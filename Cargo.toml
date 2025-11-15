@@ -78,5 +78,9 @@ path = "tests/test_revoke_nonexistent.rs"
 name = "test_issue_1618"
 path = "tests/test_issue_1618.rs"
 
+[[test]]
+name = "aggregate_random_patterns"
+path = "tests/aggregate_random_patterns.rs"
+
 [patch.crates-io]
 sqllogictest = { path = "crates/sqllogictest" }
