@@ -9,10 +9,9 @@ use super::aggregate::AggregateOp;
 use super::scan::ColumnarScan;
 use vibesql_types::SqlValue;
 
-/// Compute SIMD aggregate for Int64 columns
+/// Compute SIMD aggregate for Int64 columns using streaming batches
 ///
-/// Extracts i64 values from a column, applies optional filter and null masks,
-/// then computes the aggregate using SIMD operations.
+/// Processes values in fixed-size batches to avoid allocating entire column in memory.
 ///
 /// # Arguments
 ///
@@ -31,10 +30,16 @@ pub fn simd_aggregate_i64(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
-    // Extract i64 values and build combined filter (nulls + filter_bitmap)
-    // Track original type to preserve it in MIN/MAX results
-    let mut values = Vec::new();
+    const BATCH_SIZE: usize = 1024; // Process 1K values at a time
+
+    let mut batch = Vec::with_capacity(BATCH_SIZE);
     let mut original_type: Option<SqlValue> = None;
+    let mut count = 0i64;
+
+    // Accumulators for different operations
+    let mut sum = 0i64;
+    let mut min = i64::MAX;
+    let mut max = i64::MIN;
 
     for (row_idx, value_opt) in scan.column(column_idx).enumerate() {
         // Check filter bitmap
@@ -46,61 +51,92 @@ pub fn simd_aggregate_i64(
 
         // Extract i64 value, skip NULLs
         if let Some(value) = value_opt {
-            match value {
+            let i64_value = match value {
                 SqlValue::Integer(v) => {
                     if original_type.is_none() {
-                        original_type = Some(SqlValue::Integer(0)); // Marker for Integer type
+                        original_type = Some(SqlValue::Integer(0));
                     }
-                    values.push(*v);
+                    *v
                 }
                 SqlValue::Bigint(v) => {
                     if original_type.is_none() {
-                        original_type = Some(SqlValue::Bigint(0)); // Marker for Bigint type
+                        original_type = Some(SqlValue::Bigint(0));
                     }
-                    values.push(*v);
+                    *v
                 }
                 SqlValue::Smallint(v) => {
                     if original_type.is_none() {
-                        original_type = Some(SqlValue::Smallint(0)); // Marker for Smallint type
+                        original_type = Some(SqlValue::Smallint(0));
                     }
-                    values.push(*v as i64);
+                    *v as i64
                 }
-                SqlValue::Null => continue, // Skip NULLs
+                SqlValue::Null => continue,
                 _ => {
                     return Err(ExecutorError::UnsupportedExpression(
                         format!("Cannot compute SIMD aggregate on non-integer value: {:?}", value)
                     ))
                 }
+            };
+
+            batch.push(i64_value);
+            count += 1;
+
+            // Process batch when full
+            if batch.len() >= BATCH_SIZE {
+                match op {
+                    AggregateOp::Sum | AggregateOp::Avg => {
+                        sum += simd_sum_i64(&batch);
+                    }
+                    AggregateOp::Min => {
+                        if let Some(batch_min) = simd_min_i64(&batch) {
+                            min = min.min(batch_min);
+                        }
+                    }
+                    AggregateOp::Max => {
+                        if let Some(batch_max) = simd_max_i64(&batch) {
+                            max = max.max(batch_max);
+                        }
+                    }
+                    AggregateOp::Count => {} // Just count, no SIMD needed
+                }
+                batch.clear();
             }
         }
     }
 
+    // Process final partial batch
+    if !batch.is_empty() {
+        match op {
+            AggregateOp::Sum | AggregateOp::Avg => {
+                sum += simd_sum_i64(&batch);
+            }
+            AggregateOp::Min => {
+                if let Some(batch_min) = simd_min_i64(&batch) {
+                    min = min.min(batch_min);
+                }
+            }
+            AggregateOp::Max => {
+                if let Some(batch_max) = simd_max_i64(&batch) {
+                    max = max.max(batch_max);
+                }
+            }
+            AggregateOp::Count => {}
+        }
+    }
+
     // Handle empty result set
-    if values.is_empty() {
+    if count == 0 {
         return Ok(match op {
             AggregateOp::Count => SqlValue::Integer(0),
             _ => SqlValue::Null,
         });
     }
 
-    // Apply SIMD operations
+    // Return aggregated result
     match op {
-        AggregateOp::Sum => {
-            let sum = simd_sum_i64(&values);
-            // Return Double to match scalar behavior
-            Ok(SqlValue::Double(sum as f64))
-        }
-        AggregateOp::Avg => {
-            let avg = simd_avg_i64(&values).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression("Cannot compute AVG on empty set".to_string())
-            })?;
-            Ok(SqlValue::Double(avg))
-        }
+        AggregateOp::Sum => Ok(SqlValue::Double(sum as f64)),
+        AggregateOp::Avg => Ok(SqlValue::Double(sum as f64 / count as f64)),
         AggregateOp::Min => {
-            let min = simd_min_i64(&values).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression("Cannot compute MIN on empty set".to_string())
-            })?;
-            // Preserve original type for MIN/MAX
             Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
                 SqlValue::Integer(_) => SqlValue::Integer(min),
                 SqlValue::Smallint(_) => SqlValue::Smallint(min as i16),
@@ -108,24 +144,19 @@ pub fn simd_aggregate_i64(
             })
         }
         AggregateOp::Max => {
-            let max = simd_max_i64(&values).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression("Cannot compute MAX on empty set".to_string())
-            })?;
-            // Preserve original type for MIN/MAX
             Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
                 SqlValue::Integer(_) => SqlValue::Integer(max),
                 SqlValue::Smallint(_) => SqlValue::Smallint(max as i16),
                 _ => SqlValue::Bigint(max),
             })
         }
-        AggregateOp::Count => Ok(SqlValue::Integer(values.len() as i64)),
+        AggregateOp::Count => Ok(SqlValue::Integer(count)),
     }
 }
 
-/// Compute SIMD aggregate for Float64 columns
+/// Compute SIMD aggregate for Float64 columns using streaming batches
 ///
-/// Extracts f64 values from a column, applies optional filter and null masks,
-/// then computes the aggregate using SIMD operations.
+/// Processes values in fixed-size batches to avoid allocating entire column in memory.
 ///
 /// # Arguments
 ///
@@ -144,8 +175,15 @@ pub fn simd_aggregate_f64(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
-    // Extract f64 values and build combined filter (nulls + filter_bitmap)
-    let mut values = Vec::new();
+    const BATCH_SIZE: usize = 1024; // Process 1K values at a time
+
+    let mut batch = Vec::with_capacity(BATCH_SIZE);
+    let mut count = 0i64;
+
+    // Accumulators for different operations
+    let mut sum = 0.0f64;
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
 
     for (row_idx, value_opt) in scan.column(column_idx).enumerate() {
         // Check filter bitmap
@@ -157,57 +195,82 @@ pub fn simd_aggregate_f64(
 
         // Extract f64 value, skip NULLs
         if let Some(value) = value_opt {
-            match value {
-                SqlValue::Double(v) => values.push(*v),
-                SqlValue::Float(v) => values.push(*v as f64),
-                SqlValue::Numeric(v) => values.push(*v),
-                // Also handle integer types for mixed numeric columns
-                SqlValue::Integer(v) => values.push(*v as f64),
-                SqlValue::Bigint(v) => values.push(*v as f64),
-                SqlValue::Smallint(v) => values.push(*v as f64),
-                SqlValue::Null => continue, // Skip NULLs
+            let f64_value = match value {
+                SqlValue::Double(v) => *v,
+                SqlValue::Float(v) => *v as f64,
+                SqlValue::Numeric(v) => *v,
+                SqlValue::Integer(v) => *v as f64,
+                SqlValue::Bigint(v) => *v as f64,
+                SqlValue::Smallint(v) => *v as f64,
+                SqlValue::Null => continue,
                 _ => {
                     return Err(ExecutorError::UnsupportedExpression(
                         format!("Cannot compute SIMD aggregate on non-numeric value: {:?}", value)
                     ))
                 }
+            };
+
+            batch.push(f64_value);
+            count += 1;
+
+            // Process batch when full
+            if batch.len() >= BATCH_SIZE {
+                match op {
+                    AggregateOp::Sum | AggregateOp::Avg => {
+                        sum += simd_sum_f64(&batch);
+                    }
+                    AggregateOp::Min => {
+                        if let Some(batch_min) = simd_min_f64(&batch) {
+                            min = min.min(batch_min);
+                        }
+                    }
+                    AggregateOp::Max => {
+                        if let Some(batch_max) = simd_max_f64(&batch) {
+                            max = max.max(batch_max);
+                        }
+                    }
+                    AggregateOp::Count => {} // Just count, no SIMD needed
+                }
+                batch.clear();
             }
         }
     }
 
+    // Process final partial batch
+    if !batch.is_empty() {
+        match op {
+            AggregateOp::Sum | AggregateOp::Avg => {
+                sum += simd_sum_f64(&batch);
+            }
+            AggregateOp::Min => {
+                if let Some(batch_min) = simd_min_f64(&batch) {
+                    min = min.min(batch_min);
+                }
+            }
+            AggregateOp::Max => {
+                if let Some(batch_max) = simd_max_f64(&batch) {
+                    max = max.max(batch_max);
+                }
+            }
+            AggregateOp::Count => {}
+        }
+    }
+
     // Handle empty result set
-    if values.is_empty() {
+    if count == 0 {
         return Ok(match op {
             AggregateOp::Count => SqlValue::Integer(0),
             _ => SqlValue::Null,
         });
     }
 
-    // Apply SIMD operations
+    // Return aggregated result
     match op {
-        AggregateOp::Sum => {
-            let sum = simd_sum_f64(&values);
-            Ok(SqlValue::Double(sum))
-        }
-        AggregateOp::Avg => {
-            let avg = simd_avg_f64(&values).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression("Cannot compute AVG on empty set".to_string())
-            })?;
-            Ok(SqlValue::Double(avg))
-        }
-        AggregateOp::Min => {
-            let min = simd_min_f64(&values).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression("Cannot compute MIN on empty set".to_string())
-            })?;
-            Ok(SqlValue::Double(min))
-        }
-        AggregateOp::Max => {
-            let max = simd_max_f64(&values).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression("Cannot compute MAX on empty set".to_string())
-            })?;
-            Ok(SqlValue::Double(max))
-        }
-        AggregateOp::Count => Ok(SqlValue::Integer(values.len() as i64)),
+        AggregateOp::Sum => Ok(SqlValue::Double(sum)),
+        AggregateOp::Avg => Ok(SqlValue::Double(sum / count as f64)),
+        AggregateOp::Min => Ok(SqlValue::Double(min)),
+        AggregateOp::Max => Ok(SqlValue::Double(max)),
+        AggregateOp::Count => Ok(SqlValue::Integer(count)),
     }
 }
 
@@ -224,7 +287,12 @@ pub fn simd_aggregate_f64(
 #[cfg(feature = "simd")]
 pub fn can_use_simd_for_column(scan: &ColumnarScan, column_idx: usize) -> Option<bool> {
     // Check first non-NULL value to determine column type
-    for value_opt in scan.column(column_idx) {
+    // IMPORTANT: Only check first 100 rows to avoid materializing huge columns
+    for (idx, value_opt) in scan.column(column_idx).enumerate() {
+        if idx >= 100 {
+            break; // Stop after checking 100 rows
+        }
+
         if let Some(value) = value_opt {
             return match value {
                 SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => Some(true),
