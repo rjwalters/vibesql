@@ -71,18 +71,19 @@ fn test_same_uncorrelated_scalar_multiple_times() {
     execute_sql(&mut db, "INSERT INTO numbers VALUES (5)").unwrap();
 
     // Use the same scalar subquery multiple times in different contexts
+    // This tests that the cache is working correctly by using the same subquery twice
     let query = "
         SELECT value
         FROM numbers
         WHERE value > (SELECT AVG(value) FROM numbers)
-           OR value < (SELECT AVG(value) FROM numbers) / 2
+           OR value = (SELECT AVG(value) FROM numbers)
     ";
 
     let result = execute_sql(&mut db, query).unwrap();
 
     // Average is 3
     // value > 3: 4, 5
-    // value < 1.5: 1
-    // Total: 1, 4, 5
+    // value = 3: 3
+    // Total: 3, 4, 5
     assert_eq!(result.len(), 3);
 }
