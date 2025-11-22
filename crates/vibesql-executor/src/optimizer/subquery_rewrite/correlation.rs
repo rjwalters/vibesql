@@ -28,7 +28,7 @@ use vibesql_ast::{Expression, SelectItem, SelectStmt};
 ///   SELECT status FROM valid_statuses
 /// )
 /// ```
-pub(super) fn is_correlated(subquery: &SelectStmt) -> bool {
+pub(crate) fn is_correlated(subquery: &SelectStmt) -> bool {
     // Check WHERE clause for external column references
     if let Some(where_clause) = &subquery.where_clause {
         if has_external_column_refs(where_clause, subquery) {
