@@ -29,7 +29,13 @@ impl Division {
         // SQLite: INTEGER / INTEGER → INTEGER (truncated division)
         if let (Integer(a), Integer(b)) = (left, right) {
             if *b == 0 {
-                return Ok(Null);  // SQL standard: division by zero returns NULL
+                // Check strict mode - MySQL behavior
+                if let Some(flags) = sql_mode.mysql_flags() {
+                    if flags.strict_mode {
+                        return Err(ExecutorError::DivisionByZero);
+                    }
+                }
+                return Ok(Null);  // Non-strict mode: division by zero returns NULL
             }
 
             // Use TypeBehavior trait to determine result type
@@ -53,7 +59,7 @@ impl Division {
         // Use helper for type coercion
         let coerced = coerce_numeric_values(left, right, "/")?;
 
-        // Check for division by zero and return NULL (SQL standard behavior)
+        // Check for division by zero - behavior depends on strict mode
         let is_zero = match &coerced {
             super::CoercedValues::ExactNumeric(_, right) => *right == 0,
             super::CoercedValues::ApproximateNumeric(_, right) => *right == 0.0,
@@ -61,7 +67,13 @@ impl Division {
         };
 
         if is_zero {
-            return Ok(Null);  // SQL standard: division by zero returns NULL
+            // Check strict mode - MySQL behavior
+            if let Some(flags) = sql_mode.mysql_flags() {
+                if flags.strict_mode {
+                    return Err(ExecutorError::DivisionByZero);
+                }
+            }
+            return Ok(Null);  // Non-strict mode: division by zero returns NULL
         }
 
         // Use TypeBehavior trait to determine result type based on original operands
