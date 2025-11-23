@@ -9,7 +9,7 @@
 //! - Subquery rewriting for IN predicate optimization
 //! - Adaptive execution model selection (row-oriented vs columnar)
 
-pub mod adaptive_execution;
+pub mod adaptive;
 mod expressions;
 pub mod index_planner;
 pub mod index_strategy;
@@ -22,7 +22,7 @@ pub mod subquery_to_join;
 mod tests;
 pub mod where_pushdown;
 
-pub use adaptive_execution::{choose_execution_model, ExecutionModel};
+pub use adaptive::{choose_execution_model, ExecutionModel};
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;
