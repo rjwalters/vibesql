@@ -39,6 +39,247 @@ fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
     hasher.finish()
 }
 
+/// Extract correlation values from the current row for correlated subquery caching
+///
+/// For correlated subqueries, we need to identify which columns from the outer query
+/// are referenced within the subquery, and extract their values from the current row.
+/// These values, combined with the subquery hash, form a composite cache key.
+///
+/// # Implementation
+///
+/// This function collects all column references in the subquery that belong to the
+/// outer schema (not the subquery's own FROM clause). The values of these columns
+/// from the current row are extracted and returned in a deterministic order.
+///
+/// # Returns
+///
+/// A Vec of (column_name, value) pairs representing the correlation columns and their
+/// values in the current row. Returns None if extraction fails (e.g., column not found).
+///
+/// # Example
+///
+/// For TPC-H Q2:
+/// ```sql
+/// SELECT ... WHERE ps_supplycost = (
+///     SELECT MIN(ps_supplycost)
+///     FROM partsupp, ...
+///     WHERE p_partkey = ps_partkey  -- Correlation: references outer p_partkey
+/// )
+/// ```
+/// Returns: vec![("p_partkey", <value_from_current_row>)]
+fn extract_correlation_values(
+    subquery: &vibesql_ast::SelectStmt,
+    row: &vibesql_storage::Row,
+    outer_schema: &crate::schema::CombinedSchema,
+) -> Option<Vec<(String, vibesql_types::SqlValue)>> {
+    // Get all tables in the subquery's FROM clause
+    let subquery_tables = extract_table_names_from_from_clause(subquery.from.as_ref());
+
+    // Collect correlation column references
+    let mut correlation_refs = std::collections::BTreeSet::new(); // Use BTreeSet for deterministic ordering
+    collect_correlation_refs(subquery, outer_schema, &subquery_tables, &mut correlation_refs);
+
+    // Extract values from the current row
+    let mut correlation_values = Vec::new();
+    for (table, column) in correlation_refs {
+        match outer_schema.get_column_index(table.as_deref(), &column) {
+            Some(idx) => {
+                if let Some(value) = row.values.get(idx) {
+                    let full_name = if let Some(t) = &table {
+                        format!("{}.{}", t, column)
+                    } else {
+                        column.clone()
+                    };
+                    correlation_values.push((full_name, value.clone()));
+                } else {
+                    return None; // Column index out of bounds
+                }
+            }
+            None => return None, // Column not found in outer schema
+        }
+    }
+
+    Some(correlation_values)
+}
+
+/// Extract table names from a FROM clause (helper for correlation detection)
+fn extract_table_names_from_from_clause(from: Option<&vibesql_ast::FromClause>) -> Vec<String> {
+    let mut tables = Vec::new();
+    if let Some(from_clause) = from {
+        extract_table_names_recursive(from_clause, &mut tables);
+    }
+    tables
+}
+
+/// Recursively extract table names from a FROM clause
+fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Vec<String>) {
+    match from {
+        vibesql_ast::FromClause::Table { name, alias } => {
+            tables.push(alias.clone().unwrap_or_else(|| name.clone()));
+        }
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            extract_table_names_recursive(left, tables);
+            extract_table_names_recursive(right, tables);
+        }
+        vibesql_ast::FromClause::Subquery { alias, .. } => {
+            tables.push(alias.clone());
+        }
+    }
+}
+
+/// Collect all correlation column references from a subquery
+fn collect_correlation_refs(
+    subquery: &vibesql_ast::SelectStmt,
+    outer_schema: &crate::schema::CombinedSchema,
+    subquery_tables: &[String],
+    refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
+) {
+    // Check WHERE clause
+    if let Some(where_clause) = &subquery.where_clause {
+        collect_correlation_refs_from_expr(where_clause, outer_schema, subquery_tables, refs);
+    }
+
+    // Check SELECT list
+    for item in &subquery.select_list {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+        }
+    }
+
+    // Check HAVING clause
+    if let Some(having) = &subquery.having {
+        collect_correlation_refs_from_expr(having, outer_schema, subquery_tables, refs);
+    }
+
+    // Check GROUP BY
+    if let Some(group_by) = &subquery.group_by {
+        for expr in group_by {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+        }
+    }
+}
+
+/// Collect correlation column references from an expression
+fn collect_correlation_refs_from_expr(
+    expr: &vibesql_ast::Expression,
+    outer_schema: &crate::schema::CombinedSchema,
+    subquery_tables: &[String],
+    refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
+) {
+    match expr {
+        vibesql_ast::Expression::ColumnRef { table, column } => {
+            // Check if this column reference belongs to the outer schema
+            if let Some(table_name) = table {
+                let table_lower = table_name.to_lowercase();
+                if !subquery_tables.iter().any(|t| t.to_lowercase() == table_lower) {
+                    // Not in subquery's tables, check if in outer schema
+                    if outer_schema.get_column_index(Some(table_name), column).is_some() {
+                        refs.insert((Some(table_name.clone()), column.clone()));
+                    }
+                }
+            } else if !subquery_tables.is_empty() {
+                // Unqualified reference - check if it's in outer schema but not in subquery tables
+                // This is conservative: we only add it if we're sure it's external
+                if outer_schema.get_column_index(None, column).is_some() {
+                    refs.insert((None, column.clone()));
+                }
+            }
+        }
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+            collect_correlation_refs_from_expr(left, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(right, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::Function { args, .. }
+        | vibesql_ast::Expression::AggregateFunction { args, .. } => {
+            for arg in args {
+                collect_correlation_refs_from_expr(arg, outer_schema, subquery_tables, refs);
+            }
+        }
+        vibesql_ast::Expression::IsNull { expr, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } => {
+            if let Some(op) = operand {
+                collect_correlation_refs_from_expr(op, outer_schema, subquery_tables, refs);
+            }
+            for when in when_clauses {
+                for condition in &when.conditions {
+                    collect_correlation_refs_from_expr(condition, outer_schema, subquery_tables, refs);
+                }
+                collect_correlation_refs_from_expr(&when.result, outer_schema, subquery_tables, refs);
+            }
+            if let Some(else_expr) = else_result {
+                collect_correlation_refs_from_expr(else_expr, outer_schema, subquery_tables, refs);
+            }
+        }
+        vibesql_ast::Expression::InList { expr, values, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            for val in values {
+                collect_correlation_refs_from_expr(val, outer_schema, subquery_tables, refs);
+            }
+        }
+        vibesql_ast::Expression::Between { expr, low, high, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(low, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(high, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::Like { expr, pattern, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(pattern, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::Cast { expr, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::Position { substring, string, .. } => {
+            collect_correlation_refs_from_expr(substring, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(string, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::Trim { removal_char, string, .. } => {
+            if let Some(c) = removal_char {
+                collect_correlation_refs_from_expr(c, outer_schema, subquery_tables, refs);
+            }
+            collect_correlation_refs_from_expr(string, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::Interval { value, .. } => {
+            collect_correlation_refs_from_expr(value, outer_schema, subquery_tables, refs);
+        }
+        // Literals, subqueries, and special expressions don't contribute to correlation
+        _ => {}
+    }
+}
+
+/// Compute a composite cache key for a correlated subquery
+///
+/// The cache key combines:
+/// 1. The subquery hash (AST structure)
+/// 2. The correlation values (column values from outer row)
+///
+/// This allows caching correlated subquery results when the correlation
+/// values are the same across different rows.
+fn compute_correlated_cache_key(
+    subquery_hash: u64,
+    correlation_values: &[(String, vibesql_types::SqlValue)],
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    subquery_hash.hash(&mut hasher);
+
+    // Hash each correlation value in order
+    for (name, value) in correlation_values {
+        name.hash(&mut hasher);
+        // Hash the value's Debug representation (consistent with subquery hashing)
+        format!("{:?}", value).hash(&mut hasher);
+    }
+
+    hasher.finish()
+}
+
 /// Compute the number of columns in a SELECT statement's result
 /// Handles wildcards by expanding them using table schemas from the database
 fn compute_select_list_column_count(
@@ -108,14 +349,37 @@ fn count_columns_in_from_clause(
 impl CombinedExpressionEvaluator<'_> {
     /// Evaluate scalar subquery - must return exactly one row and one column
     ///
-    /// **Optimization**: For uncorrelated scalar subqueries, results are cached to avoid
-    /// redundant execution. This is critical for performance when scalar subqueries appear
-    /// in HAVING clauses (e.g., TPC-H Q11), where the same subquery would otherwise be
-    /// executed once per group.
+    /// **Optimization**: Caches scalar subquery results to avoid redundant execution:
+    /// - **Uncorrelated subqueries**: Cached by subquery hash alone (issue #2451)
+    /// - **Correlated subqueries**: Cached by (subquery hash, correlation values) (issue #2452)
     ///
-    /// **Cache key**: Hash of the subquery AST (via Debug format)
+    /// This is critical for performance when scalar subqueries appear in WHERE/HAVING
+    /// clauses or are evaluated per-row (e.g., TPC-H Q2, Q11, Q17, Q20).
+    ///
+    /// **Cache key**:
+    /// - Uncorrelated: Hash of subquery AST
+    /// - Correlated: Hash of (subquery AST + correlation column values)
+    ///
     /// **Cache scope**: Per-evaluator instance (lifetime tied to query execution)
     /// **Cache eviction**: LRU with configurable size (default: 5000 entries)
+    ///
+    /// **Examples**:
+    ///
+    /// TPC-H Q11 (uncorrelated):
+    /// ```sql
+    /// HAVING SUM(value) > (SELECT SUM(value) * 0.0001 FROM partsupp ...)
+    /// ```
+    /// Cached once, reused for all groups (10-100x speedup)
+    ///
+    /// TPC-H Q2 (correlated):
+    /// ```sql
+    /// WHERE ps_supplycost = (
+    ///     SELECT MIN(ps_supplycost)
+    ///     FROM partsupp
+    ///     WHERE p_partkey = ps_partkey  -- Correlated on p_partkey
+    /// )
+    /// ```
+    /// Cached per unique p_partkey value (avoids O(N²) execution)
     pub(super) fn eval_scalar_subquery(
         &self,
         subquery: &vibesql_ast::SelectStmt,
@@ -133,77 +397,24 @@ impl CombinedExpressionEvaluator<'_> {
             "Subquery execution requires database reference".to_string(),
         ))?;
 
-        // OPTIMIZATION: Cache uncorrelated scalar subqueries to avoid redundant execution
-        //
-        // This is especially important for HAVING clauses where the same uncorrelated
-        // scalar subquery would otherwise be executed once per group.
-        //
-        // Example (TPC-H Q11):
-        //   SELECT ps_partkey, SUM(value) as total_value
-        //   FROM partsupp JOIN supplier JOIN nation ...
-        //   GROUP BY ps_partkey
-        //   HAVING SUM(value) > (SELECT SUM(value) * 0.0001 FROM partsupp ...)
-        //                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        //                        This uncorrelated subquery is the same for every group!
-        //
-        // Performance impact: 10-100x speedup for queries like Q11 with thousands of groups
+        // Determine if subquery is correlated
         let is_uncorrelated = !crate::optimizer::subquery_rewrite::correlation::is_correlated(subquery);
 
-        let rows = if is_uncorrelated {
-            // Check cache first
-            let cache_key = compute_subquery_hash(subquery);
-            let mut cache = self.subquery_cache.borrow_mut();
-
-            if let Some(cached_rows) = cache.get(&cache_key) {
-                // Cache hit - return cached result
-                cached_rows.clone()
+        // Compute cache key (different strategies for correlated vs uncorrelated)
+        let cache_key = if is_uncorrelated {
+            // Uncorrelated: cache key is just the subquery hash
+            compute_subquery_hash(subquery)
+        } else if !self.schema.table_schemas.is_empty() {
+            // Correlated: cache key includes correlation column values
+            // Only attempt if we have an outer schema to reference
+            if let Some(correlation_values) = extract_correlation_values(subquery, row, self.schema) {
+                let subquery_hash = compute_subquery_hash(subquery);
+                compute_correlated_cache_key(subquery_hash, &correlation_values)
             } else {
-                // Cache miss - execute subquery
-                drop(cache); // Release lock before execution
-
+                // Failed to extract correlation values - skip caching
+                // This can happen if correlation columns aren't in outer schema
+                // Fall through to execute without caching
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
-                    // Have CTE context to pass through
-                    if !self.schema.table_schemas.is_empty() {
-                        crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                            database,
-                            row,
-                            self.schema,
-                            cte_ctx,
-                            self.depth,
-                        )
-                    } else {
-                        crate::select::SelectExecutor::new_with_cte_and_depth(
-                            database,
-                            cte_ctx,
-                            self.depth,
-                        )
-                    }
-                } else {
-                    // No CTE context - use existing constructors
-                    if !self.schema.table_schemas.is_empty() {
-                        crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                            database,
-                            row,
-                            self.schema,
-                            self.depth,
-                        )
-                    } else {
-                        crate::select::SelectExecutor::new(database)
-                    }
-                };
-                let executed_rows = select_executor.execute(subquery)?;
-
-                // Cache the result for future evaluations
-                let mut cache = self.subquery_cache.borrow_mut();
-                cache.put(cache_key, executed_rows.clone());
-
-                executed_rows
-            }
-        } else {
-            // Correlated subquery - must execute for each row (cannot cache)
-            let select_executor = if let Some(cte_ctx) = self.cte_context {
-                // Have CTE context to pass through
-                if !self.schema.table_schemas.is_empty() {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database,
                         row,
@@ -212,26 +423,68 @@ impl CombinedExpressionEvaluator<'_> {
                         self.depth,
                     )
                 } else {
-                    crate::select::SelectExecutor::new_with_cte_and_depth(
-                        database,
-                        cte_ctx,
-                        self.depth,
-                    )
-                }
-            } else {
-                // No CTE context - use existing constructors
-                if !self.schema.table_schemas.is_empty() {
                     crate::select::SelectExecutor::new_with_outer_context_and_depth(
                         database,
                         row,
                         self.schema,
                         self.depth,
                     )
+                };
+                let rows = select_executor.execute(subquery)?;
+                return super::super::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len());
+            }
+        } else {
+            // Correlated but no outer schema - skip caching
+            let select_executor = crate::select::SelectExecutor::new(database);
+            let rows = select_executor.execute(subquery)?;
+            return super::super::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len());
+        };
+
+        // Try cache lookup
+        let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+
+        let rows = if let Some(cached_rows) = cached_result {
+            // Cache hit - use cached result
+            cached_rows
+        } else {
+            // Cache miss - execute subquery
+            let select_executor = if is_uncorrelated {
+                // Uncorrelated: execute without outer context
+                if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database,
+                        cte_ctx,
+                        self.depth,
+                    )
                 } else {
                     crate::select::SelectExecutor::new(database)
                 }
+            } else {
+                // Correlated: execute with outer context
+                if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                        database,
+                        row,
+                        self.schema,
+                        cte_ctx,
+                        self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                        database,
+                        row,
+                        self.schema,
+                        self.depth,
+                    )
+                }
             };
-            select_executor.execute(subquery)?
+
+            let executed_rows = select_executor.execute(subquery)?;
+
+            // Cache the result for future evaluations
+            self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
+
+            executed_rows
         };
 
         // Delegate to shared logic
