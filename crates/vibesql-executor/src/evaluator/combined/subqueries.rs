@@ -124,40 +124,75 @@ impl CombinedExpressionEvaluator<'_> {
             "Subquery execution requires database reference".to_string(),
         ))?;
 
-        // Execute the subquery with outer context for correlated subqueries
-        // Pass the entire CombinedSchema to preserve alias information and propagate depth
-        // Also pass CTE context if available so subqueries can reference CTEs from outer query
-        let select_executor = if let Some(cte_ctx) = self.cte_context {
-            // Have CTE context to pass through
-            if !self.schema.table_schemas.is_empty() {
-                crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                    database,
-                    row,
-                    self.schema,
-                    cte_ctx,
-                    self.depth,
-                )
+        // Check if this is a non-correlated subquery that can be cached
+        let is_correlated = crate::correlation::is_correlated(subquery, self.schema);
+
+        // Execute or retrieve from cache
+        let rows = if !is_correlated {
+            // Non-correlated subquery - try cache first
+            let cache_key = compute_subquery_hash(subquery);
+
+            // Check cache (explicitly scope the borrow to avoid holding it during execution)
+            // Use peek() for readonly access (get() requires &mut for LRU tracking)
+            let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+
+            if let Some(cached_rows) = cached_result {
+                // Cache hit - use cached result
+                cached_rows
             } else {
-                crate::select::SelectExecutor::new_with_cte_and_depth(
-                    database,
-                    cte_ctx,
-                    self.depth,
-                )
+                // Cache miss - execute and cache
+                // IMPORTANT: Propagate depth to prevent bypassing MAX_EXPRESSION_DEPTH
+                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database,
+                        cte_ctx,
+                        self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                };
+                let rows = select_executor.execute(subquery)?;
+
+                // Cache the result
+                self.subquery_cache.borrow_mut().put(cache_key, rows.clone());
+                rows
             }
         } else {
-            // No CTE context - use existing constructors
-            if !self.schema.table_schemas.is_empty() {
-                crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                    database,
-                    row,
-                    self.schema,
-                    self.depth,
-                )
+            // Correlated subquery - execute with outer context (can't cache)
+            // Pass the entire CombinedSchema to preserve alias information and propagate depth
+            // Also pass CTE context if available so subqueries can reference CTEs from outer query
+            let select_executor = if let Some(cte_ctx) = self.cte_context {
+                // Have CTE context to pass through
+                if !self.schema.table_schemas.is_empty() {
+                    crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                        database,
+                        row,
+                        self.schema,
+                        cte_ctx,
+                        self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database,
+                        cte_ctx,
+                        self.depth,
+                    )
+                }
             } else {
-                crate::select::SelectExecutor::new(database)
-            }
+                // No CTE context - use existing constructors
+                if !self.schema.table_schemas.is_empty() {
+                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                        database,
+                        row,
+                        self.schema,
+                        self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new(database)
+                }
+            };
+            select_executor.execute(subquery)?
         };
-        let rows = select_executor.execute(subquery)?;
 
         // Delegate to shared logic
         super::super::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len())
