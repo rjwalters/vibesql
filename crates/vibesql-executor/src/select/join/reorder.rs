@@ -37,6 +37,20 @@ use std::{
 
 use vibesql_ast::{BinaryOperator, Expression};
 
+/// Get standard table abbreviation for TPC-H tables
+/// This mirrors the abbreviation logic in scan/reorder.rs
+fn get_table_abbreviation(table_name: &str) -> String {
+    let table_lower = table_name.to_lowercase();
+    // Known TPC-H table abbreviations
+    match table_lower.as_str() {
+        "partsupp" => "ps".to_string(), // Special case: compound abbreviation
+        _ => {
+            // Default: use first letter as abbreviation
+            table_name.chars().next().map(|c| c.to_lowercase().to_string()).unwrap_or_default()
+        }
+    }
+}
+
 /// Information about a table and its predicates
 #[derive(Debug, Clone)]
 struct TableInfo {
@@ -141,15 +155,23 @@ impl JoinOrderAnalyzer {
                 let (left_table, left_col) = self.extract_column_ref(left, tables);
                 let (right_table, right_col) = self.extract_column_ref(right, tables);
 
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[ANALYZER] analyze_predicate: left_table={:?}, right_table={:?}, left_col={:?}, right_col={:?}",
+                        left_table, right_table, left_col, right_col);
+                }
+
                 match (left_table, right_table, left_col, right_col) {
                     // Equijoin: column from one table = column from another
                     (Some(lt), Some(rt), Some(lc), Some(rc)) if lt != rt => {
                         let edge = JoinEdge {
                             left_table: lt.to_lowercase(),
-                            left_column: lc,
+                            left_column: lc.clone(),
                             right_table: rt.to_lowercase(),
-                            right_column: rc,
+                            right_column: rc.clone(),
                         };
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[ANALYZER] Added edge: {}.{} = {}.{}", lt, lc, rt, rc);
+                        }
                         self.edges.push(edge);
                     }
                     // Local predicate: column = constant
@@ -160,7 +182,11 @@ impl JoinOrderAnalyzer {
                             table_info.local_selectivity *= 0.1;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[ANALYZER] Skipped predicate (no match)");
+                        }
+                    }
                 }
             }
             // For other operators, analyze for local vs cross-table
@@ -172,16 +198,69 @@ impl JoinOrderAnalyzer {
 
     /// Extract table and column info from an expression
     /// Returns (table_name, column_name)
+    /// Uses table inference if explicit table prefix is not present
     fn extract_column_ref(
         &self,
         expr: &Expression,
-        _tables: &HashSet<String>,
+        tables: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         match expr {
-            Expression::ColumnRef { table, column } => (table.clone(), Some(column.clone())),
+            Expression::ColumnRef { table, column } => {
+                // If explicit table prefix exists, use it
+                if let Some(t) = table {
+                    return (Some(t.clone()), Some(column.clone()));
+                }
+
+                // Otherwise, infer table from column prefix
+                let inferred_table = self.infer_table_from_column(column, tables);
+                (inferred_table, Some(column.clone()))
+            }
             Expression::Literal(_) => (None, None),
             _ => (None, None),
         }
+    }
+
+    /// Infer table name from column name using prefix matching and abbreviations
+    /// This mirrors the logic in scan/reorder.rs for consistency
+    fn infer_table_from_column(&self, column: &str, tables: &HashSet<String>) -> Option<String> {
+        let col_upper = column.to_uppercase();
+
+        // Extract prefix before first underscore (e.g., "L_SUPPKEY" -> "L")
+        let prefix = col_upper.split('_').next()?;
+
+        // Try exact match first
+        if tables.contains(&prefix.to_lowercase()) {
+            return Some(prefix.to_lowercase());
+        }
+
+        // Try prefix matching (prefer shorter names for specificity)
+        let mut prefix_matches: Vec<String> = tables
+            .iter()
+            .filter(|t| t.to_uppercase().starts_with(prefix))
+            .cloned()
+            .collect();
+
+        if !prefix_matches.is_empty() {
+            prefix_matches.sort_by_key(|t| t.len()); // Ascending: prefer shorter matches
+            return prefix_matches.into_iter().next();
+        }
+
+        // Try abbreviation match (e.g., "PS" -> "partsupp")
+        let mut abbrev_matches: Vec<String> = tables
+            .iter()
+            .filter(|t| {
+                let abbrev = get_table_abbreviation(t);
+                abbrev.eq_ignore_ascii_case(prefix)
+            })
+            .cloned()
+            .collect();
+
+        if !abbrev_matches.is_empty() {
+            abbrev_matches.sort_by_key(|t| t.len());
+            return abbrev_matches.into_iter().next();
+        }
+
+        None
     }
 
     /// Find all tables that have local predicates (highest selectivity filters)
