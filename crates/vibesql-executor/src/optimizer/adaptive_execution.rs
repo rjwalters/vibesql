@@ -47,7 +47,7 @@
 //! }
 //! ```
 
-use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
+use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt};
 
 /// Execution model for query processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,20 +124,12 @@ fn extract_query_hint(_query: &SelectStmt) -> Option<ExecutionModel> {
 /// Detect if a query has analytical patterns suitable for columnar execution
 ///
 /// Returns true if the query benefits from columnar execution based on:
-/// - Has aggregation (GROUP BY or aggregate functions like SUM, AVG, COUNT)
+/// - Has aggregation (aggregate functions like SUM, AVG, COUNT WITHOUT GROUP BY)
 /// - Has arithmetic expressions (price * quantity, price * (1 - discount))
-/// - Simple equijoins only (no complex nested joins or non-equijoins)
+/// - Single table only (no JOINs yet - Phase 5 limitation)
 /// - Selective projection (few columns, not SELECT *)
-///
-/// # Phase 5 Limitations (Current Columnar Execution Support)
-///
-/// The current columnar execution implementation (Phase 5) has these constraints:
-/// - **No GROUP BY**: Only simple aggregates without grouping (e.g., SUM, AVG, COUNT)
-/// - **Single table only**: No JOIN support yet (planned for Phase 6)
-/// - **No DISTINCT**: Not yet implemented in columnar path
-/// - **Simple predicates**: AND-only predicates (no OR/IN/complex expressions)
-///
-/// These heuristics will evolve as columnar execution gains more capabilities.
+/// - No window functions
+/// - No DISTINCT
 ///
 /// # Rationale
 ///
@@ -150,46 +142,55 @@ fn extract_query_hint(_query: &SelectStmt) -> Option<ExecutionModel> {
 /// - Point lookups: Single row access patterns
 /// - Wide projections: Need all columns anyway
 /// - Complex joins: Tuple-at-a-time processing more flexible
+/// - GROUP BY: Not yet supported in Phase 5
+///
+/// # Phase 5 Current Capabilities
+///
+/// Current columnar execution supports:
+/// - Aggregation WITHOUT GROUP BY (e.g., SELECT SUM(price) FROM orders)
+/// - Single table scans (no JOINs)
+/// - Simple predicates (=, <, >, <=, >=, BETWEEN, AND)
+/// - Arithmetic expressions in aggregates (e.g., SUM(a * b))
+///
+/// NOT supported yet (TODO: Future phases):
+/// - GROUP BY aggregations
+/// - JOIN operations
+/// - DISTINCT
+/// - Window functions
 fn has_analytical_pattern(query: &SelectStmt) -> bool {
     // Phase 5 limitation: No GROUP BY support yet
-    // Columnar execution only supports simple aggregates without grouping
     if has_group_by(query) {
         return false;
     }
 
-    // Phase 5 limitation: Single table only (no JOINs)
-    // count_tables() will return 0 for no FROM, 1 for single table, 2+ for joins
-    let is_single_table = match &query.from {
-        None => false,                        // No FROM clause -> not suitable
-        Some(from) => count_tables(from) == 1, // Exactly one table
-    };
-
-    if !is_single_table {
+    // Phase 5 limitation: Single table only (no joins)
+    if !is_single_table(query) {
         return false;
     }
 
-    // Phase 5 limitation: No DISTINCT support
+    // No window functions
+    if has_window_functions(query) {
+        return false;
+    }
+
+    // No DISTINCT for now
     if query.distinct {
         return false;
     }
 
-    // Must have aggregate functions (not just GROUP BY)
     let has_aggregation = has_aggregate_functions(query);
-    if !has_aggregation {
-        return false;
-    }
-
-    // Beneficial if query has arithmetic expressions OR selective projection
-    // - Arithmetic: Vectorized operations (e.g., SUM(price * quantity))
-    // - Selective projection: Avoid conversion overhead for wide rows
     let has_arithmetic = has_arithmetic_expressions(query);
     let selective_projection = has_selective_projection(query);
 
     // Columnar execution is beneficial if:
-    // - Has aggregation (required)
-    // - Single table (required by Phase 5)
-    // - Either arithmetic expressions OR selective projection
-    has_arithmetic || selective_projection
+    // 1. Has aggregation (aggregate functions like SUM/AVG/COUNT), AND
+    // 2. Either has arithmetic OR selective projection
+    //
+    // This ensures we only use columnar for queries that benefit from:
+    // - Aggregation: Columnar aggregates are much faster with SIMD
+    // - Arithmetic: Vectorized operations on column data
+    // - Selective columns: Avoid conversion overhead for wide rows
+    has_aggregation && (has_arithmetic || selective_projection)
 }
 
 /// Check if query has GROUP BY clause
@@ -390,6 +391,60 @@ fn has_selective_projection(query: &SelectStmt) -> bool {
     non_wildcard_count > 0 && non_wildcard_count <= 10
 }
 
+/// Check if query is a single table (no JOINs, no subqueries)
+///
+/// Phase 5 limitation: Columnar execution only supports single table scans.
+/// JOINs and subqueries will be added in future phases.
+fn is_single_table(query: &SelectStmt) -> bool {
+    match &query.from {
+        Some(FromClause::Table { .. }) => true,
+        Some(FromClause::Join { .. }) | Some(FromClause::Subquery { .. }) => false,
+        None => false, // No FROM clause (e.g., SELECT 1)
+    }
+}
+
+/// Check if query contains window functions
+///
+/// Window functions are not yet supported in columnar execution.
+fn has_window_functions(query: &SelectStmt) -> bool {
+    query.select_list.iter().any(|item| match item {
+        SelectItem::Expression { expr, .. } => contains_window_function(expr),
+        _ => false,
+    })
+}
+
+/// Recursively check if an expression contains window functions
+fn contains_window_function(expr: &Expression) -> bool {
+    match expr {
+        Expression::WindowFunction { .. } => true,
+        Expression::BinaryOp { left, right, .. } => {
+            contains_window_function(left) || contains_window_function(right)
+        }
+        Expression::UnaryOp { expr, .. } => contains_window_function(expr),
+        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+            args.iter().any(contains_window_function)
+        }
+        Expression::Case {
+            operand,
+            when_clauses,
+            else_result,
+            ..
+        } => {
+            operand
+                .as_ref()
+                .map_or(false, |e| contains_window_function(e))
+                || when_clauses.iter().any(|clause| {
+                    clause.conditions.iter().any(contains_window_function)
+                        || contains_window_function(&clause.result)
+                })
+                || else_result
+                    .as_ref()
+                    .map_or(false, |e| contains_window_function(e))
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,9 +485,65 @@ mod tests {
     }
 
     #[test]
-    fn test_columnar_for_aggregation() {
+    fn test_row_oriented_for_group_by() {
+        // SELECT region, SUM(price * quantity) FROM orders GROUP BY region
+        // Phase 5 limitation: GROUP BY not supported in columnar execution yet
+        let query = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![
+                SelectItem::Expression {
+                    expr: Expression::ColumnRef {
+                        table: None,
+                        column: "region".to_string(),
+                    },
+                    alias: None,
+                },
+                SelectItem::Expression {
+                    expr: Expression::AggregateFunction {
+                        name: "SUM".to_string(),
+                        distinct: false,
+                        args: vec![Expression::BinaryOp {
+                            left: Box::new(Expression::ColumnRef {
+                                table: None,
+                                column: "price".to_string(),
+                            }),
+                            op: BinaryOperator::Multiply,
+                            right: Box::new(Expression::ColumnRef {
+                                table: None,
+                                column: "quantity".to_string(),
+                            }),
+                        }],
+                    },
+                    alias: None,
+                },
+            ],
+            into_table: None,
+            into_variables: None,
+            from: Some(FromClause::Table {
+                name: "orders".to_string(),
+                alias: None,
+            }),
+            where_clause: None,
+            group_by: Some(vec![Expression::ColumnRef {
+                table: None,
+                column: "region".to_string(),
+            }]),
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+        };
+
+        // Should use row-oriented (GROUP BY not supported in Phase 5)
+        assert_eq!(choose_execution_model(&query), ExecutionModel::RowOriented);
+    }
+
+    #[test]
+    fn test_columnar_for_aggregation_without_group_by() {
         // SELECT SUM(price * quantity) FROM orders
-        // Phase 5: No GROUP BY (simple aggregation with arithmetic expression)
+        // Phase 5 supports aggregation WITHOUT GROUP BY
         let query = SelectStmt {
             with_clause: None,
             distinct: false,
@@ -452,7 +563,7 @@ mod tests {
                         }),
                     }],
                 },
-                alias: None,
+                alias: Some("total".to_string()),
             }],
             into_table: None,
             into_variables: None,
@@ -461,7 +572,7 @@ mod tests {
                 alias: None,
             }),
             where_clause: None,
-            group_by: None, // Phase 5: No GROUP BY support yet
+            group_by: None,
             having: None,
             order_by: None,
             limit: None,
@@ -469,8 +580,7 @@ mod tests {
             set_operation: None,
         };
 
-        // Should use columnar (aggregation + arithmetic expression)
-        // Phase 5: Single table, no GROUP BY, has arithmetic (price * quantity)
+        // Should use columnar (aggregation + arithmetic, no GROUP BY)
         assert_eq!(choose_execution_model(&query), ExecutionModel::Columnar);
     }
 
