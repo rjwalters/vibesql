@@ -1,0 +1,244 @@
+//! Main join reordering optimization logic
+
+use std::collections::{HashMap, HashSet};
+use vibesql_ast::{Expression, FromClause};
+use crate::{
+    errors::ExecutorError,
+    schema::CombinedSchema,
+    select::{
+        cte::CteResult,
+        join::{nested_loop_join, JoinOrderAnalyzer, JoinOrderSearch},
+        SelectResult,
+        scan::{derived::execute_derived_table, table::execute_table_scan, FromResult},
+    },
+};
+use super::{graph, predicates, utils};
+
+/// Apply join reordering optimization to a multi-table join
+///
+/// This function:
+/// 1. Flattens the join tree to extract all tables
+/// 2. Analyzes join conditions and WHERE predicates
+/// 3. Uses cost-based search to find optimal join order
+/// 4. Builds and executes joins in the optimal order
+/// 5. Restores original column ordering to preserve query semantics
+pub(crate) fn execute_with_join_reordering<F>(
+    from: &FromClause,
+    cte_results: &HashMap<String, CteResult>,
+    database: &vibesql_storage::Database,
+    where_clause: Option<&Expression>,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
+    execute_subquery: F,
+) -> Result<FromResult, ExecutorError>
+where
+    F: Fn(&vibesql_ast::SelectStmt) -> Result<SelectResult, ExecutorError> + Copy,
+{
+    // Step 1: Flatten join tree to extract all tables
+    let mut table_refs = Vec::new();
+    graph::flatten_join_tree(from, &mut table_refs);
+
+    // Step 2: Extract all join conditions
+    let mut join_conditions = Vec::new();
+    graph::extract_all_conditions(from, &mut join_conditions);
+
+    // Step 3: Build analyzer with table names (preserving original order)
+    let table_names: Vec<String> =
+        table_refs.iter().map(|t| t.alias.clone().unwrap_or_else(|| t.name.clone())).collect();
+
+    let mut analyzer = JoinOrderAnalyzer::new();
+    analyzer.register_tables(table_names.clone());
+
+    // Combine table names into a set for predicate analysis (normalize to lowercase)
+    let table_set: HashSet<String> = table_names.iter().map(|t| t.to_lowercase()).collect();
+
+    // Step 4: Analyze join conditions to extract edges
+    for condition in &join_conditions {
+        analyzer.analyze_predicate(condition, &table_set);
+    }
+
+    // Step 5: Analyze WHERE clause predicates if available
+    // Also extract WHERE clause equijoins for join execution
+    let where_equijoins = if let Some(where_expr) = where_clause {
+        analyzer.analyze_predicate(where_expr, &table_set);
+
+        // Debug logging
+        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+            eprintln!("[JOIN_REORDER] WHERE clause present: {:?}", where_expr);
+            eprintln!("[JOIN_REORDER] Table set: {:?}", table_set);
+        }
+
+        // Extract equijoin conditions from WHERE clause manually
+        // This is simpler and more reliable than using decompose_where_clause,
+        // which requires a full schema with column information
+        let equijoins = predicates::extract_where_equijoins(where_expr, &table_set);
+
+        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+            eprintln!("[JOIN_REORDER] Extracted {} WHERE equijoins", equijoins.len());
+        }
+
+        equijoins
+    } else {
+        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+            eprintln!("[JOIN_REORDER] No WHERE clause");
+        }
+        Vec::new()
+    };
+
+    // Step 6: Add WHERE equijoins to join_conditions for execution
+    // This ensures WHERE clause equijoins are used during join execution, not just for optimization
+    join_conditions.extend(where_equijoins);
+
+    // Step 6.5: Extract table-local predicates for cardinality estimation
+    let mut table_local_predicates = if let Some(where_expr) = where_clause {
+        predicates::extract_table_local_predicates(where_expr, &table_set)
+    } else {
+        HashMap::new()
+    };
+
+    // Also extract IN predicates from OR expressions (TPC-H Q7 optimization)
+    if let Some(where_expr) = where_clause {
+        for (table, preds) in predicates::extract_in_predicates_from_or(where_expr, &table_set) {
+            table_local_predicates.entry(table).or_default().extend(preds);
+        }
+    }
+
+    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && !table_local_predicates.is_empty() {
+        eprintln!("[JOIN_REORDER] Table-local predicates: {:?}",
+            table_local_predicates.keys().collect::<Vec<_>>());
+    }
+
+    // Step 7: Use search to find optimal join order (with real statistics + selectivity)
+    let search = JoinOrderSearch::from_analyzer_with_predicates(&analyzer, database, &table_local_predicates);
+    let optimal_order = search.find_optimal_order();
+
+    // Log the reordering decision (optional, for debugging)
+    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+        eprintln!("[JOIN_REORDER] Original order: {:?}", table_names);
+        eprintln!("[JOIN_REORDER] Optimal order:  {:?}", optimal_order);
+        eprintln!("[JOIN_REORDER] Join conditions (including WHERE equijoins): {}", join_conditions.len());
+    }
+
+    // Step 8: Build a map from table name to TableRef for easy lookup
+    // IMPORTANT: Normalize keys to lowercase to match analyzer's normalization
+    let table_map: HashMap<String, graph::TableRef> = table_refs
+        .into_iter()
+        .map(|t| {
+            let key = t.alias.clone().unwrap_or_else(|| t.name.clone()).to_lowercase();
+            (key, t)
+        })
+        .collect();
+
+    // Step 9: Track column count per table for later column reordering
+    let mut table_column_counts: HashMap<String, usize> = HashMap::new();
+
+    // Step 10: Execute tables in optimal order, joining them sequentially
+    let mut result: Option<FromResult> = None;
+    let mut joined_tables: HashSet<String> = HashSet::new();
+    let mut applied_conditions: HashSet<usize> = HashSet::new();
+
+    for table_name in &optimal_order {
+        let table_ref = table_map.get(table_name).ok_or_else(|| {
+            ExecutorError::UnsupportedFeature(format!("Table not found in map: {}", table_name))
+        })?;
+
+        // Execute this table
+        let table_result = if table_ref.is_subquery {
+            if let Some(subquery) = &table_ref.subquery {
+                execute_derived_table(subquery, table_name, execute_subquery)?
+            } else {
+                return Err(ExecutorError::UnsupportedFeature(
+                    "Subquery reference missing query".to_string(),
+                ));
+            }
+        } else {
+            execute_table_scan(&table_ref.name, table_ref.alias.as_ref(), cte_results, database, where_clause, None, outer_row, outer_schema)?
+        };
+
+        // Record the column count for this table (using table_schemas to get column info)
+        let col_count = if let Some((_, schema)) = table_result.schema.table_schemas.get(table_name) {
+            schema.columns.len()
+        } else {
+            table_result.schema.total_columns
+        };
+        table_column_counts.insert(table_name.clone(), col_count);
+
+        // Join with previous result (if any)
+        if let Some(prev_result) = result {
+            // Extract join conditions that connect this table to already-joined tables
+            let mut applicable_conditions: Vec<Expression> = Vec::new();
+
+            for (idx, condition) in join_conditions.iter().enumerate() {
+                // Skip conditions we've already applied
+                if applied_conditions.contains(&idx) {
+                    continue;
+                }
+
+                // Extract tables referenced in this condition
+                let mut referenced_tables = HashSet::new();
+                graph::extract_referenced_tables(condition, &mut referenced_tables, &table_set);
+
+                // Check if condition connects the new table with any already-joined table
+                // Condition is applicable if it references the new table AND at least one joined table
+                let references_new_table = referenced_tables.contains(&table_name.to_lowercase());
+                let references_joined_table = referenced_tables.iter().any(|t| joined_tables.contains(t));
+
+                if references_new_table && references_joined_table {
+                    applicable_conditions.push(condition.clone());
+                    applied_conditions.insert(idx);
+                }
+            }
+
+            // Debug logging for applicable conditions
+            if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                eprintln!("[JOIN_REORDER] Joining {} to {:?}, found {} applicable conditions",
+                    table_name, joined_tables, applicable_conditions.len());
+            }
+
+            // Always use INNER join for comma-list joins, even when applicable_conditions is empty.
+            // This allows nested_loop_join to find equijoins from WHERE clause and use hash join.
+            // Using CROSS join would trigger memory limit checks for large Cartesian products.
+            let join_type = &vibesql_ast::JoinType::Inner;
+
+            result = Some(nested_loop_join(
+                prev_result,
+                table_result,
+                join_type,
+                &None, // No ON condition (using additional_equijoins instead)
+                false, // Not a NATURAL JOIN
+                database,
+                &applicable_conditions, // Pass only the applicable conditions for this join
+            )?);
+        } else {
+            result = Some(table_result);
+        }
+
+        // Mark this table as joined
+        joined_tables.insert(table_name.to_lowercase());
+    }
+
+    let result = result.ok_or_else(|| ExecutorError::UnsupportedFeature("No tables in join".to_string()))?;
+
+    // Step 11: Restore original column ordering if needed
+    // Build column permutation: map from current position to target position
+    let column_permutation = utils::build_column_permutation(&table_names, &optimal_order, &table_column_counts);
+
+    // Reorder rows according to the permutation
+    let rows = result.data.into_rows();
+    let reordered_rows: Vec<vibesql_storage::Row> = rows
+        .into_iter()
+        .map(|row| {
+            let mut new_values = Vec::with_capacity(row.values.len());
+            for &idx in &column_permutation {
+                new_values.push(row.values[idx].clone());
+            }
+            vibesql_storage::Row::new(new_values)
+        })
+        .collect();
+
+    // Build a new combined schema with tables in original order
+    let new_schema = utils::build_reordered_schema(&result.schema, &table_names, &optimal_order);
+
+    // Return result with reordered data and schema
+    Ok(FromResult::from_rows(new_schema, reordered_rows))
+}
