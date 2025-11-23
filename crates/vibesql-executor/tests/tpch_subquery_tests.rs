@@ -89,12 +89,11 @@ fn test_q11_scalar_subquery_having() {
 }
 
 #[test]
-#[ignore] // SLOW: Takes >60s on SF 0.01 (needs join optimization)
 fn test_q13_complex_join_subquery() {
     // Q13: Customer Distribution
     // Tests subquery in FROM with LEFT OUTER JOIN and aggregate
-    // Pattern: No decorrelation needed, just complex join
-    // Performance: SLOW - needs optimization
+    // Pattern: No decorrelation needed, uses hash join for LEFT OUTER JOIN
+    // Performance: Fast (~2s on SF 0.01) thanks to hash join optimization (#2465)
 
     let db = load_vibesql(0.01);
 

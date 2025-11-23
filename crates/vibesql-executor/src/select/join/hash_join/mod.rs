@@ -18,6 +18,7 @@ mod tests;
 
 // Re-export public API
 pub(super) use inner::hash_join_inner;
+pub(super) use outer::hash_join_left_outer;
 
 // Re-export FromResult type for use in submodules
 pub(super) use super::FromResult;
