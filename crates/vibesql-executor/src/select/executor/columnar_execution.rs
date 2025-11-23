@@ -39,21 +39,29 @@ impl SelectExecutor<'_> {
         // Check if this query is compatible with columnar execution
         // Use adaptive execution model selection for better query decisions
         match choose_execution_model(stmt) {
-            ExecutionModel::RowOriented => return Ok(None), // Fall back to row-based
+            ExecutionModel::RowOriented => {
+                log::debug!("  Columnar execution: Query not compatible (adaptive execution selected row-oriented)");
+                return Ok(None);
+            }
             ExecutionModel::Columnar => {
+                log::debug!("  Columnar execution: Query eligible (adaptive execution selected columnar)");
                 // Continue with columnar execution
             }
         }
 
         // Only handle queries without CTEs or set operations for now
         if !cte_results.is_empty() || stmt.set_operation.is_some() {
+            log::debug!("  Columnar execution: Not supported - has CTEs or set operations");
             return Ok(None);
         }
 
         // Must have a FROM clause
         let from_clause = match &stmt.from {
             Some(from) => from,
-            None => return Ok(None),
+            None => {
+                log::debug!("  Columnar execution: Not supported - no FROM clause");
+                return Ok(None);
+            }
         };
 
         // Execute FROM clause WITHOUT applying WHERE clause

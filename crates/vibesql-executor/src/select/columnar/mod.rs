@@ -72,6 +72,7 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 #[cfg(test)]
 use vibesql_types::Date;
+use log;
 
 /// Execute a columnar aggregate query with filtering
 ///
@@ -158,26 +159,36 @@ pub fn execute_columnar(
     aggregates: &[vibesql_ast::Expression],
     schema: &CombinedSchema,
 ) -> Option<Result<Vec<Row>, ExecutorError>> {
+    log::debug!("  Executing columnar query with {} rows", rows.len());
+
     // Extract column predicates from filter expression
     let predicates = if let Some(filter_expr) = filter {
         match extract_column_predicates(filter_expr, schema) {
             Some(preds) => {
+                log::debug!("    ✓ Extracted {} column predicates for SIMD filtering", preds.len());
                 preds
             }
             None => {
+                log::debug!("    ✗ Filter too complex for columnar optimization");
                 return None; // Too complex for columnar optimization
             }
         }
     } else {
+        log::debug!("    No filter predicates");
         vec![] // No filter
     };
 
     // Extract aggregates from SELECT list
     let agg_specs = match extract_aggregates(aggregates, schema) {
         Some(specs) => {
+            log::debug!("    ✓ Extracted {} aggregate operations", specs.len());
+            for (i, spec) in specs.iter().enumerate() {
+                log::debug!("      Aggregate {}: {:?}", i + 1, spec.op);
+            }
             specs
         }
         None => {
+            log::debug!("    ✗ Aggregates too complex for columnar optimization");
             return None; // Too complex for columnar optimization
         }
     };
@@ -186,6 +197,7 @@ pub fn execute_columnar(
     let needs_schema = agg_specs.iter().any(|spec| matches!(spec.source, aggregate::AggregateSource::Expression(_)));
     let schema_ref = if needs_schema { Some(schema) } else { None };
 
+    log::debug!("    Executing SIMD-accelerated columnar aggregation");
     Some(execute_columnar_aggregate(rows, &predicates, &agg_specs, schema_ref))
 }
 

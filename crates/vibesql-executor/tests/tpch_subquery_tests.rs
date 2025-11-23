@@ -38,6 +38,32 @@ fn execute_tpch_query(db: &Database, sql: &str) -> Result<usize, String> {
 }
 
 #[test]
+fn test_q2_correlated_scalar_subquery() {
+    // Q2: Minimum Cost Supplier
+    // Tests correlated scalar subquery in WHERE clause
+    // Pattern: Correlated on p_partkey - subquery references outer query column
+    // Performance: Previously timed out (>30s), should now complete with caching
+    // This test validates issue #2452 is fixed
+
+    let db = load_vibesql(0.01);
+
+    let result = execute_tpch_query(&db, TPCH_Q2);
+
+    match result {
+        Ok(count) => {
+            println!("Q2 executed successfully: {} rows", count);
+            // Q2 has LIMIT 100, so should return at most 100 rows
+            assert!(count <= 100, "Q2 has LIMIT 100");
+            // Should return at least some suppliers (exact count varies by data)
+            println!("Q2 completed without timeout (row count: {})", count);
+        }
+        Err(e) => {
+            panic!("Q2 failed to execute: {}", e);
+        }
+    }
+}
+
+#[test]
 #[ignore] // SLOW: Takes >60s on SF 0.01 (needs scalar subquery caching #2425)
 fn test_q11_scalar_subquery_having() {
     // Q11: Important Stock Identification
