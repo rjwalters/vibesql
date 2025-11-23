@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
-    optimizer::adaptive_execution::{choose_execution_model, ExecutionModel},
+    optimizer::adaptive::{choose_execution_model, ExecutionModel},
     select::{columnar, cte::CteResult},
 };
 

@@ -1,0 +1,313 @@
+//! Expression aggregates - aggregating over expressions rather than simple columns
+//!
+//! This module handles aggregates over complex expressions like SUM(a * b),
+//! where we need to evaluate the expression for each row before aggregating.
+
+use crate::errors::ExecutorError;
+use crate::schema::CombinedSchema;
+use vibesql_ast::Expression;
+use vibesql_storage::Row;
+use vibesql_types::SqlValue;
+
+use super::functions::compare_for_min_max;
+use super::{AggregateOp, AggregateSource, AggregateSpec};
+
+/// Evaluate a simple arithmetic expression for a single row
+///
+/// This is a lightweight evaluator for the subset of expressions we support
+/// in columnar aggregates (column references and binary operations).
+pub(super) fn eval_simple_expr(
+    expr: &Expression,
+    row: &Row,
+    schema: &CombinedSchema,
+) -> Result<SqlValue, ExecutorError> {
+    match expr {
+        Expression::ColumnRef { table, column } => {
+            let col_idx = schema.get_column_index(table.as_deref(), column)
+                .ok_or_else(|| ExecutorError::UnsupportedExpression(
+                    format!("Column not found: {}", column)
+                ))?;
+            Ok(row.get(col_idx).cloned().unwrap_or(SqlValue::Null))
+        }
+        Expression::Literal(val) => Ok(val.clone()),
+        Expression::BinaryOp { left, op, right } => {
+            let left_val = eval_simple_expr(left, row, schema)?;
+            let right_val = eval_simple_expr(right, row, schema)?;
+
+            // Use the evaluator's operators module
+            use crate::evaluator::operators::OperatorRegistry;
+            OperatorRegistry::eval_binary_op(&left_val, op, &right_val, vibesql_types::SqlMode::default())
+        }
+        _ => Err(ExecutorError::UnsupportedExpression(
+            "Complex expressions not supported in columnar aggregates".to_string()
+        )),
+    }
+}
+
+/// Compute an aggregate over an expression (e.g., SUM(a * b))
+///
+/// Evaluates the expression for each row, then aggregates the results.
+pub(super) fn compute_expression_aggregate(
+    rows: &[Row],
+    expr: &Expression,
+    op: AggregateOp,
+    filter_bitmap: Option<&[bool]>,
+    schema: &CombinedSchema,
+) -> Result<SqlValue, ExecutorError> {
+    match op {
+        AggregateOp::Sum => {
+            let mut sum = 0.0;
+            let mut count = 0;
+
+            for (row_idx, row) in rows.iter().enumerate() {
+                // Check filter bitmap
+                if let Some(bitmap) = filter_bitmap {
+                    if !bitmap.get(row_idx).copied().unwrap_or(false) {
+                        continue;
+                    }
+                }
+
+                // Evaluate expression for this row
+                let value = eval_simple_expr(expr, row, schema)?;
+
+                // Add to sum
+                if !matches!(value, SqlValue::Null) {
+                    match value {
+                        SqlValue::Integer(v) => sum += v as f64,
+                        SqlValue::Bigint(v) => sum += v as f64,
+                        SqlValue::Smallint(v) => sum += v as f64,
+                        SqlValue::Float(v) => sum += v as f64,
+                        SqlValue::Double(v) => sum += v,
+                        SqlValue::Numeric(v) => sum += v,
+                        SqlValue::Null => {}, // Already checked above
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                format!("Cannot compute SUM on non-numeric value: {:?}", value)
+                            ))
+                        }
+                    }
+                    count += 1;
+                }
+            }
+
+            Ok(if count > 0 {
+                SqlValue::Double(sum)
+            } else {
+                SqlValue::Null
+            })
+        }
+        AggregateOp::Count => {
+            // COUNT of expression counts non-NULL results
+            let mut count = 0;
+            for (row_idx, row) in rows.iter().enumerate() {
+                if let Some(bitmap) = filter_bitmap {
+                    if !bitmap.get(row_idx).copied().unwrap_or(false) {
+                        continue;
+                    }
+                }
+                let value = eval_simple_expr(expr, row, schema)?;
+                if !matches!(value, SqlValue::Null) {
+                    count += 1;
+                }
+            }
+            Ok(SqlValue::Integer(count))
+        }
+        AggregateOp::Avg => {
+            // AVG(expr) = SUM(expr) / COUNT(expr)
+            let sum_result = compute_expression_aggregate(rows, expr, AggregateOp::Sum, filter_bitmap, schema)?;
+            let count_result = compute_expression_aggregate(rows, expr, AggregateOp::Count, filter_bitmap, schema)?;
+
+            match (sum_result, count_result) {
+                (SqlValue::Double(sum), SqlValue::Integer(count)) if count > 0 => {
+                    Ok(SqlValue::Double(sum / count as f64))
+                }
+                _ => Ok(SqlValue::Null),
+            }
+        }
+        AggregateOp::Min | AggregateOp::Max => {
+            let mut result_value: Option<SqlValue> = None;
+
+            for (row_idx, row) in rows.iter().enumerate() {
+                if let Some(bitmap) = filter_bitmap {
+                    if !bitmap.get(row_idx).copied().unwrap_or(false) {
+                        continue;
+                    }
+                }
+
+                let value = eval_simple_expr(expr, row, schema)?;
+                if !matches!(value, SqlValue::Null) {
+                    result_value = Some(match &result_value {
+                        None => value,
+                        Some(current) => {
+                            let should_update = if op == AggregateOp::Min {
+                                compare_for_min_max(&value, current)
+                            } else {
+                                compare_for_min_max(current, &value)
+                            };
+                            if should_update {
+                                value
+                            } else {
+                                current.clone()
+                            }
+                        }
+                    });
+                }
+            }
+
+            Ok(result_value.unwrap_or(SqlValue::Null))
+        }
+    }
+}
+
+/// Extract aggregate operations from AST expressions
+///
+/// Converts aggregate function expressions to AggregateSpec objects
+/// that can be used with columnar execution.
+///
+/// Currently supports:
+/// - SUM(column) → Column aggregate (fast path)
+/// - SUM(a * b) → Expression aggregate (evaluates expression per row)
+/// - COUNT(*) or COUNT(column) → Column aggregate
+/// - AVG(column) or AVG(expr) → Column/Expression aggregate
+/// - MIN(column) or MIN(expr) → Column/Expression aggregate
+/// - MAX(column) or MAX(expr) → Column/Expression aggregate
+///
+/// Supported expression types:
+/// - Simple column references (fast path)
+/// - Binary operations (+, -, *, /) with column references
+///
+/// Returns None if the expression contains unsupported patterns:
+/// - DISTINCT aggregates
+/// - Multiple arguments
+/// - Complex expressions (subqueries, function calls, etc.)
+/// - Non-aggregate expressions
+///
+/// # Arguments
+///
+/// * `exprs` - The SELECT list expressions
+/// * `schema` - The schema to resolve column names to indices
+///
+/// # Returns
+///
+/// Some(aggregates) if all expressions can be converted to aggregates,
+/// None if any expression is too complex for columnar optimization.
+pub fn extract_aggregates(
+    exprs: &[Expression],
+    schema: &CombinedSchema,
+) -> Option<Vec<AggregateSpec>> {
+    let mut aggregates = Vec::new();
+
+    for expr in exprs.iter() {
+        match expr {
+            Expression::AggregateFunction {
+                name,
+                distinct,
+                args,
+            } => {
+                // DISTINCT not supported for columnar optimization
+                if *distinct {
+                    return None;
+                }
+
+                let op = match name.to_uppercase().as_str() {
+                    "SUM" => AggregateOp::Sum,
+                    "COUNT" => AggregateOp::Count,
+                    "AVG" => AggregateOp::Avg,
+                    "MIN" => AggregateOp::Min,
+                    "MAX" => AggregateOp::Max,
+                    _ => return None, // Unsupported aggregate function
+                };
+
+                // Handle COUNT(*)
+                if op == AggregateOp::Count && args.is_empty() {
+                    // For COUNT(*), use column 0 (the column index is ignored by compute_count)
+                    aggregates.push(AggregateSpec {
+                        op,
+                        source: AggregateSource::Column(0),
+                    });
+                    continue;
+                }
+
+                // Handle COUNT(*) with wildcard argument (Expression::Wildcard or ColumnRef { column: "*" })
+                if op == AggregateOp::Count && args.len() == 1 {
+                    match &args[0] {
+                        Expression::Wildcard => {
+                            aggregates.push(AggregateSpec {
+                                op,
+                                source: AggregateSource::Column(0),
+                            });
+                            continue;
+                        }
+                        Expression::ColumnRef { table: _, column } if column == "*" => {
+                            aggregates.push(AggregateSpec {
+                                op,
+                                source: AggregateSource::Column(0),
+                            });
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Extract source (column or expression) for other aggregates
+                if args.len() != 1 {
+                    return None; // Multiple arguments not supported
+                }
+
+                let source = match &args[0] {
+                    // Fast path: simple column reference
+                    Expression::ColumnRef { table, column } => {
+                        let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                        AggregateSource::Column(column_idx)
+                    }
+                    // New: support binary operations like a * b
+                    Expression::BinaryOp { .. } => {
+                        // Check if this is a simple binary operation we can handle
+                        if is_simple_arithmetic_expr(&args[0], schema).is_some() {
+                            AggregateSource::Expression(args[0].clone())
+                        } else {
+                            return None; // Complex expression not supported
+                        }
+                    }
+                    _ => return None, // Other expression types not supported
+                };
+
+                aggregates.push(AggregateSpec { op, source });
+            }
+            _ => {
+                return None; // Non-aggregate expressions not supported
+            }
+        }
+    }
+
+    Some(aggregates)
+}
+
+/// Check if an expression is a simple arithmetic expression we can optimize
+///
+/// Returns Some(()) if the expression only contains column references and
+/// arithmetic operations (+, -, *, /), which we can efficiently evaluate.
+/// Returns None if the expression contains unsupported operations.
+fn is_simple_arithmetic_expr(expr: &Expression, schema: &CombinedSchema) -> Option<()> {
+    match expr {
+        Expression::ColumnRef { table, column } => {
+            // Verify column exists
+            schema.get_column_index(table.as_deref(), column)?;
+            Some(())
+        }
+        Expression::Literal(_) => Some(()),
+        Expression::BinaryOp { left, op, right } => {
+            // Only support arithmetic operations
+            use vibesql_ast::BinaryOperator::*;
+            match op {
+                Plus | Minus | Multiply | Divide => {
+                    is_simple_arithmetic_expr(left, schema)?;
+                    is_simple_arithmetic_expr(right, schema)?;
+                    Some(())
+                }
+                _ => None, // Comparison ops, logical ops, etc. not supported
+            }
+        }
+        _ => None, // Function calls, subqueries, etc. not supported
+    }
+}

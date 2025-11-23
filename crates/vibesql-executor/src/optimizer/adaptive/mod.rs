@@ -31,7 +31,7 @@
 //! ## Example
 //!
 //! ```rust,ignore
-//! use vibesql_executor::optimizer::adaptive_execution::{ExecutionModel, choose_execution_model};
+//! use vibesql_executor::optimizer::adaptive::{ExecutionModel, choose_execution_model};
 //! use vibesql_ast::SelectStmt;
 //!
 //! let query: SelectStmt = // ... parse query
@@ -47,7 +47,15 @@
 //! }
 //! ```
 
-use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt};
+use vibesql_ast::SelectStmt;
+
+mod expression;
+mod hints;
+mod patterns;
+mod query;
+
+use hints::extract_query_hint;
+use patterns::has_analytical_pattern;
 
 /// Execution model for query processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,348 +115,10 @@ pub fn choose_execution_model(query: &SelectStmt) -> ExecutionModel {
     }
 }
 
-/// Extract query execution hint from comment
-///
-/// Supports:
-/// - `/* COLUMNAR */` - Force columnar execution
-/// - `/* ROW_ORIENTED */` - Force row-oriented execution
-///
-/// Note: Currently returns None as hint parsing from comments
-/// would require parser changes. This is a placeholder for future enhancement.
-fn extract_query_hint(_query: &SelectStmt) -> Option<ExecutionModel> {
-    // TODO: Extract hints from query comments when parser support is added
-    // For now, hints are not supported
-    None
-}
-
-/// Detect if a query has analytical patterns suitable for columnar execution
-///
-/// Returns true if the query benefits from columnar execution based on:
-/// - Has aggregation (aggregate functions like SUM, AVG, COUNT WITHOUT GROUP BY)
-/// - Has arithmetic expressions (price * quantity, price * (1 - discount))
-/// - Single table only (no JOINs yet - Phase 5 limitation)
-/// - Selective projection (few columns, not SELECT *)
-/// - No window functions
-/// - No DISTINCT
-///
-/// # Rationale
-///
-/// Columnar execution excels at:
-/// - Aggregations: SIMD can process multiple values per instruction
-/// - Arithmetic: Vectorized operations on packed column data
-/// - Scans: Better cache locality when accessing few columns
-///
-/// Row-oriented is better for:
-/// - Point lookups: Single row access patterns
-/// - Wide projections: Need all columns anyway
-/// - Complex joins: Tuple-at-a-time processing more flexible
-/// - GROUP BY: Not yet supported in Phase 5
-///
-/// # Phase 5 Current Capabilities
-///
-/// Current columnar execution supports:
-/// - Aggregation WITHOUT GROUP BY (e.g., SELECT SUM(price) FROM orders)
-/// - Single table scans (no JOINs)
-/// - Simple predicates (=, <, >, <=, >=, BETWEEN, AND)
-/// - Arithmetic expressions in aggregates (e.g., SUM(a * b))
-///
-/// NOT supported yet (TODO: Future phases):
-/// - GROUP BY aggregations
-/// - JOIN operations
-/// - DISTINCT
-/// - Window functions
-fn has_analytical_pattern(query: &SelectStmt) -> bool {
-    // Phase 5 limitation: No GROUP BY support yet
-    if has_group_by(query) {
-        return false;
-    }
-
-    // Phase 5 limitation: Single table only (no joins)
-    if !is_single_table(query) {
-        return false;
-    }
-
-    // No window functions
-    if has_window_functions(query) {
-        return false;
-    }
-
-    // No DISTINCT for now
-    if query.distinct {
-        return false;
-    }
-
-    let has_aggregation = has_aggregate_functions(query);
-    let has_arithmetic = has_arithmetic_expressions(query);
-    let selective_projection = has_selective_projection(query);
-
-    // Columnar execution is beneficial if:
-    // 1. Has aggregation (aggregate functions like SUM/AVG/COUNT), AND
-    // 2. Either has arithmetic OR selective projection
-    //
-    // This ensures we only use columnar for queries that benefit from:
-    // - Aggregation: Columnar aggregates are much faster with SIMD
-    // - Arithmetic: Vectorized operations on column data
-    // - Selective columns: Avoid conversion overhead for wide rows
-    has_aggregation && (has_arithmetic || selective_projection)
-}
-
-/// Check if query has GROUP BY clause
-fn has_group_by(query: &SelectStmt) -> bool {
-    query.group_by.is_some()
-}
-
-/// Check if query contains aggregate functions (SUM, AVG, MIN, MAX, COUNT)
-fn has_aggregate_functions(query: &SelectStmt) -> bool {
-    query.select_list.iter().any(|item| match item {
-        SelectItem::Expression { expr, .. } => contains_aggregate(expr),
-        SelectItem::Wildcard { .. } => false,
-        SelectItem::QualifiedWildcard { .. } => false,
-    })
-}
-
-/// Recursively check if an expression contains aggregate functions
-fn contains_aggregate(expr: &Expression) -> bool {
-    match expr {
-        Expression::AggregateFunction { .. } => true,
-        Expression::Function { args, .. } => {
-            // Check arguments for nested aggregates
-            args.iter().any(contains_aggregate)
-        }
-        Expression::BinaryOp { left, right, .. } => {
-            contains_aggregate(left) || contains_aggregate(right)
-        }
-        Expression::UnaryOp { expr, .. } => contains_aggregate(expr),
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-            ..
-        } => {
-            operand.as_ref().map_or(false, |e| contains_aggregate(e))
-                || when_clauses.iter().any(|clause| {
-                    clause.conditions.iter().any(contains_aggregate)
-                        || contains_aggregate(&clause.result)
-                })
-                || else_result
-                    .as_ref()
-                    .map_or(false, |e| contains_aggregate(e))
-        }
-        Expression::InList { expr, values, .. } => {
-            contains_aggregate(expr) || values.iter().any(contains_aggregate)
-        }
-        Expression::Between {
-            expr, low, high, ..
-        } => contains_aggregate(expr) || contains_aggregate(low) || contains_aggregate(high),
-        Expression::ScalarSubquery(_) | Expression::In { .. } => {
-            // Conservative: assume subqueries may contain aggregates
-            true
-        }
-        _ => false,
-    }
-}
-
-/// Check if query contains arithmetic expressions in SELECT list or WHERE clause
-///
-/// Arithmetic expressions like `price * (1 - discount)` benefit from SIMD
-/// vectorization in columnar execution.
-fn has_arithmetic_expressions(query: &SelectStmt) -> bool {
-    // Check SELECT list for arithmetic
-    let select_has_arithmetic = query.select_list.iter().any(|item| match item {
-        SelectItem::Expression { expr, .. } => contains_arithmetic(expr),
-        _ => false,
-    });
-
-    // Check WHERE clause for arithmetic
-    let where_has_arithmetic = query
-        .where_clause
-        .as_ref()
-        .map_or(false, contains_arithmetic);
-
-    select_has_arithmetic || where_has_arithmetic
-}
-
-/// Recursively check if an expression contains arithmetic operations
-fn contains_arithmetic(expr: &Expression) -> bool {
-    match expr {
-        Expression::BinaryOp { op, left, right } => {
-            let is_arithmetic = matches!(
-                op,
-                BinaryOperator::Plus
-                    | BinaryOperator::Minus
-                    | BinaryOperator::Multiply
-                    | BinaryOperator::Divide
-                    | BinaryOperator::Modulo
-                    | BinaryOperator::IntegerDivide
-                    | BinaryOperator::Concat
-            );
-
-            is_arithmetic || contains_arithmetic(left) || contains_arithmetic(right)
-        }
-        Expression::UnaryOp { expr, .. } => contains_arithmetic(expr),
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-            ..
-        } => {
-            operand
-                .as_ref()
-                .map_or(false, |e| contains_arithmetic(e))
-                || when_clauses.iter().any(|clause| {
-                    clause.conditions.iter().any(contains_arithmetic)
-                        || contains_arithmetic(&clause.result)
-                })
-                || else_result
-                    .as_ref()
-                    .map_or(false, |e| contains_arithmetic(e))
-        }
-        Expression::InList { expr, values, .. } => {
-            contains_arithmetic(expr) || values.iter().any(contains_arithmetic)
-        }
-        Expression::Between {
-            expr, low, high, ..
-        } => contains_arithmetic(expr) || contains_arithmetic(low) || contains_arithmetic(high),
-        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
-            args.iter().any(contains_arithmetic)
-        }
-        _ => false,
-    }
-}
-
-/// Check if all joins in the query are simple (equijoins with single tables)
-///
-/// Complex joins with many tables, non-equijoin conditions, or nested subqueries
-/// are better suited for row-oriented execution.
-///
-/// Returns true if:
-/// - No joins (single table), or
-/// - All joins are simple equijoins with <= 3 tables
-fn all_joins_are_simple(query: &SelectStmt) -> bool {
-    match &query.from {
-        None => true, // No FROM clause (e.g., SELECT 1)
-        Some(from) => {
-            // Count tables in FROM clause
-            let table_count = count_tables(from);
-
-            // Simple if <= 3 tables (allows TPC-H style queries with 2-3 joins)
-            // Complex joins with many tables benefit less from columnar execution
-            table_count <= 3
-        }
-    }
-}
-
-/// Count the number of tables in a FROM clause (including joins)
-fn count_tables(from: &FromClause) -> usize {
-    match from {
-        FromClause::Table { .. } => 1,
-        FromClause::Subquery { .. } => {
-            // Treat subqueries as complex (conservative approach)
-            // Could be optimized later to analyze subquery patterns
-            4 // > 3, forces row-oriented execution
-        }
-        FromClause::Join { left, right, .. } => count_tables(left) + count_tables(right),
-    }
-}
-
-/// Check if query has selective projection (few columns, not SELECT *)
-///
-/// Selective projections benefit more from columnar execution because:
-/// - Only needed columns are loaded (projection pushdown)
-/// - Less conversion overhead between row/columnar formats
-///
-/// Returns true if:
-/// - Not SELECT * (wildcard)
-/// - Projected columns <= 10 (arbitrary threshold)
-fn has_selective_projection(query: &SelectStmt) -> bool {
-    // Count non-wildcard items
-    let non_wildcard_count = query
-        .select_list
-        .iter()
-        .filter(|item| {
-            !matches!(
-                item,
-                SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. }
-            )
-        })
-        .count();
-
-    // If there are any wildcards, projection is NOT selective
-    let has_wildcard = query.select_list.iter().any(|item| {
-        matches!(
-            item,
-            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. }
-        )
-    });
-
-    if has_wildcard {
-        return false;
-    }
-
-    // Selective if <= 10 columns
-    // This threshold allows for moderate projections like TPC-H queries
-    // while avoiding columnar overhead for very wide projections
-    non_wildcard_count > 0 && non_wildcard_count <= 10
-}
-
-/// Check if query is a single table (no JOINs, no subqueries)
-///
-/// Phase 5 limitation: Columnar execution only supports single table scans.
-/// JOINs and subqueries will be added in future phases.
-fn is_single_table(query: &SelectStmt) -> bool {
-    match &query.from {
-        Some(FromClause::Table { .. }) => true,
-        Some(FromClause::Join { .. }) | Some(FromClause::Subquery { .. }) => false,
-        None => false, // No FROM clause (e.g., SELECT 1)
-    }
-}
-
-/// Check if query contains window functions
-///
-/// Window functions are not yet supported in columnar execution.
-fn has_window_functions(query: &SelectStmt) -> bool {
-    query.select_list.iter().any(|item| match item {
-        SelectItem::Expression { expr, .. } => contains_window_function(expr),
-        _ => false,
-    })
-}
-
-/// Recursively check if an expression contains window functions
-fn contains_window_function(expr: &Expression) -> bool {
-    match expr {
-        Expression::WindowFunction { .. } => true,
-        Expression::BinaryOp { left, right, .. } => {
-            contains_window_function(left) || contains_window_function(right)
-        }
-        Expression::UnaryOp { expr, .. } => contains_window_function(expr),
-        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
-            args.iter().any(contains_window_function)
-        }
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-            ..
-        } => {
-            operand
-                .as_ref()
-                .map_or(false, |e| contains_window_function(e))
-                || when_clauses.iter().any(|clause| {
-                    clause.conditions.iter().any(contains_window_function)
-                        || contains_window_function(&clause.result)
-                })
-                || else_result
-                    .as_ref()
-                    .map_or(false, |e| contains_window_function(e))
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibesql_ast::{BinaryOperator, FromClause, JoinType, SelectItem, SelectStmt};
+    use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
     use vibesql_types::SqlValue;
 
     #[test]
@@ -665,7 +335,7 @@ mod tests {
             set_operation: None,
         };
 
-        assert!(has_aggregate_functions(&query_with_count));
+        assert!(query::has_aggregate_functions(&query_with_count));
     }
 
     #[test]
@@ -702,7 +372,7 @@ mod tests {
             set_operation: None,
         };
 
-        assert!(has_arithmetic_expressions(&query_with_arithmetic));
+        assert!(query::has_arithmetic_expressions(&query_with_arithmetic));
     }
 
     #[test]
@@ -742,7 +412,7 @@ mod tests {
             set_operation: None,
         };
 
-        assert!(has_selective_projection(&selective));
+        assert!(query::has_selective_projection(&selective));
 
         // SELECT * (wildcard)
         let non_selective = SelectStmt {
@@ -764,6 +434,6 @@ mod tests {
             set_operation: None,
         };
 
-        assert!(!has_selective_projection(&non_selective));
+        assert!(!query::has_selective_projection(&non_selective));
     }
 }

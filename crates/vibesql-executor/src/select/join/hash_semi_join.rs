@@ -5,6 +5,7 @@ use rayon::prelude::*;
 
 use super::FromResult;
 use crate::errors::ExecutorError;
+use crate::evaluator::CombinedExpressionEvaluator;
 
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
@@ -141,6 +142,122 @@ pub(super) fn hash_semi_join(
 
     // Return result with left schema only (we don't combine with right schema)
     Ok(FromResult::from_rows(left.schema.clone(), result_rows))
+}
+
+/// Hash semi-join with additional filter conditions
+///
+/// This is an optimized version of hash_semi_join that supports additional filter predicates
+/// beyond the equi-join condition. This is essential for EXISTS subqueries with complex WHERE clauses.
+///
+/// Example use case (TPC-H Q21):
+/// ```sql
+/// EXISTS (
+///     SELECT * FROM lineitem l2
+///     WHERE l2.l_orderkey = l1.l_orderkey    -- Equi-join (used for hash table)
+///       AND l2.l_suppkey <> l1.l_suppkey     -- Additional filter (checked during probe)
+/// )
+/// ```
+///
+/// Algorithm:
+/// 1. Build phase: Hash the RIGHT table on the equi-join column (O(n))
+/// 2. Probe phase: For each LEFT row:
+///    a. Check if hash table contains matching key
+///    b. If yes, verify additional filter conditions against ALL matching right rows
+///    c. If any right row passes the filter, emit the left row (only once)
+///
+/// Performance: Still O(n + m) average case, much faster than nested loop O(n*m)
+pub(super) fn hash_semi_join_with_filter(
+    mut left: FromResult,
+    mut right: FromResult,
+    left_col_idx: usize,
+    right_col_idx: usize,
+    additional_filter: Option<&vibesql_ast::Expression>,
+    combined_schema: &crate::schema::CombinedSchema,
+    database: &vibesql_storage::Database,
+) -> Result<FromResult, ExecutorError> {
+    // If no additional filter, use the simpler version
+    if additional_filter.is_none() {
+        return hash_semi_join(left, right, left_col_idx, right_col_idx);
+    }
+
+    let filter = additional_filter.unwrap();
+
+    // Get left and right row data
+    let left_rows = left.rows();
+    let right_rows = right.rows();
+
+    // Build phase: Create hash table from right side
+    // Unlike simple hash_semi_join, we need to store row indices to check the filter
+    use std::collections::HashMap;
+    let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
+
+    for (idx, row) in right_rows.iter().enumerate() {
+        let key = row.values[right_col_idx].clone();
+        // Skip NULL values - they never match in equi-joins
+        if key != vibesql_types::SqlValue::Null {
+            hash_table.entry(key).or_insert_with(Vec::new).push(idx);
+        }
+    }
+
+    // Probe phase: Check each left row for a match that passes the filter
+    let estimated_capacity = left_rows.len().min(100_000);
+    let mut result_rows = Vec::with_capacity(estimated_capacity);
+
+    // Create evaluator for filter evaluation
+    let evaluator = CombinedExpressionEvaluator::with_database(combined_schema, database);
+
+    for left_row in left_rows.iter() {
+        let key = &left_row.values[left_col_idx];
+
+        // Skip NULL values - they never match in equi-joins
+        if key == &vibesql_types::SqlValue::Null {
+            continue;
+        }
+
+        // Check if key exists in hash table
+        if let Some(right_indices) = hash_table.get(key) {
+            // Check if any matching right row passes the additional filter
+            let mut found_match = false;
+            for &right_idx in right_indices {
+                let right_row = &right_rows[right_idx];
+
+                // Create combined row for filter evaluation
+                let combined_row = create_combined_row(left_row, right_row);
+
+                // Clear CSE cache before evaluation
+                evaluator.clear_cse_cache();
+
+                // Evaluate the additional filter
+                match evaluator.eval(filter, &combined_row) {
+                    Ok(vibesql_types::SqlValue::Boolean(true)) => {
+                        found_match = true;
+                        break; // Semi-join: we only need one match
+                    }
+                    Ok(vibesql_types::SqlValue::Boolean(false))
+                    | Ok(vibesql_types::SqlValue::Null) => continue,
+                    Err(_) => continue, // Filter evaluation error, skip this row
+                    Ok(_) => continue,  // Filter didn't return boolean, skip this row
+                }
+            }
+
+            if found_match {
+                result_rows.push(left_row.clone());
+            }
+        }
+    }
+
+    // Return result with left schema only
+    Ok(FromResult::from_rows(left.schema.clone(), result_rows))
+}
+
+/// Helper function to create a combined row from left and right rows
+fn create_combined_row(
+    left_row: &vibesql_storage::Row,
+    right_row: &vibesql_storage::Row,
+) -> vibesql_storage::Row {
+    let mut combined_values = left_row.values.clone();
+    combined_values.extend_from_slice(&right_row.values);
+    vibesql_storage::Row::new(combined_values)
 }
 
 #[cfg(test)]
