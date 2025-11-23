@@ -283,21 +283,28 @@ fn extract_referenced_tables(
                 // Try to find a FROM clause table that starts with this prefix (case-insensitive)
                 let prefix_upper = prefix.to_uppercase();
 
-                // Collect all tables that match the prefix
-                let mut matching_tables: Vec<_> = available_tables
-                    .iter()
-                    .filter(|t| t.to_uppercase().starts_with(&prefix_upper))
-                    .collect();
+                // Collect exact and prefix matches
+                let mut exact_match: Option<String> = None;
+                let mut prefix_matches = Vec::new();
 
-                if !matching_tables.is_empty() {
-                    // Sort by name length (ascending) to prefer shorter, more specific matches
+                for table in available_tables {
+                    let table_upper = table.to_uppercase();
+                    if table_upper == prefix_upper {
+                        exact_match = Some(table.clone());
+                        break;  // Exact match takes priority
+                    } else if table_upper.starts_with(&prefix_upper) {
+                        prefix_matches.push(table.clone());
+                    }
+                }
+
+                if let Some(table) = exact_match {
+                    output.insert(table);
+                } else if !prefix_matches.is_empty() {
+                    // Sort by length ascending to prefer shorter, more specific matches
                     // This ensures "PART" matches before "PARTSUPP" for prefix "P"
-                    // while "PARTSUPP" still correctly matches for prefix "PS"
-                    matching_tables.sort_by_key(|t| t.len());
-
-                    // Use the shortest matching table
-                    if let Some(table) = matching_tables.first() {
-                        output.insert((*table).clone());
+                    prefix_matches.sort_by_key(|t| t.len());
+                    if let Some(table) = prefix_matches.into_iter().next() {
+                        output.insert(table);
                     }
                 }
             }
@@ -400,23 +407,32 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                         return None;
                     }
 
-                    // Collect all tables that match the prefix
-                    let mut matching_tables: Vec<_> = tables
-                        .iter()
-                        .filter(|t| t.to_uppercase().starts_with(&prefix))
-                        .collect();
+                    // Collect all matching tables (both exact and prefix matches)
+                    let mut exact_matches = Vec::new();
+                    let mut prefix_matches = Vec::new();
 
-                    if matching_tables.is_empty() {
-                        return None;
+                    for table in tables {
+                        let table_upper = table.to_uppercase();
+                        if table_upper == prefix {
+                            exact_matches.push(table.clone());
+                        } else if table_upper.starts_with(&prefix) {
+                            prefix_matches.push(table.clone());
+                        }
                     }
 
-                    // Sort by name length (ascending) to prefer shorter, more specific matches
-                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
-                    // while "PARTSUPP" still correctly matches for prefix "PS"
-                    matching_tables.sort_by_key(|t| t.len());
+                    // Prefer exact match (e.g., "P" -> "PART" even if "PARTSUPP" exists)
+                    if !exact_matches.is_empty() {
+                        return exact_matches.into_iter().next();
+                    }
 
-                    // Use the shortest matching table
-                    matching_tables.first().map(|t| (*t).clone())
+                    // For prefix matches, prefer shorter (more specific) tables
+                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
+                    if !prefix_matches.is_empty() {
+                        prefix_matches.sort_by_key(|t| t.len());
+                        return prefix_matches.into_iter().next();
+                    }
+
+                    None
                 };
 
                 let left_table = match left.as_ref() {
