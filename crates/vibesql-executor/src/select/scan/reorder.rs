@@ -283,16 +283,21 @@ fn extract_referenced_tables(
                 // Try to find a FROM clause table that starts with this prefix (case-insensitive)
                 let prefix_upper = prefix.to_uppercase();
 
-                // Sort tables by name length (descending) to match longer names first
-                // This ensures "PARTSUPP" matches before "PART" for prefix "PS"
-                let mut table_list: Vec<_> = available_tables.iter().collect();
-                table_list.sort_by(|a, b| b.len().cmp(&a.len()));
+                // Collect all tables that match the prefix
+                let mut matching_tables: Vec<_> = available_tables
+                    .iter()
+                    .filter(|t| t.to_uppercase().starts_with(&prefix_upper))
+                    .collect();
 
-                for table in table_list {
-                    if table.to_uppercase().starts_with(&prefix_upper) {
-                        // Found a match! Insert this table into the output
-                        output.insert(table.clone());
-                        break;
+                if !matching_tables.is_empty() {
+                    // Sort by name length (ascending) to prefer shorter, more specific matches
+                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
+                    // while "PARTSUPP" still correctly matches for prefix "PS"
+                    matching_tables.sort_by_key(|t| t.len());
+
+                    // Use the shortest matching table
+                    if let Some(table) = matching_tables.first() {
+                        output.insert((*table).clone());
                     }
                 }
             }
@@ -395,14 +400,23 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                         return None;
                     }
 
-                    // Sort tables by length (descending) to match longer names first
-                    // This ensures "PARTSUPP" matches before "PART" for prefix "PS"
-                    let mut table_list: Vec<_> = tables.iter().collect();
-                    table_list.sort_by_key(|b| std::cmp::Reverse(b.len()));
+                    // Collect all tables that match the prefix
+                    let mut matching_tables: Vec<_> = tables
+                        .iter()
+                        .filter(|t| t.to_uppercase().starts_with(&prefix))
+                        .collect();
 
-                    table_list.into_iter()
-                        .find(|t| t.to_uppercase().starts_with(&prefix))
-                        .cloned()
+                    if matching_tables.is_empty() {
+                        return None;
+                    }
+
+                    // Sort by name length (ascending) to prefer shorter, more specific matches
+                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
+                    // while "PARTSUPP" still correctly matches for prefix "PS"
+                    matching_tables.sort_by_key(|t| t.len());
+
+                    // Use the shortest matching table
+                    matching_tables.first().map(|t| (*t).clone())
                 };
 
                 let left_table = match left.as_ref() {
