@@ -500,9 +500,20 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                 };
 
                 // If both sides reference columns from different tables, it's an equijoin
-                if let (Some(lt), Some(rt)) = (left_table, right_table) {
+                if let (Some(lt), Some(rt)) = (left_table.clone(), right_table.clone()) {
+                    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!("[JOIN_REORDER] Checking equijoin: left_table={:?}, right_table={:?}", lt, rt);
+                        eprintln!("[JOIN_REORDER]   tables.contains(left)={}, tables.contains(right)={}",
+                            tables.contains(&lt), tables.contains(&rt));
+                        eprintln!("[JOIN_REORDER]   condition: {:?}", expr);
+                    }
                     if lt != rt && tables.contains(&lt) && tables.contains(&rt) {
                         equijoins.push(expr.clone());
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[JOIN_REORDER]   ✓ Added to equijoins");
+                        }
+                    } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!("[JOIN_REORDER]   ✗ Skipped: lt==rt or table not found");
                     }
                 }
             }

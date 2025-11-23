@@ -150,7 +150,15 @@ impl JoinOrderAnalyzer {
     /// Analyze a predicate and extract join edges or local predicates
     pub fn analyze_predicate(&mut self, expr: &Expression, tables: &HashSet<String>) {
         match expr {
-            // Only handle simple binary equality operations
+            // Recursively handle AND expressions
+            Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[ANALYZER] Decomposing AND expression");
+                }
+                self.analyze_predicate(left, tables);
+                self.analyze_predicate(right, tables);
+            }
+            // Handle simple binary equality operations
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
                 let (left_table, left_col) = self.extract_column_ref(left, tables);
                 let (right_table, right_col) = self.extract_column_ref(right, tables);
