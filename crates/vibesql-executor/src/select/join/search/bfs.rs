@@ -13,11 +13,15 @@ use rayon::prelude::*;
 use super::{JoinCost, JoinOrderContext, SearchState};
 
 impl JoinOrderContext {
-    /// Find optimal order using parallel BFS
+    /// Find optimal order using parallel BFS with time-bounded search
     ///
     /// Explores all candidate orderings at each depth level using parallel iteration,
-    /// with intelligent pruning to manage memory usage.
+    /// with intelligent pruning to manage memory usage. Supports time-bounded search
+    /// that will terminate gracefully if time budget is exceeded.
     pub(super) fn find_optimal_order_parallel(&self) -> Vec<String> {
+        let start_time = std::time::Instant::now();
+        let time_budget = std::time::Duration::from_millis(self.config.time_budget_ms);
+
         // Initial state: empty set of joined tables
         let initial_state = SearchState {
             joined_tables: BTreeSet::new(),
@@ -29,11 +33,46 @@ impl JoinOrderContext {
         let mut current_layer = vec![initial_state];
         let best_cost = AtomicU64::new(u64::MAX);
         let mut best_order = vec![];
+        let mut depth_reached = 0;
+        let mut total_states_explored = 0;
 
         // Iterate through depths (number of tables joined)
-        for _depth in 0..self.all_tables.len() {
+        for depth in 0..self.all_tables.len() {
             if current_layer.is_empty() {
                 break; // No more paths to explore
+            }
+
+            depth_reached = depth;
+            total_states_explored += current_layer.len();
+
+            // Check time budget at each layer
+            let elapsed = start_time.elapsed();
+            if self.config.use_time_budget && elapsed > time_budget {
+                if !best_order.is_empty() {
+                    // Return best found so far
+                    if self.config.verbose {
+                        eprintln!(
+                            "[JOIN_REORDER] Time budget {:?} exceeded (elapsed {:?}), returning best order found",
+                            time_budget, elapsed
+                        );
+                        eprintln!(
+                            "[JOIN_REORDER] Search stats: depth {}/{}, states explored: {}, search space coverage: {:.1}%",
+                            depth_reached,
+                            self.all_tables.len(),
+                            total_states_explored,
+                            (depth_reached as f64 / self.all_tables.len() as f64) * 100.0
+                        );
+                    }
+                    return best_order;
+                } else {
+                    // No complete ordering yet, fall back to greedy
+                    if self.config.verbose {
+                        eprintln!(
+                            "[JOIN_REORDER] Time budget exceeded before finding complete ordering, falling back to greedy"
+                        );
+                    }
+                    return self.find_optimal_order_greedy();
+                }
             }
 
             // Generate next layer in parallel
@@ -57,6 +96,15 @@ impl JoinOrderContext {
 
             // Prune layer to prevent memory explosion
             current_layer = self.prune_layer(next_layer, &best_cost, &mut best_order);
+        }
+
+        // Log search completion statistics
+        if self.config.verbose && !best_order.is_empty() {
+            let elapsed = start_time.elapsed();
+            eprintln!(
+                "[JOIN_REORDER] Search completed in {:?}, explored {} states across {} depths",
+                elapsed, total_states_explored, depth_reached + 1
+            );
         }
 
         // If no solution found, return left-to-right ordering as fallback

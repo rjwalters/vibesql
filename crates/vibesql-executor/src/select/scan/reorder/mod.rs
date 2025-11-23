@@ -2,12 +2,13 @@
 //!
 //! Provides cost-based join reordering for multi-table queries:
 //! - Analyzes join conditions and WHERE predicates
-//! - Uses exhaustive search with pruning to find optimal join order
+//! - Uses time-bounded search to find optimal join order
 //! - Minimizes intermediate result sizes
 //!
-//! This optimization is enabled by default for 3-8 table INNER/CROSS joins.
-//! Disabled for 9+ tables to prevent excessive search time (9! = 362,880).
-//! Can be disabled via JOIN_REORDER_DISABLED environment variable.
+//! This optimization uses time-bounded anytime search (default: 1000ms budget)
+//! to enable optimization for queries of all sizes, including 9+ tables.
+//! Simple queries complete exhaustively in <1ms, complex queries use full budget.
+//! Can be configured via JOIN_REORDER_TIME_BUDGET_MS or disabled via JOIN_REORDER_DISABLED.
 
 mod graph;
 mod optimizer;

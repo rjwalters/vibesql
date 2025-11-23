@@ -1,18 +1,36 @@
-//! Join order optimization via exhaustive search
+//! Join order optimization via time-bounded search
 //!
-//! This module implements join order optimization using tree search to explore
-//! different orderings. Unlike greedy heuristics that commit to the first choice,
-//! search exhaustively considers possibilities and selects the ordering that
-//! minimizes estimated cost.
+//! This module implements join order optimization using breadth-first search with
+//! a configurable time budget. Unlike greedy heuristics that commit to the first choice,
+//! search explores multiple orderings and selects one that minimizes estimated cost.
+//!
+//! ## Time-Bounded Search (Default)
+//!
+//! By default, the optimizer uses time-bounded anytime search that:
+//! - Explores join orders using parallel BFS (breadth-first)
+//! - Terminates when time budget is exceeded (default: 1000ms)
+//! - Returns the best ordering found so far (anytime property)
+//! - Falls back to greedy heuristic if no complete ordering found
+//!
+//! This approach enables optimization for large queries (9+ tables) while preventing
+//! excessive search time. Small queries complete exhaustively within milliseconds.
+//!
+//! ## Configuration
+//!
+//! Time budget and behavior can be configured via environment variables:
+//! - `JOIN_REORDER_TIME_BUDGET_MS`: Override default time budget (default: 1000ms)
+//! - `JOIN_REORDER_VERBOSE`: Enable search statistics logging
+//! - `JOIN_REORDER_DISABLED`: Disable optimization entirely
 //!
 //! ## Algorithm
 //!
-//! Uses depth-first search with branch-and-bound pruning:
+//! Uses parallel breadth-first search with branch-and-bound pruning:
 //! 1. Start with empty set of joined tables
-//! 2. At each step, try adding each unjoined table
-//! 3. Estimate cost of this join
-//! 4. Prune branch if cost exceeds current best
-//! 5. Continue recursively until all tables joined
+//! 2. At each depth level, expand all candidate states in parallel
+//! 3. Estimate cost of each join
+//! 4. Prune states with cost exceeding current best (with threshold)
+//! 5. Check time budget at each layer
+//! 6. Continue until all tables joined or time budget exceeded
 //!
 //! ## Example
 //!
@@ -20,16 +38,14 @@
 //! Query: SELECT * FROM t1, t2, t3, t4, t5
 //! WHERE t1.id = t2.id AND t2.id = t3.id ...
 //!
-//! Search tree:
-//!               {}
-//!            /  |  | \
-//!         {t1} {t2} {t3} {t4} {t5}
-//!          / |  \
-//!      {t1,t2}  {t1,t3}  ...
-//!       /  \
-//!    {t1,t2,t3} ...
+//! BFS search by depth:
+//! Depth 0: {}
+//! Depth 1: {t1}, {t2}, {t3}, {t4}, {t5}  (5 states)
+//! Depth 2: {t1,t2}, {t1,t3}, {t2,t3}, ... (pruned to keep best N states)
+//! Depth 3: {t1,t2,t3}, ...                (pruned, check time budget)
+//! ...
 //!
-//! Prune branches where cumulative cost > best found so far
+//! Returns best complete ordering found, or falls back if time exceeded
 //! ```
 
 mod bfs;
@@ -77,15 +93,33 @@ pub struct ParallelSearchConfig {
     pub max_states_per_layer: usize,
     /// Prune states with cost > best * threshold
     pub pruning_threshold: f64,
+    /// Maximum time budget for join order search (milliseconds)
+    /// Default: 1000ms for OLAP workloads
+    pub time_budget_ms: u64,
+    /// Whether to use time-bounded search (vs table-count cutoff)
+    pub use_time_budget: bool,
+    /// Enable verbose logging of search statistics
+    pub verbose: bool,
 }
 
 impl Default for ParallelSearchConfig {
     fn default() -> Self {
+        // Read time budget from environment variable if set
+        let time_budget_ms = std::env::var("JOIN_REORDER_TIME_BUDGET_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1000);
+
+        let verbose = std::env::var("JOIN_REORDER_VERBOSE").is_ok();
+
         Self {
             enabled: true,
             max_depth: 8, // Support 8-way joins like TPC-H Q8
             max_states_per_layer: 1000,
             pruning_threshold: 1.5,
+            time_budget_ms,
+            use_time_budget: true,  // New: prefer time-bounded over table-count
+            verbose,
         }
     }
 }
@@ -167,18 +201,29 @@ impl JoinOrderSearch {
     /// Find optimal join order by exploring search space
     ///
     /// Returns list of table names in the order they should be joined.
-    /// Uses adaptive strategy selection: parallel BFS for 3-6 table queries with
-    /// highly connected join graphs, DFS for small or large queries.
+    ///
+    /// When time-bounded search is enabled (default), uses parallel BFS for all
+    /// multi-table queries with a configurable time budget. This allows optimization
+    /// of large queries (9+ tables) while preventing excessive search time.
+    ///
+    /// When time-bounded search is disabled, uses legacy behavior: parallel BFS for
+    /// 3-6 table queries with highly connected join graphs, DFS for others.
     pub fn find_optimal_order(&self) -> Vec<String> {
         if self.context.all_tables.is_empty() {
             return Vec::new();
         }
 
-        // Use adaptive strategy selection
-        if self.should_use_parallel_search() {
+        // Use time-bounded BFS for all multi-table queries when enabled
+        if self.context.config.use_time_budget {
+            // Time-bounded BFS handles all query sizes with time budget protection
             self.context.find_optimal_order_parallel()
         } else {
-            self.context.find_optimal_order_dfs()
+            // Legacy behavior: table-count based decision
+            if self.should_use_parallel_search() {
+                self.context.find_optimal_order_parallel()
+            } else {
+                self.context.find_optimal_order_dfs()
+            }
         }
     }
 
@@ -690,5 +735,185 @@ mod tests {
 
         // Verify we got all 5 tables
         assert_eq!(first_order.len(), 5);
+    }
+
+    #[test]
+    fn test_time_bounded_search_returns_valid_ordering() {
+        // Test that time-bounded search always returns a valid ordering
+        // even with a very short time budget
+        let mut analyzer = JoinOrderAnalyzer::new();
+        analyzer.register_tables(vec![
+            "t1".to_string(),
+            "t2".to_string(),
+            "t3".to_string(),
+            "t4".to_string(),
+            "t5".to_string(),
+        ]);
+
+        // Create a connected graph
+        analyzer.add_edge(JoinEdge {
+            left_table: "t1".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t2".to_string(),
+            right_column: "id".to_string(),
+        });
+        analyzer.add_edge(JoinEdge {
+            left_table: "t2".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t3".to_string(),
+            right_column: "id".to_string(),
+        });
+        analyzer.add_edge(JoinEdge {
+            left_table: "t3".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t4".to_string(),
+            right_column: "id".to_string(),
+        });
+        analyzer.add_edge(JoinEdge {
+            left_table: "t4".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t5".to_string(),
+            right_column: "id".to_string(),
+        });
+
+        let db = vibesql_storage::Database::new();
+        let mut search = JoinOrderSearch::from_analyzer(&analyzer, &db);
+
+        // Set a very short time budget to test early termination
+        search.context.config.time_budget_ms = 1; // 1ms - very short
+        search.context.config.use_time_budget = true;
+
+        let order = search.find_optimal_order();
+
+        // Should still return all tables
+        assert_eq!(order.len(), 5);
+
+        // All tables should be present
+        assert!(order.contains(&"t1".to_string()));
+        assert!(order.contains(&"t2".to_string()));
+        assert!(order.contains(&"t3".to_string()));
+        assert!(order.contains(&"t4".to_string()));
+        assert!(order.contains(&"t5".to_string()));
+    }
+
+    #[test]
+    fn test_time_bounded_search_completes_fast_for_small_queries() {
+        // Test that small queries complete within time budget
+        let mut analyzer = JoinOrderAnalyzer::new();
+        analyzer.register_tables(vec![
+            "t1".to_string(),
+            "t2".to_string(),
+            "t3".to_string(),
+        ]);
+
+        analyzer.add_edge(JoinEdge {
+            left_table: "t1".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t2".to_string(),
+            right_column: "id".to_string(),
+        });
+        analyzer.add_edge(JoinEdge {
+            left_table: "t2".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t3".to_string(),
+            right_column: "id".to_string(),
+        });
+
+        let db = vibesql_storage::Database::new();
+        let search = JoinOrderSearch::from_analyzer(&analyzer, &db);
+
+        let start = std::time::Instant::now();
+        let order = search.find_optimal_order();
+        let elapsed = start.elapsed();
+
+        // Should complete very quickly for 3 tables
+        assert!(elapsed.as_millis() < 100, "Small query took too long: {:?}", elapsed);
+        assert_eq!(order.len(), 3);
+    }
+
+    #[test]
+    fn test_time_bounded_search_with_generous_budget() {
+        // Test that search completes exhaustively with generous time budget
+        let mut analyzer = JoinOrderAnalyzer::new();
+        analyzer.register_tables(vec![
+            "t1".to_string(),
+            "t2".to_string(),
+            "t3".to_string(),
+            "t4".to_string(),
+        ]);
+
+        // Star pattern
+        analyzer.add_edge(JoinEdge {
+            left_table: "t1".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t2".to_string(),
+            right_column: "id".to_string(),
+        });
+        analyzer.add_edge(JoinEdge {
+            left_table: "t1".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t3".to_string(),
+            right_column: "id".to_string(),
+        });
+        analyzer.add_edge(JoinEdge {
+            left_table: "t1".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t4".to_string(),
+            right_column: "id".to_string(),
+        });
+
+        let db = vibesql_storage::Database::new();
+        let mut search = JoinOrderSearch::from_analyzer(&analyzer, &db);
+
+        // Set generous time budget
+        search.context.config.time_budget_ms = 10000; // 10 seconds
+        search.context.config.use_time_budget = true;
+
+        let order = search.find_optimal_order();
+
+        // Should return all tables
+        assert_eq!(order.len(), 4);
+
+        // t1 should be early in the order (hub table)
+        let t1_pos = order.iter().position(|t| t == "t1").unwrap();
+        assert!(t1_pos <= 1, "Hub table should be early in order");
+    }
+
+    #[test]
+    fn test_legacy_behavior_with_time_budget_disabled() {
+        // Test that disabling time budget uses legacy table-count based logic
+        let mut analyzer = JoinOrderAnalyzer::new();
+        analyzer.register_tables(vec![
+            "t1".to_string(),
+            "t2".to_string(),
+            "t3".to_string(),
+        ]);
+
+        analyzer.add_edge(JoinEdge {
+            left_table: "t1".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t2".to_string(),
+            right_column: "id".to_string(),
+        });
+        analyzer.add_edge(JoinEdge {
+            left_table: "t2".to_string(),
+            left_column: "id".to_string(),
+            right_table: "t3".to_string(),
+            right_column: "id".to_string(),
+        });
+
+        let db = vibesql_storage::Database::new();
+        let mut search = JoinOrderSearch::from_analyzer(&analyzer, &db);
+
+        // Disable time-bounded search
+        search.context.config.use_time_budget = false;
+
+        let order = search.find_optimal_order();
+
+        // Should still return valid ordering
+        assert_eq!(order.len(), 3);
+        assert!(order.contains(&"t1".to_string()));
+        assert!(order.contains(&"t2".to_string()));
+        assert!(order.contains(&"t3".to_string()));
     }
 }

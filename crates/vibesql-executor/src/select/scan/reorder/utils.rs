@@ -6,29 +6,28 @@ use crate::schema::CombinedSchema;
 
 /// Check if join reordering optimization should be applied
 ///
-/// Enabled by default for 2-8 table joins. Can be disabled via JOIN_REORDER_DISABLED env var.
+/// ## Time-Bounded Search (Default)
 ///
-/// Table count limits:
-/// - < 2 tables: Not applicable (no join)
-/// - 2-8 tables: Enabled (branch-and-bound pruning keeps search manageable)
-/// - > 8 tables: Disabled (excessive search time: 9! = 362,880, 10! = 3,628,800)
+/// The optimizer uses time-bounded anytime search with a configurable budget
+/// (default: 1000ms). This enables optimization for queries of all sizes:
+/// - Small queries (2-6 tables): Complete exhaustively in <1ms
+/// - Medium queries (7-8 tables): Usually complete within budget
+/// - Large queries (9+ tables): Get partial optimization (better than none!)
 ///
-/// The branch-and-bound search with cost-based pruning efficiently handles up to 8 tables
-/// by eliminating suboptimal paths early. Even with 8! = 40,320 theoretical orderings,
-/// pruning reduces the search space by orders of magnitude in practice.
+/// The time budget can be configured via JOIN_REORDER_TIME_BUDGET_MS environment variable.
 ///
-/// 2-table joins benefit from choosing optimal build/probe sides, especially when one
-/// table has highly selective predicates (e.g., TPC-H Q19's complex OR conditions).
+/// ## Benefits vs Table-Count Limits
+///
+/// Previous approach (hard 8-table limit):
+/// - 3-8 table joins: Find optimal ordering via exhaustive search with pruning
+/// - 9+ table joins: Previously received NO optimization, now get partial
+///   optimization within time budget
+///
+/// The time budget prevents pathological cases while enabling better plans
+/// for complex queries that need optimization most.
 pub(crate) fn should_apply_join_reordering(table_count: usize) -> bool {
     // Must have at least 2 tables for reordering to be beneficial
     if table_count < 2 {
-        return false;
-    }
-
-    // Limit to 8 tables maximum to prevent excessive search time
-    // With 9+ tables, the search space becomes impractical (9! = 362,880, 10! = 3,628,800)
-    // Even with aggressive pruning, the overhead becomes prohibitive
-    if table_count > 8 {
         return false;
     }
 
