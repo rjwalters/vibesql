@@ -20,8 +20,8 @@ mod tests;
 // Re-export join reorder analyzer for public tests
 // Re-export hash_join functions for internal use
 use hash_join::hash_join_inner;
-use hash_semi_join::hash_semi_join;
-use hash_anti_join::hash_anti_join;
+use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
+use hash_anti_join::{hash_anti_join, hash_anti_join_with_filter};
 // Re-export hash join iterator for public use
 pub use hash_join_iterator::HashJoinIterator;
 // Re-export nested loop join variants for internal use
@@ -448,24 +448,36 @@ pub(super) fn nested_loop_join(
         let temp_schema =
             CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
 
-        // Try ON condition first
+        // Try ON condition first - use analyze_compound_equi_join to handle complex conditions
+        // This enables hash join optimization for EXISTS subqueries with additional predicates
+        // Example: EXISTS (SELECT * FROM t WHERE t.x = outer.x AND t.y <> outer.y)
+        // The equi-join (t.x = outer.x) is used for hash join, and the inequality is a post-filter
         if let Some(cond) = condition {
-            if let Some(equi_join_info) =
-                join_analyzer::analyze_equi_join(cond, &temp_schema, left_col_count)
+            if let Some(compound_result) =
+                join_analyzer::analyze_compound_equi_join(cond, &temp_schema, left_col_count)
             {
+                // Build the combined remaining condition (if any)
+                let remaining_filter = combine_with_and(compound_result.remaining_conditions);
+
                 let result = if matches!(join_type, vibesql_ast::JoinType::Semi) {
-                    hash_semi_join(
+                    hash_semi_join_with_filter(
                         left,
                         right,
-                        equi_join_info.left_col_idx,
-                        equi_join_info.right_col_idx,
+                        compound_result.equi_join.left_col_idx,
+                        compound_result.equi_join.right_col_idx,
+                        remaining_filter.as_ref(),
+                        &temp_schema,
+                        database,
                     )?
                 } else {
-                    hash_anti_join(
+                    hash_anti_join_with_filter(
                         left,
                         right,
-                        equi_join_info.left_col_idx,
-                        equi_join_info.right_col_idx,
+                        compound_result.equi_join.left_col_idx,
+                        compound_result.equi_join.right_col_idx,
+                        remaining_filter.as_ref(),
+                        &temp_schema,
+                        database,
                     )?
                 };
 
