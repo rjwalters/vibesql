@@ -197,7 +197,7 @@ pub fn extract_aggregates(
 ) -> Option<Vec<AggregateSpec>> {
     let mut aggregates = Vec::new();
 
-    for (i, expr) in exprs.iter().enumerate() {
+    for expr in exprs.iter() {
         match expr {
             Expression::AggregateFunction {
                 name,
@@ -261,7 +261,7 @@ pub fn extract_aggregates(
                         AggregateSource::Column(column_idx)
                     }
                     // New: support binary operations like a * b
-                    Expression::BinaryOp { left, op: bin_op, right } => {
+                    Expression::BinaryOp { .. } => {
                         // Check if this is a simple binary operation we can handle
                         if is_simple_arithmetic_expr(&args[0], schema).is_some() {
                             AggregateSource::Expression(args[0].clone())
