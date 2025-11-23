@@ -249,6 +249,28 @@ fn extract_all_conditions(from: &vibesql_ast::FromClause, conditions: &mut Vec<v
     }
 }
 
+/// Get table abbreviation for matching column prefixes
+///
+/// TPC-H uses abbreviations for compound table names:
+/// - "ps" → "partsupp" (partsupp is "part" + "supplier" abbreviated)
+/// - "c" → "customer", "l" → "lineitem", etc. (standard prefixes)
+///
+/// This enables matching abbreviation-style column prefixes (e.g., ps_partkey → partsupp)
+fn get_table_abbreviation(table_name: &str) -> String {
+    let table_lower = table_name.to_lowercase();
+
+    // Known TPC-H table abbreviations
+    match table_lower.as_str() {
+        "partsupp" => "ps".to_string(),  // Special case: compound abbreviation
+        _ => {
+            // Default: use first letter as abbreviation
+            table_name.chars().next()
+                .map(|c| c.to_lowercase().to_string())
+                .unwrap_or_default()
+        }
+    }
+}
+
 /// Extract all table names referenced in an expression
 ///
 /// This function recursively walks an expression tree and collects all table names
@@ -271,7 +293,7 @@ fn extract_referenced_tables(
         vibesql_ast::Expression::ColumnRef { table: None, column } => {
             // Infer table from column name prefix by matching against FROM clause tables
             // This handles naming conventions where columns are prefixed with table name/initials
-            // Example: C_CUSTKEY matches CUSTOMER, PS_PARTKEY matches PARTSUPP, P_PARTKEY matches PART
+            // Example: C_CUSTKEY matches CUSTOMER, PS_PARTKEY matches PARTSUPP, emp_id matches employees
 
             // Extract prefix: everything before the first underscore
             let prefix = column
@@ -280,11 +302,16 @@ fn extract_referenced_tables(
                 .unwrap_or("");
 
             if !prefix.is_empty() {
+                // Try to find a FROM clause table that starts with this prefix (case-insensitive)
                 let prefix_upper = prefix.to_uppercase();
 
-                // Collect exact and prefix matches
+                // Try three matching strategies in order of specificity:
+                // 1. Exact match (e.g., "P" == "P")
+                // 2. Prefix match (e.g., "P" matches "PART")
+                // 3. Abbreviation match (e.g., "PS" matches "partsupp")
                 let mut exact_match: Option<String> = None;
                 let mut prefix_matches = Vec::new();
+                let mut abbrev_matches = Vec::new();
 
                 for table in available_tables {
                     let table_upper = table.to_uppercase();
@@ -293,15 +320,29 @@ fn extract_referenced_tables(
                         break;  // Exact match takes priority
                     } else if table_upper.starts_with(&prefix_upper) {
                         prefix_matches.push(table.clone());
+                    } else {
+                        // Check abbreviation match (e.g., "ps" → "partsupp")
+                        let abbrev = get_table_abbreviation(table);
+                        if abbrev.to_uppercase() == prefix_upper {
+                            abbrev_matches.push(table.clone());
+                        }
                     }
                 }
 
                 if let Some(table) = exact_match {
                     output.insert(table);
                 } else if !prefix_matches.is_empty() {
-                    // Sort by length descending and take longest
-                    prefix_matches.sort_by_key(|t| std::cmp::Reverse(t.len()));
+                    // Sort by length ascending to prefer shorter, more specific matches
+                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
+                    prefix_matches.sort_by_key(|t| t.len());
                     if let Some(table) = prefix_matches.into_iter().next() {
+                        output.insert(table);
+                    }
+                } else if !abbrev_matches.is_empty() {
+                    // Use abbreviation match as last resort
+                    // Sort by length to prefer shorter names if multiple match
+                    abbrev_matches.sort_by_key(|t| t.len());
+                    if let Some(table) = abbrev_matches.into_iter().next() {
                         output.insert(table);
                     }
                 }
@@ -399,15 +440,17 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                 // Handle both explicit table qualifiers and implicit (prefix-based) references
 
                 // Helper closure to infer table from column prefix
+                // Uses three-tier matching: 1) exact, 2) prefix, 3) abbreviation
                 let infer_table = |column: &str| -> Option<String> {
                     let prefix = column.split('_').next().unwrap_or("").to_uppercase();
                     if prefix.is_empty() {
                         return None;
                     }
 
-                    // Collect all matching tables (both exact and prefix matches)
+                    // Collect all matching tables (exact, prefix, and abbreviation matches)
                     let mut exact_matches = Vec::new();
                     let mut prefix_matches = Vec::new();
+                    let mut abbrev_matches = Vec::new();
 
                     for table in tables {
                         let table_upper = table.to_uppercase();
@@ -415,22 +458,31 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                             exact_matches.push(table.clone());
                         } else if table_upper.starts_with(&prefix) {
                             prefix_matches.push(table.clone());
+                        } else {
+                            // Check abbreviation match (e.g., "ps" → "partsupp")
+                            let abbrev = get_table_abbreviation(table);
+                            if abbrev.to_uppercase() == prefix {
+                                abbrev_matches.push(table.clone());
+                            }
                         }
                     }
 
-                    // Prefer exact match (e.g., "P" -> "PART" even if "PARTSUPP" exists)
+                    // Prefer exact match (e.g., "P" -> "P" table if it exists)
                     if !exact_matches.is_empty() {
                         return exact_matches.into_iter().next();
                     }
 
-                    // For prefix matches, prefer longer tables (e.g., "PS" -> "PARTSUPP" not "PART")
-                    // But only if there's exactly one match to avoid ambiguity
-                    if prefix_matches.len() == 1 {
+                    // For prefix matches, prefer shorter (more specific) tables
+                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
+                    if !prefix_matches.is_empty() {
+                        prefix_matches.sort_by_key(|t| t.len());
                         return prefix_matches.into_iter().next();
-                    } else if prefix_matches.len() > 1 {
-                        // Multiple matches: sort by length descending and take longest
-                        prefix_matches.sort_by_key(|t| std::cmp::Reverse(t.len()));
-                        return prefix_matches.into_iter().next();
+                    }
+
+                    // Use abbreviation match as last resort (e.g., "PS" -> "partsupp")
+                    if !abbrev_matches.is_empty() {
+                        abbrev_matches.sort_by_key(|t| t.len());
+                        return abbrev_matches.into_iter().next();
                     }
 
                     None
@@ -448,9 +500,20 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                 };
 
                 // If both sides reference columns from different tables, it's an equijoin
-                if let (Some(lt), Some(rt)) = (left_table, right_table) {
+                if let (Some(lt), Some(rt)) = (left_table.clone(), right_table.clone()) {
+                    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!("[JOIN_REORDER] Checking equijoin: left_table={:?}, right_table={:?}", lt, rt);
+                        eprintln!("[JOIN_REORDER]   tables.contains(left)={}, tables.contains(right)={}",
+                            tables.contains(&lt), tables.contains(&rt));
+                        eprintln!("[JOIN_REORDER]   condition: {:?}", expr);
+                    }
                     if lt != rt && tables.contains(&lt) && tables.contains(&rt) {
                         equijoins.push(expr.clone());
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[JOIN_REORDER]   ✓ Added to equijoins");
+                        }
+                    } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!("[JOIN_REORDER]   ✗ Skipped: lt==rt or table not found");
                     }
                 }
             }
