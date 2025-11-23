@@ -2,16 +2,27 @@
 
 **Latest Issue**: #2430 - Benchmark TPC-H Q6 with columnar execution
 **Previous Issue**: #2414 - Run TPC-H benchmarks and validate columnar execution performance targets
-**Date**: 2025-11-22
-**Status**: ⚠️ Benchmark Execution Blocked - Infrastructure challenges identified
+**Date**: 2025-11-23
+**Status**: ✅ Q6 Benchmark Complete - Results documented in Q6_BENCHMARK_RESULTS.md
 
 ## Summary
 
-Investigated the current state of TPC-H benchmarking for columnar execution. Key findings:
+Successfully completed Q6 benchmark with columnar execution. Key findings:
 
-- **Q6**: ✅ Ready to benchmark (issue #2412 closed)
+- **Q6**: ✅ **BENCHMARKED** - ~396ms average (1.5x improvement over ~600ms baseline, but still 4x away from <100ms target)
 - **Q1**: ✅ Ready to benchmark (issue #2413 closed)
 - **Q3**: ✅ Ready to benchmark (TpchQ3Plan implemented)
+
+### Q6 Benchmark Results (2025-11-23)
+
+- **Average Execution**: 396.34ms (6 runs)
+- **Range**: 254-516ms (high variance due to DB load times)
+- **vs Previous Baseline** (~600ms): **1.5x faster** ✅
+- **vs Target** (<100ms): **4x slower** ⚠️
+- **vs DuckDB** (0.646ms): **613x slower** 🔴
+- **Status**: Benchmarks working, but performance needs optimization
+
+See `Q6_BENCHMARK_RESULTS.md` for detailed analysis.
 
 ## Investigation Details
 
