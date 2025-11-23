@@ -100,6 +100,23 @@ fn main() {
 
     // Check for single-query mode
     let args: Vec<String> = env::args().collect();
+
+    // Handle help flag
+    if args.len() > 1 && (args[1] == "--help" || args[1] == "-h" || args[1] == "help") {
+        eprintln!("\nUsage:");
+        eprintln!("  {} [QUERY]", args[0]);
+        eprintln!("\nArguments:");
+        eprintln!("  QUERY    Optional query to run (Q1-Q22). If not specified, runs all queries.");
+        eprintln!("\nEnvironment Variables:");
+        eprintln!("  QUERY_TIMEOUT_SECS        Timeout per query in seconds (default: 30)");
+        eprintln!("  JOIN_REORDER_VERBOSE      Enable verbose join reordering logs");
+        eprintln!("\nExamples:");
+        eprintln!("  {}                          # Run all 22 queries", args[0]);
+        eprintln!("  {} Q9                       # Run only Q9", args[0]);
+        eprintln!("  QUERY_TIMEOUT_SECS=60 {} Q9  # Run Q9 with 60s timeout", args[0]);
+        std::process::exit(0);
+    }
+
     let queries_to_run = if args.len() > 1 {
         // Run only specified query
         let target_query = &args[1];
@@ -115,6 +132,7 @@ fn main() {
 
     if queries_to_run.is_empty() {
         eprintln!("Error: Query '{}' not found. Valid queries: Q1-Q22", args[1]);
+        eprintln!("Run with --help for usage information.");
         std::process::exit(1);
     }
 
