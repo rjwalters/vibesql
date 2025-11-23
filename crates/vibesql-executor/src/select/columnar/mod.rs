@@ -72,6 +72,7 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 #[cfg(test)]
 use vibesql_types::Date;
+use log;
 
 /// Execute a columnar aggregate query with filtering
 ///
