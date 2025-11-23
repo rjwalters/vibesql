@@ -17,16 +17,20 @@ use crate::{
 impl SelectExecutor<'_> {
     /// Execute a SELECT statement
     pub fn execute(&self, stmt: &vibesql_ast::SelectStmt) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        eprintln!("[EXEC DEBUG] execute() START - depth={}", self.subquery_depth);
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 
         // Reset arena for fresh query execution (only at top level)
         if self.subquery_depth == 0 {
+            eprintln!("[EXEC DEBUG] Resetting arena");
             self.reset_arena();
         }
 
         // Check timeout before starting execution
+        eprintln!("[EXEC DEBUG] Checking timeout");
         self.check_timeout()?;
+        eprintln!("[EXEC DEBUG] Timeout check passed");
 
         // Check subquery depth limit to prevent stack overflow
         if self.subquery_depth >= crate::limits::MAX_EXPRESSION_DEPTH {

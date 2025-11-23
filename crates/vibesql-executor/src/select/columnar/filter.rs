@@ -629,6 +629,8 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
 fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
 
+    eprintln!("[FILTER DEBUG] compare_values called with a={:?}, b={:?}", a, b);
+
     // Try to extract numeric value as f64 for cross-type comparison
     fn to_f64(v: &SqlValue) -> Option<f64> {
         match v {
@@ -643,6 +645,7 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
         }
     }
 
+    eprintln!("[FILTER DEBUG] Starting match on value types");
     match (a, b) {
         // Same-type comparisons (fast path)
         (SqlValue::Integer(a), SqlValue::Integer(b)) => a.cmp(b),
@@ -667,14 +670,22 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
         // Date-String comparisons: convert string to date format for comparison
         // This handles cases like: date_column >= '1994-01-01'
         (SqlValue::Date(date), SqlValue::Varchar(s)) | (SqlValue::Date(date), SqlValue::Character(s)) => {
+            eprintln!("[FILTER DEBUG] Date-Varchar comparison: date={:?}, s={:?}", date, s);
             // Compare dates as strings in ISO format (YYYY-MM-DD)
             let date_str = date.to_string();
-            date_str.as_str().cmp(s.as_str())
+            eprintln!("[FILTER DEBUG] date_str={}, comparing to s={}", date_str, s);
+            let result = date_str.as_str().cmp(s.as_str());
+            eprintln!("[FILTER DEBUG] Date-Varchar result: {:?}", result);
+            result
         }
         (SqlValue::Varchar(s), SqlValue::Date(date)) | (SqlValue::Character(s), SqlValue::Date(date)) => {
+            eprintln!("[FILTER DEBUG] Varchar-Date comparison: s={:?}, date={:?}", s, date);
             // Reverse comparison
             let date_str = date.to_string();
-            s.as_str().cmp(date_str.as_str())
+            eprintln!("[FILTER DEBUG] date_str={}, comparing s={}", date_str, s);
+            let result = s.as_str().cmp(date_str.as_str());
+            eprintln!("[FILTER DEBUG] Varchar-Date result: {:?}", result);
+            result
         }
 
         // Mixed numeric types: coerce to f64 with epsilon comparison for floats

@@ -9,11 +9,8 @@ use std::collections::HashMap;
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
-    select::{
-        adaptive_execution::{DefaultExecutionPolicy, ExecutionPolicy, ExecutionStrategy, QueryProfile},
-        columnar,
-        cte::CteResult,
-    },
+    optimizer::adaptive_execution::{choose_execution_model, ExecutionModel},
+    select::{columnar, cte::CteResult},
 };
 
 impl SelectExecutor<'_> {
@@ -39,12 +36,13 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
-        // Use adaptive execution policy to determine strategy
-        let profile = QueryProfile::from_stmt(stmt);
-        let policy = DefaultExecutionPolicy;
-
-        if policy.select_strategy(&profile) != ExecutionStrategy::Columnar {
-            return Ok(None);
+        // Use adaptive execution model selection to determine if columnar execution is beneficial
+        // This analyzes query patterns (aggregation, arithmetic, projection) to choose the best path
+        match choose_execution_model(stmt) {
+            ExecutionModel::RowOriented => return Ok(None), // Fall back to row-based execution
+            ExecutionModel::Columnar => {
+                // Continue with columnar execution below
+            }
         }
 
         // Only handle queries without CTEs or set operations for now
