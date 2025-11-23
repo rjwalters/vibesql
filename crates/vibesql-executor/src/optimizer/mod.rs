@@ -17,6 +17,7 @@ pub mod predicate;
 mod predicate_plan;
 pub mod selectivity;
 pub mod subquery_rewrite;
+pub mod subquery_to_join;
 #[cfg(test)]
 mod tests;
 pub mod where_pushdown;
@@ -25,4 +26,5 @@ pub use adaptive_execution::{choose_execution_model, ExecutionModel};
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;
+pub use subquery_to_join::transform_subqueries_to_joins;
 pub use where_pushdown::{combine_with_and, PredicateDecomposition};

@@ -271,7 +271,7 @@ fn extract_referenced_tables(
         vibesql_ast::Expression::ColumnRef { table: None, column } => {
             // Infer table from column name prefix by matching against FROM clause tables
             // This handles naming conventions where columns are prefixed with table name/initials
-            // Example: C_CUSTKEY matches CUSTOMER, PS_PARTKEY matches PARTSUPP, emp_id matches employees
+            // Example: C_CUSTKEY matches CUSTOMER, PS_PARTKEY matches PARTSUPP, P_PARTKEY matches PART
 
             // Extract prefix: everything before the first underscore
             let prefix = column
@@ -280,19 +280,29 @@ fn extract_referenced_tables(
                 .unwrap_or("");
 
             if !prefix.is_empty() {
-                // Try to find a FROM clause table that starts with this prefix (case-insensitive)
                 let prefix_upper = prefix.to_uppercase();
 
-                // Sort tables by name length (descending) to match longer names first
-                // This ensures "PARTSUPP" matches before "PART" for prefix "PS"
-                let mut table_list: Vec<_> = available_tables.iter().collect();
-                table_list.sort_by(|a, b| b.len().cmp(&a.len()));
+                // Collect exact and prefix matches
+                let mut exact_match: Option<String> = None;
+                let mut prefix_matches = Vec::new();
 
-                for table in table_list {
-                    if table.to_uppercase().starts_with(&prefix_upper) {
-                        // Found a match! Insert this table into the output
-                        output.insert(table.clone());
-                        break;
+                for table in available_tables {
+                    let table_upper = table.to_uppercase();
+                    if table_upper == prefix_upper {
+                        exact_match = Some(table.clone());
+                        break;  // Exact match takes priority
+                    } else if table_upper.starts_with(&prefix_upper) {
+                        prefix_matches.push(table.clone());
+                    }
+                }
+
+                if let Some(table) = exact_match {
+                    output.insert(table);
+                } else if !prefix_matches.is_empty() {
+                    // Sort by length descending and take longest
+                    prefix_matches.sort_by_key(|t| std::cmp::Reverse(t.len()));
+                    if let Some(table) = prefix_matches.into_iter().next() {
+                        output.insert(table);
                     }
                 }
             }
@@ -395,14 +405,35 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                         return None;
                     }
 
-                    // Sort tables by length (descending) to match longer names first
-                    // This ensures "PARTSUPP" matches before "PART" for prefix "PS"
-                    let mut table_list: Vec<_> = tables.iter().collect();
-                    table_list.sort_by_key(|b| std::cmp::Reverse(b.len()));
+                    // Collect all matching tables (both exact and prefix matches)
+                    let mut exact_matches = Vec::new();
+                    let mut prefix_matches = Vec::new();
 
-                    table_list.into_iter()
-                        .find(|t| t.to_uppercase().starts_with(&prefix))
-                        .cloned()
+                    for table in tables {
+                        let table_upper = table.to_uppercase();
+                        if table_upper == prefix {
+                            exact_matches.push(table.clone());
+                        } else if table_upper.starts_with(&prefix) {
+                            prefix_matches.push(table.clone());
+                        }
+                    }
+
+                    // Prefer exact match (e.g., "P" -> "PART" even if "PARTSUPP" exists)
+                    if !exact_matches.is_empty() {
+                        return exact_matches.into_iter().next();
+                    }
+
+                    // For prefix matches, prefer longer tables (e.g., "PS" -> "PARTSUPP" not "PART")
+                    // But only if there's exactly one match to avoid ambiguity
+                    if prefix_matches.len() == 1 {
+                        return prefix_matches.into_iter().next();
+                    } else if prefix_matches.len() > 1 {
+                        // Multiple matches: sort by length descending and take longest
+                        prefix_matches.sort_by_key(|t| std::cmp::Reverse(t.len()));
+                        return prefix_matches.into_iter().next();
+                    }
+
+                    None
                 };
 
                 let left_table = match left.as_ref() {
