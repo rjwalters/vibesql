@@ -12,7 +12,17 @@ use vibesql_storage::Database;
 
 #[test]
 fn test_division_by_zero_error() {
-    let mut db = Database::new();
+    use vibesql_storage::DatabaseConfig;
+    use vibesql_types::{MySqlModeFlags, SqlMode};
+
+    // Create database with strict mode enabled to raise errors on division by zero
+    let config = DatabaseConfig {
+        sql_mode: SqlMode::MySQL {
+            flags: MySqlModeFlags::with_strict_mode(),
+        },
+        ..DatabaseConfig::test_default()
+    };
+    let mut db = Database::with_config(config);
 
     // Create table with numeric data
     let sql = "CREATE TABLE numbers (value INTEGER)";

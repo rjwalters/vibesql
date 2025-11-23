@@ -201,8 +201,18 @@ impl JoinOrderContext {
             (left_cardinality as f64 * right_cardinality as f64 * selectivity) as usize,
         );
 
-        // Estimate operations (roughly, cross product comparisons)
-        let operations = (left_cardinality as u64) * (right_cardinality as u64);
+        // Estimate operations: For hash join (our primary strategy), cost is roughly:
+        // - Build hash table from left: O(left_cardinality)
+        // - Probe with right: O(right_cardinality)
+        // Total: O(left + right) rather than O(left * right) for nested loop
+        // Use linear cost for equijoins, quadratic only if no edge (cross join)
+        let operations = if self.has_join_edge(joined_tables, next_table) {
+            // Hash join: linear cost
+            (left_cardinality as u64) + (right_cardinality as u64)
+        } else {
+            // Cross join: quadratic cost (nested loop)
+            (left_cardinality as u64) * (right_cardinality as u64)
+        };
 
         JoinCost::new(output_cardinality, operations)
     }
@@ -212,7 +222,7 @@ impl JoinOrderContext {
     /// Note: Composite join keys (multiple edges between same table pair) are already
     /// handled in compute_edge_selectivities, so the selectivities here are combined.
     fn get_edge_selectivity(&self, joined_tables: &BTreeSet<String>, next_table: &str) -> f64 {
-        let mut best_selectivity = 0.5; // Default for cross join (no edge)
+        let mut best_selectivity = 1.0; // Default for cross join (no filtering)
 
         for joined_table in joined_tables {
             let joined_lower = joined_table.to_lowercase();

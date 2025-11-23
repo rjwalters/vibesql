@@ -51,6 +51,11 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let optimizer_time = optimizer_start.elapsed();
 
+        // Transform decorrelated IN/EXISTS subqueries to semi/anti-joins (#2424)
+        // This enables hash-based join execution instead of row-by-row subquery evaluation
+        // Converts WHERE clauses like "WHERE x IN (SELECT y FROM t)" to "SEMI JOIN t ON x = y"
+        let optimized_stmt = crate::optimizer::transform_subqueries_to_joins(&optimized_stmt);
+
         // Execute CTEs if present and merge with outer query's CTE context
         let mut cte_results = if let Some(with_clause) = &optimized_stmt.with_clause {
             // This query has its own CTEs - execute them
@@ -153,7 +158,9 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let columnar_check_start = std::time::Instant::now();
 
+        log::debug!("Checking if columnar execution is possible...");
         if let Some(result) = self.try_columnar_execution(stmt, cte_results)? {
+            log::debug!("✓ Using COLUMNAR execution path (SIMD-accelerated)");
             #[cfg(feature = "profile-q6")]
             {
                 let total_execute_ctes = execute_ctes_start.elapsed();
@@ -161,6 +168,7 @@ impl SelectExecutor<'_> {
             }
             return Ok(result);
         }
+        log::debug!("✗ Columnar execution not used, falling back to row-based execution");
 
         // Try monomorphic execution path for known query patterns (TEMPORARILY DISABLED)
         // NOTE: Monomorphic execution currently has issues with complex aggregate expressions
