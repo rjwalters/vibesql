@@ -1,3 +1,4 @@
+pub mod adaptive_execution;
 pub mod columnar;
 pub(crate) mod cte;
 mod executor;
