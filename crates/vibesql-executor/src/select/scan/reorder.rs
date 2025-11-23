@@ -181,10 +181,19 @@ pub(crate) fn count_tables_in_from(from: &vibesql_ast::FromClause) -> usize {
 /// Join reordering changes column ordering, so we only apply it to implicit CROSS joins
 /// from comma-list syntax (FROM t1, t2, t3). Explicit INNER/LEFT/RIGHT joins must
 /// preserve their declared ordering.
+///
+/// Also rejects CROSS JOINs with explicit ON conditions, as those should fail
+/// validation in nested_loop_cross_join.
 pub(crate) fn all_joins_are_cross(from: &vibesql_ast::FromClause) -> bool {
     match from {
         vibesql_ast::FromClause::Table { .. } | vibesql_ast::FromClause::Subquery { .. } => true,
-        vibesql_ast::FromClause::Join { left, right, join_type, .. } => {
+        vibesql_ast::FromClause::Join { left, right, join_type, condition, .. } => {
+            // Reject CROSS JOIN with explicit condition - this is invalid SQL
+            // and should be caught by nested_loop_cross_join validation
+            if matches!(join_type, vibesql_ast::JoinType::Cross) && condition.is_some() {
+                return false;
+            }
+
             matches!(join_type, vibesql_ast::JoinType::Cross)
                 && all_joins_are_cross(left)
                 && all_joins_are_cross(right)
@@ -282,6 +291,17 @@ fn extract_referenced_tables(
             if !prefix.is_empty() {
                 let prefix_upper = prefix.to_uppercase();
 
+                // Special case: Handle common TPC-H multi-character abbreviations
+                // These are compound table names where the abbreviation doesn't match the prefix
+                if prefix_upper == "PS" {
+                    for table in available_tables {
+                        if table.to_uppercase() == "PARTSUPP" {
+                            output.insert(table.clone());
+                            return;
+                        }
+                    }
+                }
+
                 // Collect exact and prefix matches
                 let mut exact_match: Option<String> = None;
                 let mut prefix_matches = Vec::new();
@@ -292,16 +312,21 @@ fn extract_referenced_tables(
                         exact_match = Some(table.clone());
                         break;  // Exact match takes priority
                     } else if table_upper.starts_with(&prefix_upper) {
-                        prefix_matches.push(table.clone());
+                        prefix_matches.push((table.clone(), table.len()));
                     }
                 }
 
                 if let Some(table) = exact_match {
                     output.insert(table);
                 } else if !prefix_matches.is_empty() {
-                    // Sort by length descending and take longest
-                    prefix_matches.sort_by_key(|t| std::cmp::Reverse(t.len()));
-                    if let Some(table) = prefix_matches.into_iter().next() {
+                    // For single-character prefixes, prefer shortest match (e.g., "P" -> "PART" not "PARTSUPP")
+                    // For multi-character prefixes, prefer longest match (e.g., "PAR" -> "PARTSUPP" not "PART")
+                    if prefix_upper.len() == 1 {
+                        prefix_matches.sort_by_key(|(_, len)| *len);
+                    } else {
+                        prefix_matches.sort_by_key(|(_, len)| std::cmp::Reverse(*len));
+                    }
+                    if let Some((table, _)) = prefix_matches.into_iter().next() {
                         output.insert(table);
                     }
                 }
@@ -373,6 +398,192 @@ fn extract_referenced_tables(
     }
 }
 
+/// Extract equijoin conditions from OR expressions (TPC-H Q19 optimization)
+///
+/// For expressions like `(a.x = b.x AND ...) OR (a.x = b.x AND ...) OR (a.x = b.x AND ...)`,
+/// this extracts the common equi-join `a.x = b.x` that appears in ALL branches.
+fn extract_or_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<String>) -> Vec<vibesql_ast::Expression> {
+    use vibesql_ast::{BinaryOperator, Expression};
+
+    // Only process OR expressions
+    if !matches!(expr, Expression::BinaryOp { op: BinaryOperator::Or, .. }) {
+        return Vec::new();
+    }
+
+    // Flatten all OR branches
+    fn flatten_or<'a>(expr: &'a Expression, branches: &mut Vec<&'a Expression>) {
+        match expr {
+            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+                flatten_or(left, branches);
+                flatten_or(right, branches);
+            }
+            _ => branches.push(expr),
+        }
+    }
+
+    let mut or_branches = Vec::new();
+    flatten_or(expr, &mut or_branches);
+
+    if or_branches.is_empty() {
+        return Vec::new();
+    }
+
+    // Helper to check if an expression is an equijoin between two tables
+    let is_equijoin = |e: &Expression| -> Option<(String, String, Expression)> {
+        if let Expression::BinaryOp { op: BinaryOperator::Equal, left, right } = e {
+            let (left_table, right_table) = extract_table_pair_from_columns(left, right, tables)?;
+            if left_table != right_table {
+                return Some((left_table, right_table, e.clone()));
+            }
+        }
+        None
+    };
+
+    // For each branch, extract all equijoins
+    let mut branch_equijoins: Vec<Vec<(String, String, Expression)>> = Vec::new();
+
+    for branch in &or_branches {
+        let mut branch_joins = Vec::new();
+
+        match branch {
+            Expression::BinaryOp { op: BinaryOperator::Equal, .. } => {
+                // Single equality - check if it's an equijoin
+                if let Some(equi) = is_equijoin(branch) {
+                    branch_joins.push(equi);
+                }
+            }
+            Expression::BinaryOp { op: BinaryOperator::And, .. } => {
+                // AND expression - extract all equijoins from it
+                let mut and_conditions = Vec::new();
+                flatten_and_chain(branch).into_iter().for_each(|c| and_conditions.push(c));
+
+                for cond in and_conditions {
+                    if let Some(equi) = is_equijoin(&cond) {
+                        branch_joins.push(equi);
+                    }
+                }
+            }
+            _ => {
+                // Branch contains no equijoins
+                return Vec::new();
+            }
+        }
+
+        if branch_joins.is_empty() {
+            return Vec::new();
+        }
+
+        branch_equijoins.push(branch_joins);
+    }
+
+    if branch_equijoins.is_empty() {
+        return Vec::new();
+    }
+
+    // Find equijoins that appear in ALL branches
+    let mut common_equijoins = Vec::new();
+
+    for (t1, t2, expr) in &branch_equijoins[0] {
+        let mut found_in_all = true;
+
+        for other_branch in &branch_equijoins[1..] {
+            let mut found = false;
+            for (other_t1, other_t2, _) in other_branch {
+                if (t1 == other_t1 && t2 == other_t2) || (t1 == other_t2 && t2 == other_t1) {
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                found_in_all = false;
+                break;
+            }
+        }
+
+        if found_in_all {
+            common_equijoins.push(expr.clone());
+        }
+    }
+
+    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && !common_equijoins.is_empty() {
+        eprintln!("[JOIN_REORDER] Extracted {} common equijoins from OR expression", common_equijoins.len());
+    }
+
+    common_equijoins
+}
+
+/// Extract table names from two column reference expressions
+fn extract_table_pair_from_columns(
+    left: &vibesql_ast::Expression,
+    right: &vibesql_ast::Expression,
+    tables: &HashSet<String>,
+) -> Option<(String, String)> {
+    use vibesql_ast::Expression;
+
+    // Helper to infer table from column prefix
+    let infer_table = |column: &str| -> Option<String> {
+        let prefix = column.split('_').next().unwrap_or("").to_uppercase();
+        if prefix.is_empty() {
+            return None;
+        }
+
+        if prefix == "PS" {
+            for table in tables {
+                if table.to_uppercase() == "PARTSUPP" {
+                    return Some(table.clone());
+                }
+            }
+        }
+
+        let mut exact_matches = Vec::new();
+        let mut prefix_matches = Vec::new();
+
+        for table in tables {
+            let table_upper = table.to_uppercase();
+            if table_upper == prefix {
+                exact_matches.push(table.clone());
+            } else if table_upper.starts_with(&prefix) {
+                prefix_matches.push((table.clone(), table.len()));
+            }
+        }
+
+        if !exact_matches.is_empty() {
+            return exact_matches.into_iter().next();
+        }
+
+        if prefix_matches.len() == 1 {
+            return prefix_matches.into_iter().map(|(t, _)| t).next();
+        } else if prefix_matches.len() > 1 {
+            if prefix.len() == 1 {
+                prefix_matches.sort_by_key(|(_, len)| *len);
+            } else {
+                prefix_matches.sort_by_key(|(_, len)| std::cmp::Reverse(*len));
+            }
+            return prefix_matches.into_iter().map(|(t, _)| t).next();
+        }
+
+        None
+    };
+
+    let left_table = match left {
+        Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
+        Expression::ColumnRef { table: None, column } => infer_table(column),
+        _ => None,
+    };
+
+    let right_table = match right {
+        Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
+        Expression::ColumnRef { table: None, column } => infer_table(column),
+        _ => None,
+    };
+
+    match (left_table, right_table) {
+        (Some(lt), Some(rt)) if tables.contains(&lt) && tables.contains(&rt) => Some((lt, rt)),
+        _ => None,
+    }
+}
+
 /// Extract equijoin conditions from a WHERE clause expression
 ///
 /// Recursively walks the expression tree looking for binary equality operations
@@ -393,68 +604,21 @@ fn extract_where_equijoins(expr: &vibesql_ast::Expression, tables: &HashSet<Stri
                 extract_recursive(left, tables, equijoins);
                 extract_recursive(right, tables, equijoins);
             }
+            // Binary OR: try to extract common equijoins
+            Expression::BinaryOp { op: BinaryOperator::Or, .. } => {
+                // Extract common equijoins from OR branches
+                equijoins.extend(extract_or_equijoins(expr, tables));
+            }
             // Binary EQUAL: check if it's an equijoin
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
-                // Check if both sides are column references
-                // Handle both explicit table qualifiers and implicit (prefix-based) references
-
-                // Helper closure to infer table from column prefix
-                let infer_table = |column: &str| -> Option<String> {
-                    let prefix = column.split('_').next().unwrap_or("").to_uppercase();
-                    if prefix.is_empty() {
-                        return None;
-                    }
-
-                    // Collect all matching tables (both exact and prefix matches)
-                    let mut exact_matches = Vec::new();
-                    let mut prefix_matches = Vec::new();
-
-                    for table in tables {
-                        let table_upper = table.to_uppercase();
-                        if table_upper == prefix {
-                            exact_matches.push(table.clone());
-                        } else if table_upper.starts_with(&prefix) {
-                            prefix_matches.push(table.clone());
-                        }
-                    }
-
-                    // Prefer exact match (e.g., "P" -> "PART" even if "PARTSUPP" exists)
-                    if !exact_matches.is_empty() {
-                        return exact_matches.into_iter().next();
-                    }
-
-                    // For prefix matches, prefer longer tables (e.g., "PS" -> "PARTSUPP" not "PART")
-                    // But only if there's exactly one match to avoid ambiguity
-                    if prefix_matches.len() == 1 {
-                        return prefix_matches.into_iter().next();
-                    } else if prefix_matches.len() > 1 {
-                        // Multiple matches: sort by length descending and take longest
-                        prefix_matches.sort_by_key(|t| std::cmp::Reverse(t.len()));
-                        return prefix_matches.into_iter().next();
-                    }
-
-                    None
-                };
-
-                let left_table = match left.as_ref() {
-                    Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => infer_table(column),
-                    _ => None,
-                };
-                let right_table = match right.as_ref() {
-                    Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => infer_table(column),
-                    _ => None,
-                };
-
-                // If both sides reference columns from different tables, it's an equijoin
-                if let (Some(lt), Some(rt)) = (left_table, right_table) {
-                    if lt != rt && tables.contains(&lt) && tables.contains(&rt) {
+                // Check if both sides are column references from different tables
+                if let Some((lt, rt)) = extract_table_pair_from_columns(left, right, tables) {
+                    if lt != rt {
                         equijoins.push(expr.clone());
                     }
                 }
             }
-            // For other expressions, don't recurse (we only care about top-level ANDs and EQUALs)
+            // For other expressions, don't recurse (we only care about top-level ANDs, ORs, and EQUALs)
             _ => {}
         }
     }
@@ -631,6 +795,11 @@ where
                 // Condition is applicable if it references the new table AND at least one joined table
                 let references_new_table = referenced_tables.contains(&table_name.to_lowercase());
                 let references_joined_table = referenced_tables.iter().any(|t| joined_tables.contains(t));
+
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && !referenced_tables.is_empty() {
+                    eprintln!("  Condition {:?} references tables: {:?}, new={}, joined={}",
+                        idx, referenced_tables, references_new_table, references_joined_table);
+                }
 
                 if references_new_table && references_joined_table {
                     applicable_conditions.push(condition.clone());

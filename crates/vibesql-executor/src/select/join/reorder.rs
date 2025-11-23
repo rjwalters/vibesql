@@ -136,6 +136,11 @@ impl JoinOrderAnalyzer {
     /// Analyze a predicate and extract join edges or local predicates
     pub fn analyze_predicate(&mut self, expr: &Expression, tables: &HashSet<String>) {
         match expr {
+            // Handle AND chains recursively (critical for WHERE clause analysis)
+            Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
+                self.analyze_predicate(left, tables);
+                self.analyze_predicate(right, tables);
+            }
             // Only handle simple binary equality operations
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
                 let (left_table, left_col) = self.extract_column_ref(left, tables);
@@ -144,6 +149,10 @@ impl JoinOrderAnalyzer {
                 match (left_table, right_table, left_col, right_col) {
                     // Equijoin: column from one table = column from another
                     (Some(lt), Some(rt), Some(lc), Some(rc)) if lt != rt => {
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[JOIN_ANALYZER] Adding edge: {}.{} = {}.{}",
+                                lt, lc, rt, rc);
+                        }
                         let edge = JoinEdge {
                             left_table: lt.to_lowercase(),
                             left_column: lc,
@@ -175,13 +184,73 @@ impl JoinOrderAnalyzer {
     fn extract_column_ref(
         &self,
         expr: &Expression,
-        _tables: &HashSet<String>,
+        tables: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         match expr {
-            Expression::ColumnRef { table, column } => (table.clone(), Some(column.clone())),
+            Expression::ColumnRef { table: Some(t), column } => {
+                (Some(t.clone()), Some(column.clone()))
+            }
+            Expression::ColumnRef { table: None, column } => {
+                // Infer table from column prefix (e.g., "P_PARTKEY" -> "PART")
+                let inferred_table = self.infer_table_from_column(column, tables);
+                (inferred_table, Some(column.clone()))
+            }
             Expression::Literal(_) => (None, None),
             _ => (None, None),
         }
+    }
+
+    /// Infer table name from column prefix (e.g., "P_PARTKEY" -> "PART")
+    ///
+    /// This mirrors the logic in extract_where_equijoins to ensure consistency.
+    fn infer_table_from_column(&self, column: &str, tables: &HashSet<String>) -> Option<String> {
+        let prefix = column.split('_').next().unwrap_or("").to_uppercase();
+        if prefix.is_empty() {
+            return None;
+        }
+
+        // Special case: Handle common TPC-H multi-character abbreviations
+        if prefix == "PS" {
+            for table in tables {
+                if table.to_uppercase() == "PARTSUPP" {
+                    return Some(table.clone());
+                }
+            }
+        }
+
+        // Collect all matching tables (both exact and prefix matches)
+        let mut exact_matches = Vec::new();
+        let mut prefix_matches = Vec::new();
+
+        for table in tables {
+            let table_upper = table.to_uppercase();
+            if table_upper == prefix {
+                exact_matches.push(table.clone());
+            } else if table_upper.starts_with(&prefix) {
+                prefix_matches.push((table.clone(), table.len()));
+            }
+        }
+
+        // Prefer exact match (e.g., "P" -> "PART" even if "PARTSUPP" exists)
+        if !exact_matches.is_empty() {
+            return exact_matches.into_iter().next();
+        }
+
+        // For prefix matches:
+        // - Single-character prefixes: prefer shortest match (e.g., "P" -> "PART" not "PARTSUPP")
+        // - Multi-character prefixes: prefer longest match (e.g., "PAR" -> "PARTSUPP" not "PART")
+        if prefix_matches.len() == 1 {
+            return prefix_matches.into_iter().map(|(t, _)| t).next();
+        } else if prefix_matches.len() > 1 {
+            if prefix.len() == 1 {
+                prefix_matches.sort_by_key(|(_, len)| *len);
+            } else {
+                prefix_matches.sort_by_key(|(_, len)| std::cmp::Reverse(*len));
+            }
+            return prefix_matches.into_iter().map(|(t, _)| t).next();
+        }
+
+        None
     }
 
     /// Find all tables that have local predicates (highest selectivity filters)
@@ -411,5 +480,64 @@ mod tests {
         // Should find condition even with case differences
         let condition = analyzer.get_join_condition("T1", "T2");
         assert!(condition.is_some());
+    }
+
+    #[test]
+    fn test_and_expression_handling() {
+        // Test that AND expressions are properly recursed
+        let mut analyzer = JoinOrderAnalyzer::new();
+        analyzer.register_tables(vec!["t1".to_string(), "t2".to_string(), "t3".to_string()]);
+
+        let tables = std::collections::HashSet::from(["t1".to_string(), "t2".to_string(), "t3".to_string()]);
+
+        // Create an AND expression: t1.id = t2.id AND t2.id = t3.id
+        let expr1 = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "id".to_string(),
+            }),
+            right: Box::new(Expression::ColumnRef {
+                table: Some("t2".to_string()),
+                column: "id".to_string(),
+            }),
+        };
+
+        let expr2 = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t2".to_string()),
+                column: "id".to_string(),
+            }),
+            right: Box::new(Expression::ColumnRef {
+                table: Some("t3".to_string()),
+                column: "id".to_string(),
+            }),
+        };
+
+        let and_expr = Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(expr1),
+            right: Box::new(expr2),
+        };
+
+        // Analyze the AND expression
+        analyzer.analyze_predicate(&and_expr, &tables);
+
+        // Should have extracted both edges
+        assert_eq!(analyzer.edges.len(), 2, "Should extract both edges from AND expression");
+
+        // Verify edges were extracted
+        let has_t1_t2 = analyzer.edges.iter().any(|e|
+            (e.left_table == "t1" && e.right_table == "t2") ||
+            (e.left_table == "t2" && e.right_table == "t1")
+        );
+        let has_t2_t3 = analyzer.edges.iter().any(|e|
+            (e.left_table == "t2" && e.right_table == "t3") ||
+            (e.left_table == "t3" && e.right_table == "t2")
+        );
+
+        assert!(has_t1_t2, "Should have t1-t2 edge");
+        assert!(has_t2_t3, "Should have t2-t3 edge");
     }
 }

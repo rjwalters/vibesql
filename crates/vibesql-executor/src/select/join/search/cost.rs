@@ -245,10 +245,17 @@ impl JoinOrderContext {
             if edge.involves_table(next_table) {
                 for joined_table in joined_tables {
                     if edge.involves_table(joined_table) {
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("  [SEARCH] Edge found: {} ↔ {} for joining {} to {:?}",
+                                edge.left_table, edge.right_table, next_table, joined_tables);
+                        }
                         return true;
                     }
                 }
             }
+        }
+        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+            eprintln!("  [SEARCH] NO edge found for joining {} to {:?}", next_table, joined_tables);
         }
         false
     }
