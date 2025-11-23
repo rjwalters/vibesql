@@ -63,7 +63,7 @@ Located two benchmark suites:
 - Found existing compiled binary from earlier: `target/release/deps/tpch_benchmark-cf44bab9bb9c2842`
 
 #### 2. Benchmark Execution Issues
--Attempted to run existing binary: `./target/release/deps/tpch_benchmark-cf44bab9bb9c2842 q6_vibesql --test`
+- Attempted to run existing binary: `./target/release/deps/tpch_benchmark-cf44bab9bb9c2842 q6_vibesql --test`
 - Benchmark process started and consumed 101% CPU for 3+ minutes
 - No output produced after extended wait
 - Process was terminated after exceeding expected test execution time
