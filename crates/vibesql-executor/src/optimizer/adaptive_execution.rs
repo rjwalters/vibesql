@@ -47,7 +47,7 @@
 //! }
 //! ```
 
-use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
+use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt};
 
 /// Execution model for query processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
