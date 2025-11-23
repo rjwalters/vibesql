@@ -58,13 +58,30 @@ Status: Compiling dependencies (in progress)
 
 ## Performance Targets (SF 0.01)
 
-Per issue #2414 and `IMPLEMENTATION_STATUS.md`:
+### TPC-H Q6 Performance Evolution
 
-| Query | Baseline | Target | Expected Speedup | Status |
-|-------|----------|--------|------------------|---------|
-| Q6 | ~600ms | <100ms | 6-10x | Ready to test |
-| Q1 | ~600ms | <100ms | 6-10x | Ready to test |
-| Q3 | 724ms | <180ms | 4x | Ready to test |
+**Historical Baselines** (different optimization stages):
+- **Initial row-by-row**: ~600ms (naive implementation, pre-monomorphic)
+- **Monomorphic execution**: 35ms (type-specialized paths, commit 55713f6c)
+- **With lazy filtering**: 1.54ms (deferred row materialization)
+
+**Reference Implementations** (from issue #2220):
+- **DuckDB**: 646µs (0.646ms) - Gold standard target
+- **SQLite**: 6.51ms - Comparison baseline
+
+**Current Columnar Target**:
+- **Goal**: <1ms (approach DuckDB performance)
+- **Stretch**: 646µs (match DuckDB exactly)
+
+**Note**: The ~600ms baseline represents the initial naive implementation. The relevant starting point for columnar optimization is the 35ms monomorphic baseline. Achieving <1ms requires a ~35x improvement from the monomorphic baseline, which columnar + SIMD execution should provide.
+
+### Performance Targets Summary
+
+| Query | Pre-Monomorphic | Monomorphic Baseline | Columnar Target | Expected Speedup | Status |
+|-------|----------------|---------------------|----------------|------------------|---------|
+| Q6 | ~600ms | ~35ms | <1ms | 35-50x | Ready to test |
+| Q1 | ~600ms | (not measured) | <100ms | 6-10x | Ready to test |
+| Q3 | (not measured) | 724ms | <180ms | 4x | Ready to test |
 
 ## Next Steps
 
