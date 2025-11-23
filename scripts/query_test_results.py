@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 # Import shared configuration for test results storage
-from test_results_config import get_default_database_path, get_repo_root
+from test_results_config import get_default_database_path, get_repo_root, get_vibesql_cli_path
 
 
 # Preset queries for common tasks
@@ -232,11 +232,11 @@ ORDER BY error_pattern, file_path
 
 def execute_query_with_cli(query: str, db_path: Path) -> Tuple[bool, str]:
     """
-    Execute SQL query using VibeSQL CLI.
+    Execute SQL query using VibeSQL CLI against binary database.
 
     Args:
         query: SQL query to execute
-        db_path: Path to SQL dump file
+        db_path: Path to vibesql binary database (.vbsql)
 
     Returns:
         (success: bool, output: str)
@@ -244,79 +244,31 @@ def execute_query_with_cli(query: str, db_path: Path) -> Tuple[bool, str]:
     if not db_path.exists():
         return False, f"Database not found: {db_path}"
 
-    # Find CLI binary
-    repo_root = get_repo_root()
-    cli_binary = repo_root / "target" / "release" / "vibesql"
-
-    if not cli_binary.exists():
-        return False, f"CLI binary not found: {cli_binary}\n\nBuild with: cargo build --release --package cli"
-
     try:
-        # Execute query: cat db.sql - <<'EOF' | vibesql --stdin --format table
-        # We need to pipe both the SQL dump and the query
-        input_sql = db_path.read_text() + "\n" + query.strip()
+        # Find CLI binary
+        cli_binary = get_vibesql_cli_path()
 
+        # Execute query against binary database using --database flag
         result = subprocess.run(
-            [str(cli_binary), "--stdin", "--format", "table"],
-            input=input_sql,
+            [str(cli_binary), "--database", str(db_path), "--command", query.strip(), "--format", "table"],
             capture_output=True,
             text=True,
             check=False,  # Don't raise on non-zero exit
         )
 
-        # Filter output to remove noise from INSERT/DELETE statements
-        # Keep only lines that are part of the actual query result table
-        lines = result.stdout.split('\n')
-        filtered_lines = []
-        in_table = False
+        # Check for errors
+        if result.returncode != 0:
+            return False, f"Query execution failed:\n{result.stderr}"
 
-        for line in lines:
-            # Check if we're starting/continuing a table
-            if line.startswith('+') or line.startswith('|'):
-                in_table = True
-                filtered_lines.append(line)
-            elif in_table:
-                # We've reached the end of the table (non-table line after table started)
-                # Check if it's a row count line (e.g., "0 rows", "5 rows")
-                if line.strip().endswith(' rows'):
-                    # This is the query result's row count, keep it
-                    filtered_lines.append(line)
-                # Stop capturing after reaching end of table
-                break
+        # Return stdout directly - vibesql CLI handles formatting
+        output = result.stdout.strip()
+        if not output:
+            return True, "0 rows"
 
-        # Check if we got table output
-        # Successful queries with results produce tables with borders
-        has_table_output = bool(filtered_lines)
+        return True, output
 
-        if not has_table_output:
-            # No table output - could be empty result or query failed
-            # Look for "0 rows" immediately before execution summary
-            # (within 3 lines to account for blank lines)
-            lines = result.stdout.split('\n')
-
-            # Find the execution summary line
-            summary_index = None
-            for i, line in enumerate(lines):
-                if "=== Script Execution Summary ===" in line:
-                    summary_index = i
-                    break
-
-            if summary_index is not None:
-                # Look backwards from summary for "0 rows"
-                # Check up to 3 lines before the summary
-                for i in range(max(0, summary_index - 3), summary_index):
-                    if lines[i].strip() == "0 rows":
-                        # Found "0 rows" immediately before summary - query succeeded with empty result
-                        return True, "0 rows"
-
-            # No table output and no "0 rows" immediately before summary - query failed
-            if result.stderr and "Error" in result.stderr:
-                return False, f"Query execution failed:\n{result.stderr}"
-
-            return False, "Query produced no output"
-
-        return True, '\n'.join(filtered_lines)
-
+    except FileNotFoundError as e:
+        return False, str(e)
     except Exception as e:
         return False, f"Failed to execute query: {e}"
 
@@ -358,7 +310,7 @@ def main():
         "--database",
         type=Path,
         default=None,
-        help="Database SQL dump file (default: ~/.vibesql/test_results/sqllogictest_results.sql)",
+        help="Database file (default: ~/.vibesql/test_results/sqllogictest_results.vbsql)",
     )
     parser.add_argument(
         "--list-presets",

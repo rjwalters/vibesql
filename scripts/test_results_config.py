@@ -31,12 +31,12 @@ def get_shared_results_dir() -> Path:
 
 def get_default_database_path() -> Path:
     """
-    Get the default path for the test results SQL database.
+    Get the default path for the test results database.
 
     Returns:
-        Path to ~/.vibesql/test_results/sqllogictest_results.sql
+        Path to ~/.vibesql/test_results/sqllogictest_results.vbsql (binary format)
     """
-    return get_shared_results_dir() / "sqllogictest_results.sql"
+    return get_shared_results_dir() / "sqllogictest_results.vbsql"
 
 
 def get_default_json_path() -> Path:
@@ -160,3 +160,37 @@ def get_git_branch(repo_root: Optional[Path] = None) -> Optional[str]:
         return result.stdout.strip()
     except subprocess.CalledProcessError:
         return None
+
+
+def get_vibesql_cli_path(repo_root: Optional[Path] = None) -> Path:
+    """
+    Get path to vibesql CLI binary.
+
+    Looks for the binary in target/release/vibesql, then target/debug/vibesql.
+
+    Args:
+        repo_root: Repository root directory (optional)
+
+    Returns:
+        Path to vibesql CLI binary
+
+    Raises:
+        FileNotFoundError: If vibesql CLI binary not found
+    """
+    root = repo_root or get_repo_root()
+
+    # Try release build first
+    release_path = root / "target" / "release" / "vibesql"
+    if release_path.exists():
+        return release_path
+
+    # Fall back to debug build
+    debug_path = root / "target" / "debug" / "vibesql"
+    if debug_path.exists():
+        return debug_path
+
+    raise FileNotFoundError(
+        "vibesql CLI not found. Please build it first:\n"
+        "  cargo build --release --bin vibesql\n"
+        f"Expected location: {release_path}"
+    )

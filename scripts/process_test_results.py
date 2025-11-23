@@ -3,25 +3,25 @@
 Process SQLLogicTest results into VibeSQL database.
 
 This script is the core of our dogfooding initiative - it takes JSON test results
-and stores them in a VibeSQL database, demonstrating real-world usage.
+and stores them in a VibeSQL binary database, demonstrating real-world usage.
 
 Usage:
-    ./scripts/process_test_results.py --input results.json [--database db.sql]
+    ./scripts/process_test_results.py --input results.json [--database db.vbsql]
 
 Features:
-- Creates database from schema on first run
-- Loads existing database state from SQL dump
+- Creates binary database from schema on first run
+- Uses vibesql CLI to execute SQL statements against binary database
 - Inserts new test run metadata
 - Records individual test results with error messages
 - Updates current status in test_files table
-- Exports SQL dump for version control and web demo
+- Stores data in native vibesql binary format (.vbsql)
 
 Example:
     # After a test run
     ./scripts/process_test_results.py \
         --input target/sqllogictest_results.json
 
-    # Results stored in: ~/.vibesql/test_results/sqllogictest_results.sql
+    # Results stored in: ~/.vibesql/test_results/sqllogictest_results.vbsql
 """
 
 import argparse
@@ -38,6 +38,7 @@ from test_results_config import (
     get_default_json_path,
     get_git_commit,
     get_repo_root,
+    get_vibesql_cli_path,
     migrate_legacy_results,
 )
 
@@ -68,11 +69,11 @@ def execute_sql_file(sql_path: Path) -> Tuple[bool, str]:
 
 def create_database_from_schema(schema_path: Path, db_path: Path) -> bool:
     """
-    Create a new database from schema SQL file.
+    Create a new vibesql binary database from schema SQL file.
 
     Args:
         schema_path: Path to schema SQL file
-        db_path: Path where SQL dump will be saved
+        db_path: Path where binary database (.vbsql) will be saved
 
     Returns:
         True if successful, False otherwise
@@ -83,13 +84,30 @@ def create_database_from_schema(schema_path: Path, db_path: Path) -> bool:
         print(f"Error: Schema file not found: {schema_path}", file=sys.stderr)
         return False
 
-    # For now, we'll just copy the schema as the initial database
-    # The schema creates empty tables
-    import shutil
-    shutil.copy(schema_path, db_path)
+    try:
+        # Get vibesql CLI path
+        vibesql_cli = get_vibesql_cli_path()
 
-    print(f"✓ Database created: {db_path}")
-    return True
+        # Execute schema file using vibesql CLI to create binary database
+        result = subprocess.run(
+            [str(vibesql_cli), '--database', str(db_path), '--file', str(schema_path)],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        print(f"✓ Binary database created: {db_path}")
+        return True
+
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing schema: {e.stderr}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"Error creating database: {e}", file=sys.stderr)
+        return False
 
 
 def load_json_results(json_path: Path) -> Dict:
@@ -248,26 +266,56 @@ def sql_escape(value: Optional[str]) -> str:
     return f"'{escaped}'"
 
 
-def append_statements_to_dump(db_path: Path, statements: List[str]) -> bool:
+def execute_statements_against_db(db_path: Path, statements: List[str]) -> bool:
     """
-    Append SQL statements to the database dump file.
+    Execute SQL statements against vibesql binary database using the CLI.
 
     Args:
-        db_path: Path to SQL dump file
-        statements: SQL statements to append
+        db_path: Path to vibesql binary database (.vbsql)
+        statements: SQL statements to execute
 
     Returns:
         True if successful, False otherwise
     """
+    import tempfile
+
     try:
-        with open(db_path, 'a') as f:
-            f.write("\n-- Test results inserted at " + datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f') + "\n")
-            for stmt in statements:
-                f.write(stmt)
-                f.write("\n")
-        return True
+        # Get vibesql CLI path
+        vibesql_cli = get_vibesql_cli_path()
+
+        # Write statements to a temporary SQL file
+        # Add comment header
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        sql_script = f"-- Test results inserted at {timestamp}\n"
+        sql_script += "\n".join(statements)
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as tmp:
+            tmp.write(sql_script)
+            tmp_path = tmp.name
+
+        try:
+            # Execute SQL file using vibesql CLI
+            result = subprocess.run(
+                [str(vibesql_cli), '--database', str(db_path), '--file', tmp_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return True
+        finally:
+            # Clean up temp file
+            import os
+            os.unlink(tmp_path)
+
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing SQL statements: {e.stderr}", file=sys.stderr)
+        return False
     except Exception as e:
-        print(f"Error appending to database: {e}", file=sys.stderr)
+        print(f"Error executing statements: {e}", file=sys.stderr)
         return False
 
 
@@ -303,7 +351,7 @@ def main():
         "--database",
         type=Path,
         default=None,
-        help="Database SQL dump file (default: ~/.vibesql/test_results/sqllogictest_results.sql)",
+        help="Database file (default: ~/.vibesql/test_results/sqllogictest_results.vbsql)",
     )
     parser.add_argument(
         "--schema",
@@ -349,9 +397,9 @@ def main():
     statements = generate_insert_statements(results_json)
     print(f"Generated {len(statements)} SQL statements")
 
-    # Append to database
-    print(f"Appending to database: {db_path}")
-    if not append_statements_to_dump(db_path, statements):
+    # Execute statements against database
+    print(f"Executing statements against database: {db_path}")
+    if not execute_statements_against_db(db_path, statements):
         return 1
 
     # Print summary
