@@ -9,7 +9,7 @@ use crate::{
     schema::CombinedSchema,
 };
 use std::collections::HashMap;
-use vibesql_ast::{Expression, SelectItem};
+use vibesql_ast::SelectItem;
 use vibesql_storage::{QueryBufferPool, Row};
 use vibesql_types::SqlValue;
 
