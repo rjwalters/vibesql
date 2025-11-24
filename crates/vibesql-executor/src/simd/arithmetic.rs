@@ -6,9 +6,35 @@ use wide::*;
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 use std::arch::x86_64::*;
 
-/// SIMD addition for f64 columns
+/// SIMD addition for f64 columns with automatic dispatch
+///
+/// Automatically selects the best SIMD implementation based on CPU capabilities:
+/// - **AVX-512**: 8 elements per operation (2x throughput)
+/// - **AVX2/SSE**: 4 elements per operation
+///
+/// # Example
+///
+/// ```ignore
+/// let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+/// let b = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+/// let result = simd_add_f64(&a, &b);
+/// ```
 #[cfg(feature = "simd")]
 pub fn simd_add_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { simd_add_f64_avx512(a, b) };
+        }
+    }
+
+    // Fallback to AVX2/SSE implementation
+    simd_add_f64_avx2(a, b)
+}
+
+/// AVX2/SSE SIMD addition for f64 columns (4 elements at a time)
+#[cfg(feature = "simd")]
+fn simd_add_f64_avx2(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut result = Vec::with_capacity(a.len());
 
     // Process chunks of 4 elements with SIMD (f64x4)
@@ -245,6 +271,10 @@ pub unsafe fn simd_add_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 subtraction for f64 columns (8 elements at a time)
+///
+/// # Safety
+///
+/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_sub_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -274,6 +304,10 @@ pub unsafe fn simd_sub_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 multiplication for f64 columns (8 elements at a time)
+///
+/// # Safety
+///
+/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_mul_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -303,6 +337,10 @@ pub unsafe fn simd_mul_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 division for f64 columns (8 elements at a time)
+///
+/// # Safety
+///
+/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_div_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -332,6 +370,10 @@ pub unsafe fn simd_div_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 addition for i64 columns (8 elements at a time)
+///
+/// # Safety
+///
+/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_add_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
@@ -361,6 +403,10 @@ pub unsafe fn simd_add_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
 }
 
 /// AVX-512 subtraction for i64 columns (8 elements at a time)
+///
+/// # Safety
+///
+/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_sub_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
@@ -390,6 +436,10 @@ pub unsafe fn simd_sub_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
 }
 
 /// AVX-512 multiplication for i64 columns (8 elements at a time)
+///
+/// # Safety
+///
+/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_mul_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
@@ -473,7 +523,7 @@ mod tests {
 
     // AVX-512 tests (only run on AVX-512 capable CPUs)
     #[test]
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(target_arch = "x86_64")]
     fn test_simd_add_f64_avx512() {
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
         let b = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0];
@@ -482,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(target_arch = "x86_64")]
     fn test_simd_sub_f64_avx512() {
         let a = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0];
         let b = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
@@ -491,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(target_arch = "x86_64")]
     fn test_simd_mul_f64_avx512() {
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
         let b = vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0];
@@ -500,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(target_arch = "x86_64")]
     fn test_simd_div_f64_avx512() {
         let a = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0];
         let b = vec![2.0, 4.0, 3.0, 8.0, 5.0, 6.0, 7.0, 10.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
@@ -509,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(target_arch = "x86_64")]
     fn test_simd_add_i64_avx512() {
         let a = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
         let b = vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170];
@@ -518,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(target_arch = "x86_64")]
     fn test_simd_sub_i64_avx512() {
         let a = vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170];
         let b = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
@@ -527,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(target_arch = "x86_64")]
     fn test_simd_mul_i64_avx512() {
         let a = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
         let b = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
