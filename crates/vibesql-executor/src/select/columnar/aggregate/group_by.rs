@@ -99,9 +99,12 @@ pub fn columnar_group_by(
     // Phase 2: Compute aggregates for each group
     let mut result_rows = Vec::with_capacity(groups.len());
 
+    // Reuse a single bitmap buffer to avoid repeated allocations
+    // This is much more efficient than allocating rows.len() booleans per group
+    let mut group_bitmap = vec![false; rows.len()];
+
     for (group_key, row_indices) in groups {
-        // Create a bitmap for rows in this group
-        let mut group_bitmap = vec![false; rows.len()];
+        // Set bits for this group's rows
         for &idx in &row_indices {
             group_bitmap[idx] = true;
         }
@@ -119,6 +122,11 @@ pub fn columnar_group_by(
         }
 
         result_rows.push(Row::new(result_values));
+
+        // Clear bitmap for next group (faster than allocating a new one)
+        for &idx in &row_indices {
+            group_bitmap[idx] = false;
+        }
     }
 
     Ok(result_rows)
