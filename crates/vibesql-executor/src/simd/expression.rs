@@ -115,38 +115,55 @@ fn is_simple_operand(expr: &Expression) -> bool {
     }
 }
 
-/// Check if an expression contains NULL values in any of the input rows
-///
-/// Scans through all rows and evaluates the expression to detect NULL values.
-/// Returns true if any NULL is found, false otherwise.
-///
-/// This enables early NULL detection for graceful fallback to scalar evaluation,
-/// avoiding errors that would occur if we proceeded with SIMD operations.
+/// Extract all column references from an expression tree
+#[cfg(feature = "simd")]
+fn extract_column_refs(expr: &Expression) -> Vec<Expression> {
+    let mut columns = Vec::new();
+    match expr {
+        Expression::ColumnRef { .. } => {
+            columns.push(expr.clone());
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            columns.extend(extract_column_refs(left));
+            columns.extend(extract_column_refs(right));
+        }
+        // Other expression types (literals, etc.) don't contain column refs
+        _ => {}
+    }
+    columns
+}
+
+/// Check if an expression contains NULL values by checking source columns only
 #[cfg(feature = "simd")]
 fn has_null_values(
     expr: &Expression,
     rows: &[vibesql_storage::Row],
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,
 ) -> bool {
-    // Check a sample of rows for NULL values to avoid full scan overhead
-    // Sample size: min(rows.len(), 100) to balance accuracy vs performance
+    let column_refs = extract_column_refs(expr);
+    if column_refs.is_empty() {
+        return false;
+    }
+
     let sample_size = rows.len().min(100);
 
     for row in rows.iter().take(sample_size) {
-        if let Ok(value) = evaluator.eval(expr, row) {
-            if value == SqlValue::Null {
-                return true;
+        for col_ref in &column_refs {
+            match evaluator.eval(col_ref, row) {
+                Ok(value) if value == SqlValue::Null => return true,
+                Err(_) => return true,
+                _ => {}
             }
         }
     }
 
-    // If no NULLs found in sample and sample < total, do a full scan
-    // This is conservative: better to catch all NULLs than risk SIMD errors
     if sample_size < rows.len() {
         for row in rows.iter().skip(sample_size) {
-            if let Ok(value) = evaluator.eval(expr, row) {
-                if value == SqlValue::Null {
-                    return true;
+            for col_ref in &column_refs {
+                match evaluator.eval(col_ref, row) {
+                    Ok(value) if value == SqlValue::Null => return true,
+                    Err(_) => return true,
+                    _ => {}
                 }
             }
         }
@@ -267,10 +284,8 @@ fn eval_operand_to_buffer(
 
 /// Convert a vector of NumericValues to a typed NumericBuffer
 ///
-/// # Panics
-///
-/// Panics if any NULL values are present. NULL values should be detected early
-/// in `can_use_simd_for_expression()` to enable graceful fallback to scalar evaluation.
+/// Returns an error if NULL values are present, which indicates a bug in the
+/// NULL detection logic (NULLs should be caught by can_use_simd_for_expression).
 #[cfg(feature = "simd")]
 fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, ExecutorError> {
     // Determine if we can use Int64 or need Float64
@@ -278,10 +293,11 @@ fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, Executo
 
     // NULL values should have been detected early by can_use_simd_for_expression()
     // If we reach here with NULLs, it's a bug in the NULL detection logic
-    debug_assert!(
-        !values.iter().any(|v| matches!(v, NumericValue::Null)),
-        "NULL values should be detected early by can_use_simd_for_expression()"
-    );
+    if values.iter().any(|v| matches!(v, NumericValue::Null)) {
+        return Err(ExecutorError::UnsupportedExpression(
+            "NULL values reached SIMD path despite early detection - this is a bug".to_string(),
+        ));
+    }
 
     if has_float {
         // Use Float64
@@ -290,7 +306,7 @@ fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, Executo
             .map(|v| match v {
                 NumericValue::Int64(n) => n as f64,
                 NumericValue::Float64(f) => f,
-                NumericValue::Null => 0.0, // Won't happen due to check above
+                NumericValue::Null => unreachable!("NULLs filtered by early detection"),
             })
             .collect();
         Ok(NumericBuffer::Float64(buf))
@@ -300,8 +316,8 @@ fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, Executo
             .into_iter()
             .map(|v| match v {
                 NumericValue::Int64(n) => n,
-                NumericValue::Float64(_) => unreachable!(),
-                NumericValue::Null => 0, // Won't happen due to check above
+                NumericValue::Float64(_) => unreachable!("Mixed types handled above"),
+                NumericValue::Null => unreachable!("NULLs filtered by early detection"),
             })
             .collect();
         Ok(NumericBuffer::Int64(buf))
