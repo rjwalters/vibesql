@@ -192,7 +192,27 @@ pub fn simd_mul_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
 // These provide 2x throughput on AVX-512 capable CPUs
 
 /// AVX-512 addition for f64 columns (8 elements at a time)
-#[cfg(all(feature = "simd", target_arch = "x86_64", target_feature = "avx512f"))]
+///
+/// # Safety
+///
+/// This function requires AVX-512F CPU support. The caller MUST verify CPU capabilities
+/// using `is_x86_feature_detected!("avx512f")` before calling. Calling this function
+/// on a CPU without AVX-512F support results in undefined behavior (illegal instruction).
+///
+/// # Example
+///
+/// ```ignore
+/// #[cfg(target_arch = "x86_64")]
+/// {
+///     if is_x86_feature_detected!("avx512f") {
+///         let result = unsafe { simd_add_f64_avx512(&a, &b) };
+///     } else {
+///         // Fallback to AVX2/SSE
+///         let result = simd_add_f64(&a, &b);
+///     }
+/// }
+/// ```
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_add_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut result = Vec::with_capacity(a.len());
@@ -225,7 +245,7 @@ pub unsafe fn simd_add_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 subtraction for f64 columns (8 elements at a time)
-#[cfg(all(feature = "simd", target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_sub_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut result = Vec::with_capacity(a.len());
@@ -254,7 +274,7 @@ pub unsafe fn simd_sub_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 multiplication for f64 columns (8 elements at a time)
-#[cfg(all(feature = "simd", target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_mul_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut result = Vec::with_capacity(a.len());
@@ -283,7 +303,7 @@ pub unsafe fn simd_mul_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 division for f64 columns (8 elements at a time)
-#[cfg(all(feature = "simd", target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_div_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut result = Vec::with_capacity(a.len());
@@ -312,7 +332,7 @@ pub unsafe fn simd_div_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 /// AVX-512 addition for i64 columns (8 elements at a time)
-#[cfg(all(feature = "simd", target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_add_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
     let mut result = Vec::with_capacity(a.len());
@@ -341,7 +361,7 @@ pub unsafe fn simd_add_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
 }
 
 /// AVX-512 subtraction for i64 columns (8 elements at a time)
-#[cfg(all(feature = "simd", target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_sub_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
     let mut result = Vec::with_capacity(a.len());
@@ -370,7 +390,7 @@ pub unsafe fn simd_sub_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
 }
 
 /// AVX-512 multiplication for i64 columns (8 elements at a time)
-#[cfg(all(feature = "simd", target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn simd_mul_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
     let mut result = Vec::with_capacity(a.len());
