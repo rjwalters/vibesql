@@ -45,8 +45,13 @@ impl JoinOrderContext {
                     // Apply selectivity to base row count
                     std::cmp::max(1, (base_rows as f64 * selectivity) as usize)
                 } else {
-                    // No stats available, use heuristic: assume each predicate filters ~30%
-                    let selectivity = 0.3_f64.powi(predicates.len() as i32);
+                    // No stats available, use heuristic based on predicate analysis
+                    // This is better than flat 30% per predicate
+                    let mut selectivity = 1.0;
+                    for pred in predicates {
+                        let pred_sel = estimate_predicate_selectivity_heuristic(pred);
+                        selectivity *= pred_sel;
+                    }
                     std::cmp::max(1, (base_rows as f64 * selectivity) as usize)
                 }
             } else {
@@ -213,14 +218,23 @@ impl JoinOrderContext {
             }
         };
 
-        // Estimate operations: For hash join (our primary strategy), cost is roughly:
-        // - Build hash table from left: O(left_cardinality)
+        // Estimate operations: For hash join (our primary strategy), cost includes:
+        // - Build hash table from left: O(left_cardinality) with overhead
         // - Probe with right: O(right_cardinality)
-        // Total: O(left + right) rather than O(left * right) for nested loop
-        // Use linear cost for equijoins, quadratic only if no edge (cross join)
+        //
+        // Hash table build is more expensive than simple scan due to:
+        // - Memory allocation
+        // - Hash computation
+        // - Collision resolution
+        //
+        // We model this with a 2x multiplier on the build side to account for overhead.
+        // This encourages the optimizer to prefer smaller build sides.
         let operations = if self.has_join_edge(joined_tables, next_table) {
-            // Hash join: linear cost
-            (left_cardinality as u64) + (right_cardinality as u64)
+            // Hash join: build cost (2x) + probe cost (1x)
+            // This reflects that building a hash table is more expensive than probing
+            let build_cost = (left_cardinality as u64) * 2;
+            let probe_cost = right_cardinality as u64;
+            build_cost + probe_cost
         } else {
             // Cross join: quadratic cost (nested loop)
             (left_cardinality as u64) * (right_cardinality as u64)
@@ -291,5 +305,88 @@ impl JoinOrderContext {
             }
         }
         false
+    }
+}
+
+/// Estimate predicate selectivity without statistics using heuristics
+///
+/// This function analyzes the predicate structure to provide better estimates
+/// than a flat 30% per predicate. It considers:
+/// - Equality predicates: more selective (10%)
+/// - Range predicates: less selective (25-33%)
+/// - IN lists: depends on number of values
+/// - LIKE patterns: depends on wildcards
+/// - Complex expressions: conservative (50%)
+fn estimate_predicate_selectivity_heuristic(pred: &vibesql_ast::Expression) -> f64 {
+    use vibesql_ast::{BinaryOperator, Expression};
+
+    match pred {
+        // AND: multiply selectivities
+        Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
+            let left_sel = estimate_predicate_selectivity_heuristic(left);
+            let right_sel = estimate_predicate_selectivity_heuristic(right);
+            left_sel * right_sel
+        }
+
+        // OR: 1 - ((1 - s1) * (1 - s2))
+        Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+            let left_sel = estimate_predicate_selectivity_heuristic(left);
+            let right_sel = estimate_predicate_selectivity_heuristic(right);
+            1.0 - ((1.0 - left_sel) * (1.0 - right_sel))
+        }
+
+        // Equality: highly selective (10%)
+        Expression::BinaryOp { op: BinaryOperator::Equal, .. } => 0.10,
+
+        // Inequality: less selective (90%)
+        Expression::BinaryOp { op: BinaryOperator::NotEqual, .. } => 0.90,
+
+        // Range comparisons: moderately selective (25%)
+        Expression::BinaryOp {
+            op: BinaryOperator::LessThan |
+                BinaryOperator::LessThanOrEqual |
+                BinaryOperator::GreaterThan |
+                BinaryOperator::GreaterThanOrEqual,
+            ..
+        } => 0.25,
+
+        // BETWEEN: similar to range (33%)
+        Expression::Between { .. } => 0.33,
+
+        // IN list: depends on number of values (estimate 5% per value, cap at 50%)
+        Expression::InList { values, negated: false, .. } => {
+            (values.len() as f64 * 0.05).min(0.50)
+        }
+        Expression::InList { values, negated: true, .. } => {
+            1.0 - (values.len() as f64 * 0.05).min(0.50)
+        }
+
+        // LIKE: depends on pattern
+        Expression::Like { pattern, .. } => {
+            // Try to extract pattern string
+            if let Expression::Literal(vibesql_types::SqlValue::Varchar(s)) = pattern.as_ref() {
+                if s.starts_with('%') && s.ends_with('%') {
+                    0.10 // %pattern% - substring search
+                } else if s.starts_with('%') || s.ends_with('%') {
+                    0.15 // prefix or suffix search
+                } else {
+                    0.10 // exact match
+                }
+            } else {
+                0.15 // unknown pattern
+            }
+        }
+
+        // IS NULL / IS NOT NULL: assume 10% nulls
+        Expression::IsNull { negated: false, .. } => 0.10,
+        Expression::IsNull { negated: true, .. } => 0.90,
+
+        // NOT: inverse
+        Expression::UnaryOp { op: vibesql_ast::UnaryOperator::Not, expr } => {
+            1.0 - estimate_predicate_selectivity_heuristic(expr)
+        }
+
+        // Complex expressions: conservative estimate
+        _ => 0.50,
     }
 }
