@@ -79,7 +79,7 @@ repository = "https://github.com/rjwalters/vibesql"
 
 [workspace.dependencies]
 # Will add dependencies as needed for each phase
-pyo3 = { version = "0.27", features = ["extension-module"] }
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py39"] }
 
 # Test declarations for integration tests
 
