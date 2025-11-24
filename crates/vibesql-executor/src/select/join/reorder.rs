@@ -158,6 +158,49 @@ impl JoinOrderAnalyzer {
                 self.analyze_predicate(left, tables);
                 self.analyze_predicate(right, tables);
             }
+            // Handle OR expressions by extracting common join conditions
+            // that appear in ALL branches
+            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[ANALYZER] Analyzing OR expression for common join conditions");
+                }
+
+                // Collect all OR branches into a list
+                let mut branches = Vec::new();
+                self.collect_or_branches(expr, &mut branches);
+
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[ANALYZER] Found {} OR branches", branches.len());
+                }
+
+                // Extract edges from each branch
+                let mut branch_edges: Vec<Vec<JoinEdge>> = Vec::new();
+                for branch in &branches {
+                    let mut branch_analyzer = JoinOrderAnalyzer::new();
+                    let table_vec: Vec<String> = tables.iter().cloned().collect();
+                    branch_analyzer.register_tables(table_vec);
+                    branch_analyzer.analyze_predicate(branch, tables);
+                    branch_edges.push(branch_analyzer.edges().to_vec());
+                }
+
+                // Find edges common to ALL branches
+                if !branch_edges.is_empty() {
+                    let common_edges = self.find_common_edges(&branch_edges);
+
+                    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!("[ANALYZER] Found {} common join edges across all OR branches", common_edges.len());
+                    }
+
+                    // Add common edges to our join graph
+                    for edge in common_edges {
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[ANALYZER] Added common edge from OR: {}.{} = {}.{}",
+                                edge.left_table, edge.left_column, edge.right_table, edge.right_column);
+                        }
+                        self.edges.push(edge);
+                    }
+                }
+            }
             // Handle simple binary equality operations
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
                 let (left_table, left_col) = self.extract_column_ref(left, tables);
@@ -202,6 +245,65 @@ impl JoinOrderAnalyzer {
                 // Conservative: mark as complex, don't try to optimize
             }
         }
+    }
+
+    /// Collect all branches of an OR expression into a flat list
+    /// Handles nested ORs by flattening them: (A OR B) OR C => [A, B, C]
+    fn collect_or_branches(&self, expr: &Expression, branches: &mut Vec<Expression>) {
+        match expr {
+            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+                // Recursively collect from both sides
+                self.collect_or_branches(left, branches);
+                self.collect_or_branches(right, branches);
+            }
+            _ => {
+                // Leaf node - add to branches
+                branches.push(expr.clone());
+            }
+        }
+    }
+
+    /// Find join edges that appear in ALL branches
+    /// An edge is common if it has the same tables and columns in every branch
+    fn find_common_edges(&self, branch_edges: &[Vec<JoinEdge>]) -> Vec<JoinEdge> {
+        if branch_edges.is_empty() {
+            return Vec::new();
+        }
+
+        // Start with edges from first branch
+        let mut common_edges = Vec::new();
+        let first_branch = &branch_edges[0];
+
+        for edge in first_branch {
+            // Check if this edge appears in all other branches
+            let appears_in_all = branch_edges[1..].iter().all(|branch| {
+                branch.iter().any(|e| self.edges_match(e, edge))
+            });
+
+            if appears_in_all {
+                common_edges.push(edge.clone());
+            }
+        }
+
+        common_edges
+    }
+
+    /// Check if two edges represent the same join condition
+    /// Handles both (A=B) and (B=A) as equivalent
+    fn edges_match(&self, e1: &JoinEdge, e2: &JoinEdge) -> bool {
+        // Direct match: left-to-left, right-to-right
+        let direct = e1.left_table.eq_ignore_ascii_case(&e2.left_table)
+            && e1.left_column.eq_ignore_ascii_case(&e2.left_column)
+            && e1.right_table.eq_ignore_ascii_case(&e2.right_table)
+            && e1.right_column.eq_ignore_ascii_case(&e2.right_column);
+
+        // Reverse match: left-to-right, right-to-left (handles A=B vs B=A)
+        let reverse = e1.left_table.eq_ignore_ascii_case(&e2.right_table)
+            && e1.left_column.eq_ignore_ascii_case(&e2.right_column)
+            && e1.right_table.eq_ignore_ascii_case(&e2.left_table)
+            && e1.right_column.eq_ignore_ascii_case(&e2.left_column);
+
+        direct || reverse
     }
 
     /// Extract table and column info from an expression
