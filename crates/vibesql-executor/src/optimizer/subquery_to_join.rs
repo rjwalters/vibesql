@@ -39,6 +39,9 @@ use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, 
 ///
 /// This transformation only applies to simple IN subqueries with single-column SELECT lists
 /// and simple table references. Complex subqueries (joins, aggregations, etc.) are left unchanged.
+///
+/// The transformation is applied iteratively to handle queries with multiple subqueries
+/// (e.g., Q21 with both EXISTS and NOT EXISTS clauses).
 pub fn transform_subqueries_to_joins(stmt: &SelectStmt) -> SelectStmt {
     let mut result = stmt.clone();
 
@@ -47,14 +50,34 @@ pub fn transform_subqueries_to_joins(stmt: &SelectStmt) -> SelectStmt {
         return result;
     }
 
-    // Try to extract IN/NOT IN subqueries from WHERE clause and convert to joins
-    if let Some(where_clause) = &result.where_clause {
-        if let Some((new_from, new_where)) = try_extract_subqueries_to_joins(
-            result.from.as_ref().unwrap(),
-            where_clause,
-        ) {
-            result.from = Some(new_from);
-            result.where_clause = new_where;
+    // Apply transformation iteratively until no more changes
+    // This handles queries with multiple IN/EXISTS subqueries
+    let max_iterations = 10; // Safety limit to prevent infinite loops
+    for iteration in 0..max_iterations {
+        let mut made_progress = false;
+
+        // Try to extract IN/NOT IN/EXISTS subqueries from WHERE clause and convert to joins
+        if let Some(where_clause) = &result.where_clause {
+            if let Some((new_from, new_where)) = try_extract_subqueries_to_joins(
+                result.from.as_ref().unwrap(),
+                where_clause,
+            ) {
+                // Debug output for subquery transformation
+                if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+                    eprintln!("[SUBQUERY_TRANSFORM] Iteration {}: Converted subquery to join", iteration + 1);
+                }
+                result.from = Some(new_from);
+                result.where_clause = new_where;
+                made_progress = true;
+            }
+        }
+
+        // If no transformation was applied this iteration, we're done
+        if !made_progress {
+            if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() && iteration > 0 {
+                eprintln!("[SUBQUERY_TRANSFORM] Completed after {} iterations", iteration);
+            }
+            break;
         }
     }
 
@@ -395,5 +418,81 @@ mod tests {
             Some(FromClause::Table { .. }) => {} // Good, no join created
             _ => panic!("Complex subquery should not create JOIN"),
         }
+    }
+
+    #[test]
+    fn test_multiple_subqueries_to_joins() {
+        // Test Q21-like pattern with multiple IN subqueries in a deep AND chain
+        // WHERE a = b AND c = d AND x IN (...) AND y NOT IN (...)
+        let mut stmt = simple_select("orders", "o_orderkey");
+        let subquery1 = simple_select("lineitem", "l_orderkey");
+        let subquery2 = simple_select("supplier", "s_suppkey");
+
+        // Build WHERE: o_custkey = 1 AND o_orderkey IN (subquery1) AND o_custkey NOT IN (subquery2)
+        let predicate1 = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(column_ref("o_custkey")),
+            right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+        };
+
+        let in_subquery = Expression::In {
+            expr: Box::new(column_ref("o_orderkey")),
+            subquery: Box::new(subquery1),
+            negated: false,
+        };
+
+        let not_in_subquery = Expression::In {
+            expr: Box::new(column_ref("o_custkey")),
+            subquery: Box::new(subquery2),
+            negated: true,
+        };
+
+        // Build: predicate1 AND in_subquery AND not_in_subquery
+        let combined_where = Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::And,
+                left: Box::new(predicate1),
+                right: Box::new(in_subquery),
+            }),
+            right: Box::new(not_in_subquery),
+        };
+
+        stmt.where_clause = Some(combined_where);
+
+        // Transform should extract BOTH subqueries iteratively
+        let transformed = transform_subqueries_to_joins(&stmt);
+
+        // Should have two joins (SEMI and ANTI)
+        match transformed.from {
+            Some(FromClause::Join {
+                left: inner_join_box,
+                join_type: outer_join_type,
+                ..
+            }) => {
+                // Outer join should be either SEMI or ANTI
+                assert!(
+                    matches!(outer_join_type, JoinType::Semi | JoinType::Anti),
+                    "Outer join should be SEMI or ANTI, got: {:?}",
+                    outer_join_type
+                );
+
+                // Inner join should also be a join (not just a table)
+                match *inner_join_box {
+                    FromClause::Join { join_type: inner_join_type, .. } => {
+                        assert!(
+                            matches!(inner_join_type, JoinType::Semi | JoinType::Anti),
+                            "Inner join should be SEMI or ANTI, got: {:?}",
+                            inner_join_type
+                        );
+                    }
+                    _ => panic!("Expected nested JOIN, got table"),
+                }
+            }
+            _ => panic!("Expected JOIN in FROM clause"),
+        }
+
+        // WHERE should only have the simple predicate left
+        assert!(transformed.where_clause.is_some(), "Simple predicate should remain in WHERE");
     }
 }

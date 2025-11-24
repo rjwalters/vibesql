@@ -25,6 +25,7 @@ wkt = { version = "0.10", optional = true }
 rstar = { version = "0.12", optional = true }
 lru = "0.12"
 log = "0.4"
+bumpalo = { version = "3.16", features = ["collections"] }
 
 # SIMD dependencies for columnar acceleration
 wide = { version = "0.7", optional = true }
@@ -136,3 +137,7 @@ harness = false
 name = "tpch_profiling"
 harness = false
 required-features = ["benchmark-comparison"]
+
+[[bench]]
+name = "simd_dispatch_benchmark"
+harness = false
