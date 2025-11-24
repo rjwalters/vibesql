@@ -37,6 +37,10 @@ use vibesql_types::SqlValue;
 /// Below this, scalar evaluation is more efficient due to conversion overhead
 pub const SIMD_THRESHOLD: usize = 100;
 
+/// Maximum recursion depth for nested expressions
+/// Prevents stack overflow on deeply nested binary operations
+const MAX_RECURSION_DEPTH: usize = 32;
+
 /// Check if an expression can benefit from SIMD evaluation
 ///
 /// Returns true if:
@@ -134,10 +138,10 @@ pub fn eval_expression_batch_simd(
         return eval_expression_scalar(expr, rows, evaluator);
     }
 
-    // Evaluate expression using SIMD
+    // Evaluate expression using SIMD with depth tracking
     match expr {
         Expression::BinaryOp { left, op, right } => {
-            eval_binary_op_simd(left, *op, right, rows, evaluator)
+            eval_binary_op_simd(left, *op, right, rows, evaluator, 0)
         }
         _ => eval_expression_scalar(expr, rows, evaluator),
     }
@@ -151,10 +155,25 @@ fn eval_binary_op_simd(
     right: &Expression,
     rows: &[vibesql_storage::Row],
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,
+    depth: usize,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
+    // Check recursion depth to prevent stack overflow
+    if depth >= MAX_RECURSION_DEPTH {
+        // Fall back to scalar evaluation for deeply nested expressions
+        return eval_expression_scalar(
+            &Expression::BinaryOp {
+                left: Box::new(left.clone()),
+                op,
+                right: Box::new(right.clone()),
+            },
+            rows,
+            evaluator,
+        );
+    }
+
     // Evaluate left and right operands
-    let left_values = eval_operand_to_buffer(left, rows, evaluator)?;
-    let right_values = eval_operand_to_buffer(right, rows, evaluator)?;
+    let left_values = eval_operand_to_buffer(left, rows, evaluator, depth)?;
+    let right_values = eval_operand_to_buffer(right, rows, evaluator, depth)?;
 
     // Determine result type and perform SIMD operation
     apply_simd_operation(&left_values, op, &right_values)
@@ -166,11 +185,12 @@ fn eval_operand_to_buffer(
     expr: &Expression,
     rows: &[vibesql_storage::Row],
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,
+    depth: usize,
 ) -> Result<NumericBuffer, ExecutorError> {
     match expr {
         // Recursively handle nested binary operations
         Expression::BinaryOp { left, op, right } => {
-            let result_values = eval_binary_op_simd(left, *op, right, rows, evaluator)?;
+            let result_values = eval_binary_op_simd(left, *op, right, rows, evaluator, depth + 1)?;
             // Convert Vec<SqlValue> to NumericBuffer
             let numeric_values: Result<Vec<_>, _> = result_values
                 .into_iter()
