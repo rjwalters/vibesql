@@ -175,15 +175,17 @@ pub fn neon_ne_f64(column: &[f64], value: f64) -> Vec<bool> {
             let values = vld1q_f64(column.as_ptr().add(offset));
             let val_vec = vdupq_n_f64(value);
 
-            // Get equality mask and invert it (vmvnq_u64 = bitwise NOT)
+            // Get equality mask and invert it
             let eq_mask = vceqq_f64(values, val_vec);
-            let ne_mask = vmvnq_u64(eq_mask);
 
+            // Extract mask values and manually invert (NOT operation)
             let mut mask_arr = [0u64; 2];
-            vst1q_u64(mask_arr.as_mut_ptr(), ne_mask);
+            vst1q_u64(mask_arr.as_mut_ptr(), eq_mask);
 
-            result.push(mask_arr[0] != 0);
-            result.push(mask_arr[1] != 0);
+            // Invert the bits: eq mask is all 1s (0xFFFFFFFFFFFFFFFF) for true, 0 for false
+            // So NOT equal is the opposite
+            result.push(mask_arr[0] == 0);
+            result.push(mask_arr[1] == 0);
         }
     }
 

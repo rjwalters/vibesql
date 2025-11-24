@@ -157,61 +157,33 @@ pub fn neon_avg_i64(column: &[i64]) -> Option<f64> {
 }
 
 /// NEON minimum for i64 columns (2 elements at a time)
+///
+/// Note: NEON doesn't have native min operations for signed 64-bit integers,
+/// so this falls back to scalar implementation.
 #[cfg(all(feature = "simd", target_arch = "aarch64"))]
 pub fn neon_min_i64(column: &[i64]) -> Option<i64> {
     if column.is_empty() {
         return None;
     }
 
-    unsafe {
-        let mut min_vec = vdupq_n_s64(i64::MAX);
-
-        // Process chunks of 2 elements with NEON
-        let chunks = column.len() / 2;
-        for i in 0..chunks {
-            let offset = i * 2;
-            let values = vld1q_s64(column.as_ptr().add(offset));
-            min_vec = vminq_s64(min_vec, values);
-        }
-
-        // Horizontal min: find minimum across both lanes
-        let min_scalar = vminvq_s64(min_vec);
-
-        // Handle remainder elements with scalar fallback
-        let remainder_start = chunks * 2;
-        let remainder_min = column[remainder_start..].iter().copied().min().unwrap_or(i64::MAX);
-
-        Some(min_scalar.min(remainder_min))
-    }
+    // NEON doesn't have efficient 64-bit signed integer min
+    // Fall back to scalar implementation
+    column.iter().copied().min()
 }
 
 /// NEON maximum for i64 columns (2 elements at a time)
+///
+/// Note: NEON doesn't have native max operations for signed 64-bit integers,
+/// so this falls back to scalar implementation.
 #[cfg(all(feature = "simd", target_arch = "aarch64"))]
 pub fn neon_max_i64(column: &[i64]) -> Option<i64> {
     if column.is_empty() {
         return None;
     }
 
-    unsafe {
-        let mut max_vec = vdupq_n_s64(i64::MIN);
-
-        // Process chunks of 2 elements with NEON
-        let chunks = column.len() / 2;
-        for i in 0..chunks {
-            let offset = i * 2;
-            let values = vld1q_s64(column.as_ptr().add(offset));
-            max_vec = vmaxq_s64(max_vec, values);
-        }
-
-        // Horizontal max: find maximum across both lanes
-        let max_scalar = vmaxvq_s64(max_vec);
-
-        // Handle remainder elements with scalar fallback
-        let remainder_start = chunks * 2;
-        let remainder_max = column[remainder_start..].iter().copied().max().unwrap_or(i64::MIN);
-
-        Some(max_scalar.max(remainder_max))
-    }
+    // NEON doesn't have efficient 64-bit signed integer max
+    // Fall back to scalar implementation
+    column.iter().copied().max()
 }
 
 #[cfg(all(test, feature = "simd", target_arch = "aarch64"))]
