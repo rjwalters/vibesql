@@ -16,7 +16,7 @@ pub struct NullBitmask {
 impl NullBitmask {
     /// Create a new NULL bitmask for the given length
     pub fn new(len: usize) -> Self {
-        let bytes = (len + 7) / 8; // Round up to nearest byte
+        let bytes = len.div_ceil(8); // Round up to nearest byte
         Self {
             bits: vec![0; bytes],
             len,

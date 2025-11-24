@@ -128,7 +128,7 @@ impl SelectExecutor<'_> {
                 from_clause,
                 &cte_results,
                 stmt.where_clause.as_ref(),
-                stmt.order_by.as_ref().map(|v| &**v),
+                stmt.order_by.as_deref(),
             )?)
         } else {
             None

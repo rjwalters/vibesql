@@ -119,7 +119,7 @@ fn count_aggregates_in_expr(expr: &Expression) -> usize {
                 + when_clauses.iter().map(|wc| {
                     wc.conditions
                         .iter()
-                        .map(|c| count_aggregates_in_expr(c))
+                        .map(count_aggregates_in_expr)
                         .sum::<usize>()
                         + count_aggregates_in_expr(&wc.result)
                 }).sum::<usize>()

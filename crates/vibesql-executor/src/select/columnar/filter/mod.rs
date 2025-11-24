@@ -1,4 +1,4 @@
-///! Columnar filtering - efficient predicate evaluation on column data
+//! Columnar filtering - efficient predicate evaluation on column data
 
 mod comparison;
 mod evaluation;

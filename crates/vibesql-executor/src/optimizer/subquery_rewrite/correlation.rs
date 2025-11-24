@@ -114,7 +114,7 @@ pub(super) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
                 // convention (prefix + underscore, e.g., "o_orderkey", "l_shipdate")
                 if column.chars().nth(1) == Some('_') {
                     let from_table_prefixes = extract_table_prefixes(from);
-                    !from_table_prefixes.iter().any(|tp| *tp == col_prefix)
+                    !from_table_prefixes.contains(&col_prefix)
                 } else {
                     // Not TPC-H style column name: assume internal (conservative)
                     false

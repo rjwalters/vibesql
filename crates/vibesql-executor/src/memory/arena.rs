@@ -15,7 +15,7 @@
 //! All allocations are tied to the arena's lifetime via Rust's borrow checker.
 //! References returned cannot outlive the arena.
 
-use std::cell::Cell;
+use std::cell::{Cell, UnsafeCell};
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
@@ -44,7 +44,7 @@ use std::ptr;
 /// ```
 pub struct QueryArena {
     /// Pre-allocated buffer for all allocations
-    buffer: Vec<u8>,
+    buffer: UnsafeCell<Vec<u8>>,
     /// Current offset into the buffer (bump pointer)
     offset: Cell<usize>,
     /// Phantom data to ensure proper variance
@@ -77,7 +77,7 @@ impl QueryArena {
     /// ```
     pub fn with_capacity(bytes: usize) -> Self {
         Self {
-            buffer: vec![0u8; bytes],
+            buffer: UnsafeCell::new(vec![0u8; bytes]),
             offset: Cell::new(0),
             _marker: PhantomData,
         }
@@ -133,11 +133,14 @@ impl QueryArena {
         let end_offset = aligned_offset
             .checked_add(size)
             .expect("arena offset overflow");
+
+        // SAFETY: We're accessing the buffer to check its length
+        let buffer = unsafe { &*self.buffer.get() };
         assert!(
-            end_offset <= self.buffer.len(),
+            end_offset <= buffer.len(),
             "arena overflow: need {} bytes, have {} remaining",
             size,
-            self.buffer.len() - aligned_offset
+            buffer.len() - aligned_offset
         );
 
         // Bump pointer
@@ -148,8 +151,9 @@ impl QueryArena {
         // - Buffer has enough space (checked above)
         // - Pointer is properly aligned (aligned_offset)
         // - Lifetime is tied to arena via borrow checker
+        // - UnsafeCell allows interior mutability
         unsafe {
-            let ptr = self.buffer.as_ptr().add(aligned_offset) as *mut T;
+            let ptr = buffer.as_ptr().add(aligned_offset) as *mut T;
             ptr::write(ptr, value);
             &*ptr
         }
@@ -195,6 +199,7 @@ impl QueryArena {
     /// assert_eq!(initialized_slice[50], 50);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice<T>(&self, len: usize) -> &mut [MaybeUninit<T>] {
         if len == 0 {
             // Return empty slice without allocating
@@ -214,11 +219,14 @@ impl QueryArena {
         let end_offset = aligned_offset
             .checked_add(size)
             .expect("arena offset overflow");
+
+        // SAFETY: We're accessing the buffer to check its length
+        let buffer = unsafe { &*self.buffer.get() };
         assert!(
-            end_offset <= self.buffer.len(),
+            end_offset <= buffer.len(),
             "arena overflow: need {} bytes, have {} remaining",
             size,
-            self.buffer.len() - aligned_offset
+            buffer.len() - aligned_offset
         );
 
         // Bump pointer
@@ -231,8 +239,9 @@ impl QueryArena {
         // - Size doesn't overflow (checked above)
         // - Lifetime is tied to arena via borrow checker
         // - MaybeUninit<T> is safe to construct from uninitialized memory
+        // - UnsafeCell allows interior mutability
         unsafe {
-            let ptr = self.buffer.as_ptr().add(aligned_offset) as *mut MaybeUninit<T>;
+            let ptr = buffer.as_ptr().add(aligned_offset) as *mut MaybeUninit<T>;
             std::slice::from_raw_parts_mut(ptr, len)
         }
     }
@@ -266,15 +275,19 @@ impl QueryArena {
         let aligned_offset = (offset + align - 1) & !(align - 1);
         let end_offset = aligned_offset.checked_add(size)?;
 
-        if end_offset > self.buffer.len() {
+        // SAFETY: We're accessing the buffer to check its length
+        let buffer = unsafe { &*self.buffer.get() };
+
+        if end_offset > buffer.len() {
             return None;
         }
 
         self.offset.set(end_offset);
 
         // SAFETY: Same guarantees as alloc(), but checked for space
+        // - UnsafeCell allows interior mutability
         unsafe {
-            let ptr = self.buffer.as_ptr().add(aligned_offset) as *mut T;
+            let ptr = buffer.as_ptr().add(aligned_offset) as *mut T;
             ptr::write(ptr, value);
             Some(&*ptr)
         }
@@ -339,7 +352,8 @@ impl QueryArena {
     /// ```
     #[inline]
     pub fn capacity_bytes(&self) -> usize {
-        self.buffer.len()
+        // SAFETY: We're only reading the length, which is safe
+        unsafe { (*self.buffer.get()).len() }
     }
 
     /// Get the number of bytes remaining in this arena
@@ -356,7 +370,8 @@ impl QueryArena {
     /// ```
     #[inline]
     pub fn remaining_bytes(&self) -> usize {
-        self.buffer.len() - self.offset.get()
+        // SAFETY: We're only reading the length, which is safe
+        unsafe { (*self.buffer.get()).len() - self.offset.get() }
     }
 }
 

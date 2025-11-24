@@ -20,14 +20,14 @@ pub(super) fn contains_aggregate(expr: &Expression) -> bool {
             else_result,
             ..
         } => {
-            operand.as_ref().map_or(false, |e| contains_aggregate(e))
+            operand.as_ref().is_some_and(|e| contains_aggregate(e))
                 || when_clauses.iter().any(|clause| {
                     clause.conditions.iter().any(contains_aggregate)
                         || contains_aggregate(&clause.result)
                 })
                 || else_result
                     .as_ref()
-                    .map_or(false, |e| contains_aggregate(e))
+                    .is_some_and(|e| contains_aggregate(e))
         }
         Expression::InList { expr, values, .. } => {
             contains_aggregate(expr) || values.iter().any(contains_aggregate)
@@ -69,14 +69,14 @@ pub(super) fn contains_arithmetic(expr: &Expression) -> bool {
         } => {
             operand
                 .as_ref()
-                .map_or(false, |e| contains_arithmetic(e))
+                .is_some_and(|e| contains_arithmetic(e))
                 || when_clauses.iter().any(|clause| {
                     clause.conditions.iter().any(contains_arithmetic)
                         || contains_arithmetic(&clause.result)
                 })
                 || else_result
                     .as_ref()
-                    .map_or(false, |e| contains_arithmetic(e))
+                    .is_some_and(|e| contains_arithmetic(e))
         }
         Expression::InList { expr, values, .. } => {
             contains_arithmetic(expr) || values.iter().any(contains_arithmetic)
@@ -110,14 +110,14 @@ pub(super) fn contains_window_function(expr: &Expression) -> bool {
         } => {
             operand
                 .as_ref()
-                .map_or(false, |e| contains_window_function(e))
+                .is_some_and(|e| contains_window_function(e))
                 || when_clauses.iter().any(|clause| {
                     clause.conditions.iter().any(contains_window_function)
                         || contains_window_function(&clause.result)
                 })
                 || else_result
                     .as_ref()
-                    .map_or(false, |e| contains_window_function(e))
+                    .is_some_and(|e| contains_window_function(e))
         }
         _ => false,
     }

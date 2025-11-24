@@ -195,7 +195,7 @@ pub(super) fn hash_semi_join_with_filter(
         let key = row.values[right_col_idx].clone();
         // Skip NULL values - they never match in equi-joins
         if key != vibesql_types::SqlValue::Null {
-            hash_table.entry(key).or_insert_with(Vec::new).push(idx);
+            hash_table.entry(key).or_default().push(idx);
         }
     }
 

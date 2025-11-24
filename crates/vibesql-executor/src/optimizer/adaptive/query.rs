@@ -33,7 +33,7 @@ pub(super) fn has_arithmetic_expressions(query: &SelectStmt) -> bool {
     let where_has_arithmetic = query
         .where_clause
         .as_ref()
-        .map_or(false, contains_arithmetic);
+        .is_some_and(contains_arithmetic);
 
     select_has_arithmetic || where_has_arithmetic
 }

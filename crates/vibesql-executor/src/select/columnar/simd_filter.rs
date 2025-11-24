@@ -112,7 +112,7 @@ fn evaluate_predicate_i64_simd(
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
             if let SqlValue::Integer(threshold) = value {
-                simd_lt_i64(values, *threshold as i64)
+                simd_lt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_lt_i64(values, *threshold)
             } else {
@@ -126,7 +126,7 @@ fn evaluate_predicate_i64_simd(
 
         ColumnPredicate::GreaterThan { value, .. } => {
             if let SqlValue::Integer(threshold) = value {
-                simd_gt_i64(values, *threshold as i64)
+                simd_gt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_gt_i64(values, *threshold)
             } else {
@@ -139,7 +139,7 @@ fn evaluate_predicate_i64_simd(
 
         ColumnPredicate::Equal { value, .. } => {
             if let SqlValue::Integer(target) = value {
-                simd_eq_i64(values, *target as i64)
+                simd_eq_i64(values, *target)
             } else if let SqlValue::Bigint(target) = value {
                 simd_eq_i64(values, *target)
             } else {
@@ -153,7 +153,7 @@ fn evaluate_predicate_i64_simd(
         ColumnPredicate::Between { low, high, .. } => {
             // BETWEEN is equivalent to: value >= low AND value <= high
             let low_i64 = match low {
-                SqlValue::Integer(v) => *v as i64,
+                SqlValue::Integer(v) => *v,
                 SqlValue::Bigint(v) => *v,
                 _ => {
                     return Err(ExecutorError::Other(
@@ -162,7 +162,7 @@ fn evaluate_predicate_i64_simd(
                 }
             };
             let high_i64 = match high {
-                SqlValue::Integer(v) => *v as i64,
+                SqlValue::Integer(v) => *v,
                 SqlValue::Bigint(v) => *v,
                 _ => {
                     return Err(ExecutorError::Other(
@@ -181,7 +181,7 @@ fn evaluate_predicate_i64_simd(
         // For LTE and GTE, we use LT/GT and equality checks
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
             let gt = if let SqlValue::Integer(threshold) = value {
-                simd_gt_i64(values, *threshold as i64)
+                simd_gt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_gt_i64(values, *threshold)
             } else {
@@ -192,7 +192,7 @@ fn evaluate_predicate_i64_simd(
             };
 
             let eq = if let SqlValue::Integer(target) = value {
-                simd_eq_i64(values, *target as i64)
+                simd_eq_i64(values, *target)
             } else if let SqlValue::Bigint(target) = value {
                 simd_eq_i64(values, *target)
             } else {
@@ -208,7 +208,7 @@ fn evaluate_predicate_i64_simd(
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
             let lt = if let SqlValue::Integer(threshold) = value {
-                simd_lt_i64(values, *threshold as i64)
+                simd_lt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_lt_i64(values, *threshold)
             } else {
@@ -219,7 +219,7 @@ fn evaluate_predicate_i64_simd(
             };
 
             let eq = if let SqlValue::Integer(target) = value {
-                simd_eq_i64(values, *target as i64)
+                simd_eq_i64(values, *target)
             } else if let SqlValue::Bigint(target) = value {
                 simd_eq_i64(values, *target)
             } else {
