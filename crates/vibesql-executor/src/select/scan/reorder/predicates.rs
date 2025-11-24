@@ -118,6 +118,49 @@ pub(super) fn extract_in_predicates_from_or(
 pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String>) -> Vec<Expression> {
     let mut equijoins = Vec::new();
 
+    // Helper function to collect all branches of an OR expression into a flat list
+    fn collect_or_branches(expr: &Expression, branches: &mut Vec<Expression>) {
+        match expr {
+            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+                collect_or_branches(left, branches);
+                collect_or_branches(right, branches);
+            }
+            _ => {
+                branches.push(expr.clone());
+            }
+        }
+    }
+
+    // Helper function to find equijoins that appear in ALL branches
+    fn find_common_equijoins(branch_equijoins: &[Vec<Expression>]) -> Vec<Expression> {
+        if branch_equijoins.is_empty() {
+            return Vec::new();
+        }
+
+        // Helper to check if two equijoin expressions are equivalent
+        fn exprs_equivalent(e1: &Expression, e2: &Expression) -> bool {
+            // For now, use Debug format comparison (simple but effective)
+            // A more robust approach would compare the AST structure
+            format!("{:?}", e1) == format!("{:?}", e2)
+        }
+
+        let mut common = Vec::new();
+        let first_branch = &branch_equijoins[0];
+
+        for eq in first_branch {
+            // Check if this equijoin appears in all other branches
+            let appears_in_all = branch_equijoins[1..].iter().all(|branch| {
+                branch.iter().any(|e| exprs_equivalent(e, eq))
+            });
+
+            if appears_in_all {
+                common.push(eq.clone());
+            }
+        }
+
+        common
+    }
+
     fn extract_recursive(
         expr: &Expression,
         tables: &HashSet<String>,
@@ -128,6 +171,41 @@ pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String
             Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
                 extract_recursive(left, tables, equijoins);
                 extract_recursive(right, tables, equijoins);
+            }
+            // Binary OR: extract common equijoins from all branches
+            Expression::BinaryOp { op: BinaryOperator::Or, .. } => {
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[JOIN_REORDER] Processing OR expression for common equijoins");
+                }
+
+                // Collect all OR branches
+                let mut branches = Vec::new();
+                collect_or_branches(expr, &mut branches);
+
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[JOIN_REORDER] Found {} OR branches", branches.len());
+                }
+
+                // Extract equijoins from each branch
+                let mut branch_equijoins: Vec<Vec<Expression>> = Vec::new();
+                for branch in &branches {
+                    let mut branch_eqs = Vec::new();
+                    extract_recursive(branch, tables, &mut branch_eqs);
+                    branch_equijoins.push(branch_eqs);
+                }
+
+                // Find equijoins that appear in ALL branches
+                if !branch_equijoins.is_empty() {
+                    let common_eqs = find_common_equijoins(&branch_equijoins);
+
+                    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!("[JOIN_REORDER] Found {} common equijoins across all OR branches",
+                            common_eqs.len());
+                    }
+
+                    // Add common equijoins to result
+                    equijoins.extend(common_eqs);
+                }
             }
             // Binary EQUAL: check if it's an equijoin
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
