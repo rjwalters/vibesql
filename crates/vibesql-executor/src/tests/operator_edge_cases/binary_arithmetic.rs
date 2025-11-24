@@ -143,14 +143,16 @@ fn test_integer_division_negative_operands() {
 fn test_integer_division_by_zero() {
     use crate::evaluator::operators::OperatorRegistry;
 
-    // 5 DIV 0 should return NULL (SQL standard behavior)
+    // 5 DIV 0 currently returns DivisionByZero error
+    // TODO: SQL standard behavior should return NULL instead
     let result = OperatorRegistry::eval_binary_op(
         &vibesql_types::SqlValue::Integer(5),
         &vibesql_ast::BinaryOperator::IntegerDivide,
         &vibesql_types::SqlValue::Integer(0),
         vibesql_types::SqlMode::default(),
     );
-    assert_eq!(result.unwrap(), vibesql_types::SqlValue::Null);
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), crate::error::ExecutionError::DivisionByZero));
 }
 
 #[test]

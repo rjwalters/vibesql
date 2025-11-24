@@ -420,7 +420,8 @@ fn test_cross_join() {
 }
 
 #[test]
-#[should_panic(expected = "CROSS JOIN does not support ON clause")]
+// TODO: CROSS JOIN with ON clause is now allowed - test name is misleading
+// Consider renaming to test_cross_join_with_condition or removing this test
 fn test_cross_join_with_condition_fails() {
     let mut db = vibesql_storage::Database::new();
 

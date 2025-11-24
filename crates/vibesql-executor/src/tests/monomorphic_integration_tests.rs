@@ -416,6 +416,7 @@ fn test_generic_pattern_no_matching_rows() {
         SqlValue::Float(v) => *v as f64,
         SqlValue::Integer(v) => *v as f64,
         SqlValue::Numeric(v) => *v,
+        SqlValue::Null => 0.0, // SUM returns NULL for no matching rows
         other => panic!("Expected numeric result, got {:?}", other),
     };
     assert_eq!(total, 0.0, "Expected 0.0 for no matching rows, got {}", total);

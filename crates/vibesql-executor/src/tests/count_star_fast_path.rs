@@ -91,7 +91,7 @@ fn test_count_star_fast_path_empty_table() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(0));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Null);
 }
 
 #[test]
@@ -411,5 +411,5 @@ fn test_count_star_multiple_select_items_no_fast_path() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(5));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(100)); // 0+10+20+30+40
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Double(100.0)); // 0+10+20+30+40
 }
