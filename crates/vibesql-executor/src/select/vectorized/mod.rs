@@ -21,6 +21,7 @@ pub mod bitmap;
 pub mod compiled_predicate;
 pub mod filter;
 pub mod predicate;
+pub mod temporal;
 
 pub use arithmetic::evaluate_arithmetic_simd;
 pub use batch::{

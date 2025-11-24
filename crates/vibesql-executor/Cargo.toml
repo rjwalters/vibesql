@@ -34,6 +34,7 @@ wide = { version = "0.7", optional = true }
 # Using 53.0+ for chrono 0.4.42 compatibility (fixes quarter() method ambiguity)
 arrow = "53.0"
 arrow-array = "53.0"
+arrow-arith = "53.0"  # For SIMD-accelerated temporal operations
 arrow-select = "53.0"
 
 # Optional benchmark-comparison dependencies
