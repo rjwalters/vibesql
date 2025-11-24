@@ -63,20 +63,68 @@ with vibesql.connect() as db:
 
 **Note**: Python bindings are excluded from the default workspace build to avoid requiring Python development headers. To build the Python bindings, you need Python 3.8+ and development headers installed.
 
+### Prerequisites
+
+**macOS**:
 ```bash
-# Install maturin
+# Python 3.8+ should already include development headers
+python3 --version  # Verify Python is installed
+```
+
+**Ubuntu/Debian**:
+```bash
+sudo apt-get install python3-dev
+```
+
+**Fedora/RHEL**:
+```bash
+sudo dnf install python3-devel
+```
+
+### Building the Package
+
+```bash
+# 1. Install maturin (Python packaging tool for Rust)
 pip install maturin
 
-# Build and install locally (from this directory)
+# 2. Navigate to the Python bindings directory
 cd crates/vibesql-python-bindings
+
+# 3. Build and install for local development (recommended for testing)
 maturin develop
 
-# Or build wheel
+# 4. Or build a wheel for distribution
 maturin build --release
+# Wheel will be in: target/wheels/vibesql-0.1.0-*.whl
 
-# To build as part of workspace (requires Python dev environment)
-cargo build --package vibesql-python-bindings
+# 5. Install the wheel
+pip install target/wheels/vibesql-0.1.0-*.whl
 ```
+
+### Quick Build Script
+
+From the repository root:
+
+```bash
+./scripts/build-python.sh
+```
+
+This script will:
+- Check for Python development headers
+- Install maturin if needed
+- Build the wheel in release mode
+- Show installation instructions
+
+### Building with Cargo (Advanced)
+
+If you need to build as part of the workspace:
+
+```bash
+# From repository root
+cargo build --package vibesql-python-bindings --release
+```
+
+Note: This only builds the Rust library, not the Python package. Use maturin for the full Python package.
 
 ## Documentation
 
