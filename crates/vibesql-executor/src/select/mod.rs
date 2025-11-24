@@ -9,6 +9,7 @@ mod iterator;
 pub mod join;
 mod join_executor;
 mod join_reorder_wrapper;
+#[allow(dead_code)] // Experimental feature with tests, not yet enabled in production
 mod monomorphic;
 mod order;
 #[cfg(feature = "parallel")]

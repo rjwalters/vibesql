@@ -4,7 +4,6 @@ pub mod coercion;
 mod combined;
 mod core;
 mod caching;
-mod context;
 mod parallel;
 mod single;
 mod combined_core;

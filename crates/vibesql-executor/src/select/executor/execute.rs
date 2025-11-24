@@ -273,16 +273,6 @@ impl SelectExecutor<'_> {
         Ok(left_results)
     }
 
-    /// Execute a FROM clause (table or join) and return combined schema and rows
-    pub(super) fn execute_from(
-        &self,
-        from: &vibesql_ast::FromClause,
-        cte_results: &HashMap<String, CteResult>,
-    ) -> Result<FromResult, ExecutorError> {
-        use crate::select::scan::execute_from_clause;
-        execute_from_clause(from, cte_results, self.database, None, None, self.outer_row, self.outer_schema, |query| self.execute_with_columns(query))
-    }
-
     /// Execute a FROM clause with WHERE and ORDER BY for optimization
     pub(super) fn execute_from_with_where(
         &self,
@@ -304,77 +294,4 @@ impl SelectExecutor<'_> {
         Ok(from_result)
     }
 
-    /// Try to execute using a monomorphic (type-specialized) plan
-    ///
-    /// Returns Some(rows) if a monomorphic plan was found and executed successfully.
-    /// Returns None if no matching pattern was found (fall back to regular execution).
-    ///
-    /// Monomorphic plans eliminate SqlValue enum overhead by using type-specific
-    /// accessors for ~2.4x performance improvement on known query patterns.
-    fn try_monomorphic_execution(
-        &self,
-        stmt: &vibesql_ast::SelectStmt,
-        cte_results: &HashMap<String, CteResult>,
-    ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
-        use crate::select::monomorphic::try_create_monomorphic_plan;
-
-        // Only try monomorphic path for queries without CTEs or set operations
-        // Supports both single-table queries (Q6) and multi-table joins (Q3)
-        if !cte_results.is_empty() || stmt.set_operation.is_some() {
-            return Ok(None);
-        }
-
-        // Check if we have a FROM clause
-        let from_clause = match &stmt.from {
-            Some(from) => from,
-            None => return Ok(None),
-        };
-
-        // Execute FROM clause (handles single tables, joins, etc.)
-        // For Q6: returns raw lineitem rows
-        // For Q3: returns joined rows (customer + orders + lineitem)
-        // Pass WHERE clause for join reordering optimization (critical for Q3)
-        #[cfg(feature = "profile-q6")]
-        let load_start = std::time::Instant::now();
-
-        let mut from_result = self.execute_from_with_where(
-            from_clause,
-            cte_results,
-            stmt.where_clause.as_ref(),
-            None, // ORDER BY applied after aggregation
-        )?;
-
-        #[cfg(feature = "profile-q6")]
-        {
-            let load_time = load_start.elapsed();
-            eprintln!("[Q6 PROFILE] Load time: {:?}, rows: {}, per-row: {:?}",
-                load_time, from_result.rows().len(), load_time / from_result.rows().len() as u32);
-        }
-
-        // Try to create a monomorphic plan using AST-based pattern matching
-        let plan = match try_create_monomorphic_plan(stmt, &from_result.schema) {
-            Some(p) => p,
-            None => return Ok(None),
-        };
-
-        // Execute the monomorphic plan using streaming if data is still an iterator
-        // This avoids materializing rows that will be filtered out, providing 2-3x speedup
-        // for queries with selective filters (e.g., TPC-H Q6)
-        let result_rows = match &mut from_result.data {
-            crate::select::join::FromData::Iterator(iter) => {
-                // Take ownership of the iterator and stream without materializing
-                let owned_iter = std::mem::replace(
-                    iter,
-                    crate::select::from_iterator::FromIterator::from_vec(vec![]),
-                );
-                plan.execute_stream(Box::new(owned_iter))?
-            }
-            crate::select::join::FromData::Materialized(_rows) => {
-                // Data is already materialized (e.g., from JOIN), use standard path
-                plan.execute(from_result.rows())?
-            }
-        };
-
-        Ok(Some(result_rows))
-    }
 }

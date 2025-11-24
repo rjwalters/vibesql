@@ -7,7 +7,7 @@ use crate::errors::ExecutorError;
 #[cfg(feature = "simd")]
 use crate::simd::comparison::{
     simd_eq_f64, simd_eq_i64, simd_ge_f64, simd_gt_f64, simd_gt_i64, simd_le_f64, simd_lt_f64,
-    simd_lt_i64, simd_ne_f64,
+    simd_lt_i64,
 };
 
 use vibesql_types::SqlValue;
