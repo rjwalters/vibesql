@@ -59,10 +59,10 @@ pub(super) fn build_merged_outer_schema<'a>(
 ///
 /// # Returns
 /// A merged row with values from both rows, or just the current row if no outer row exists
-pub(super) fn build_merged_outer_row(
-    current_row: &vibesql_storage::Row,
-    outer_row: Option<&vibesql_storage::Row>,
-) -> std::borrow::Cow<'_, vibesql_storage::Row> {
+pub(super) fn build_merged_outer_row<'a>(
+    current_row: &'a vibesql_storage::Row,
+    outer_row: Option<&'a vibesql_storage::Row>,
+) -> std::borrow::Cow<'a, vibesql_storage::Row> {
     if let Some(outer) = outer_row {
         // Merge: outer row values + current row values
         let mut merged_values = outer.values.clone();
