@@ -152,18 +152,23 @@ fn evaluate_predicate_i64_simd(
 
         ColumnPredicate::Between { low, high, .. } => {
             // BETWEEN is equivalent to: value >= low AND value <= high
-            let low_i64 = match low {
-                SqlValue::Integer(v) => *v,
-                SqlValue::Bigint(v) => *v,
+            // Optimize by converting to f64 and using SIMD BETWEEN logic
+            let low_f64 = match low {
+                SqlValue::Integer(v) => *v as f64,
+                SqlValue::Bigint(v) => *v as f64,
+                SqlValue::Double(v) => *v,
+                SqlValue::Float(v) => *v as f64,
                 _ => {
                     return Err(ExecutorError::Other(
                         "Incompatible types for BETWEEN".to_string(),
                     ))
                 }
             };
-            let high_i64 = match high {
-                SqlValue::Integer(v) => *v,
-                SqlValue::Bigint(v) => *v,
+            let high_f64 = match high {
+                SqlValue::Integer(v) => *v as f64,
+                SqlValue::Bigint(v) => *v as f64,
+                SqlValue::Double(v) => *v,
+                SqlValue::Float(v) => *v as f64,
                 _ => {
                     return Err(ExecutorError::Other(
                         "Incompatible types for BETWEEN".to_string(),
@@ -171,11 +176,17 @@ fn evaluate_predicate_i64_simd(
                 }
             };
 
-            let mut result = vec![true; values.len()];
-            for i in 0..values.len() {
-                result[i] = values[i] >= low_i64 && values[i] <= high_i64;
-            }
-            result
+            // Convert i64 values to f64 for SIMD processing
+            let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
+            let ge_low = simd_ge_f64(&f64_values, low_f64);
+            let le_high = simd_le_f64(&f64_values, high_f64);
+
+            // AND the two masks
+            ge_low
+                .iter()
+                .zip(le_high.iter())
+                .map(|(&a, &b)| a && b)
+                .collect()
         }
 
         // For LTE and GTE, we use LT/GT and equality checks
