@@ -20,6 +20,7 @@ pub mod bitmap;
 pub mod compiled_predicate;
 pub mod filter;
 pub mod predicate;
+pub mod temporal;
 
 pub use batch::{
     rows_to_record_batch, record_batch_to_rows,
