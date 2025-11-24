@@ -176,13 +176,13 @@ impl QueryArena {
     /// }
     /// ```
     #[inline]
-    pub fn alloc_vec<T>(&self) -> bumpalo::collections::Vec<T> {
+    pub fn alloc_vec<T>(&self) -> bumpalo::collections::Vec<'_, T> {
         bumpalo::collections::Vec::new_in(&self.bump)
     }
 
     /// Allocate a Vec with specified capacity
     #[inline]
-    pub fn alloc_vec_with_capacity<T>(&self, capacity: usize) -> bumpalo::collections::Vec<T> {
+    pub fn alloc_vec_with_capacity<T>(&self, capacity: usize) -> bumpalo::collections::Vec<'_, T> {
         bumpalo::collections::Vec::with_capacity_in(capacity, &self.bump)
     }
 
@@ -292,23 +292,33 @@ mod tests {
         let bytes1 = arena.allocated_bytes();
         assert!(bytes1 > 0);
 
-        // Reset
+        // Reset - bumpalo keeps chunks allocated but resets the bump pointer
         arena.reset();
         let bytes2 = arena.allocated_bytes();
-        assert_eq!(bytes2, 0);
+        // After reset, chunks are kept allocated (not freed) for reuse
+        assert_eq!(bytes2, bytes1, "Reset should keep chunks for reuse");
 
         // Second allocation (reuses space)
         let _bitmap2 = arena.alloc_bitmap(1000);
         let bytes3 = arena.allocated_bytes();
-        assert!(bytes3 > 0);
+        // Should reuse the same chunk without growing
+        assert_eq!(bytes3, bytes1, "Should reuse existing chunk without growing");
     }
 
     #[test]
     fn test_with_capacity() {
         let arena = QueryArena::with_capacity(1024);
+        let initial_bytes = arena.allocated_bytes();
+
+        // Bumpalo rounds up capacity to efficient chunk sizes (often page-aligned)
+        // so allocated_bytes() may be larger than requested capacity
+        assert!(initial_bytes >= 1024, "Should allocate at least requested capacity");
+
         let _bitmap = arena.alloc_bitmap(100);
+        let after_alloc = arena.allocated_bytes();
+
         // Should not need to grow for this small allocation
-        assert!(arena.allocated_bytes() <= 1024);
+        assert_eq!(after_alloc, initial_bytes, "Small allocation should not grow chunk");
     }
 
     #[test]
