@@ -25,7 +25,11 @@ export default defineConfig({
       name: 'copy-benchmark-data',
       closeBundle() {
         // Copy benchmark data to dist after build
-        const benchmarkSrc = resolve(__dirname, '../benchmarks/benchmark_results.json')
+        // Try public directory first (for local development), then repo root (for CI)
+        const benchmarkSources = [
+          resolve(__dirname, 'public/benchmarks/benchmark_results.json'),
+          resolve(__dirname, '../benchmarks/benchmark_results.json'),
+        ]
         const benchmarkDest = resolve(__dirname, 'dist/benchmarks/benchmark_results.json')
 
         try {
@@ -35,12 +39,19 @@ export default defineConfig({
             mkdirSync(benchmarksDir, { recursive: true })
           }
 
-          // Copy the file if source exists
-          if (existsSync(benchmarkSrc)) {
-            copyFileSync(benchmarkSrc, benchmarkDest)
-            console.log('✓ Copied benchmark_results.json to dist/benchmarks/')
-          } else {
-            console.warn('⚠️  benchmark_results.json not found at:', benchmarkSrc)
+          // Try each source location
+          let copied = false
+          for (const benchmarkSrc of benchmarkSources) {
+            if (existsSync(benchmarkSrc)) {
+              copyFileSync(benchmarkSrc, benchmarkDest)
+              console.log('✓ Copied benchmark_results.json from:', benchmarkSrc)
+              copied = true
+              break
+            }
+          }
+
+          if (!copied) {
+            console.warn('⚠️  benchmark_results.json not found in:', benchmarkSources.join(', '))
           }
         } catch (err) {
           console.error('Failed to copy benchmark data:', err)

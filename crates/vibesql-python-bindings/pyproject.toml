@@ -1,0 +1,38 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "vibesql"
+version = "0.1.0"
+description = "Python bindings for VibeSQL SQL database engine"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT OR Apache-2.0" }
+keywords = ["sql", "database", "query", "engine"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Database",
+]
+
+[project.urls]
+Homepage = "https://github.com/rjwalters/vibesql"
+Repository = "https://github.com/rjwalters/vibesql"
+
+[tool.maturin]
+# Path to Cargo.toml relative to pyproject.toml
+manifest-path = "Cargo.toml"
+# Python source directory (if you add any Python helper code)
+python-source = "python"
+# Include README in the package
+include = ["README.md"]
