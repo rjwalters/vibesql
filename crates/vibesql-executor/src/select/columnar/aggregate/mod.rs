@@ -43,6 +43,8 @@ pub enum AggregateSource {
     Column(usize),
     /// Complex expression that needs evaluation (e.g., a * b)
     Expression(Expression),
+    /// COUNT(*) - count all rows (not tied to any specific column)
+    CountStar,
 }
 
 /// A complete aggregate specification
@@ -125,6 +127,10 @@ pub fn compute_multiple_aggregates(
                 })?;
                 expression::compute_expression_aggregate(rows, expr, spec.op, filter_bitmap, schema)?
             }
+            // COUNT(*) path: count all rows
+            AggregateSource::CountStar => {
+                functions::compute_count(&scan, filter_bitmap)?
+            }
         };
         results.push(result);
     }
@@ -150,7 +156,7 @@ mod tests {
         let scan = ColumnarScan::new(&rows);
 
         let result = functions::compute_sum(&scan, 0, None).unwrap();
-        assert!(matches!(result, SqlValue::Double(sum) if (sum - 60.0).abs() < 0.001));
+        assert_eq!(result, SqlValue::Integer(60));
 
         let result = functions::compute_sum(&scan, 1, None).unwrap();
         assert!(matches!(result, SqlValue::Double(sum) if (sum - 7.5).abs() < 0.001));
@@ -172,7 +178,7 @@ mod tests {
         let filter = vec![true, false, true]; // Include rows 0 and 2
 
         let result = functions::compute_sum(&scan, 0, Some(&filter)).unwrap();
-        assert!(matches!(result, SqlValue::Double(sum) if (sum - 40.0).abs() < 0.001));
+        assert_eq!(result, SqlValue::Integer(40));
     }
 
     #[test]
@@ -185,7 +191,7 @@ mod tests {
 
         let results = compute_multiple_aggregates(&rows, &aggregates, None, None).unwrap();
         assert_eq!(results.len(), 2);
-        assert!(matches!(results[0], SqlValue::Double(sum) if (sum - 60.0).abs() < 0.001));
+        assert_eq!(results[0], SqlValue::Integer(60));
         assert!(matches!(results[1], SqlValue::Double(avg) if (avg - 2.5).abs() < 0.001));
     }
 
@@ -235,7 +241,7 @@ mod tests {
         let aggregates = result.unwrap();
         assert_eq!(aggregates.len(), 1);
         assert!(matches!(aggregates[0].op, AggregateOp::Count));
-        assert!(matches!(aggregates[0].source, AggregateSource::Column(0)));
+        assert!(matches!(aggregates[0].source, AggregateSource::CountStar));
 
         // Test multiple aggregates: SUM(col1), AVG(col2)
         let exprs = vec![

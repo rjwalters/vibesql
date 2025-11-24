@@ -134,7 +134,14 @@ pub fn simd_aggregate_i64(
 
     // Return aggregated result
     match op {
-        AggregateOp::Sum => Ok(SqlValue::Double(sum as f64)),
+        AggregateOp::Sum => {
+            // Preserve integer types for SUM, matching MIN/MAX behavior
+            Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
+                SqlValue::Integer(_) => SqlValue::Integer(sum),
+                SqlValue::Smallint(_) => SqlValue::Smallint(sum as i16),
+                _ => SqlValue::Bigint(sum),
+            })
+        }
         AggregateOp::Avg => Ok(SqlValue::Double(sum as f64 / count as f64)),
         AggregateOp::Min => {
             Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
@@ -321,8 +328,8 @@ mod tests {
         let scan = ColumnarScan::new(&rows);
 
         let result = simd_aggregate_i64(&scan, 0, AggregateOp::Sum, None).unwrap();
-        // SUM returns Double to match scalar behavior
-        assert!(matches!(result, SqlValue::Double(sum) if (sum - 60.0).abs() < 0.001));
+        // SUM preserves integer types
+        assert_eq!(result, SqlValue::Integer(60));
     }
 
     #[test]
@@ -378,8 +385,8 @@ mod tests {
         let scan = ColumnarScan::new(&rows);
 
         let result = simd_aggregate_i64(&scan, 0, AggregateOp::Sum, None).unwrap();
-        // SUM returns Double to match scalar behavior
-        assert!(matches!(result, SqlValue::Double(sum) if (sum - 40.0).abs() < 0.001));
+        // SUM preserves integer types
+        assert_eq!(result, SqlValue::Integer(40));
 
         let count_result = simd_aggregate_i64(&scan, 0, AggregateOp::Count, None).unwrap();
         assert_eq!(count_result, SqlValue::Integer(2));
@@ -396,8 +403,8 @@ mod tests {
         let filter = vec![true, false, true]; // Include rows 0 and 2
 
         let result = simd_aggregate_i64(&scan, 0, AggregateOp::Sum, Some(&filter)).unwrap();
-        // SUM returns Double to match scalar behavior
-        assert!(matches!(result, SqlValue::Double(sum) if (sum - 40.0).abs() < 0.001));
+        // SUM preserves integer types
+        assert_eq!(result, SqlValue::Integer(40));
     }
 
     #[test]

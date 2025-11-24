@@ -9,6 +9,7 @@
 //! - **Arithmetic operations**: `+`, `-`, `*`, `/` for f64 columns; `+`, `-`, `*` for i64 columns
 //! - **Comparison operations**: `<`, `<=`, `>`, `>=`, `=`, `!=`
 //! - **Aggregations**: `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`
+//! - **Expression evaluation**: General-purpose SIMD for WHERE/SELECT/ORDER BY expressions
 //! - **NULL handling**: Bitmask-based NULL value support
 //! - **Remainder handling**: Automatic fallback to scalar for non-aligned data
 //!
@@ -56,7 +57,23 @@ pub mod arithmetic;
 #[cfg(feature = "simd")]
 pub mod comparison;
 #[cfg(feature = "simd")]
+pub mod expression;
+#[cfg(feature = "simd")]
 pub mod null_handling;
+#[cfg(feature = "simd")]
+pub mod hashing;
+#[cfg(feature = "simd")]
+pub mod cpu_features;
+#[cfg(feature = "simd")]
+pub mod dispatch;
+
+// ARM64 NEON-specific modules
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+pub mod arithmetic_neon;
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+pub mod comparison_neon;
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+pub mod aggregation_neon;
 
 // Re-export public API
 #[cfg(feature = "simd")]
@@ -66,4 +83,12 @@ pub use arithmetic::*;
 #[cfg(feature = "simd")]
 pub use comparison::*;
 #[cfg(feature = "simd")]
+pub use expression::*;
+#[cfg(feature = "simd")]
 pub use null_handling::*;
+#[cfg(feature = "simd")]
+pub use hashing::*;
+#[cfg(feature = "simd")]
+pub use cpu_features::*;
+#[cfg(feature = "simd")]
+pub use dispatch::*;

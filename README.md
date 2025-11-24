@@ -254,35 +254,58 @@ END;
 
 ---
 
-### 🐕 Dogfooding: SQLLogicTest Database Integration
+### 🐕 Dogfooding: Database-Integrated Testing & Benchmarking
 
-**VibeSQL stores its own test results in VibeSQL!** Database-integrated workflow for ~5.9M test cases.
+**VibeSQL stores its own test results and benchmark performance in VibeSQL!** Complete database-integrated workflow for ~5.9M test cases and TPC-H performance tracking.
 
+#### Test Results Tracking
 ```bash
-# Run tests (parallel mode recommended, 10-20 minutes on 8 CPUs)
+# Run tests with automatic database tracking
+make test
+
+# Or run SQLLogicTest suite directly (parallel mode, 10-20 minutes on 8 CPUs)
 ./scripts/sqllogictest run --parallel --workers 8
 
-# Query results with SQL
+# Query test results with SQL
 ./scripts/sqllogictest query --preset failed-files
 ./scripts/sqllogictest query --preset by-category
 
-# Test individual files
-./scripts/sqllogictest test select1.test
+# Analyze test failures
+make analyze-tests
 ```
 
-**Documentation**: [Quick Start](docs/sqllogictest/SQLLOGICTEST_QUICKSTART.md) | [Complete Guide](docs/sqllogictest/SQLLOGICTEST_DATABASE.md)
+#### Benchmark Performance Tracking
+```bash
+# Run TPC-H benchmarks with automatic tracking
+make benchmark
+
+# Query benchmark results
+./scripts/query_benchmark_results.py --latest
+./scripts/query_benchmark_results.py --trend
+./scripts/query_benchmark_results.py --regressions
+
+# Analyze performance over time
+make analyze-benchmarks
+```
+
+**Documentation**:
+- Tests: [Quick Start](docs/sqllogictest/SQLLOGICTEST_QUICKSTART.md) | [Complete Guide](docs/sqllogictest/SQLLOGICTEST_DATABASE.md)
+- Benchmarks: [Dogfooding Benchmarks Guide](docs/DOGFOODING_BENCHMARKS.md)
 
 ### Running Tests
 
 ```bash
-# Run all tests with coverage
-cargo coverage
+# Run all tests using Makefile (recommended)
+make test                      # All tests + analysis
+make test-workspace            # Unit + integration tests only
+make test-sqllogictest         # SQLLogicTest suite (parallel)
 
-# Run comprehensive SQLLogicTest suite (recommended)
-./scripts/sqllogictest run --parallel --workers 8
+# Or use scripts directly
+./scripts/sqllogictest run --parallel --workers 8  # Full suite
+./scripts/sqllogictest test select1.test           # Single file
 
-# Test individual files for debugging
-./scripts/sqllogictest test random/select/slt_good_19.test
+# Analyze test results
+make analyze-tests             # Show failure patterns and fix opportunities
 ```
 
 **Achievement**: 100% conformance (628/628 files, ~5.9M tests) using systematic punchlist approach. See [testing docs](docs/testing/sqllogictest/QUICK_START.md) for complete workflow.
@@ -290,6 +313,46 @@ cargo coverage
 ---
 
 ## 📊 Performance Benchmarking
+
+### TPC-H Benchmarking with Performance Tracking
+
+**NEW:** VibeSQL now tracks TPC-H benchmark performance in its own database! Run benchmarks and automatically store results for historical analysis.
+
+**Quick Start** (Recommended):
+```bash
+# Run TPC-H benchmarks with automatic database tracking
+make benchmark                 # Run benchmarks + show analysis
+
+# Or run benchmark directly
+make benchmark-tpch            # Run + store results in database
+
+# Query benchmark results
+./scripts/query_benchmark_results.py --latest      # Latest run
+./scripts/query_benchmark_results.py --trend       # Performance over time
+./scripts/query_benchmark_results.py --regressions # Queries that got slower
+./scripts/query_benchmark_results.py --stats       # Statistics across all runs
+
+# Analyze performance
+make analyze-benchmarks        # Show performance analysis
+```
+
+**Features**:
+- ✅ **Automatic tracking** - Stores results in VibeSQL database
+- ✅ **Historical comparison** - Track performance across commits/branches
+- ✅ **Regression detection** - Identify queries that got slower (>10%)
+- ✅ **Improvement visibility** - Celebrate optimizations with data
+- ✅ **Git integration** - Links performance to commits and branches
+
+**Manual Benchmark Execution**:
+```bash
+# Run all 22 TPC-H queries with 30s timeout per query
+./scripts/bench-tpch.sh 30 summary
+
+# Custom timeout (60 seconds per query)
+./scripts/bench-tpch.sh 60 summary
+```
+
+### SQLLogicTest Suite Benchmarking
 
 Comprehensive benchmarking tools for the full SQLLogicTest suite (628 files, ~5.9M tests).
 
@@ -303,22 +366,6 @@ cd benchmarks/suite
 **Recent Performance**: 87.45s total, 0.140s avg (628/628 passing, 100%)
 
 See [benchmarks/suite/README.md](benchmarks/suite/README.md) for complete documentation.
-
-### TPC-H Query Profiling
-
-Comprehensive TPC-H benchmark suite for all 22 standard queries with automatic timeout handling.
-
-**Quick Start** (Recommended):
-```bash
-# Run all 22 TPC-H queries with 30s timeout per query (default)
-./scripts/bench-tpch.sh
-
-# Show summary only (color-coded results)
-./scripts/bench-tpch.sh 30 summary
-
-# Custom timeout (60 seconds per query)
-./scripts/bench-tpch.sh 60 summary
-```
 
 **Example Output**:
 ```
@@ -502,8 +549,13 @@ cd vibesql
 # If already cloned, initialize submodules
 git submodule update --init --recursive
 
-# Run tests (requires Rust)
-cargo test --workspace
+# Build and test everything (using Makefile)
+make all
+
+# Or use individual targets
+make build              # Build all Rust crates
+make test               # Run all tests with analysis
+make benchmark          # Run TPC-H benchmarks with tracking
 
 # Run the interactive SQL shell (CLI)
 cargo run -p vibesql-cli
@@ -833,6 +885,77 @@ vibesql -c "\save production.sql"
 
 ---
 
+## 🛠️ Development Workflow
+
+VibeSQL includes a comprehensive **Makefile** for streamlined development:
+
+### Quick Reference
+
+```bash
+# Build
+make build              # Build all Rust crates in release mode
+make build-wasm         # Build WebAssembly bindings for web demo
+make build-python       # Build Python bindings wheel
+
+# Test
+make test               # Run all tests + show analysis
+make test-unit          # Run unit tests only
+make test-workspace     # Run workspace tests (unit + integration)
+make test-sqllogictest  # Run SQLLogicTest suite (parallel, 8 workers)
+
+# Benchmark
+make benchmark          # Run TPC-H benchmarks + show analysis
+make benchmark-tpch     # Run TPC-H benchmarks with database tracking
+
+# Analysis
+make analyze            # Show test and benchmark analysis
+make analyze-tests      # Show SQLLogicTest failure analysis
+make analyze-benchmarks # Show TPC-H performance analysis
+
+# Utilities
+make all                # Build and test everything (default)
+make clean              # Clean build artifacts
+make help               # Show all available targets
+```
+
+### Typical Workflows
+
+**Daily Development**:
+```bash
+make all                # Build + test + analyze
+```
+
+**Performance Work**:
+```bash
+# Baseline
+git checkout main
+make benchmark-tpch
+
+# Make changes
+git checkout -b feature-optimization
+# ... edit code ...
+make benchmark-tpch
+
+# Compare
+./scripts/query_benchmark_results.py --comparison
+./scripts/query_benchmark_results.py --regressions
+```
+
+**Bug Fixing**:
+```bash
+# Identify failing tests
+make test
+make analyze-tests
+
+# Fix and verify
+# ... edit code ...
+./scripts/sqllogictest test path/to/failing/test.test
+```
+
+See [DOGFOODING_BENCHMARKS.md](docs/DOGFOODING_BENCHMARKS.md) for complete workflow documentation.
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Build Errors
@@ -840,9 +963,10 @@ vibesql -c "\save production.sql"
 If you encounter compilation errors after switching branches or pulling updates, try a clean build:
 
 ```bash
+make clean
+make build
+# Or use cargo directly
 cargo clean && cargo build --release
-# Or use the convenience script
-./scripts/clean-build.sh --release
 ```
 
 For more help, see the [issue tracker](https://github.com/rjwalters/vibesql/issues).
@@ -851,16 +975,21 @@ For more help, see the [issue tracker](https://github.com/rjwalters/vibesql/issu
 
 ## 📖 Documentation
 
-**User Guides**:
+**Getting Started**:
+- **[Makefile Reference](#development-workflow)** - Build, test, and benchmark commands
 - **[docs/CLI_GUIDE.md](docs/CLI_GUIDE.md)** - Complete CLI user guide (meta-commands, import/export, configuration)
-- **[docs/reference/FEATURE_STATUS.md](docs/reference/FEATURE_STATUS.md)** - Detailed feature breakdown
 - **[.vibesqlrc.example](.vibesqlrc.example)** - Example configuration file
 
-**Testing & Conformance**:
+**Testing & Performance**:
 - **[SQL:1999 Conformance Report](https://rjwalters.github.io/vibesql/conformance.html)** - Live conformance test results
+- **[docs/DOGFOODING_BENCHMARKS.md](docs/DOGFOODING_BENCHMARKS.md)** - Benchmark tracking and performance analysis
 - [docs/testing/TESTING_STRATEGY.md](docs/testing/TESTING_STRATEGY.md) - Test approach and strategy
 - [docs/testing/sqllogictest/SQLLOGICTEST_QUICKSTART.md](docs/testing/sqllogictest/SQLLOGICTEST_QUICKSTART.md) - SQLLogicTest quick start
 - [docs/roadmaps/PUNCHLIST_100_CONFORMANCE.md](docs/roadmaps/PUNCHLIST_100_CONFORMANCE.md) - Conformance strategy
+
+**Features & Reference**:
+- **[docs/reference/FEATURE_STATUS.md](docs/reference/FEATURE_STATUS.md)** - Detailed feature breakdown
+- [docs/performance/BENCHMARKING.md](docs/performance/BENCHMARKING.md) - Performance benchmarking guide
 
 **Architecture & Design**:
 - [docs/decisions/](docs/decisions/) - Architecture Decision Records

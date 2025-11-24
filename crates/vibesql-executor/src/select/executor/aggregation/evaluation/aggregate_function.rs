@@ -62,6 +62,26 @@ pub(super) fn evaluate(
         )));
     }
 
+    // Special handling for COUNT with any argument
+    // For COUNT, we need to evaluate the expression and count non-NULL results
+    // However, COUNT(*) should count ALL rows regardless of NULL values
+    if name.to_uppercase() == "COUNT" {
+        // Double-check for COUNT(*) with various representations
+        // This handles cases where the wildcard might not be caught by the fast path above
+        let is_count_star_fallback = matches!(&args[0], vibesql_ast::Expression::Wildcard)
+            || matches!(
+                &args[0],
+                vibesql_ast::Expression::ColumnRef { table: None, column } if column == "*"
+            );
+
+        if is_count_star_fallback {
+            // COUNT(*) fallback: just count all rows
+            let result = vibesql_types::SqlValue::Integer(group_rows.len() as i64);
+            executor.aggregate_cache.borrow_mut().insert(cache_key, result.clone());
+            return Ok(result);
+        }
+    }
+
     for row in group_rows {
         // Clear CSE cache before evaluating each row to prevent column values
         // from being incorrectly cached across different rows

@@ -22,11 +22,35 @@ pub struct ParallelSearchConfig {
 
 impl Default for ParallelSearchConfig {
     fn default() -> Self {
-        // Read time budget from environment variable if set
+        Self::with_table_count(4) // Default assumes 4 tables
+    }
+}
+
+impl ParallelSearchConfig {
+    /// Create a config with adaptive time budget based on table count
+    ///
+    /// The time budget increases with query complexity:
+    /// - 1-3 tables: 500ms (simple queries)
+    /// - 4-5 tables: 1000ms (typical OLAP queries)
+    /// - 6-7 tables: 1500ms (complex multi-way joins like Q7)
+    /// - 8+ tables: 2000ms (very complex queries like Q21)
+    ///
+    /// This adaptive approach gives more time to complex queries that need it
+    /// while keeping simple queries fast.
+    pub fn with_table_count(num_tables: usize) -> Self {
+        // Read time budget from environment variable if set (overrides adaptive)
         let time_budget_ms = std::env::var("JOIN_REORDER_TIME_BUDGET_MS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(1000);
+            .unwrap_or_else(|| {
+                // Adaptive budget based on table count
+                match num_tables {
+                    0..=3 => 500,   // Simple queries
+                    4..=5 => 1000,  // Typical OLAP
+                    6..=7 => 1500,  // Complex multi-way joins (Q7)
+                    _ => 2000,      // Very complex (Q21)
+                }
+            });
 
         let verbose = std::env::var("JOIN_REORDER_VERBOSE").is_ok();
 

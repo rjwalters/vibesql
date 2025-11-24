@@ -15,6 +15,7 @@
 //! See `PHASE3_VECTORIZATION.md` in the crate root for complete design documentation.
 
 pub mod aggregate;
+pub mod arithmetic;
 pub mod batch;
 pub mod bitmap;
 pub mod compiled_predicate;
@@ -22,11 +23,13 @@ pub mod filter;
 pub mod predicate;
 pub mod temporal;
 
+pub use arithmetic::evaluate_arithmetic_simd;
 pub use batch::{
     rows_to_record_batch, record_batch_to_rows,
 };
 pub use filter::filter_record_batch_simd;
 pub use predicate::apply_where_filter_vectorized;
+pub use temporal::evaluate_temporal_simd;
 
 /// Default chunk size for vectorized operations
 /// Tuned for L1 cache utilization (typical 32-64KB)

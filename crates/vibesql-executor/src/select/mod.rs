@@ -18,6 +18,7 @@ mod parallel;
 mod predicate_graph;
 mod vectorized;
 mod projection;
+mod projection_simd;
 pub(crate) mod scan;
 mod set_operations;
 mod window;
