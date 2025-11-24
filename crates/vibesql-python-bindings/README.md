@@ -61,15 +61,21 @@ with vibesql.connect() as db:
 
 ## Building
 
+**Note**: Python bindings are excluded from the default workspace build to avoid requiring Python development headers. To build the Python bindings, you need Python 3.8+ and development headers installed.
+
 ```bash
 # Install maturin
 pip install maturin
 
-# Build and install locally
+# Build and install locally (from this directory)
+cd crates/vibesql-python-bindings
 maturin develop
 
 # Or build wheel
 maturin build --release
+
+# To build as part of workspace (requires Python dev environment)
+cargo build --package vibesql-python-bindings
 ```
 
 ## Documentation
