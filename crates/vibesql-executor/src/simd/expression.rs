@@ -77,10 +77,10 @@ pub fn can_use_simd_for_expression(expr: &Expression, row_count: usize) -> bool 
 fn is_simple_operand(expr: &Expression) -> bool {
     match expr {
         // Column references are simple
-        Expression::Identifier(_) | Expression::CompoundIdentifier(_) => true,
+        Expression::ColumnRef { .. } => true,
 
         // Literals are simple
-        Expression::Value(_) => true,
+        Expression::Literal(_) => true,
 
         // Nested binary ops are simple if their operands are simple
         Expression::BinaryOp { left, op, right } => {
@@ -170,19 +170,66 @@ fn eval_operand_to_buffer(
     match expr {
         // Recursively handle nested binary operations
         Expression::BinaryOp { left, op, right } => {
-            eval_binary_op_simd(left, *op, right, rows, evaluator)?
+            let result_values = eval_binary_op_simd(left, *op, right, rows, evaluator)?;
+            // Convert Vec<SqlValue> to NumericBuffer
+            let numeric_values: Result<Vec<_>, _> = result_values
                 .into_iter()
-                .collect::<Result<NumericBuffer, _>>()
+                .map(|v| NumericValue::from_sql_value(&v))
+                .collect();
+            convert_to_buffer(numeric_values?)
         }
 
         // For simple expressions (columns, literals), evaluate normally
-        _ => rows
-            .iter()
-            .map(|row| {
-                let value = evaluator.eval(expr, row)?;
-                NumericValue::from_sql_value(&value)
+        _ => {
+            let numeric_values: Result<Vec<_>, _> = rows
+                .iter()
+                .map(|row| {
+                    let value = evaluator.eval(expr, row)?;
+                    NumericValue::from_sql_value(&value)
+                })
+                .collect();
+            convert_to_buffer(numeric_values?)
+        }
+    }
+}
+
+/// Convert a vector of NumericValues to a typed NumericBuffer
+#[cfg(feature = "simd")]
+fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, ExecutorError> {
+    // Determine if we can use Int64 or need Float64
+    let has_float = values.iter().any(|v| matches!(v, NumericValue::Float64(_)));
+    let has_null = values.iter().any(|v| matches!(v, NumericValue::Null));
+
+    if has_null {
+        // For now, we don't handle NULL values in SIMD path
+        // This is a simplification - full implementation would need NULL bitmask
+        return Err(ExecutorError::UnsupportedExpression(
+            "NULL values not yet supported in SIMD expression evaluation".to_string(),
+        ));
+    }
+
+    if has_float {
+        // Use Float64
+        let buf: Vec<f64> = values
+            .into_iter()
+            .map(|v| match v {
+                NumericValue::Int64(n) => n as f64,
+                NumericValue::Float64(f) => f,
+                NumericValue::Null => 0.0, // Won't happen due to check above
             })
-            .collect(),
+            .collect();
+        Ok(NumericBuffer::Float64(buf))
+    } else {
+        // Use Int64
+        let buf: Vec<i64> = values
+            .into_iter()
+            .map(|v| match v {
+                NumericValue::Int64(n) => n,
+                NumericValue::Float64(_) => unreachable!(),
+                NumericValue::Null => 0, // Won't happen due to check above
+            })
+            .collect();
+        Ok(NumericBuffer::Int64(buf))
     }
 }
 
@@ -302,50 +349,6 @@ impl NumericBuffer {
         match self {
             NumericBuffer::Int64(v) => v.iter().map(|&x| x as f64).collect(),
             NumericBuffer::Float64(v) => v.clone(),
-        }
-    }
-}
-
-#[cfg(feature = "simd")]
-impl std::iter::FromIterator<Result<NumericValue, ExecutorError>> for Result<NumericBuffer, ExecutorError> {
-    fn from_iter<I: IntoIterator<Item = Result<NumericValue, ExecutorError>>>(iter: I) -> Self {
-        let values: Result<Vec<_>, _> = iter.collect();
-        let values = values?;
-
-        // Determine if we can use Int64 or need Float64
-        let has_float = values.iter().any(|v| matches!(v, NumericValue::Float64(_)));
-        let has_null = values.iter().any(|v| matches!(v, NumericValue::Null));
-
-        if has_null {
-            // For now, we don't handle NULL values in SIMD path
-            // This is a simplification - full implementation would need NULL bitmask
-            return Err(ExecutorError::UnsupportedExpression(
-                "NULL values not yet supported in SIMD expression evaluation".to_string(),
-            ));
-        }
-
-        if has_float {
-            // Use Float64
-            let buf: Vec<f64> = values
-                .into_iter()
-                .map(|v| match v {
-                    NumericValue::Int64(n) => n as f64,
-                    NumericValue::Float64(f) => f,
-                    NumericValue::Null => 0.0, // Won't happen due to check above
-                })
-                .collect();
-            Ok(NumericBuffer::Float64(buf))
-        } else {
-            // Use Int64
-            let buf: Vec<i64> = values
-                .into_iter()
-                .map(|v| match v {
-                    NumericValue::Int64(n) => n,
-                    NumericValue::Float64(_) => unreachable!(),
-                    NumericValue::Null => 0, // Won't happen due to check above
-                })
-                .collect();
-            Ok(NumericBuffer::Int64(buf))
         }
     }
 }
