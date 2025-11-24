@@ -237,6 +237,8 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
 
+    // ===== Basic functionality tests =====
+
     #[test]
     fn test_simd_multiply_columns() {
         // Test: price * quantity
@@ -342,6 +344,503 @@ mod tests {
         assert!((result_arr.value(1) - 160.0).abs() < 0.001);
         assert!((result_arr.value(2) - 255.0).abs() < 0.001);
     }
+
+    // ===== All arithmetic operations =====
+
+    #[test]
+    fn test_simd_addition() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![10.0, 20.0, 30.0, 40.0]);
+        let b_array = Float64Array::from(vec![1.0, 2.0, 3.0, 4.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 11.0);
+        assert_eq!(result_arr.value(1), 22.0);
+        assert_eq!(result_arr.value(2), 33.0);
+        assert_eq!(result_arr.value(3), 44.0);
+    }
+
+    #[test]
+    fn test_simd_subtraction() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![100.0, 200.0, 300.0, 400.0]);
+        let b_array = Float64Array::from(vec![10.0, 20.0, 30.0, 40.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Minus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 90.0);
+        assert_eq!(result_arr.value(1), 180.0);
+        assert_eq!(result_arr.value(2), 270.0);
+        assert_eq!(result_arr.value(3), 360.0);
+    }
+
+    #[test]
+    fn test_simd_division() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![100.0, 200.0, 300.0, 400.0]);
+        let b_array = Float64Array::from(vec![10.0, 20.0, 30.0, 40.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Divide,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 10.0);
+        assert_eq!(result_arr.value(1), 10.0);
+        assert_eq!(result_arr.value(2), 10.0);
+        assert_eq!(result_arr.value(3), 10.0);
+    }
+
+    // ===== Integer operations =====
+
+    #[test]
+    fn test_simd_int64_operations() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Int64, false),
+            Field::new("b", DataType::Int64, false),
+        ]);
+        let a_array = Int64Array::from(vec![10, 20, 30, 40]);
+        let b_array = Int64Array::from(vec![2, 3, 4, 5]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        // Test addition
+        let add_expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &add_expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(result_arr.value(0), 12);
+        assert_eq!(result_arr.value(1), 23);
+
+        // Test multiplication
+        let mul_expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &mul_expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(result_arr.value(0), 20);
+        assert_eq!(result_arr.value(1), 60);
+    }
+
+    // ===== Edge cases =====
+
+    #[test]
+    fn test_empty_batch() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(Vec::<f64>::new());
+        let b_array = Float64Array::from(Vec::<f64>::new());
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_single_row() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![5.0]);
+        let b_array = Float64Array::from(vec![3.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+        assert_eq!(result_arr.value(0), 15.0);
+    }
+
+    #[test]
+    fn test_large_batch() {
+        let size = 10000;
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_vals: Vec<f64> = (0..size).map(|i| i as f64).collect();
+        let b_vals: Vec<f64> = (0..size).map(|i| (i * 2) as f64).collect();
+        let a_array = Float64Array::from(a_vals);
+        let b_array = Float64Array::from(b_vals);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.len(), size);
+        assert_eq!(result_arr.value(0), 0.0);
+        assert_eq!(result_arr.value(100), 300.0);
+    }
+
+    #[test]
+    fn test_negative_values() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![-10.0, -20.0, -30.0]);
+        let b_array = Float64Array::from(vec![5.0, 10.0, 15.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), -50.0);
+        assert_eq!(result_arr.value(1), -200.0);
+        assert_eq!(result_arr.value(2), -450.0);
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
+        let b_array = Float64Array::from(vec![2.0, 0.0, 5.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Divide,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 5.0);
+        assert!(result_arr.value(1).is_infinite());
+        assert_eq!(result_arr.value(2), 6.0);
+    }
+
+    #[test]
+    fn test_zero_values() {
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![0.0, 5.0, 0.0, 10.0]);
+        let b_array = Float64Array::from(vec![10.0, 0.0, 0.0, 20.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(a_array), Arc::new(b_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 0.0);
+        assert_eq!(result_arr.value(1), 0.0);
+        assert_eq!(result_arr.value(2), 0.0);
+        assert_eq!(result_arr.value(3), 200.0);
+    }
+
+    // ===== Literal operations =====
+
+    #[test]
+    fn test_literal_addition() {
+        let schema = Schema::new(vec![Field::new("a", DataType::Float64, false)]);
+        let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Float(5.0))),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 15.0);
+        assert_eq!(result_arr.value(1), 25.0);
+        assert_eq!(result_arr.value(2), 35.0);
+    }
+
+    #[test]
+    fn test_literal_int() {
+        let schema = Schema::new(vec![Field::new("a", DataType::Int64, false)]);
+        let a_array = Int64Array::from(vec![10, 20, 30]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Int64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 20);
+        assert_eq!(result_arr.value(1), 40);
+        assert_eq!(result_arr.value(2), 60);
+    }
+
+    // ===== Complex nested expressions =====
+
+    #[test]
+    fn test_deeply_nested_expression() {
+        // Test: (a + b) * (c - d)
+        let schema = Schema::new(vec![
+            Field::new("a", DataType::Float64, false),
+            Field::new("b", DataType::Float64, false),
+            Field::new("c", DataType::Float64, false),
+            Field::new("d", DataType::Float64, false),
+        ]);
+        let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
+        let b_array = Float64Array::from(vec![5.0, 10.0, 15.0]);
+        let c_array = Float64Array::from(vec![100.0, 200.0, 300.0]);
+        let d_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(a_array),
+                Arc::new(b_array),
+                Arc::new(c_array),
+                Arc::new(d_array),
+            ],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "a".to_string(),
+                }),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "b".to_string(),
+                }),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c".to_string(),
+                }),
+                op: BinaryOperator::Minus,
+                right: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "d".to_string(),
+                }),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        // Expected: (10+5)*(100-10) = 15*90 = 1350
+        assert!((result_arr.value(0) - 1350.0).abs() < 0.001);
+        // Expected: (20+10)*(200-20) = 30*180 = 5400
+        assert!((result_arr.value(1) - 5400.0).abs() < 0.001);
+        // Expected: (30+15)*(300-30) = 45*270 = 12150
+        assert!((result_arr.value(2) - 12150.0).abs() < 0.001);
+    }
+
+    // ===== Column reference test =====
+
+    #[test]
+    fn test_simple_column_reference() {
+        let schema = Schema::new(vec![Field::new("a", DataType::Float64, false)]);
+        let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
+
+        let expr = Expression::ColumnRef {
+            table: None,
+            column: "a".to_string(),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        assert_eq!(result_arr.value(0), 10.0);
+        assert_eq!(result_arr.value(1), 20.0);
+        assert_eq!(result_arr.value(2), 30.0);
+    }
+
+    // ===== NULL handling tests =====
 
     #[test]
     fn test_simd_null_in_left_operand() {
