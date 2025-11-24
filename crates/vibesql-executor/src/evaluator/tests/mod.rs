@@ -554,14 +554,14 @@ mod deep_expression_tests {
     #[test]
     fn test_depth_limit_enforced() {
         // Test that depth limit is properly enforced
-        // Note: Building expressions deeper than ~200 causes stack overflow during evaluation.
-        // This is a Rust stack limitation. In practice, parser-generated ASTs from actual SQL
-        // won't hit this limit.
+        // MAX_EXPRESSION_DEPTH is set to 200 to prevent stack overflow.
+        // Building expressions deeper than ~200 causes stack overflow during evaluation
+        // due to Rust's recursive call stack limitations (each eval call consumes stack space).
         let schema = TableSchema::new("test".to_string(), vec![]);
         let evaluator = ExpressionEvaluator::new(&schema);
         let row = Row::new(vec![]);
 
-        // Test a deep but safe expression (100 levels - safe for default stack size)
+        // Test a deep but safe expression (100 levels - well within MAX_EXPRESSION_DEPTH of 200)
         let expr = generate_nested_add(100);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
@@ -581,12 +581,11 @@ mod deep_expression_tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SqlValue::Integer(0));
 
-        // Depth 250 (still within limit but deep enough to test) should work
-        // Note: We can't test at MAX_EXPRESSION_DEPTH because building the AST itself
-        // would stack overflow. This is a limitation of recursive AST construction in Rust.
-        let expr = generate_nested_case(250);
+        // Depth 150 should work (within MAX_EXPRESSION_DEPTH of 200)
+        let expr = generate_nested_case(150);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
+        assert_eq!(result.unwrap(), SqlValue::Integer(0));
     }
 
     #[test]
@@ -603,11 +602,11 @@ mod deep_expression_tests {
         // 100 negations of 1: even count = 1, odd count = -1
         assert_eq!(result.unwrap(), SqlValue::Integer(1));
 
-        // Depth 300 should also work
-        let expr = generate_nested_unary(300);
+        // Depth 150 should also work (within MAX_EXPRESSION_DEPTH of 200)
+        let expr = generate_nested_unary(150);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
-        // 300 negations of 1: even count = 1
+        // 150 negations of 1: even count = 1
         assert_eq!(result.unwrap(), SqlValue::Integer(1));
     }
 
@@ -664,16 +663,16 @@ mod deep_expression_tests {
         let evaluator = ExpressionEvaluator::new(&schema);
         let row = Row::new(vec![]);
 
-        // Depth 200 should work fine
-        let expr = generate_nested_add(200);
+        // Depth 100 should work fine (well within MAX_EXPRESSION_DEPTH of 200)
+        let expr = generate_nested_add(100);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), SqlValue::Integer(201));
+        assert_eq!(result.unwrap(), SqlValue::Integer(101));
 
-        // Depth 400 should also work (well within MAX_EXPRESSION_DEPTH of 500)
-        let expr = generate_nested_add(400);
+        // Depth 150 should also work
+        let expr = generate_nested_add(150);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), SqlValue::Integer(401));
+        assert_eq!(result.unwrap(), SqlValue::Integer(151));
     }
 }

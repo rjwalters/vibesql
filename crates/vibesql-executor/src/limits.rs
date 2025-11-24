@@ -20,14 +20,18 @@
 /// Maximum depth of expression tree evaluation (subqueries, nested expressions)
 ///
 /// SQLite uses 1000 for SQLITE_MAX_EXPR_DEPTH
-/// We use a more conservative 500 to catch issues earlier
+/// We use a more conservative 200 to prevent stack overflow
+///
+/// This limit is based on Rust's default stack size (typically 2MB on most platforms).
+/// Testing shows that expression depths beyond ~200 can cause stack overflow during
+/// evaluation even with depth tracking, as each recursive call consumes stack space.
 ///
 /// This prevents stack overflow from deeply nested:
 /// - Subqueries (IN, EXISTS, scalar subqueries)
 /// - Arithmetic expressions
 /// - Function calls
 /// - Boolean logic (AND/OR chains)
-pub const MAX_EXPRESSION_DEPTH: usize = 500;
+pub const MAX_EXPRESSION_DEPTH: usize = 200;
 
 /// Maximum number of compound SELECT terms
 ///
