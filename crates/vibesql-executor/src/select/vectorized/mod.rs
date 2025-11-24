@@ -15,12 +15,14 @@
 //! See `PHASE3_VECTORIZATION.md` in the crate root for complete design documentation.
 
 pub mod aggregate;
+pub mod arithmetic;
 pub mod batch;
 pub mod bitmap;
 pub mod compiled_predicate;
 pub mod filter;
 pub mod predicate;
 
+pub use arithmetic::evaluate_arithmetic_simd;
 pub use batch::{
     rows_to_record_batch, record_batch_to_rows,
 };
