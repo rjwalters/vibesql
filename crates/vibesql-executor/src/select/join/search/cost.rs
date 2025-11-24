@@ -60,9 +60,11 @@ impl JoinOrderContext {
 
             // Debug logging
             if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && base_rows != estimated_rows {
+                let selectivity = estimated_rows as f64 / base_rows as f64;
                 eprintln!(
-                    "[JOIN_REORDER] Table {} cardinality: {} -> {} (after WHERE filter)",
-                    table_name, base_rows, estimated_rows
+                    "[JOIN_REORDER] Table {} cardinality: {} -> {} (selectivity: {:.4}, {} predicates)",
+                    table_name, base_rows, estimated_rows, selectivity,
+                    table_local_predicates.get(&table_name.to_lowercase()).map(|p| p.len()).unwrap_or(0)
                 );
             }
 
@@ -239,6 +241,23 @@ impl JoinOrderContext {
             // Cross join: quadratic cost (nested loop)
             (left_cardinality as u64) * (right_cardinality as u64)
         };
+
+        // Verbose logging for debugging join order decisions
+        if self.config.verbose {
+            eprintln!(
+                "[JOIN_COST] {} + {} -> output={}, ops={}, selectivity={:.6}, type={:?}",
+                if joined_tables.is_empty() {
+                    "(start)".to_string()
+                } else {
+                    format!("{{{}}}({} rows)", joined_tables.iter().cloned().collect::<Vec<_>>().join(","), left_cardinality)
+                },
+                format!("{}({} rows)", next_table, right_cardinality),
+                output_cardinality,
+                operations,
+                selectivity,
+                join_type
+            );
+        }
 
         JoinCost::new(output_cardinality, operations)
     }

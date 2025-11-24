@@ -102,14 +102,23 @@ impl JoinOrderContext {
         // Log search completion statistics
         if self.config.verbose && !best_order.is_empty() {
             let elapsed = start_time.elapsed();
+            let final_cost = best_cost.load(Ordering::Relaxed);
             eprintln!(
                 "[JOIN_REORDER] Search completed in {:?}, explored {} states across {} depths",
                 elapsed, total_states_explored, depth_reached + 1
+            );
+            eprintln!(
+                "[JOIN_REORDER] Optimal order: [{}] (total cost: {})",
+                best_order.join(" -> "),
+                final_cost
             );
         }
 
         // If no solution found, return left-to-right ordering as fallback
         if best_order.is_empty() {
+            if self.config.verbose {
+                eprintln!("[JOIN_REORDER] No solution found, using fallback left-to-right order");
+            }
             return self.all_tables.iter().cloned().collect();
         }
 
