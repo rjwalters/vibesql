@@ -48,6 +48,35 @@ pub(super) fn build_merged_outer_schema<'a>(
     }
 }
 
+/// Build a merged outer row that matches the merged outer schema
+///
+/// When we merge schemas from multiple levels, we must also merge the corresponding
+/// rows so that column indices align correctly.
+///
+/// # Arguments
+/// * `current_row` - Row from the current level
+/// * `outer_row` - Optional row from outer level(s)
+///
+/// # Returns
+/// A merged row with values from both rows, or just the current row if no outer row exists
+pub(super) fn build_merged_outer_row(
+    current_row: &vibesql_storage::Row,
+    outer_row: Option<&vibesql_storage::Row>,
+) -> std::borrow::Cow<'_, vibesql_storage::Row> {
+    if let Some(outer) = outer_row {
+        // Merge: outer row values + current row values
+        let mut merged_values = outer.values.clone();
+        merged_values.extend(current_row.values.iter().cloned());
+
+        std::borrow::Cow::Owned(vibesql_storage::Row {
+            values: merged_values,
+        })
+    } else {
+        // No outer row to merge, just use current row
+        std::borrow::Cow::Borrowed(current_row)
+    }
+}
+
 /// Compute the number of columns in a SELECT statement's result
 /// Handles wildcards by expanding them using table schemas from the database
 pub(super) fn compute_select_list_column_count(

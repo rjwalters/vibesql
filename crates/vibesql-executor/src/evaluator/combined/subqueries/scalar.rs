@@ -6,7 +6,7 @@
 
 use super::cache::{compute_correlated_cache_key, compute_subquery_hash};
 use super::correlation::extract_correlation_values;
-use super::schema_utils::build_merged_outer_schema;
+use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row};
 use super::super::super::core::CombinedExpressionEvaluator;
 use crate::errors::ExecutorError;
 
@@ -79,10 +79,11 @@ impl CombinedExpressionEvaluator<'_> {
                 // This can happen if correlation columns aren't in outer schema
                 // Fall through to execute without caching
                 let merged_schema = build_merged_outer_schema(self.schema, self.outer_schema);
+                let merged_row = build_merged_outer_row(row, self.outer_row);
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database,
-                        row,
+                        &merged_row,
                         &merged_schema,
                         cte_ctx,
                         self.depth,
@@ -90,7 +91,7 @@ impl CombinedExpressionEvaluator<'_> {
                 } else {
                     crate::select::SelectExecutor::new_with_outer_context_and_depth(
                         database,
-                        row,
+                        &merged_row,
                         &merged_schema,
                         self.depth,
                     )
@@ -132,12 +133,13 @@ impl CombinedExpressionEvaluator<'_> {
                     crate::select::SelectExecutor::new(database)
                 }
             } else {
-                // Correlated: execute with outer context (merged schema includes all parent scopes - fix for #2463)
+                // Correlated: execute with outer context (merged schema + merged row - fix for #2463)
                 let schema_ref = merged_schema.as_ref().unwrap();
+                let merged_row = build_merged_outer_row(row, self.outer_row);
                 if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database,
-                        row,
+                        &merged_row,
                         schema_ref,
                         cte_ctx,
                         self.depth,
@@ -145,7 +147,7 @@ impl CombinedExpressionEvaluator<'_> {
                 } else {
                     crate::select::SelectExecutor::new_with_outer_context_and_depth(
                         database,
-                        row,
+                        &merged_row,
                         schema_ref,
                         self.depth,
                     )

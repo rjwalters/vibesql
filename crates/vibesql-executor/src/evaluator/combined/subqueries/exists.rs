@@ -3,7 +3,7 @@
 //! This module handles evaluation of EXISTS and NOT EXISTS predicates,
 //! which test whether a subquery returns any rows.
 
-use super::schema_utils::build_merged_outer_schema;
+use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row};
 use super::super::super::core::CombinedExpressionEvaluator;
 use crate::errors::ExecutorError;
 
@@ -32,17 +32,23 @@ impl CombinedExpressionEvaluator<'_> {
         ))?;
 
         // Execute the subquery with outer context and propagate depth
-        // Build merged schema outside if-else to ensure it lives long enough (fix for #2463)
+        // Build merged schema and row outside if-else to ensure they live long enough (fix for #2463)
         let merged_schema = if !self.schema.table_schemas.is_empty() {
             Some(build_merged_outer_schema(self.schema, self.outer_schema))
         } else {
             None
         };
 
-        let select_executor = if let Some(ref schema) = merged_schema {
+        let merged_row = if merged_schema.is_some() {
+            Some(build_merged_outer_row(row, self.outer_row))
+        } else {
+            None
+        };
+
+        let select_executor = if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
             crate::select::SelectExecutor::new_with_outer_context_and_depth(
                 database,
-                row,
+                outer_row,
                 schema,
                 self.depth,
             )
