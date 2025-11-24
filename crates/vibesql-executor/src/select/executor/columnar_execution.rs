@@ -81,7 +81,7 @@ impl SelectExecutor<'_> {
             None, // ORDER BY applied after aggregation
         )?;
 
-        // Extract schema before taking rows (to avoid borrow checker issues)
+        // Extract schema before accessing rows (to avoid borrow checker issues)
         let schema = from_result.schema.clone();
 
         // Extract expressions from SELECT list (only Expression items, skip wildcards)
@@ -94,13 +94,17 @@ impl SelectExecutor<'_> {
             })
             .collect();
 
+        // Get a slice reference to rows WITHOUT triggering collect_vec() materialization
+        // This is the critical optimization for #2521 - avoids the 137ms bottleneck
+        let rows_slice = from_result.data.as_slice();
+
         // Try columnar execution with SIMD-accelerated filtering
         // If this returns None, the regular executor will handle the query with row-based execution
         #[cfg(feature = "profile-q6")]
-        eprintln!("[PROFILE-Q6]   Attempting columnar execution on {} rows...", from_result.rows().len());
+        eprintln!("[PROFILE-Q6]   Attempting columnar execution on {} rows...", rows_slice.len());
 
         match columnar::execute_columnar(
-            from_result.rows(),
+            rows_slice,
             stmt.where_clause.as_ref(), // Let columnar module apply WHERE with SIMD
             &select_exprs,
             &schema,
