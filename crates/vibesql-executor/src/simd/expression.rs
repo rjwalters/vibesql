@@ -270,15 +270,23 @@ fn apply_simd_operation(
                 BinaryOperator::Minus => simd_sub_i64(a, b),
                 BinaryOperator::Multiply => simd_mul_i64(a, b),
                 BinaryOperator::Divide => {
-                    // Integer division requires special handling (div by zero)
-                    return Ok(a
-                        .iter()
+                    // Use SIMD division first, then post-process for divide-by-zero
+                    // This is Option 1 from the issue: SIMD first, fix later
+                    //
+                    // Performance note: This approach gets SIMD benefits for the common
+                    // case (no divide-by-zero) while still correctly handling edge cases.
+                    // The post-processing scan is cheap compared to the scalar loop alternative.
+                    let result = simd_div_i64(a, b);
+
+                    // Convert to SqlValue, replacing divide-by-zero with NULL
+                    return Ok(result
+                        .into_iter()
                         .zip(b.iter())
-                        .map(|(a, b)| {
-                            if *b == 0 {
+                        .map(|(quotient, &divisor)| {
+                            if divisor == 0 {
                                 SqlValue::Null
                             } else {
-                                SqlValue::Bigint(a / b)
+                                SqlValue::Bigint(quotient)
                             }
                         })
                         .collect());
