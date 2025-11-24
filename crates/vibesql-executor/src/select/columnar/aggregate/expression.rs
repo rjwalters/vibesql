@@ -375,14 +375,14 @@ pub fn extract_aggregates(
                         Expression::Wildcard => {
                             aggregates.push(AggregateSpec {
                                 op,
-                                source: AggregateSource::Column(0),
+                                source: AggregateSource::CountStar,
                             });
                             continue;
                         }
                         Expression::ColumnRef { table: _, column } if column == "*" => {
                             aggregates.push(AggregateSpec {
                                 op,
-                                source: AggregateSource::Column(0),
+                                source: AggregateSource::CountStar,
                             });
                             continue;
                         }
