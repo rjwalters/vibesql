@@ -156,7 +156,7 @@ mod tests {
         let scan = ColumnarScan::new(&rows);
 
         let result = functions::compute_sum(&scan, 0, None).unwrap();
-        assert!(matches!(result, SqlValue::Double(sum) if (sum - 60.0).abs() < 0.001));
+        assert_eq!(result, SqlValue::Integer(60));
 
         let result = functions::compute_sum(&scan, 1, None).unwrap();
         assert!(matches!(result, SqlValue::Double(sum) if (sum - 7.5).abs() < 0.001));
@@ -178,7 +178,7 @@ mod tests {
         let filter = vec![true, false, true]; // Include rows 0 and 2
 
         let result = functions::compute_sum(&scan, 0, Some(&filter)).unwrap();
-        assert!(matches!(result, SqlValue::Double(sum) if (sum - 40.0).abs() < 0.001));
+        assert_eq!(result, SqlValue::Integer(40));
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
 
         let results = compute_multiple_aggregates(&rows, &aggregates, None, None).unwrap();
         assert_eq!(results.len(), 2);
-        assert!(matches!(results[0], SqlValue::Double(sum) if (sum - 60.0).abs() < 0.001));
+        assert_eq!(results[0], SqlValue::Integer(60));
         assert!(matches!(results[1], SqlValue::Double(avg) if (avg - 2.5).abs() < 0.001));
     }
 

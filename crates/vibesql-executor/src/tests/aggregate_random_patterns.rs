@@ -139,7 +139,7 @@ fn test_multiple_aggregates_same_query() {
     assert_eq!(rows[0].values[1], SqlValue::Integer(77));  // MAX(col1)
     // AVG(col2) = (40 + 58 + 23) / 3 = 121 / 3 = 40.333...
     assert_eq!(rows[0].values[3], SqlValue::Integer(3));   // COUNT(*)
-    assert_eq!(rows[0].values[4], SqlValue::Double(185.0)); // SUM(col0) = 64+75+46
+    assert_eq!(rows[0].values[4], SqlValue::Integer(185)); // SUM(col0) = 64+75+46
 }
 
 #[test]
@@ -208,6 +208,6 @@ fn test_aggregate_with_null_arithmetic() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].values[0], SqlValue::Integer(3));  // COUNT(*) includes NULLs
-    assert_eq!(rows[0].values[1], SqlValue::Double(50.0)); // SUM(col0) = 20+30, ignores NULL
-    assert_eq!(rows[0].values[2], SqlValue::Double(50.0)); // SUM(col1) = 10+40, ignores NULL
+    assert_eq!(rows[0].values[1], SqlValue::Integer(50)); // SUM(col0) = 20+30, ignores NULL
+    assert_eq!(rows[0].values[2], SqlValue::Integer(50)); // SUM(col1) = 10+40, ignores NULL
 }
