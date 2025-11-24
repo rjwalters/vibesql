@@ -6,8 +6,9 @@ use crate::errors::ExecutorError;
 
 #[cfg(feature = "simd")]
 use crate::simd::comparison::{
-    simd_eq_f64, simd_eq_i64, simd_ge_f64, simd_gt_f64, simd_gt_i64, simd_le_f64, simd_lt_f64,
-    simd_lt_i64,
+    simd_eq_f64, simd_eq_i32, simd_eq_i64, simd_ge_f64, simd_ge_i32, simd_ge_i64, simd_gt_f64,
+    simd_gt_i32, simd_gt_i64, simd_le_f64, simd_le_i32, simd_le_i64, simd_lt_f64, simd_lt_i32,
+    simd_lt_i64, simd_ne_i32, simd_ne_i64,
 };
 
 use vibesql_types::SqlValue;
@@ -98,6 +99,16 @@ fn evaluate_predicate_simd(
             evaluate_predicate_f64_simd(predicate, values, nulls.as_ref())
         }
 
+        // SIMD path for Date columns (i32 - days since epoch)
+        ColumnArray::Date(values, nulls) => {
+            evaluate_predicate_i32_simd(predicate, values, nulls.as_ref())
+        }
+
+        // SIMD path for Timestamp columns (i64 - microseconds since epoch)
+        ColumnArray::Timestamp(values, nulls) => {
+            evaluate_predicate_i64_simd(predicate, values, nulls.as_ref())
+        }
+
         // Scalar fallback for other column types
         _ => evaluate_predicate_scalar(batch, predicate, column_idx),
     }
@@ -115,6 +126,8 @@ fn evaluate_predicate_i64_simd(
                 simd_lt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_lt_i64(values, *threshold)
+            } else if let Some(threshold) = value_to_timestamp_i64(value) {
+                simd_lt_i64(values, threshold)
             } else {
                 // Type mismatch: convert to f64 and use f64 SIMD
                 let threshold = value_to_f64(value)
@@ -231,6 +244,73 @@ fn evaluate_predicate_i64_simd(
 
             // OR the two masks
             lt.iter().zip(eq.iter()).map(|(&a, &b)| a || b).collect()
+        }
+    };
+
+    // Apply NULL mask: NULLs always fail predicates
+    if let Some(null_mask) = nulls {
+        for i in 0..result.len() {
+            if null_mask[i] {
+                result[i] = false;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Evaluate predicate on i32 column using SIMD (for dates)
+fn evaluate_predicate_i32_simd(
+    predicate: &ColumnPredicate,
+    values: &[i32],
+    nulls: Option<&Vec<bool>>,
+) -> Result<Vec<bool>, ExecutorError> {
+    let mut result = match predicate {
+        ColumnPredicate::LessThan { value, .. } => {
+            let threshold = value_to_date_i32(value)
+                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+            simd_lt_i32(values, threshold)
+        }
+
+        ColumnPredicate::GreaterThan { value, .. } => {
+            let threshold = value_to_date_i32(value)
+                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+            simd_gt_i32(values, threshold)
+        }
+
+        ColumnPredicate::GreaterThanOrEqual { value, .. } => {
+            let threshold = value_to_date_i32(value)
+                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+            simd_ge_i32(values, threshold)
+        }
+
+        ColumnPredicate::LessThanOrEqual { value, .. } => {
+            let threshold = value_to_date_i32(value)
+                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+            simd_le_i32(values, threshold)
+        }
+
+        ColumnPredicate::Equal { value, .. } => {
+            let target = value_to_date_i32(value)
+                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+            simd_eq_i32(values, target)
+        }
+
+        ColumnPredicate::Between { low, high, ..} => {
+            let low_i32 = value_to_date_i32(low)
+                .ok_or_else(|| ExecutorError::Other("Incompatible types for BETWEEN".to_string()))?;
+            let high_i32 = value_to_date_i32(high)
+                .ok_or_else(|| ExecutorError::Other("Incompatible types for BETWEEN".to_string()))?;
+
+            let ge_low = simd_ge_i32(values, low_i32);
+            let le_high = simd_le_i32(values, high_i32);
+
+            // AND the two masks
+            ge_low
+                .iter()
+                .zip(le_high.iter())
+                .map(|(&a, &b)| a && b)
+                .collect()
         }
     };
 
@@ -564,6 +644,61 @@ fn value_to_f64(value: &SqlValue) -> Option<f64> {
         SqlValue::Real(n) => Some(*n as f64),
         _ => None,
     }
+}
+
+/// Convert SqlValue::Date to i32 (days since Unix epoch)
+fn value_to_date_i32(value: &SqlValue) -> Option<i32> {
+    match value {
+        SqlValue::Date(date) => Some(date_to_days_since_epoch(date)),
+        _ => None,
+    }
+}
+
+/// Convert Date to days since Unix epoch (1970-01-01)
+fn date_to_days_since_epoch(date: &vibesql_types::Date) -> i32 {
+    // Simple calculation: days since Unix epoch
+    let year_days = (date.year - 1970) * 365;
+    let leap_years = ((date.year - 1969) / 4) - ((date.year - 1901) / 100) + ((date.year - 1601) / 400);
+    let month_days: i32 = match date.month {
+        1 => 0,
+        2 => 31,
+        3 => 59,
+        4 => 90,
+        5 => 120,
+        6 => 151,
+        7 => 181,
+        8 => 212,
+        9 => 243,
+        10 => 273,
+        11 => 304,
+        12 => 334,
+        _ => 0,
+    };
+
+    // Add leap day if after February in a leap year
+    let is_leap = date.year % 4 == 0 && (date.year % 100 != 0 || date.year % 400 == 0);
+    let leap_adjustment = if is_leap && date.month > 2 { 1 } else { 0 };
+
+    year_days + leap_years + month_days + date.day as i32 - 1 + leap_adjustment
+}
+
+/// Convert SqlValue::Timestamp to i64 (microseconds since Unix epoch)
+fn value_to_timestamp_i64(value: &SqlValue) -> Option<i64> {
+    match value {
+        SqlValue::Timestamp(ts) => Some(timestamp_to_microseconds(ts)),
+        _ => None,
+    }
+}
+
+/// Convert Timestamp to microseconds since Unix epoch
+fn timestamp_to_microseconds(ts: &vibesql_types::Timestamp) -> i64 {
+    let days = date_to_days_since_epoch(&ts.date);
+    let micros_from_days = days as i64 * 86_400_000_000; // 24 * 60 * 60 * 1_000_000
+    let micros_from_time = (ts.time.hour as i64 * 3_600_000_000)
+        + (ts.time.minute as i64 * 60_000_000)
+        + (ts.time.second as i64 * 1_000_000)
+        + (ts.time.nanosecond as i64 / 1000); // Convert nanoseconds to microseconds
+    micros_from_days + micros_from_time
 }
 
 #[cfg(test)]
