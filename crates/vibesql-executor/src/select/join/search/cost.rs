@@ -195,11 +195,32 @@ impl JoinOrderContext {
         let next_table_lower = next_table.to_lowercase();
         let selectivity = self.get_edge_selectivity(joined_tables, &next_table_lower);
 
-        // Estimate output cardinality (cross product filtered by join condition)
-        let output_cardinality = std::cmp::max(
-            1,
-            (left_cardinality as f64 * right_cardinality as f64 * selectivity) as usize,
-        );
+        // Get join type to determine cardinality calculation
+        let join_type = self.get_join_type(joined_tables, &next_table_lower);
+
+        // Estimate output cardinality based on join type
+        let output_cardinality = match join_type {
+            vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti => {
+                // SEMI/ANTI joins: output is at most left_cardinality (existence check)
+                // For SEMI: each left row appears at most once (1 if match exists, 0 otherwise)
+                // For ANTI: each left row appears at most once (1 if no match, 0 otherwise)
+                // The selectivity represents the fraction of left rows that match (SEMI) or don't match (ANTI)
+                std::cmp::max(
+                    1,
+                    std::cmp::min(
+                        left_cardinality,
+                        (left_cardinality as f64 * selectivity) as usize
+                    )
+                )
+            }
+            _ => {
+                // INNER/LEFT/etc: use cross-product × selectivity
+                std::cmp::max(
+                    1,
+                    (left_cardinality as f64 * right_cardinality as f64 * selectivity) as usize,
+                )
+            }
+        };
 
         // Estimate operations: For hash join (our primary strategy), cost is roughly:
         // - Build hash table from left: O(left_cardinality)
@@ -237,6 +258,34 @@ impl JoinOrderContext {
         }
 
         best_selectivity
+    }
+
+    /// Find the join type for joining next_table to any of the joined_tables
+    ///
+    /// If multiple edges exist with different join types, returns the "most restrictive" type.
+    /// Priority: SEMI > ANTI > INNER (SEMI/ANTI are more selective)
+    fn get_join_type(&self, joined_tables: &BTreeSet<String>, next_table: &str) -> vibesql_ast::JoinType {
+        use vibesql_ast::JoinType;
+
+        let mut found_type = JoinType::Inner; // Default
+
+        for edge in &self.edges {
+            if edge.involves_table(next_table) {
+                for joined_table in joined_tables {
+                    if edge.involves_table(joined_table) {
+                        // Found an edge connecting joined_tables to next_table
+                        match (&found_type, &edge.join_type) {
+                            (_, JoinType::Semi) => found_type = JoinType::Semi,
+                            (JoinType::Inner, JoinType::Anti) => found_type = JoinType::Anti,
+                            (JoinType::Inner, t) => found_type = t.clone(),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        found_type
     }
 
     /// Check if there's a join edge connecting the joined tables and next table

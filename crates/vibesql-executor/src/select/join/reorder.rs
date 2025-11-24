@@ -60,7 +60,7 @@ struct TableInfo {
 }
 
 /// Information about an equijoin between two tables
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct JoinEdge {
     /// Table name on left side of equijoin
     pub left_table: String,
@@ -70,6 +70,8 @@ pub struct JoinEdge {
     pub right_table: String,
     /// Column from right table
     pub right_column: String,
+    /// Join type (INNER, SEMI, ANTI, etc.)
+    pub join_type: vibesql_ast::JoinType,
 }
 
 impl JoinEdge {
@@ -149,14 +151,19 @@ impl JoinOrderAnalyzer {
 
     /// Analyze a predicate and extract join edges or local predicates
     pub fn analyze_predicate(&mut self, expr: &Expression, tables: &HashSet<String>) {
+        self.analyze_predicate_with_type(expr, tables, vibesql_ast::JoinType::Inner);
+    }
+
+    /// Analyze a predicate with an explicit join type
+    pub fn analyze_predicate_with_type(&mut self, expr: &Expression, tables: &HashSet<String>, join_type: vibesql_ast::JoinType) {
         match expr {
             // Recursively handle AND expressions
             Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
                 if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                     eprintln!("[ANALYZER] Decomposing AND expression");
                 }
-                self.analyze_predicate(left, tables);
-                self.analyze_predicate(right, tables);
+                self.analyze_predicate_with_type(left, tables, join_type.clone());
+                self.analyze_predicate_with_type(right, tables, join_type);
             }
             // Handle simple binary equality operations
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
@@ -176,9 +183,10 @@ impl JoinOrderAnalyzer {
                             left_column: lc.clone(),
                             right_table: rt.to_lowercase(),
                             right_column: rc.clone(),
+                            join_type: join_type.clone(),
                         };
                         if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                            eprintln!("[ANALYZER] Added edge: {}.{} = {}.{}", lt, lc, rt, rc);
+                            eprintln!("[ANALYZER] Added edge: {}.{} = {}.{} (join_type: {:?})", lt, lc, rt, rc, join_type);
                         }
                         self.edges.push(edge);
                     }
@@ -396,6 +404,7 @@ mod tests {
             left_column: "a".to_string(),
             right_table: "t2".to_string(),
             right_column: "b".to_string(),
+            join_type: vibesql_ast::JoinType::Inner,
         };
 
         assert!(edge.involves_table("t1"));
@@ -410,6 +419,7 @@ mod tests {
             left_column: "a".to_string(),
             right_table: "t2".to_string(),
             right_column: "b".to_string(),
+            join_type: vibesql_ast::JoinType::Inner,
         };
 
         assert_eq!(edge.other_table("t1"), Some("t2".to_string()));
@@ -428,12 +438,14 @@ mod tests {
             left_column: "id".to_string(),
             right_table: "t2".to_string(),
             right_column: "id".to_string(),
+            join_type: vibesql_ast::JoinType::Inner,
         });
         analyzer.edges.push(JoinEdge {
             left_table: "t2".to_string(),
             left_column: "id".to_string(),
             right_table: "t3".to_string(),
             right_column: "id".to_string(),
+            join_type: vibesql_ast::JoinType::Inner,
         });
 
         let chain = analyzer.build_join_chain("t1");
@@ -476,6 +488,7 @@ mod tests {
             left_column: "id".to_string(),
             right_table: "t2".to_string(),
             right_column: "id".to_string(),
+            join_type: vibesql_ast::JoinType::Inner,
         });
 
         let condition = analyzer.get_join_condition("t1", "t2");
@@ -493,6 +506,7 @@ mod tests {
             left_column: "id".to_string(),
             right_table: "t2".to_string(),
             right_column: "id".to_string(),
+            join_type: vibesql_ast::JoinType::Inner,
         });
 
         // Should find condition even with case differences

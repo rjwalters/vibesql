@@ -38,9 +38,11 @@ where
     let mut table_refs = Vec::new();
     graph::flatten_join_tree(from, &mut table_refs);
 
-    // Step 2: Extract all join conditions
+    // Step 2: Extract all join conditions with their types
     let mut join_conditions = Vec::new();
+    let mut join_conditions_with_types = Vec::new();
     graph::extract_all_conditions(from, &mut join_conditions);
+    graph::extract_conditions_with_types(from, &mut join_conditions_with_types);
 
     // Step 3: Build analyzer with table names (preserving original order)
     let table_names: Vec<String> =
@@ -52,9 +54,9 @@ where
     // Combine table names into a set for predicate analysis (normalize to lowercase)
     let table_set: HashSet<String> = table_names.iter().map(|t| t.to_lowercase()).collect();
 
-    // Step 4: Analyze join conditions to extract edges
-    for condition in &join_conditions {
-        analyzer.analyze_predicate(condition, &table_set);
+    // Step 4: Analyze join conditions to extract edges with their join types
+    for condition_with_type in &join_conditions_with_types {
+        analyzer.analyze_predicate_with_type(&condition_with_type.condition, &table_set, condition_with_type.join_type.clone());
     }
 
     // Step 5: Analyze WHERE clause predicates if available
