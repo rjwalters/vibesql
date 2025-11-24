@@ -43,6 +43,8 @@ pub enum AggregateSource {
     Column(usize),
     /// Complex expression that needs evaluation (e.g., a * b)
     Expression(Expression),
+    /// COUNT(*) - count all rows (not tied to any specific column)
+    CountStar,
 }
 
 /// A complete aggregate specification
@@ -124,6 +126,10 @@ pub fn compute_multiple_aggregates(
                     )
                 })?;
                 expression::compute_expression_aggregate(rows, expr, spec.op, filter_bitmap, schema)?
+            }
+            // COUNT(*) path: count all rows
+            AggregateSource::CountStar => {
+                functions::compute_count(&scan, filter_bitmap)?
             }
         };
         results.push(result);
@@ -235,7 +241,7 @@ mod tests {
         let aggregates = result.unwrap();
         assert_eq!(aggregates.len(), 1);
         assert!(matches!(aggregates[0].op, AggregateOp::Count));
-        assert!(matches!(aggregates[0].source, AggregateSource::Column(0)));
+        assert!(matches!(aggregates[0].source, AggregateSource::CountStar));
 
         // Test multiple aggregates: SUM(col1), AVG(col2)
         let exprs = vec![
