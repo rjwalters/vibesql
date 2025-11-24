@@ -31,6 +31,31 @@ pub trait SimdOperations: Send + Sync {
 
     /// Multiply two i64 slices
     fn mul_i64(&self, a: &[i64], b: &[i64]) -> Vec<i64>;
+
+    // Comparison operations for f64
+    fn gt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool>;
+    fn ge_f64(&self, column: &[f64], threshold: f64) -> Vec<bool>;
+    fn lt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool>;
+    fn le_f64(&self, column: &[f64], threshold: f64) -> Vec<bool>;
+    fn eq_f64(&self, column: &[f64], value: f64) -> Vec<bool>;
+    fn ne_f64(&self, column: &[f64], value: f64) -> Vec<bool>;
+
+    // Comparison operations for i64
+    fn gt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool>;
+    fn lt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool>;
+    fn eq_i64(&self, column: &[i64], value: i64) -> Vec<bool>;
+
+    // Aggregation operations for f64
+    fn sum_f64(&self, column: &[f64]) -> f64;
+    fn avg_f64(&self, column: &[f64]) -> Option<f64>;
+    fn min_f64(&self, column: &[f64]) -> Option<f64>;
+    fn max_f64(&self, column: &[f64]) -> Option<f64>;
+
+    // Aggregation operations for i64
+    fn sum_i64(&self, column: &[i64]) -> i64;
+    fn avg_i64(&self, column: &[i64]) -> Option<f64>;
+    fn min_i64(&self, column: &[i64]) -> Option<i64>;
+    fn max_i64(&self, column: &[i64]) -> Option<i64>;
 }
 
 /// Scalar fallback implementation
@@ -67,6 +92,82 @@ impl SimdOperations for ScalarOperations {
 
     fn mul_i64(&self, a: &[i64], b: &[i64]) -> Vec<i64> {
         a.iter().zip(b.iter()).map(|(x, y)| x * y).collect()
+    }
+
+    fn gt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        column.iter().map(|&x| x > threshold).collect()
+    }
+
+    fn ge_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        column.iter().map(|&x| x >= threshold).collect()
+    }
+
+    fn lt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        column.iter().map(|&x| x < threshold).collect()
+    }
+
+    fn le_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        column.iter().map(|&x| x <= threshold).collect()
+    }
+
+    fn eq_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        column.iter().map(|&x| x == value).collect()
+    }
+
+    fn ne_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        column.iter().map(|&x| x != value).collect()
+    }
+
+    fn gt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        column.iter().map(|&x| x > threshold).collect()
+    }
+
+    fn lt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        column.iter().map(|&x| x < threshold).collect()
+    }
+
+    fn eq_i64(&self, column: &[i64], value: i64) -> Vec<bool> {
+        column.iter().map(|&x| x == value).collect()
+    }
+
+    fn sum_f64(&self, column: &[f64]) -> f64 {
+        column.iter().sum()
+    }
+
+    fn avg_f64(&self, column: &[f64]) -> Option<f64> {
+        if column.is_empty() {
+            None
+        } else {
+            Some(column.iter().sum::<f64>() / column.len() as f64)
+        }
+    }
+
+    fn min_f64(&self, column: &[f64]) -> Option<f64> {
+        column.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap())
+    }
+
+    fn max_f64(&self, column: &[f64]) -> Option<f64> {
+        column.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap())
+    }
+
+    fn sum_i64(&self, column: &[i64]) -> i64 {
+        column.iter().sum()
+    }
+
+    fn avg_i64(&self, column: &[i64]) -> Option<f64> {
+        if column.is_empty() {
+            None
+        } else {
+            Some(column.iter().sum::<i64>() as f64 / column.len() as f64)
+        }
+    }
+
+    fn min_i64(&self, column: &[i64]) -> Option<i64> {
+        column.iter().copied().min()
+    }
+
+    fn max_i64(&self, column: &[i64]) -> Option<i64> {
+        column.iter().copied().max()
     }
 }
 
@@ -107,6 +208,74 @@ impl SimdOperations for Avx2Operations {
 
     fn mul_i64(&self, a: &[i64], b: &[i64]) -> Vec<i64> {
         super::arithmetic::simd_mul_i64(a, b)
+    }
+
+    fn gt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison::simd_gt_f64(column, threshold)
+    }
+
+    fn ge_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison::simd_ge_f64(column, threshold)
+    }
+
+    fn lt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison::simd_lt_f64(column, threshold)
+    }
+
+    fn le_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison::simd_le_f64(column, threshold)
+    }
+
+    fn eq_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        super::comparison::simd_eq_f64(column, value)
+    }
+
+    fn ne_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        super::comparison::simd_ne_f64(column, value)
+    }
+
+    fn gt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        super::comparison::simd_gt_i64(column, threshold)
+    }
+
+    fn lt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        super::comparison::simd_lt_i64(column, threshold)
+    }
+
+    fn eq_i64(&self, column: &[i64], value: i64) -> Vec<bool> {
+        super::comparison::simd_eq_i64(column, value)
+    }
+
+    fn sum_f64(&self, column: &[f64]) -> f64 {
+        super::aggregation::simd_sum_f64(column)
+    }
+
+    fn avg_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation::simd_avg_f64(column)
+    }
+
+    fn min_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation::simd_min_f64(column)
+    }
+
+    fn max_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation::simd_max_f64(column)
+    }
+
+    fn sum_i64(&self, column: &[i64]) -> i64 {
+        super::aggregation::simd_sum_i64(column)
+    }
+
+    fn avg_i64(&self, column: &[i64]) -> Option<f64> {
+        super::aggregation::simd_avg_i64(column)
+    }
+
+    fn min_i64(&self, column: &[i64]) -> Option<i64> {
+        super::aggregation::simd_min_i64(column)
+    }
+
+    fn max_i64(&self, column: &[i64]) -> Option<i64> {
+        super::aggregation::simd_max_i64(column)
     }
 }
 
@@ -152,6 +321,76 @@ impl SimdOperations for Avx512Operations {
 
     fn mul_i64(&self, a: &[i64], b: &[i64]) -> Vec<i64> {
         super::arithmetic::simd_mul_i64(a, b)
+    }
+
+    fn gt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        // TODO: Implement dedicated AVX-512 path
+        super::comparison::simd_gt_f64(column, threshold)
+    }
+
+    fn ge_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison::simd_ge_f64(column, threshold)
+    }
+
+    fn lt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison::simd_lt_f64(column, threshold)
+    }
+
+    fn le_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison::simd_le_f64(column, threshold)
+    }
+
+    fn eq_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        super::comparison::simd_eq_f64(column, value)
+    }
+
+    fn ne_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        super::comparison::simd_ne_f64(column, value)
+    }
+
+    fn gt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        super::comparison::simd_gt_i64(column, threshold)
+    }
+
+    fn lt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        super::comparison::simd_lt_i64(column, threshold)
+    }
+
+    fn eq_i64(&self, column: &[i64], value: i64) -> Vec<bool> {
+        super::comparison::simd_eq_i64(column, value)
+    }
+
+    fn sum_f64(&self, column: &[f64]) -> f64 {
+        // TODO: Implement dedicated AVX-512 path
+        super::aggregation::simd_sum_f64(column)
+    }
+
+    fn avg_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation::simd_avg_f64(column)
+    }
+
+    fn min_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation::simd_min_f64(column)
+    }
+
+    fn max_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation::simd_max_f64(column)
+    }
+
+    fn sum_i64(&self, column: &[i64]) -> i64 {
+        super::aggregation::simd_sum_i64(column)
+    }
+
+    fn avg_i64(&self, column: &[i64]) -> Option<f64> {
+        super::aggregation::simd_avg_i64(column)
+    }
+
+    fn min_i64(&self, column: &[i64]) -> Option<i64> {
+        super::aggregation::simd_min_i64(column)
+    }
+
+    fn max_i64(&self, column: &[i64]) -> Option<i64> {
+        super::aggregation::simd_max_i64(column)
     }
 }
 
@@ -241,6 +480,78 @@ pub mod dispatched {
     /// Multiply two i64 slices using best available SIMD
     pub fn mul_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
         get_simd_ops().mul_i64(a, b)
+    }
+
+    // Comparison operations for f64
+    pub fn gt_f64(column: &[f64], threshold: f64) -> Vec<bool> {
+        get_simd_ops().gt_f64(column, threshold)
+    }
+
+    pub fn ge_f64(column: &[f64], threshold: f64) -> Vec<bool> {
+        get_simd_ops().ge_f64(column, threshold)
+    }
+
+    pub fn lt_f64(column: &[f64], threshold: f64) -> Vec<bool> {
+        get_simd_ops().lt_f64(column, threshold)
+    }
+
+    pub fn le_f64(column: &[f64], threshold: f64) -> Vec<bool> {
+        get_simd_ops().le_f64(column, threshold)
+    }
+
+    pub fn eq_f64(column: &[f64], value: f64) -> Vec<bool> {
+        get_simd_ops().eq_f64(column, value)
+    }
+
+    pub fn ne_f64(column: &[f64], value: f64) -> Vec<bool> {
+        get_simd_ops().ne_f64(column, value)
+    }
+
+    // Comparison operations for i64
+    pub fn gt_i64(column: &[i64], threshold: i64) -> Vec<bool> {
+        get_simd_ops().gt_i64(column, threshold)
+    }
+
+    pub fn lt_i64(column: &[i64], threshold: i64) -> Vec<bool> {
+        get_simd_ops().lt_i64(column, threshold)
+    }
+
+    pub fn eq_i64(column: &[i64], value: i64) -> Vec<bool> {
+        get_simd_ops().eq_i64(column, value)
+    }
+
+    // Aggregation operations for f64
+    pub fn sum_f64(column: &[f64]) -> f64 {
+        get_simd_ops().sum_f64(column)
+    }
+
+    pub fn avg_f64(column: &[f64]) -> Option<f64> {
+        get_simd_ops().avg_f64(column)
+    }
+
+    pub fn min_f64(column: &[f64]) -> Option<f64> {
+        get_simd_ops().min_f64(column)
+    }
+
+    pub fn max_f64(column: &[f64]) -> Option<f64> {
+        get_simd_ops().max_f64(column)
+    }
+
+    // Aggregation operations for i64
+    pub fn sum_i64(column: &[i64]) -> i64 {
+        get_simd_ops().sum_i64(column)
+    }
+
+    pub fn avg_i64(column: &[i64]) -> Option<f64> {
+        get_simd_ops().avg_i64(column)
+    }
+
+    pub fn min_i64(column: &[i64]) -> Option<i64> {
+        get_simd_ops().min_i64(column)
+    }
+
+    pub fn max_i64(column: &[i64]) -> Option<i64> {
+        get_simd_ops().max_i64(column)
     }
 }
 
