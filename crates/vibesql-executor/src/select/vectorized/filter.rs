@@ -3,7 +3,7 @@
 //! Simplified implementation using Arrow 53 scalar comparison API
 
 use crate::errors::ExecutorError;
-use arrow::array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, Date32Array, TimestampMicrosecondArray};
+use arrow::array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, Date32Array, TimestampMicrosecondArray, Scalar};
 use arrow::compute::{and_kleene as and_op, or_kleene as or_op, not as not_op, filter_record_batch, like};
 use arrow::compute::kernels::cmp::{eq, neq, lt, lt_eq, gt, gt_eq};
 use arrow::record_batch::RecordBatch;
@@ -346,7 +346,8 @@ fn evaluate_like_simd(
         .ok_or_else(|| ExecutorError::Other("Failed to downcast StringArray".to_string()))?;
 
     // Use Arrow's SIMD-accelerated like kernel
-    let result = like(string_array, pattern_str)
+    let pattern_scalar = Scalar::new(StringArray::from(vec![pattern_str]));
+    let result = like(string_array, &pattern_scalar)
         .map_err(|e| ExecutorError::Other(format!("SIMD LIKE failed: {}", e)))?;
 
     // Apply negation if needed

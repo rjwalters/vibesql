@@ -58,6 +58,8 @@ pub mod comparison;
 #[cfg(feature = "simd")]
 pub mod null_handling;
 #[cfg(feature = "simd")]
+pub mod hashing;
+#[cfg(feature = "simd")]
 pub mod cpu_features;
 #[cfg(feature = "simd")]
 pub mod dispatch;
@@ -71,6 +73,8 @@ pub use arithmetic::*;
 pub use comparison::*;
 #[cfg(feature = "simd")]
 pub use null_handling::*;
+#[cfg(feature = "simd")]
+pub use hashing::*;
 #[cfg(feature = "simd")]
 pub use cpu_features::*;
 #[cfg(feature = "simd")]
