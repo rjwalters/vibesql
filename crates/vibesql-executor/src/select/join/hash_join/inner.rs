@@ -1,4 +1,7 @@
-use super::{build::build_hash_table_parallel, combine_rows, FromResult};
+use super::{build, combine_rows, FromResult};
+
+#[cfg(all(feature = "parallel", not(feature = "simd")))]
+use super::build::build_hash_table_parallel;
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 // Note: Memory limit checking removed from hash join.
@@ -59,11 +62,21 @@ pub(in crate::select::join) fn hash_join_inner(
             (right.rows(), left.rows(), right_col_idx, left_col_idx, false)
         };
 
-    // Build phase: Create hash table from build side (using parallel algorithm)
+    // Build phase: Create hash table from build side
     // Key: join column value
     // Value: vector of row indices (not row references) for deferred materialization
-    // Automatically uses parallel build when beneficial (based on row count and hardware)
+    // Uses SIMD-accelerated hashing when available, with optional parallelization
+    #[cfg(all(feature = "parallel", feature = "simd"))]
+    let hash_table = build::build_hash_table_parallel_simd(build_rows, build_col_idx);
+
+    #[cfg(all(feature = "simd", not(feature = "parallel")))]
+    let hash_table = build::build_hash_table_simd(build_rows, build_col_idx);
+
+    #[cfg(all(feature = "parallel", not(feature = "simd")))]
     let hash_table = build_hash_table_parallel(build_rows, build_col_idx);
+
+    #[cfg(not(any(feature = "parallel", feature = "simd")))]
+    let hash_table = build::build_hash_table_sequential(build_rows, build_col_idx);
 
     // Probe phase: Collect (build_idx, probe_idx) pairs without materializing rows
     // This defers the expensive row cloning until after we know all matches

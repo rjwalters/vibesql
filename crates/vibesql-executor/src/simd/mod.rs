@@ -57,6 +57,8 @@ pub mod arithmetic;
 pub mod comparison;
 #[cfg(feature = "simd")]
 pub mod null_handling;
+#[cfg(feature = "simd")]
+pub mod hashing;
 
 // Re-export public API
 #[cfg(feature = "simd")]
@@ -67,3 +69,5 @@ pub use arithmetic::*;
 pub use comparison::*;
 #[cfg(feature = "simd")]
 pub use null_handling::*;
+#[cfg(feature = "simd")]
+pub use hashing::*;
