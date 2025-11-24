@@ -76,22 +76,40 @@ fn try_extract_subqueries_to_joins(
             None
         }
 
-        // AND with potential IN subqueries
+        // AND with potential IN/EXISTS subqueries
         Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
-            // Try left side first
-            if let Expression::In { expr, subquery, negated } = left.as_ref() {
-                if let Some(join) = try_convert_in_to_join(from, expr, subquery, *negated) {
-                    // Successfully converted left side, keep right side as WHERE clause
-                    return Some((join, Some((**right).clone())));
+            // Try left side first - check both IN and EXISTS
+            match left.as_ref() {
+                Expression::In { expr, subquery, negated } => {
+                    if let Some(join) = try_convert_in_to_join(from, expr, subquery, *negated) {
+                        // Successfully converted left IN side, keep right side as WHERE clause
+                        return Some((join, Some((**right).clone())));
+                    }
                 }
+                Expression::Exists { subquery, negated } => {
+                    if let Some((join, _)) = try_convert_exists_to_join(from, subquery, *negated) {
+                        // Successfully converted left EXISTS side, keep right side as WHERE clause
+                        return Some((join, Some((**right).clone())));
+                    }
+                }
+                _ => {}
             }
 
-            // Try right side
-            if let Expression::In { expr, subquery, negated } = right.as_ref() {
-                if let Some(join) = try_convert_in_to_join(from, expr, subquery, *negated) {
-                    // Successfully converted right side, keep left side as WHERE clause
-                    return Some((join, Some((**left).clone())));
+            // Try right side - check both IN and EXISTS
+            match right.as_ref() {
+                Expression::In { expr, subquery, negated } => {
+                    if let Some(join) = try_convert_in_to_join(from, expr, subquery, *negated) {
+                        // Successfully converted right IN side, keep left side as WHERE clause
+                        return Some((join, Some((**left).clone())));
+                    }
                 }
+                Expression::Exists { subquery, negated } => {
+                    if let Some((join, _)) = try_convert_exists_to_join(from, subquery, *negated) {
+                        // Successfully converted right EXISTS side, keep left side as WHERE clause
+                        return Some((join, Some((**left).clone())));
+                    }
+                }
+                _ => {}
             }
 
             // Try recursively on left side
