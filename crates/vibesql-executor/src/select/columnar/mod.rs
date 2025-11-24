@@ -113,9 +113,16 @@ pub fn execute_columnar_aggregate(
     schema: Option<&CombinedSchema>,
 ) -> Result<Vec<Row>, ExecutorError> {
     // Early return for empty input
+    // SQL standard: COUNT returns 0 for empty input, other aggregates return NULL
     if rows.is_empty() {
-        let null_values = vec![SqlValue::Null; aggregates.len()];
-        return Ok(vec![Row::new(null_values)]);
+        let values: Vec<SqlValue> = aggregates
+            .iter()
+            .map(|spec| match spec.op {
+                aggregate::AggregateOp::Count => SqlValue::Integer(0),
+                _ => SqlValue::Null,
+            })
+            .collect();
+        return Ok(vec![Row::new(values)]);
     }
 
     // Create columnar scan
