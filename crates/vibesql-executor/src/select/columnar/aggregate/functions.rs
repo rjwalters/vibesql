@@ -15,8 +15,10 @@ pub(super) fn compute_sum(
     column_idx: usize,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
-    let mut sum = 0.0;
+    let mut int_sum: i64 = 0;
+    let mut float_sum = 0.0;
     let mut count = 0;
+    let mut has_float = false;
 
     for (row_idx, value_opt) in scan.column(column_idx).enumerate() {
         // Check filter bitmap
@@ -29,12 +31,51 @@ pub(super) fn compute_sum(
         // Add to sum
         if let Some(value) = value_opt {
             match value {
-                SqlValue::Integer(v) => sum += *v as f64,
-                SqlValue::Bigint(v) => sum += *v as f64,
-                SqlValue::Smallint(v) => sum += *v as f64,
-                SqlValue::Float(v) => sum += *v as f64,
-                SqlValue::Double(v) => sum += v,
-                SqlValue::Numeric(v) => sum += v,
+                SqlValue::Integer(v) => {
+                    if has_float {
+                        float_sum += *v as f64;
+                    } else {
+                        int_sum += v;
+                    }
+                }
+                SqlValue::Bigint(v) => {
+                    if has_float {
+                        float_sum += *v as f64;
+                    } else {
+                        int_sum += v;
+                    }
+                }
+                SqlValue::Smallint(v) => {
+                    if has_float {
+                        float_sum += *v as f64;
+                    } else {
+                        int_sum += *v as i64;
+                    }
+                }
+                SqlValue::Float(v) => {
+                    if !has_float {
+                        // Convert accumulated integer sum to float
+                        float_sum = int_sum as f64;
+                        has_float = true;
+                    }
+                    float_sum += *v as f64;
+                }
+                SqlValue::Double(v) => {
+                    if !has_float {
+                        // Convert accumulated integer sum to float
+                        float_sum = int_sum as f64;
+                        has_float = true;
+                    }
+                    float_sum += v;
+                }
+                SqlValue::Numeric(v) => {
+                    if !has_float {
+                        // Convert accumulated integer sum to float
+                        float_sum = int_sum as f64;
+                        has_float = true;
+                    }
+                    float_sum += v;
+                }
                 SqlValue::Null => {}, // NULL values don't contribute to sum
                 _ => {
                     return Err(ExecutorError::UnsupportedExpression(
@@ -46,10 +87,13 @@ pub(super) fn compute_sum(
         }
     }
 
-    // Return appropriate type based on input
-    // For now, always return Double for simplicity
+    // Return appropriate type based on input types
     Ok(if count > 0 {
-        SqlValue::Double(sum)
+        if has_float {
+            SqlValue::Double(float_sum)
+        } else {
+            SqlValue::Integer(int_sum)
+        }
     } else {
         SqlValue::Null
     })
@@ -79,6 +123,9 @@ pub(super) fn compute_avg(
     let count_result = compute_count(scan, filter_bitmap)?;
 
     match (sum_result, count_result) {
+        (SqlValue::Integer(sum), SqlValue::Integer(count)) if count > 0 => {
+            Ok(SqlValue::Double(sum as f64 / count as f64))
+        }
         (SqlValue::Double(sum), SqlValue::Integer(count)) if count > 0 => {
             Ok(SqlValue::Double(sum / count as f64))
         }
