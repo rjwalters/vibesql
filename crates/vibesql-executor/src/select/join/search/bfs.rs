@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use super::{JoinCost, JoinOrderContext, SearchState};
+use super::context::JoinOrderContext;
+use super::state::{JoinCost, SearchState};
 
 impl JoinOrderContext {
     /// Find optimal order using parallel BFS with time-bounded search
