@@ -6,7 +6,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use super::{JoinCost, JoinOrderContext};
+use super::context::JoinOrderContext;
+use super::state::JoinCost;
 
 impl JoinOrderContext {
     /// Extract table cardinalities from actual table statistics, adjusted by WHERE clause selectivity

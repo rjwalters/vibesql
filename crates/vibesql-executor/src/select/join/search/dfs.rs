@@ -6,7 +6,8 @@
 
 use std::collections::BTreeSet;
 
-use super::{JoinCost, JoinOrderContext, SearchState};
+use super::context::JoinOrderContext;
+use super::state::{JoinCost, SearchState};
 
 impl JoinOrderContext {
     /// Find optimal order using sequential DFS (original algorithm)

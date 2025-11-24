@@ -5,7 +5,8 @@
 
 use std::collections::BTreeSet;
 
-use super::{JoinCost, JoinOrderContext};
+use super::context::JoinOrderContext;
+use super::state::JoinCost;
 
 impl JoinOrderContext {
     /// Find optimal order using greedy heuristic
