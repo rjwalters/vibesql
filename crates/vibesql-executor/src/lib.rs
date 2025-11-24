@@ -4,6 +4,7 @@
 
 pub mod advanced_objects;
 mod alter;
+pub mod arena;
 pub mod cache;
 mod constraint_validator;
 pub mod correlation;
