@@ -136,3 +136,7 @@ harness = false
 name = "tpch_profiling"
 harness = false
 required-features = ["benchmark-comparison"]
+
+[[bench]]
+name = "simd_dispatch_benchmark"
+harness = false
