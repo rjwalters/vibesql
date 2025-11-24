@@ -3,8 +3,8 @@
 //! Simplified implementation using Arrow 53 scalar comparison API
 
 use crate::errors::ExecutorError;
-use arrow::array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, Date32Array, TimestampMicrosecondArray};
-use arrow::compute::{and_kleene as and_op, or_kleene as or_op, not as not_op, filter_record_batch};
+use arrow::array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray, Date32Array, TimestampMicrosecondArray, Scalar};
+use arrow::compute::{and_kleene as and_op, or_kleene as or_op, not as not_op, filter_record_batch, like};
 use arrow::compute::kernels::cmp::{eq, neq, lt, lt_eq, gt, gt_eq};
 use arrow::record_batch::RecordBatch;
 use arrow::datatypes::TimeUnit;
@@ -47,6 +47,9 @@ fn evaluate_predicate_simd(
                 }
                 _ => Err(ExecutorError::Other(format!("Unsupported unary operator: {:?}", op))),
             }
+        }
+        Expression::Like { expr, pattern, negated } => {
+            evaluate_like_simd(batch, expr, pattern, *negated)
         }
         _ => Err(ExecutorError::Other(format!("Unsupported SIMD predicate: {:?}", expr))),
     }
@@ -305,6 +308,56 @@ fn get_boolean_column(batch: &RecordBatch, col_name: &str) -> Result<BooleanArra
     Ok(array.clone())
 }
 
+/// Evaluate a LIKE pattern match using SIMD
+fn evaluate_like_simd(
+    batch: &RecordBatch,
+    expr: &Expression,
+    pattern: &Expression,
+    negated: bool,
+) -> Result<BooleanArray, ExecutorError> {
+    // Extract column name from expression
+    let col_name = match expr {
+        Expression::ColumnRef { column, .. } => column,
+        _ => return Err(ExecutorError::Other("SIMD LIKE requires: column LIKE literal".to_string())),
+    };
+
+    // Extract pattern string from literal
+    let pattern_str = match pattern {
+        Expression::Literal(SqlValue::Varchar(s)) | Expression::Literal(SqlValue::Character(s)) => s.as_str(),
+        Expression::Literal(SqlValue::Null) => {
+            // NULL pattern matches nothing - return all false
+            return Ok(BooleanArray::from(vec![false; batch.num_rows()]));
+        }
+        _ => return Err(ExecutorError::Other("SIMD LIKE pattern must be a string literal".to_string())),
+    };
+
+    // Get the string column
+    let schema = batch.schema();
+    let (col_idx, _) = schema.column_with_name(col_name)
+        .ok_or_else(|| ExecutorError::Other(format!("Column not found: {}", col_name)))?;
+    let column = batch.column(col_idx);
+
+    // Ensure column is string type
+    if !matches!(column.data_type(), arrow::datatypes::DataType::Utf8) {
+        return Err(ExecutorError::Other(format!("LIKE requires string column, got: {:?}", column.data_type())));
+    }
+
+    let string_array = column.as_any().downcast_ref::<StringArray>()
+        .ok_or_else(|| ExecutorError::Other("Failed to downcast StringArray".to_string()))?;
+
+    // Use Arrow's SIMD-accelerated like kernel
+    let pattern_scalar = Scalar::new(StringArray::from(vec![pattern_str]));
+    let result = like(string_array, &pattern_scalar)
+        .map_err(|e| ExecutorError::Other(format!("SIMD LIKE failed: {}", e)))?;
+
+    // Apply negation if needed
+    if negated {
+        not_op(&result).map_err(|e| ExecutorError::Other(format!("SIMD NOT failed: {}", e)))
+    } else {
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +459,90 @@ mod tests {
         let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
         // Should match values: 4, 5, 6, 7 (4 rows)
         assert_eq!(filtered.num_rows(), 4);
+    }
+
+    #[test]
+    fn test_simd_like_prefix_pattern() {
+        // Test LIKE with prefix pattern (Al%)
+        let schema = Schema::new(vec![Field::new("name", DataType::Utf8, false)]);
+        let array = StringArray::from(vec!["Alice", "Bob", "Alex", "Charlie"]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array)]).unwrap();
+
+        // name LIKE 'Al%'
+        let predicate = Expression::Like {
+            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar("Al%".to_string()))),
+            negated: false,
+        };
+
+        let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
+        // Should match: Alice, Alex (2 rows)
+        assert_eq!(filtered.num_rows(), 2);
+
+        // Verify the matched values
+        let result_array = filtered.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(result_array.value(0), "Alice");
+        assert_eq!(result_array.value(1), "Alex");
+    }
+
+    #[test]
+    fn test_simd_like_suffix_pattern() {
+        // Test LIKE with suffix pattern (%lie)
+        let schema = Schema::new(vec![Field::new("name", DataType::Utf8, false)]);
+        let array = StringArray::from(vec!["Alice", "Bob", "Charlie", "Julie"]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array)]).unwrap();
+
+        // name LIKE '%lie'
+        let predicate = Expression::Like {
+            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar("%lie".to_string()))),
+            negated: false,
+        };
+
+        let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
+        // Should match: Charlie, Julie (2 rows)
+        assert_eq!(filtered.num_rows(), 2);
+    }
+
+    #[test]
+    fn test_simd_not_like() {
+        // Test NOT LIKE
+        let schema = Schema::new(vec![Field::new("name", DataType::Utf8, false)]);
+        let array = StringArray::from(vec!["Alice", "Bob", "Alex", "Charlie"]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array)]).unwrap();
+
+        // name NOT LIKE 'Al%'
+        let predicate = Expression::Like {
+            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar("Al%".to_string()))),
+            negated: true,
+        };
+
+        let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
+        // Should match: Bob, Charlie (2 rows)
+        assert_eq!(filtered.num_rows(), 2);
+
+        let result_array = filtered.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(result_array.value(0), "Bob");
+        assert_eq!(result_array.value(1), "Charlie");
+    }
+
+    #[test]
+    fn test_simd_like_contains_pattern() {
+        // Test LIKE with contains pattern (%li%)
+        let schema = Schema::new(vec![Field::new("name", DataType::Utf8, false)]);
+        let array = StringArray::from(vec!["Alice", "Bob", "Charlie", "Julie", "David"]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array)]).unwrap();
+
+        // name LIKE '%li%'
+        let predicate = Expression::Like {
+            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar("%li%".to_string()))),
+            negated: false,
+        };
+
+        let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
+        // Should match: Alice, Charlie, Julie (3 rows)
+        assert_eq!(filtered.num_rows(), 3);
     }
 }
