@@ -628,4 +628,190 @@ mod tests {
         assert_eq!(original_rows.len(), converted_rows.len());
         assert_eq!(original_rows[0].values.len(), converted_rows[0].values.len());
     }
+
+    #[test]
+    fn test_null_values_in_numeric_columns() {
+        // Test that NULL values are preserved in Int64 and Float64 columns
+        let original_rows = vec![
+            Row {
+                values: vec![
+                    SqlValue::Integer(100),
+                    SqlValue::Double(3.14),
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Null,  // NULL integer
+                    SqlValue::Double(2.718),
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Integer(200),
+                    SqlValue::Null,  // NULL float
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Null,  // NULL integer
+                    SqlValue::Null,  // NULL float
+                ],
+            },
+        ];
+
+        let column_names = vec!["int_col".to_string(), "float_col".to_string()];
+        let batch = rows_to_record_batch(&original_rows, &column_names).unwrap();
+
+        // Verify batch structure
+        assert_eq!(batch.num_rows(), 4);
+        assert_eq!(batch.num_columns(), 2);
+
+        // Verify NULL values are tracked
+        let int_array = batch.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        assert!(!int_array.is_null(0));  // First row is not NULL
+        assert!(int_array.is_null(1));   // Second row is NULL
+        assert!(!int_array.is_null(2));  // Third row is not NULL
+        assert!(int_array.is_null(3));   // Fourth row is NULL
+
+        let float_array = batch.column(1).as_any().downcast_ref::<Float64Array>().unwrap();
+        assert!(!float_array.is_null(0)); // First row is not NULL
+        assert!(!float_array.is_null(1)); // Second row is not NULL
+        assert!(float_array.is_null(2));  // Third row is NULL
+        assert!(float_array.is_null(3));  // Fourth row is NULL
+
+        // Test round-trip conversion preserves NULLs
+        let converted_rows = record_batch_to_rows(&batch).unwrap();
+        assert_eq!(original_rows.len(), converted_rows.len());
+
+        // Verify NULLs are preserved
+        assert!(matches!(converted_rows[1].values[0], SqlValue::Null));
+        assert!(matches!(converted_rows[2].values[1], SqlValue::Null));
+        assert!(matches!(converted_rows[3].values[0], SqlValue::Null));
+        assert!(matches!(converted_rows[3].values[1], SqlValue::Null));
+    }
+
+    #[test]
+    fn test_null_values_in_all_column_types() {
+        // Test NULL handling across different column types
+        let original_rows = vec![
+            Row {
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Double(1.1),
+                    SqlValue::Varchar("test".to_string()),
+                    SqlValue::Boolean(true),
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Null,
+                    SqlValue::Null,
+                    SqlValue::Null,
+                    SqlValue::Null,
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Integer(3),
+                    SqlValue::Double(3.3),
+                    SqlValue::Varchar("data".to_string()),
+                    SqlValue::Boolean(false),
+                ],
+            },
+        ];
+
+        let column_names = vec![
+            "int_col".to_string(),
+            "float_col".to_string(),
+            "str_col".to_string(),
+            "bool_col".to_string(),
+        ];
+
+        let batch = rows_to_record_batch(&original_rows, &column_names).unwrap();
+
+        // Verify NULLs in each column
+        assert!(!batch.column(0).is_null(0));
+        assert!(batch.column(0).is_null(1));  // NULL integer
+        assert!(!batch.column(0).is_null(2));
+
+        assert!(!batch.column(1).is_null(0));
+        assert!(batch.column(1).is_null(1));  // NULL float
+        assert!(!batch.column(1).is_null(2));
+
+        assert!(!batch.column(2).is_null(0));
+        assert!(batch.column(2).is_null(1));  // NULL string
+        assert!(!batch.column(2).is_null(2));
+
+        assert!(!batch.column(3).is_null(0));
+        assert!(batch.column(3).is_null(1));  // NULL boolean
+        assert!(!batch.column(3).is_null(2));
+
+        // Round-trip conversion
+        let converted_rows = record_batch_to_rows(&batch).unwrap();
+        assert_eq!(original_rows.len(), converted_rows.len());
+
+        // Verify second row (all NULLs) is preserved
+        assert!(matches!(converted_rows[1].values[0], SqlValue::Null));
+        assert!(matches!(converted_rows[1].values[1], SqlValue::Null));
+        assert!(matches!(converted_rows[1].values[2], SqlValue::Null));
+        assert!(matches!(converted_rows[1].values[3], SqlValue::Null));
+    }
+
+    #[test]
+    fn test_mixed_null_non_null_numeric() {
+        // Test realistic scenario with mixed NULL/non-NULL numeric values
+        // Simulates a query like: SELECT quantity * discount FROM orders
+        // where discount can be NULL for some rows
+        let original_rows = vec![
+            Row {
+                values: vec![
+                    SqlValue::Integer(10),
+                    SqlValue::Double(0.1),
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Integer(20),
+                    SqlValue::Null,  // No discount applied
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Integer(30),
+                    SqlValue::Double(0.2),
+                ],
+            },
+            Row {
+                values: vec![
+                    SqlValue::Integer(40),
+                    SqlValue::Null,  // No discount applied
+                ],
+            },
+        ];
+
+        let column_names = vec!["quantity".to_string(), "discount".to_string()];
+        let batch = rows_to_record_batch(&original_rows, &column_names).unwrap();
+
+        // Verify NULL pattern in discount column
+        let discount_array = batch.column(1).as_any().downcast_ref::<Float64Array>().unwrap();
+        assert!(!discount_array.is_null(0));
+        assert!(discount_array.is_null(1));
+        assert!(!discount_array.is_null(2));
+        assert!(discount_array.is_null(3));
+
+        // Round-trip preserves NULL pattern
+        let converted_rows = record_batch_to_rows(&batch).unwrap();
+        assert!(matches!(converted_rows[1].values[1], SqlValue::Null));
+        assert!(matches!(converted_rows[3].values[1], SqlValue::Null));
+
+        // Non-NULL values are preserved
+        match &converted_rows[0].values[1] {
+            SqlValue::Double(v) => assert!((v - 0.1).abs() < 0.001),
+            _ => panic!("Expected Double value"),
+        }
+        match &converted_rows[2].values[1] {
+            SqlValue::Double(v) => assert!((v - 0.2).abs() < 0.001),
+            _ => panic!("Expected Double value"),
+        }
+    }
 }

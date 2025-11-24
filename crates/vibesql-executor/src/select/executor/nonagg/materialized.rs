@@ -20,6 +20,7 @@ use crate::{
         join::FromResult,
         order::{apply_order_by, RowWithSortKeys},
         projection::{project_row_combined, SelectProjectionIterator},
+        projection_simd::try_batch_project_simd,
         window::{
             collect_order_by_window_functions, evaluate_order_by_window_functions,
             evaluate_window_functions, expression_has_window_function, has_window_functions,
@@ -479,36 +480,60 @@ impl SelectExecutor<'_> {
         evaluator: &CombinedExpressionEvaluator,
         window_mapping: &Option<HashMap<WindowFunctionKey, usize>>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
-        // Use pooled buffer to reduce allocation overhead
-        let mut projected_rows = self
-            .database
-            .query_buffer_pool()
-            .get_row_buffer(result_rows.len());
+        // Extract rows from RowWithSortKeys (discard sort keys for projection)
+        let rows: Vec<vibesql_storage::Row> = result_rows.into_iter().map(|(row, _)| row).collect();
 
-        for (row, _) in result_rows {
-            // Check timeout during projection
-            self.check_timeout()?;
+        // Try batch SIMD projection first for large datasets
+        let projected_rows = if let Some(projected) = try_batch_project_simd(
+            &rows,
+            &stmt.select_list,
+            evaluator,
+            schema,
+            window_mapping,
+            self.database.query_buffer_pool(),
+        )? {
+            // SIMD batch projection succeeded
+            // Track memory for projected rows
+            for projected_row in &projected {
+                let row_memory = std::mem::size_of::<vibesql_storage::Row>()
+                    + std::mem::size_of_val(projected_row.values.as_slice());
+                self.track_memory_allocation(row_memory)?;
+            }
+            projected
+        } else {
+            // Fall back to row-by-row projection
+            // Use pooled buffer to reduce allocation overhead
+            let mut result = self
+                .database
+                .query_buffer_pool()
+                .get_row_buffer(rows.len());
 
-            // Clear CSE cache before projecting each row to prevent column values
-            // from being incorrectly cached across different rows
-            evaluator.clear_cse_cache();
+            for row in rows {
+                // Check timeout during projection
+                self.check_timeout()?;
 
-            let projected_row = project_row_combined(
-                &row,
-                &stmt.select_list,
-                evaluator,
-                schema,
-                window_mapping,
-                self.database.query_buffer_pool(),
-            )?;
+                // Clear CSE cache before projecting each row to prevent column values
+                // from being incorrectly cached across different rows
+                evaluator.clear_cse_cache();
 
-            // Track memory for each projected row
-            let row_memory = std::mem::size_of::<vibesql_storage::Row>()
-                + std::mem::size_of_val(projected_row.values.as_slice());
-            self.track_memory_allocation(row_memory)?;
+                let projected_row = project_row_combined(
+                    &row,
+                    &stmt.select_list,
+                    evaluator,
+                    schema,
+                    window_mapping,
+                    self.database.query_buffer_pool(),
+                )?;
 
-            projected_rows.push(projected_row);
-        }
+                // Track memory for each projected row
+                let row_memory = std::mem::size_of::<vibesql_storage::Row>()
+                    + std::mem::size_of_val(projected_row.values.as_slice());
+                self.track_memory_allocation(row_memory)?;
+
+                result.push(projected_row);
+            }
+            result
+        };
 
         // Apply DISTINCT if specified
         let projected_rows = if stmt.distinct {

@@ -342,4 +342,254 @@ mod tests {
         assert!((result_arr.value(1) - 160.0).abs() < 0.001);
         assert!((result_arr.value(2) - 255.0).abs() < 0.001);
     }
+
+    #[test]
+    fn test_simd_null_in_left_operand() {
+        // Test: NULL + price
+        // Expected: All results should be NULL (NULL propagation)
+        let schema = Schema::new(vec![Field::new("price", DataType::Float64, true)]);
+        let price_array = Float64Array::from(vec![Some(10.0), Some(20.0), Some(30.0)]);
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::Literal(SqlValue::Null)),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "price".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+
+        // Result could be Int64Array or Float64Array depending on type casting
+        // Check using the Array trait's is_null method which works for both
+        assert_eq!(result.len(), 3);
+        assert!(result.is_null(0));
+        assert!(result.is_null(1));
+        assert!(result.is_null(2));
+    }
+
+    #[test]
+    fn test_simd_null_in_right_operand() {
+        // Test: price + NULL
+        // Expected: All results should be NULL (NULL propagation)
+        let schema = Schema::new(vec![Field::new("price", DataType::Float64, true)]);
+        let price_array = Float64Array::from(vec![Some(10.0), Some(20.0), Some(30.0)]);
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "price".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Null)),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+
+        // Result could be Int64Array or Float64Array depending on type casting
+        // Check using the Array trait's is_null method which works for both
+        assert_eq!(result.len(), 3);
+        assert!(result.is_null(0));
+        assert!(result.is_null(1));
+        assert!(result.is_null(2));
+    }
+
+    #[test]
+    fn test_simd_mixed_null_non_null() {
+        // Test: quantity * discount where discount can be NULL
+        // Expected: NULL * anything = NULL, non-NULL values computed correctly
+        let schema = Schema::new(vec![
+            Field::new("quantity", DataType::Int64, false),
+            Field::new("discount", DataType::Float64, true),
+        ]);
+        let quantity_array = Int64Array::from(vec![10, 20, 30, 40]);
+        // discount: [0.1, NULL, 0.2, NULL]
+        let discount_array = Float64Array::from(vec![Some(0.1), None, Some(0.2), None]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(quantity_array), Arc::new(discount_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "quantity".to_string(),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "discount".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        // Expected: [1.0, NULL, 6.0, NULL]
+        assert_eq!(result_arr.len(), 4);
+        assert!(!result_arr.is_null(0));
+        assert!((result_arr.value(0) - 1.0).abs() < 0.001);
+        assert!(result_arr.is_null(1)); // NULL discount propagates
+        assert!(!result_arr.is_null(2));
+        assert!((result_arr.value(2) - 6.0).abs() < 0.001);
+        assert!(result_arr.is_null(3)); // NULL discount propagates
+    }
+
+    #[test]
+    fn test_simd_all_nulls() {
+        // Test: NULL + NULL
+        // Expected: All results are NULL
+        let schema = Schema::new(vec![Field::new("dummy", DataType::Int64, true)]);
+        let dummy_array = Int64Array::from(vec![Some(1), Some(2), Some(3)]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(dummy_array)]).unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::Literal(SqlValue::Null)),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Null)),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+
+        // Result type is Int64Array (both operands are NULL literals which default to Int64)
+        // Check using the Array trait's is_null method
+        assert_eq!(result.len(), 3);
+        assert!(result.is_null(0));
+        assert!(result.is_null(1));
+        assert!(result.is_null(2));
+    }
+
+    #[test]
+    fn test_simd_nested_null_propagation() {
+        // Test: price * (1 - discount) where discount can be NULL
+        // Expected: NULL in nested expression propagates to final result
+        let schema = Schema::new(vec![
+            Field::new("price", DataType::Float64, false),
+            Field::new("discount", DataType::Float64, true),
+        ]);
+        let price_array = Float64Array::from(vec![100.0, 200.0, 300.0, 400.0]);
+        // discount: [0.1, NULL, 0.15, NULL]
+        let discount_array = Float64Array::from(vec![Some(0.1), None, Some(0.15), None]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(price_array), Arc::new(discount_array)],
+        )
+        .unwrap();
+
+        // price * (1 - discount)
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "price".to_string(),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::Literal(SqlValue::Float(1.0))),
+                op: BinaryOperator::Minus,
+                right: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "discount".to_string(),
+                }),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        // Expected: [90.0, NULL, 255.0, NULL]
+        assert_eq!(result_arr.len(), 4);
+        assert!(!result_arr.is_null(0));
+        assert!((result_arr.value(0) - 90.0).abs() < 0.001);
+        assert!(result_arr.is_null(1)); // NULL discount propagates through nested expression
+        assert!(!result_arr.is_null(2));
+        assert!((result_arr.value(2) - 255.0).abs() < 0.001);
+        assert!(result_arr.is_null(3)); // NULL discount propagates through nested expression
+    }
+
+    #[test]
+    fn test_simd_division_with_nulls() {
+        // Test: price / quantity with NULLs
+        // Expected: NULL propagation and correct division for non-NULL values
+        let schema = Schema::new(vec![
+            Field::new("price", DataType::Float64, true),
+            Field::new("quantity", DataType::Int64, true),
+        ]);
+        let price_array = Float64Array::from(vec![Some(100.0), None, Some(300.0), Some(400.0)]);
+        let quantity_array = Int64Array::from(vec![Some(2), Some(5), None, Some(8)]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(price_array), Arc::new(quantity_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "price".to_string(),
+            }),
+            op: BinaryOperator::Divide,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "quantity".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        // Expected: [50.0, NULL, NULL, 50.0]
+        assert_eq!(result_arr.len(), 4);
+        assert!(!result_arr.is_null(0));
+        assert!((result_arr.value(0) - 50.0).abs() < 0.001);
+        assert!(result_arr.is_null(1)); // NULL price
+        assert!(result_arr.is_null(2)); // NULL quantity
+        assert!(!result_arr.is_null(3));
+        assert!((result_arr.value(3) - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_simd_subtraction_with_nulls() {
+        // Test: revenue - cost with NULLs
+        let schema = Schema::new(vec![
+            Field::new("revenue", DataType::Float64, true),
+            Field::new("cost", DataType::Float64, true),
+        ]);
+        let revenue_array = Float64Array::from(vec![Some(1000.0), Some(2000.0), None, Some(4000.0)]);
+        let cost_array = Float64Array::from(vec![Some(600.0), None, Some(1500.0), Some(2500.0)]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![Arc::new(revenue_array), Arc::new(cost_array)],
+        )
+        .unwrap();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "revenue".to_string(),
+            }),
+            op: BinaryOperator::Minus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "cost".to_string(),
+            }),
+        };
+
+        let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
+        let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
+
+        // Expected: [400.0, NULL, NULL, 1500.0]
+        assert_eq!(result_arr.len(), 4);
+        assert!(!result_arr.is_null(0));
+        assert!((result_arr.value(0) - 400.0).abs() < 0.001);
+        assert!(result_arr.is_null(1)); // NULL cost
+        assert!(result_arr.is_null(2)); // NULL revenue
+        assert!(!result_arr.is_null(3));
+        assert!((result_arr.value(3) - 1500.0).abs() < 0.001);
+    }
 }
