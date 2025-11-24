@@ -41,10 +41,14 @@ impl SelectExecutor<'_> {
         match choose_execution_model(stmt) {
             ExecutionModel::RowOriented => {
                 log::debug!("  Columnar execution: Query not compatible (adaptive execution selected row-oriented)");
+                #[cfg(feature = "profile-q6")]
+                eprintln!("[PROFILE-Q6]   Reason: Adaptive execution selected ROW-ORIENTED model");
                 return Ok(None);
             }
             ExecutionModel::Columnar => {
                 log::debug!("  Columnar execution: Query eligible (adaptive execution selected columnar)");
+                #[cfg(feature = "profile-q6")]
+                eprintln!("[PROFILE-Q6]   ✓ Adaptive execution selected COLUMNAR model");
                 // Continue with columnar execution
             }
         }
@@ -52,6 +56,8 @@ impl SelectExecutor<'_> {
         // Only handle queries without CTEs or set operations for now
         if !cte_results.is_empty() || stmt.set_operation.is_some() {
             log::debug!("  Columnar execution: Not supported - has CTEs or set operations");
+            #[cfg(feature = "profile-q6")]
+            eprintln!("[PROFILE-Q6]   Reason: Has CTEs or set operations (not supported yet)");
             return Ok(None);
         }
 
@@ -60,6 +66,8 @@ impl SelectExecutor<'_> {
             Some(from) => from,
             None => {
                 log::debug!("  Columnar execution: Not supported - no FROM clause");
+                #[cfg(feature = "profile-q6")]
+                eprintln!("[PROFILE-Q6]   Reason: No FROM clause");
                 return Ok(None);
             }
         };
@@ -73,7 +81,7 @@ impl SelectExecutor<'_> {
             None, // ORDER BY applied after aggregation
         )?;
 
-        // Extract schema before taking rows (to avoid borrow checker issues)
+        // Extract schema before accessing rows (to avoid borrow checker issues)
         let schema = from_result.schema.clone();
 
         // Extract expressions from SELECT list (only Expression items, skip wildcards)
@@ -86,16 +94,31 @@ impl SelectExecutor<'_> {
             })
             .collect();
 
+        // Get a slice reference to rows WITHOUT triggering collect_vec() materialization
+        // This is the critical optimization for #2521 - avoids the 137ms bottleneck
+        let rows_slice = from_result.data.as_slice();
+
         // Try columnar execution with SIMD-accelerated filtering
         // If this returns None, the regular executor will handle the query with row-based execution
+        #[cfg(feature = "profile-q6")]
+        eprintln!("[PROFILE-Q6]   Attempting columnar execution on {} rows...", rows_slice.len());
+
         match columnar::execute_columnar(
-            from_result.rows(),
+            rows_slice,
             stmt.where_clause.as_ref(), // Let columnar module apply WHERE with SIMD
             &select_exprs,
             &schema,
         ) {
-            Some(result) => result.map(Some),
-            None => Ok(None), // Fall back to regular execution
+            Some(result) => {
+                #[cfg(feature = "profile-q6")]
+                eprintln!("[PROFILE-Q6]   ✓ Columnar execution succeeded");
+                result.map(Some)
+            },
+            None => {
+                #[cfg(feature = "profile-q6")]
+                eprintln!("[PROFILE-Q6]   Reason: execute_columnar returned None (predicates or aggregates too complex)");
+                Ok(None)
+            }, // Fall back to regular execution
         }
     }
 }

@@ -183,6 +183,18 @@ impl FromIterator {
         }
     }
 
+    /// Get a reference to the underlying rows without materializing via iterator
+    ///
+    /// This is a zero-cost operation that accesses the underlying Vec<Row> directly
+    /// without triggering iteration or collection. This is critical for columnar
+    /// execution performance, avoiding the 137ms row materialization bottleneck.
+    pub fn as_slice(&self) -> &[Row] {
+        match self {
+            Self::Materialized(iter) => iter.as_slice(),
+            Self::TableScan(iter) => &iter.rows[iter.pos..],
+        }
+    }
+
     /// Get size hint
     pub fn size_hint(&self) -> (usize, Option<usize>) {
         match self {

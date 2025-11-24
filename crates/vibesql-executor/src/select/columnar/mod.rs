@@ -113,15 +113,34 @@ pub fn execute_columnar_aggregate(
     schema: Option<&CombinedSchema>,
 ) -> Result<Vec<Row>, ExecutorError> {
     // Early return for empty input
+    // SQL standard: COUNT returns 0 for empty input, other aggregates return NULL
     if rows.is_empty() {
-        let null_values = vec![SqlValue::Null; aggregates.len()];
-        return Ok(vec![Row::new(null_values)]);
+        let values: Vec<SqlValue> = aggregates
+            .iter()
+            .map(|spec| match spec.op {
+                aggregate::AggregateOp::Count => SqlValue::Integer(0),
+                _ => SqlValue::Null,
+            })
+            .collect();
+        return Ok(vec![Row::new(values)]);
     }
 
-    // Create columnar scan
+    // Phase 1: Scan - Create columnar scan structure
+    #[cfg(feature = "profile-q6")]
+    let scan_start = std::time::Instant::now();
+
     let _scan = ColumnarScan::new(rows);
 
-    // Create filter bitmap (optional filtering)
+    #[cfg(feature = "profile-q6")]
+    {
+        let scan_time = scan_start.elapsed();
+        eprintln!("[PROFILE-Q6]   Phase 1 - Scan: {:?}", scan_time);
+    }
+
+    // Phase 2: Filter - Create filter bitmap for predicate evaluation
+    #[cfg(feature = "profile-q6")]
+    let filter_start = std::time::Instant::now();
+
     let filter_bitmap = if predicates.is_empty() {
         None
     } else {
@@ -130,8 +149,26 @@ pub fn execute_columnar_aggregate(
         })?)
     };
 
-    // Compute aggregates
+    #[cfg(feature = "profile-q6")]
+    {
+        let filter_time = filter_start.elapsed();
+        let passed = filter_bitmap.as_ref().map(|bm| bm.iter().filter(|&&b| b).count()).unwrap_or(rows.len());
+        eprintln!("[PROFILE-Q6]   Phase 2 - Filter: {:?} ({}/{} rows passed)",
+            filter_time, passed, rows.len());
+    }
+
+    // Phase 3: Aggregate - Compute aggregate functions with SIMD
+    #[cfg(feature = "profile-q6")]
+    let agg_start = std::time::Instant::now();
+
     let results = compute_multiple_aggregates(rows, aggregates, filter_bitmap.as_deref(), schema)?;
+
+    #[cfg(feature = "profile-q6")]
+    {
+        let agg_time = agg_start.elapsed();
+        eprintln!("[PROFILE-Q6]   Phase 3 - Aggregate: {:?} ({} aggregates)",
+            agg_time, aggregates.len());
+    }
 
     // Return as single row
     Ok(vec![Row::new(results)])
