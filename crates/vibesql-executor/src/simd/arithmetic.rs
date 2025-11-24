@@ -241,6 +241,10 @@ pub fn simd_div_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
 }
 
 /// AVX2/SSE SIMD division for i64 columns (4 elements at a time)
+///
+/// Note: The `wide` crate's i64x4 doesn't support division, so we convert to f64,
+/// divide, and convert back. This matches the semantics of integer division
+/// (truncation towards zero).
 #[cfg(feature = "simd")]
 fn simd_div_i64_avx2(a: &[i64], b: &[i64]) -> Vec<i64> {
     let mut result = Vec::with_capacity(a.len());
@@ -249,12 +253,34 @@ fn simd_div_i64_avx2(a: &[i64], b: &[i64]) -> Vec<i64> {
     let chunks = a.len() / 4;
     for i in 0..chunks {
         let offset = i * 4;
-        let a_vec = i64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = i64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let quotient = a_vec / b_vec;
 
-        let arr: [i64; 4] = quotient.into();
-        result.extend_from_slice(&arr);
+        // Convert i64 to f64 for division (wide crate i64x4 doesn't support div)
+        let a_f64 = f64x4::from([
+            a[offset] as f64,
+            a[offset + 1] as f64,
+            a[offset + 2] as f64,
+            a[offset + 3] as f64,
+        ]);
+        let b_f64 = f64x4::from([
+            b[offset] as f64,
+            b[offset + 1] as f64,
+            b[offset + 2] as f64,
+            b[offset + 3] as f64,
+        ]);
+
+        // Perform SIMD division
+        let quot_f64 = a_f64 / b_f64;
+
+        // Convert back to i64 (truncating towards zero)
+        let arr_f64: [f64; 4] = quot_f64.into();
+        let arr_i64: [i64; 4] = [
+            arr_f64[0] as i64,
+            arr_f64[1] as i64,
+            arr_f64[2] as i64,
+            arr_f64[3] as i64,
+        ];
+
+        result.extend_from_slice(&arr_i64);
     }
 
     // Handle remainder elements with scalar fallback
