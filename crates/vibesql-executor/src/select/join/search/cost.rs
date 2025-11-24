@@ -66,16 +66,6 @@ impl JoinOrderContext {
         cardinalities
     }
 
-    /// Extract table cardinalities from actual table statistics (legacy, no selectivity)
-    ///
-    /// Uses real row counts from database tables instead of hardcoded estimates.
-    /// This enables effective pruning in the search algorithm.
-    pub(super) fn extract_cardinalities(
-        analyzer: &crate::select::join::reorder::JoinOrderAnalyzer,
-        database: &vibesql_storage::Database,
-    ) -> std::collections::HashMap<String, usize> {
-        Self::extract_cardinalities_with_selectivity(analyzer, database, &HashMap::new())
-    }
 
     /// Compute join selectivities for each edge based on column NDV (number of distinct values)
     ///

@@ -88,7 +88,7 @@ impl ColumnarBatch {
     }
 
     /// Create a columnar batch with specified capacity
-    pub fn with_capacity(row_count: usize, column_count: usize) -> Self {
+    pub fn with_capacity(_row_count: usize, column_count: usize) -> Self {
         Self {
             row_count: 0,
             columns: Vec::with_capacity(column_count),
