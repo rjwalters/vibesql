@@ -160,7 +160,7 @@ impl JoinOrderAnalyzer {
             }
             // Handle OR expressions by extracting common join conditions
             // that appear in ALL branches
-            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+            Expression::BinaryOp { op: BinaryOperator::Or, .. } => {
                 if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                     eprintln!("[ANALYZER] Analyzing OR expression for common join conditions");
                 }

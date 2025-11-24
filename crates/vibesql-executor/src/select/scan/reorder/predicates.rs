@@ -173,7 +173,7 @@ pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String
                 extract_recursive(right, tables, equijoins);
             }
             // Binary OR: extract common equijoins from all branches
-            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+            Expression::BinaryOp { op: BinaryOperator::Or, .. } => {
                 if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                     eprintln!("[JOIN_REORDER] Processing OR expression for common equijoins");
                 }
