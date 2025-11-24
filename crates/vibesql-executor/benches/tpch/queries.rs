@@ -340,6 +340,8 @@ WHERE p_partkey = l_partkey
 "#;
 
 // TPC-H Q18: Large Volume Customer
+// Standard form with subquery for optimal performance:
+// Pre-filter orders with SUM(l_quantity) > 300 before joining with customer table
 pub const TPCH_Q18: &str = r#"
 SELECT
     c_name,
@@ -349,10 +351,15 @@ SELECT
     o_totalprice,
     SUM(l_quantity) as total_qty
 FROM customer, orders, lineitem
-WHERE c_custkey = o_custkey
+WHERE o_orderkey IN (
+        SELECT l_orderkey
+        FROM lineitem
+        GROUP BY l_orderkey
+        HAVING SUM(l_quantity) > 300
+    )
+    AND c_custkey = o_custkey
     AND o_orderkey = l_orderkey
 GROUP BY c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice
-HAVING SUM(l_quantity) > 300
 ORDER BY o_totalprice DESC, o_orderdate
 LIMIT 100
 "#;
