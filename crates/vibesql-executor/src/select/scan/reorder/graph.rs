@@ -1,7 +1,7 @@
 //! Join graph construction and table reference analysis
 
 use std::collections::HashSet;
-use vibesql_ast::{Expression, FromClause};
+use vibesql_ast::{Expression, FromClause, JoinType};
 
 /// Information about a table extracted from a FROM clause
 #[derive(Debug, Clone)]
@@ -12,6 +12,13 @@ pub(super) struct TableRef {
     pub(super) is_cte: bool,
     pub(super) is_subquery: bool,
     pub(super) subquery: Option<Box<vibesql_ast::SelectStmt>>,
+}
+
+/// Join condition with its associated join type
+#[derive(Debug, Clone)]
+pub(super) struct JoinConditionWithType {
+    pub(super) condition: Expression,
+    pub(super) join_type: JoinType,
 }
 
 /// Flatten a nested join tree into a list of table references
@@ -56,6 +63,27 @@ pub(super) fn extract_all_conditions(from: &FromClause, conditions: &mut Vec<Exp
             // Recurse into nested joins
             extract_all_conditions(left, conditions);
             extract_all_conditions(right, conditions);
+        }
+    }
+}
+
+/// Extract all join conditions with their associated join types from a FROM clause
+pub(super) fn extract_conditions_with_types(from: &FromClause, conditions: &mut Vec<JoinConditionWithType>) {
+    match from {
+        FromClause::Table { .. } | FromClause::Subquery { .. } => {
+            // No conditions in simple table refs
+        }
+        FromClause::Join { left, right, join_type, condition, .. } => {
+            // Add this join's condition with its type
+            if let Some(cond) = condition {
+                conditions.push(JoinConditionWithType {
+                    condition: cond.clone(),
+                    join_type: join_type.clone(),
+                });
+            }
+            // Recurse into nested joins
+            extract_conditions_with_types(left, conditions);
+            extract_conditions_with_types(right, conditions);
         }
     }
 }

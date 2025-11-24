@@ -30,6 +30,7 @@ fn test_two_table_order() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -53,12 +54,14 @@ fn test_three_table_chain() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -92,12 +95,14 @@ fn test_search_prunes_bad_paths() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -145,18 +150,21 @@ fn test_star_join_pattern() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -195,6 +203,7 @@ fn test_parallel_bfs_selection() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -218,48 +227,56 @@ fn test_parallel_bfs_selection() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t5".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t3".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t4".to_string(),
         left_column: "id".to_string(),
         right_table: "t5".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t5".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let search = JoinOrderSearch::from_analyzer(&analyzer, &db);
@@ -291,36 +308,42 @@ fn test_parallel_bfs_produces_valid_ordering() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t3".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -368,12 +391,14 @@ fn test_tpch_q3_star_schema_no_cross_join() {
         left_column: "c_custkey".to_string(),
         right_table: "orders".to_string(),
         right_column: "o_custkey".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "lineitem".to_string(),
         left_column: "l_orderkey".to_string(),
         right_table: "orders".to_string(),
         right_column: "o_orderkey".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -432,30 +457,35 @@ fn test_join_order_determinism() {
         left_column: "c_custkey".to_string(),
         right_table: "orders".to_string(),
         right_column: "o_custkey".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "orders".to_string(),
         left_column: "o_orderkey".to_string(),
         right_table: "lineitem".to_string(),
         right_column: "l_orderkey".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "lineitem".to_string(),
         left_column: "l_suppkey".to_string(),
         right_table: "supplier".to_string(),
         right_column: "s_suppkey".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "supplier".to_string(),
         left_column: "s_nationkey".to_string(),
         right_table: "nation".to_string(),
         right_column: "n_nationkey".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "customer".to_string(),
         left_column: "c_nationkey".to_string(),
         right_table: "nation".to_string(),
         right_column: "n_nationkey".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -501,24 +531,28 @@ fn test_time_bounded_search_returns_valid_ordering() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t3".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t4".to_string(),
         left_column: "id".to_string(),
         right_table: "t5".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -556,12 +590,14 @@ fn test_time_bounded_search_completes_fast_for_small_queries() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -593,18 +629,21 @@ fn test_time_bounded_search_with_generous_budget() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
         left_column: "id".to_string(),
         right_table: "t4".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
@@ -639,12 +678,14 @@ fn test_legacy_behavior_with_time_budget_disabled() {
         left_column: "id".to_string(),
         right_table: "t2".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
     analyzer.add_edge(JoinEdge {
         left_table: "t2".to_string(),
         left_column: "id".to_string(),
         right_table: "t3".to_string(),
         right_column: "id".to_string(),
+        join_type: vibesql_ast::JoinType::Inner,
     });
 
     let db = vibesql_storage::Database::new();
