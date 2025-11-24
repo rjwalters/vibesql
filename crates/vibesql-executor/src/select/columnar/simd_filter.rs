@@ -98,6 +98,11 @@ fn evaluate_predicate_simd(
             evaluate_predicate_f64_simd(predicate, values, nulls.as_ref())
         }
 
+        // SIMD path for Date columns
+        ColumnArray::Date(values, nulls) => {
+            evaluate_predicate_date_simd(predicate, values, nulls.as_ref())
+        }
+
         // Scalar fallback for other column types
         _ => evaluate_predicate_scalar(batch, predicate, column_idx),
     }
@@ -311,6 +316,128 @@ fn evaluate_predicate_f64_simd(
     }
 
     Ok(result)
+}
+
+/// Evaluate predicate on Date column using SIMD
+///
+/// Dates are stored as i32 (days since epoch), so we convert them to i64
+/// and reuse the existing i64 SIMD operations for efficient comparison.
+fn evaluate_predicate_date_simd(
+    predicate: &ColumnPredicate,
+    values: &[i32],
+    nulls: Option<&Vec<bool>>,
+) -> Result<Vec<bool>, ExecutorError> {
+    // Convert i32 dates to i64 for SIMD operations
+    let values_i64: Vec<i64> = values.iter().map(|&v| v as i64).collect();
+
+    let mut result = match predicate {
+        ColumnPredicate::LessThan { value, .. } => {
+            let threshold = extract_date_threshold_i32(value)?;
+            simd_lt_i64(&values_i64, threshold as i64)
+        }
+
+        ColumnPredicate::LessThanOrEqual { value, .. } => {
+            let threshold = extract_date_threshold_i32(value)?;
+            let lt = simd_lt_i64(&values_i64, threshold as i64);
+            let eq = simd_eq_i64(&values_i64, threshold as i64);
+            // OR the two masks
+            lt.iter().zip(eq.iter()).map(|(&a, &b)| a || b).collect()
+        }
+
+        ColumnPredicate::GreaterThan { value, .. } => {
+            let threshold = extract_date_threshold_i32(value)?;
+            simd_gt_i64(&values_i64, threshold as i64)
+        }
+
+        ColumnPredicate::GreaterThanOrEqual { value, .. } => {
+            let threshold = extract_date_threshold_i32(value)?;
+            let gt = simd_gt_i64(&values_i64, threshold as i64);
+            let eq = simd_eq_i64(&values_i64, threshold as i64);
+            // OR the two masks
+            gt.iter().zip(eq.iter()).map(|(&a, &b)| a || b).collect()
+        }
+
+        ColumnPredicate::Equal { value, .. } => {
+            let target = extract_date_threshold_i32(value)?;
+            simd_eq_i64(&values_i64, target as i64)
+        }
+
+        ColumnPredicate::Between { low, high, .. } => {
+            let low_i32 = extract_date_threshold_i32(low)?;
+            let high_i32 = extract_date_threshold_i32(high)?;
+
+            let ge_low = {
+                let gt = simd_gt_i64(&values_i64, low_i32 as i64);
+                let eq = simd_eq_i64(&values_i64, low_i32 as i64);
+                gt.iter().zip(eq.iter()).map(|(&a, &b)| a || b).collect::<Vec<bool>>()
+            };
+
+            let le_high = {
+                let lt = simd_lt_i64(&values_i64, high_i32 as i64);
+                let eq = simd_eq_i64(&values_i64, high_i32 as i64);
+                lt.iter().zip(eq.iter()).map(|(&a, &b)| a || b).collect::<Vec<bool>>()
+            };
+
+            // AND the two masks
+            ge_low
+                .iter()
+                .zip(le_high.iter())
+                .map(|(&a, &b)| a && b)
+                .collect()
+        }
+    };
+
+    // Apply NULL mask: NULLs always fail predicates
+    if let Some(null_mask) = nulls {
+        for i in 0..result.len() {
+            if null_mask[i] {
+                result[i] = false;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Extract i32 date value (days since epoch) from SqlValue
+fn extract_date_threshold_i32(value: &SqlValue) -> Result<i32, ExecutorError> {
+    match value {
+        SqlValue::Date(date) => {
+            // Convert Date to days since epoch (i32)
+            Ok(date_to_days_since_epoch(date))
+        }
+        _ => Err(ExecutorError::Other(format!(
+            "Expected Date value for date comparison, got: {:?}",
+            value
+        ))),
+    }
+}
+
+/// Convert Date to days since Unix epoch
+///
+/// This is a simplified calculation that doesn't account for all leap years perfectly.
+fn date_to_days_since_epoch(date: &vibesql_types::Date) -> i32 {
+    let year_days = (date.year - 1970) * 365;
+    let leap_years =
+        ((date.year - 1969) / 4) - ((date.year - 1901) / 100) + ((date.year - 1601) / 400);
+    let month_days: i32 = match date.month {
+        1 => 0,
+        2 => 31,
+        3 => 59,
+        4 => 90,
+        5 => 120,
+        6 => 151,
+        7 => 181,
+        8 => 212,
+        9 => 243,
+        10 => 273,
+        11 => 304,
+        12 => 334,
+        _ => 0,
+    };
+    let day_days = (date.day as i32) - 1;
+
+    year_days + leap_years + month_days + day_days
 }
 
 /// Scalar fallback for non-numeric columns
@@ -681,5 +808,190 @@ mod tests {
             filtered.get_value(0, 1).unwrap(),
             SqlValue::Double(0.06)
         );
+    }
+
+    #[test]
+    fn test_simd_filter_date_less_than() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date < 1996-01-01
+        let predicates = vec![ColumnPredicate::LessThan {
+            column_idx: 0,
+            value: SqlValue::Date(Date {
+                year: 1996,
+                month: 1,
+                day: 1,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match first two rows (1994-01-01, 1995-06-15)
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    #[test]
+    fn test_simd_filter_date_between() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date BETWEEN 1995-01-01 AND 1996-12-31
+        let predicates = vec![ColumnPredicate::Between {
+            column_idx: 0,
+            low: SqlValue::Date(Date {
+                year: 1995,
+                month: 1,
+                day: 1,
+            }),
+            high: SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match middle two rows (1995-06-15, 1996-12-31)
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    #[test]
+    fn test_simd_filter_date_with_nulls() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column including NULLs
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Null]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date >= 1996-01-01
+        let predicates = vec![ColumnPredicate::GreaterThanOrEqual {
+            column_idx: 0,
+            value: SqlValue::Date(Date {
+                year: 1996,
+                month: 1,
+                day: 1,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match last two rows (1996-12-31, 1997-03-10), NULLs excluded
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    #[test]
+    fn test_simd_filter_date_equal() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date = 1995-06-15
+        let predicates = vec![ColumnPredicate::Equal {
+            column_idx: 0,
+            value: SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match two middle rows
+        assert_eq!(filtered.row_count(), 2);
     }
 }
