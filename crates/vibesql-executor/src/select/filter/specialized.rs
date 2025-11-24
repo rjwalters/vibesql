@@ -1,7 +1,7 @@
-///! Specialized predicate evaluators for fast-path optimization
-///!
-///! These evaluators avoid SqlValue enum matching by working directly with
-///! native types (f64, i64, Date), achieving 2-3x speedup on common predicates.
+//! Specialized predicate evaluators for fast-path optimization
+//!
+//! These evaluators avoid SqlValue enum matching by working directly with
+//! native types (f64, i64, Date), achieving 2-3x speedup on common predicates.
 
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
@@ -105,7 +105,7 @@ impl PredicateEvaluator for IntegerComparisonEvaluator {
 
         // Extract i64 value (fast path - minimal enum matching)
         let val_i64 = match value {
-            SqlValue::Integer(i) => *i as i64,
+            SqlValue::Integer(i) => *i,
             SqlValue::Smallint(i) => *i as i64,
             SqlValue::Bigint(i) => *i,
             _ => {

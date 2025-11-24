@@ -22,7 +22,6 @@ pub mod subquery_to_join;
 mod tests;
 pub mod where_pushdown;
 
-pub use adaptive::{choose_execution_model, ExecutionModel};
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;

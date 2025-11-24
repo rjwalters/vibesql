@@ -1,7 +1,7 @@
-///! Predicate pattern recognition for fast-path optimization
-///!
-///! This module detects common predicate patterns to enable specialized evaluation
-///! that avoids SqlValue enum matching overhead.
+//! Predicate pattern recognition for fast-path optimization
+//!
+//! This module detects common predicate patterns to enable specialized evaluation
+//! that avoids SqlValue enum matching overhead.
 
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
@@ -312,7 +312,7 @@ impl PredicatePattern {
     fn extract_i64_literal(expr: &Expression) -> Option<i64> {
         if let Expression::Literal(val) = expr {
             match val {
-                SqlValue::Integer(i) => Some(*i as i64),
+                SqlValue::Integer(i) => Some(*i),
                 SqlValue::Smallint(i) => Some(*i as i64),
                 SqlValue::Bigint(i) => Some(*i),
                 _ => None,

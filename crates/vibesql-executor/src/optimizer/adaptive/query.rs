@@ -33,44 +33,9 @@ pub(super) fn has_arithmetic_expressions(query: &SelectStmt) -> bool {
     let where_has_arithmetic = query
         .where_clause
         .as_ref()
-        .map_or(false, contains_arithmetic);
+        .is_some_and(contains_arithmetic);
 
     select_has_arithmetic || where_has_arithmetic
-}
-
-/// Check if all joins in the query are simple (equijoins with single tables)
-///
-/// Complex joins with many tables, non-equijoin conditions, or nested subqueries
-/// are better suited for row-oriented execution.
-///
-/// Returns true if:
-/// - No joins (single table), or
-/// - All joins are simple equijoins with <= 3 tables
-pub(super) fn all_joins_are_simple(query: &SelectStmt) -> bool {
-    match &query.from {
-        None => true, // No FROM clause (e.g., SELECT 1)
-        Some(from) => {
-            // Count tables in FROM clause
-            let table_count = count_tables(from);
-
-            // Simple if <= 3 tables (allows TPC-H style queries with 2-3 joins)
-            // Complex joins with many tables benefit less from columnar execution
-            table_count <= 3
-        }
-    }
-}
-
-/// Count the number of tables in a FROM clause (including joins)
-fn count_tables(from: &FromClause) -> usize {
-    match from {
-        FromClause::Table { .. } => 1,
-        FromClause::Subquery { .. } => {
-            // Treat subqueries as complex (conservative approach)
-            // Could be optimized later to analyze subquery patterns
-            4 // > 3, forces row-oriented execution
-        }
-        FromClause::Join { left, right, .. } => count_tables(left) + count_tables(right),
-    }
 }
 
 /// Check if query has selective projection (few columns, not SELECT *)

@@ -125,7 +125,7 @@ fn has_exists_subqueries(stmt: &SelectStmt) -> bool {
             Expression::Case { operand, when_clauses, else_result } => {
                 operand.as_ref().is_some_and(|e| expr_has_exists(e))
                     || when_clauses.iter().any(|c| {
-                        c.conditions.iter().any(|e| expr_has_exists(e)) || expr_has_exists(&c.result)
+                        c.conditions.iter().any(expr_has_exists) || expr_has_exists(&c.result)
                     })
                     || else_result.as_ref().is_some_and(|e| expr_has_exists(e))
             }

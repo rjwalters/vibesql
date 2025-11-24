@@ -216,14 +216,7 @@ impl fmt::Display for Interval {
 
 impl PartialOrd for Interval {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // Compare intervals using their linear representation
-        // This follows PostgreSQL's approach with approximations:
-        // - 1 month = 30 days
-        // - 1 day = 24 hours
-        //
-        // Note: Comparisons between year-month and day-time intervals
-        // may not be perfectly accurate due to these approximations.
-        Some(self.cmp_value().cmp(&other.cmp_value()))
+        Some(self.cmp(other))
     }
 }
 

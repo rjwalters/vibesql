@@ -4,7 +4,7 @@
 //! including index-based optimization for simple cases.
 
 use super::cache::compute_subquery_hash;
-use super::schema_utils::compute_select_list_column_count;
+use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row, compute_select_list_column_count};
 use super::super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator};
 use crate::errors::ExecutorError;
 
@@ -87,11 +87,24 @@ impl CombinedExpressionEvaluator<'_> {
 
         } else {
             // Correlated subquery - execute with outer context (can't cache)
-            let select_executor = if !self.schema.table_schemas.is_empty() {
+            // Build merged schema and row outside if-else to ensure they live long enough (fix for #2463)
+            let merged_schema = if !self.schema.table_schemas.is_empty() {
+                Some(build_merged_outer_schema(self.schema, self.outer_schema))
+            } else {
+                None
+            };
+
+            let merged_row = if merged_schema.is_some() {
+                Some(build_merged_outer_row(row, self.outer_row))
+            } else {
+                None
+            };
+
+            let select_executor = if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
                 crate::select::SelectExecutor::new_with_outer_context_and_depth(
                     database,
-                    row,
-                    self.schema,
+                    outer_row,
+                    schema,
                     self.depth,
                 )
             } else {

@@ -1,0 +1,112 @@
+//! Tests for DELETE trigger firing behavior
+
+use vibesql_ast::{CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+use vibesql_storage::Database;
+use crate::{InsertExecutor, DeleteExecutor};
+use super::{create_users_table, create_audit_table, count_audit_rows};
+
+#[test]
+fn test_after_delete_trigger_fires() {
+    let mut db = Database::new();
+    create_users_table(&mut db);
+    create_audit_table(&mut db);
+
+    // Insert a user first
+    let insert = vibesql_ast::InsertStmt {
+        table_name: "USERS".to_string(),
+        columns: vec!["id".to_string(), "username".to_string()],
+        source: vibesql_ast::InsertSource::Values(vec![vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("alice".to_string())),
+        ]]),
+        conflict_clause: None,
+        on_duplicate_key_update: None,
+    };
+    InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
+
+    // Create AFTER DELETE trigger
+    let trigger_stmt = CreateTriggerStmt {
+        trigger_name: "log_delete".to_string(),
+        timing: TriggerTiming::After,
+        event: TriggerEvent::Delete,
+        table_name: "USERS".to_string(),
+        granularity: TriggerGranularity::Row,
+        when_condition: None,
+        triggered_action: TriggerAction::RawSql(
+            "INSERT INTO audit_log (event) VALUES ('User deleted')".to_string(),
+        ),
+    };
+    crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)
+        .expect("Failed to create trigger");
+
+    // Delete the user - should fire trigger
+    let delete = vibesql_ast::DeleteStmt {
+        only: false,
+        table_name: "USERS".to_string(),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Equal,
+            left: Box::new(vibesql_ast::Expression::ColumnRef {
+                column: "id".to_string(),
+                table: None,
+            }),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+        })),
+    };
+    DeleteExecutor::execute(&delete, &mut db).expect("Failed to delete");
+
+    // Verify trigger fired
+    assert_eq!(count_audit_rows(&db), 1);
+}
+
+#[test]
+fn test_before_delete_trigger_fires() {
+    let mut db = Database::new();
+    create_users_table(&mut db);
+    create_audit_table(&mut db);
+
+    // Insert a user first
+    let insert = vibesql_ast::InsertStmt {
+        table_name: "USERS".to_string(),
+        columns: vec!["id".to_string(), "username".to_string()],
+        source: vibesql_ast::InsertSource::Values(vec![vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("alice".to_string())),
+        ]]),
+        conflict_clause: None,
+        on_duplicate_key_update: None,
+    };
+    InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
+
+    // Create BEFORE DELETE trigger
+    let trigger_stmt = CreateTriggerStmt {
+        trigger_name: "log_before_delete".to_string(),
+        timing: TriggerTiming::Before,
+        event: TriggerEvent::Delete,
+        table_name: "USERS".to_string(),
+        granularity: TriggerGranularity::Row,
+        when_condition: None,
+        triggered_action: TriggerAction::RawSql(
+            "INSERT INTO audit_log (event) VALUES ('Before delete')".to_string(),
+        ),
+    };
+    crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)
+        .expect("Failed to create trigger");
+
+    // Delete the user - should fire trigger
+    let delete = vibesql_ast::DeleteStmt {
+        only: false,
+        table_name: "USERS".to_string(),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Equal,
+            left: Box::new(vibesql_ast::Expression::ColumnRef {
+                column: "id".to_string(),
+                table: None,
+            }),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+        })),
+    };
+    DeleteExecutor::execute(&delete, &mut db).expect("Failed to delete");
+
+    // Verify trigger fired
+    assert_eq!(count_audit_rows(&db), 1);
+}
