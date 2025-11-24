@@ -200,10 +200,10 @@ impl SelectExecutor<'_> {
         let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
         let has_group_by = stmt.group_by.is_some();
 
-
         let mut results = if has_aggregates || has_group_by {
             self.execute_with_aggregation(stmt, cte_results)?
         } else if let Some(from_clause) = &stmt.from {
+
 
             // Re-enabled predicate pushdown for all queries (issue #1902)
             //

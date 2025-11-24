@@ -243,12 +243,46 @@ impl SelectExecutor<'_> {
         // Apply DISTINCT if specified
         let result_rows = if stmt.distinct { apply_distinct(result_rows) } else { result_rows };
 
-        // Don't apply LIMIT/OFFSET if we have a set operation - it will be applied later
-        if stmt.set_operation.is_some() {
-            Ok(result_rows)
+        // SQL Standard: Aggregates without GROUP BY must return exactly ONE row,
+        // even if the input is empty. If we have no GROUP BY and result_rows is empty,
+        // this is a bug - we should have created at least one group with empty rows.
+        // Add a safety check here.
+        let result_rows = if result_rows.is_empty() && stmt.group_by.is_none() {
+            // Recompute aggregates for empty input
+            // This should not happen if the logic above is correct, but acts as a failsafe
+            let mut aggregate_results = Vec::new();
+            for item in &expanded_select_list {
+                match item {
+                    vibesql_ast::SelectItem::Expression { expr, .. } => {
+                        // For aggregates on empty input: COUNT returns 0, others return NULL
+                        let value = self.evaluate_with_aggregates(
+                            expr,
+                            &[],  // Empty group_rows
+                            &[],  // Empty group_key
+                            &evaluator,
+                        )?;
+                        aggregate_results.push(value);
+                    }
+                    _ => {
+                        return Err(ExecutorError::UnsupportedFeature(
+                            "Wildcards not supported in aggregates".to_string(),
+                        ))
+                    }
+                }
+            }
+            vec![vibesql_storage::Row::new(aggregate_results)]
         } else {
-            Ok(apply_limit_offset(result_rows, stmt.limit, stmt.offset))
-        }
+            result_rows
+        };
+
+        // Don't apply LIMIT/OFFSET if we have a set operation - it will be applied later
+        let final_result = if stmt.set_operation.is_some() {
+            result_rows
+        } else {
+            apply_limit_offset(result_rows, stmt.limit, stmt.offset)
+        };
+
+        Ok(final_result)
     }
 
     /// Expand wildcards in SELECT list to explicit column references for aggregation
