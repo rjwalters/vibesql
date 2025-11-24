@@ -34,7 +34,7 @@
 //! - `create_table_tests`: CREATE TABLE executor tests (basic table creation, data types, spatial
 //!   types)
 //! - `fulltext_search`: Full-text search integration tests (MATCH...AGAINST natural language, boolean mode)
-//! - `trigger_tests`: Trigger creation and execution tests
+//! - `triggers`: Organized trigger test suite (DDL, INSERT/UPDATE/DELETE firing, coordination, conditions, error handling, pseudo-variables)
 //! - `truncate_cascade_tests`: TRUNCATE TABLE CASCADE/RESTRICT tests (issue #1393)
 //! - `truncate_table_tests`: TRUNCATE TABLE tests (single table, multiple tables, IF EXISTS)
 //! - `view_tests`: VIEW support tests (CREATE/DROP/SELECT, OR REPLACE, CASCADE)
@@ -103,7 +103,7 @@ mod set_operations_associativity;
 mod subquery_mysql_compat;
 mod timeout_enforcement;
 mod transaction_tests;
-mod trigger_tests;
+mod triggers;
 mod truncate_cascade_tests;
 mod truncate_table_tests;
 mod unique_index_tests;
