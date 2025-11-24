@@ -82,6 +82,20 @@ impl FromData {
             Self::Iterator(_) => unreachable!(),
         }
     }
+
+    /// Get a slice reference to the underlying rows without triggering materialization
+    ///
+    /// This is a zero-cost operation that directly accesses the underlying Vec<Row>
+    /// without calling collect_vec(). This avoids the 137ms row materialization
+    /// bottleneck in Q6 by skipping iteration entirely.
+    ///
+    /// Critical for columnar execution performance (#2521).
+    pub fn as_slice(&self) -> &[vibesql_storage::Row] {
+        match self {
+            Self::Materialized(rows) => rows.as_slice(),
+            Self::Iterator(iter) => iter.as_slice(),
+        }
+    }
 }
 
 /// Result of executing a FROM clause

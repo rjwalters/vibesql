@@ -159,16 +159,24 @@ impl SelectExecutor<'_> {
         let columnar_check_start = std::time::Instant::now();
 
         log::debug!("Checking if columnar execution is possible...");
+        #[cfg(feature = "profile-q6")]
+        eprintln!("[PROFILE-Q6] Checking columnar execution eligibility...");
+
         if let Some(result) = self.try_columnar_execution(stmt, cte_results)? {
             log::debug!("✓ Using COLUMNAR execution path (SIMD-accelerated)");
             #[cfg(feature = "profile-q6")]
             {
                 let total_execute_ctes = execute_ctes_start.elapsed();
                 let columnar_check_time = columnar_check_start.elapsed();
+                eprintln!("[PROFILE-Q6] ✓ USING COLUMNAR EXECUTION (SIMD-accelerated)");
+                eprintln!("[PROFILE-Q6]   Columnar check time: {:?}", columnar_check_time);
+                eprintln!("[PROFILE-Q6]   Total execution time: {:?}", total_execute_ctes);
             }
             return Ok(result);
         }
         log::debug!("✗ Columnar execution not used, falling back to row-based execution");
+        #[cfg(feature = "profile-q6")]
+        eprintln!("[PROFILE-Q6] ✗ COLUMNAR NOT USED - Falling back to row-based execution");
 
         // Try monomorphic execution path for known query patterns (TEMPORARILY DISABLED)
         // NOTE: Monomorphic execution currently has issues with complex aggregate expressions
