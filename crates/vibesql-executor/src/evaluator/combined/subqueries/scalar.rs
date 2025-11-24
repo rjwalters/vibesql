@@ -6,6 +6,7 @@
 
 use super::cache::{compute_correlated_cache_key, compute_subquery_hash};
 use super::correlation::extract_correlation_values;
+use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row};
 use super::super::super::core::CombinedExpressionEvaluator;
 use crate::errors::ExecutorError;
 
@@ -77,19 +78,21 @@ impl CombinedExpressionEvaluator<'_> {
                 // Failed to extract correlation values - skip caching
                 // This can happen if correlation columns aren't in outer schema
                 // Fall through to execute without caching
+                let merged_schema = build_merged_outer_schema(self.schema, self.outer_schema);
+                let merged_row = build_merged_outer_row(row, self.outer_row);
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database,
-                        row,
-                        self.schema,
+                        &merged_row,
+                        &merged_schema,
                         cte_ctx,
                         self.depth,
                     )
                 } else {
                     crate::select::SelectExecutor::new_with_outer_context_and_depth(
                         database,
-                        row,
-                        self.schema,
+                        &merged_row,
+                        &merged_schema,
                         self.depth,
                     )
                 };
@@ -111,6 +114,19 @@ impl CombinedExpressionEvaluator<'_> {
             cached_rows
         } else {
             // Cache miss - execute subquery
+            // Build merged schema and row outside if-else to ensure they live long enough
+            let merged_schema = if !is_uncorrelated {
+                Some(build_merged_outer_schema(self.schema, self.outer_schema))
+            } else {
+                None
+            };
+
+            let merged_row = if !is_uncorrelated {
+                Some(build_merged_outer_row(row, self.outer_row))
+            } else {
+                None
+            };
+
             let select_executor = if is_uncorrelated {
                 // Uncorrelated: execute without outer context
                 if let Some(cte_ctx) = self.cte_context {
@@ -123,20 +139,22 @@ impl CombinedExpressionEvaluator<'_> {
                     crate::select::SelectExecutor::new(database)
                 }
             } else {
-                // Correlated: execute with outer context
+                // Correlated: execute with outer context (merged schema + merged row - fix for #2463)
+                let schema_ref = merged_schema.as_ref().unwrap();
+                let row_ref = merged_row.as_ref().unwrap();
                 if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database,
-                        row,
-                        self.schema,
+                        row_ref,
+                        schema_ref,
                         cte_ctx,
                         self.depth,
                     )
                 } else {
                     crate::select::SelectExecutor::new_with_outer_context_and_depth(
                         database,
-                        row,
-                        self.schema,
+                        row_ref,
+                        schema_ref,
                         self.depth,
                     )
                 }
