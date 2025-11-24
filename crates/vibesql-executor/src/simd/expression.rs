@@ -44,13 +44,19 @@ const MAX_RECURSION_DEPTH: usize = 32;
 /// Check if an expression can benefit from SIMD evaluation
 ///
 /// Returns true if:
+/// - Row count >= SIMD_THRESHOLD (enough rows to amortize conversion overhead)
 /// - Expression is simple binary arithmetic (+, -, *, /)
 /// - Operands are column references or literals (no complex sub-expressions)
 /// - No subqueries, aggregates, or other complex operations
+/// - No NULL values present (graceful fallback to scalar evaluation)
 #[cfg(feature = "simd")]
-pub fn can_use_simd_for_expression(expr: &Expression, row_count: usize) -> bool {
+pub fn can_use_simd_for_expression(
+    expr: &Expression,
+    rows: &[vibesql_storage::Row],
+    evaluator: &crate::evaluator::CombinedExpressionEvaluator,
+) -> bool {
     // Must have enough rows to amortize conversion overhead
-    if row_count < SIMD_THRESHOLD {
+    if rows.len() < SIMD_THRESHOLD {
         return false;
     }
 
@@ -70,7 +76,13 @@ pub fn can_use_simd_for_expression(expr: &Expression, row_count: usize) -> bool 
             }
 
             // Check if operands are simple (column refs or literals)
-            is_simple_operand(left) && is_simple_operand(right)
+            if !is_simple_operand(left) || !is_simple_operand(right) {
+                return false;
+            }
+
+            // Check for NULL values - if present, fall back to scalar evaluation
+            // This enables true graceful fallback instead of throwing errors
+            !has_null_values(expr, rows, evaluator)
         }
         _ => false,
     }
@@ -103,6 +115,46 @@ fn is_simple_operand(expr: &Expression) -> bool {
     }
 }
 
+/// Check if an expression contains NULL values in any of the input rows
+///
+/// Scans through all rows and evaluates the expression to detect NULL values.
+/// Returns true if any NULL is found, false otherwise.
+///
+/// This enables early NULL detection for graceful fallback to scalar evaluation,
+/// avoiding errors that would occur if we proceeded with SIMD operations.
+#[cfg(feature = "simd")]
+fn has_null_values(
+    expr: &Expression,
+    rows: &[vibesql_storage::Row],
+    evaluator: &crate::evaluator::CombinedExpressionEvaluator,
+) -> bool {
+    // Check a sample of rows for NULL values to avoid full scan overhead
+    // Sample size: min(rows.len(), 100) to balance accuracy vs performance
+    let sample_size = rows.len().min(100);
+
+    for row in rows.iter().take(sample_size) {
+        if let Ok(value) = evaluator.eval(expr, row) {
+            if value == SqlValue::Null {
+                return true;
+            }
+        }
+    }
+
+    // If no NULLs found in sample and sample < total, do a full scan
+    // This is conservative: better to catch all NULLs than risk SIMD errors
+    if sample_size < rows.len() {
+        for row in rows.iter().skip(sample_size) {
+            if let Ok(value) = evaluator.eval(expr, row) {
+                if value == SqlValue::Null {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
 /// Evaluate an expression in batch mode using SIMD
 ///
 /// # Arguments
@@ -132,8 +184,8 @@ pub fn eval_expression_batch_simd(
         return Ok(Vec::new());
     }
 
-    // Check if we should use SIMD
-    if !can_use_simd_for_expression(expr, rows.len()) {
+    // Check if we should use SIMD (includes NULL detection for graceful fallback)
+    if !can_use_simd_for_expression(expr, rows, evaluator) {
         // Fall back to scalar evaluation
         return eval_expression_scalar(expr, rows, evaluator);
     }
@@ -214,19 +266,22 @@ fn eval_operand_to_buffer(
 }
 
 /// Convert a vector of NumericValues to a typed NumericBuffer
+///
+/// # Panics
+///
+/// Panics if any NULL values are present. NULL values should be detected early
+/// in `can_use_simd_for_expression()` to enable graceful fallback to scalar evaluation.
 #[cfg(feature = "simd")]
 fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, ExecutorError> {
     // Determine if we can use Int64 or need Float64
     let has_float = values.iter().any(|v| matches!(v, NumericValue::Float64(_)));
-    let has_null = values.iter().any(|v| matches!(v, NumericValue::Null));
 
-    if has_null {
-        // For now, we don't handle NULL values in SIMD path
-        // This is a simplification - full implementation would need NULL bitmask
-        return Err(ExecutorError::UnsupportedExpression(
-            "NULL values not yet supported in SIMD expression evaluation".to_string(),
-        ));
-    }
+    // NULL values should have been detected early by can_use_simd_for_expression()
+    // If we reach here with NULLs, it's a bug in the NULL detection logic
+    debug_assert!(
+        !values.iter().any(|v| matches!(v, NumericValue::Null)),
+        "NULL values should be detected early by can_use_simd_for_expression()"
+    );
 
     if has_float {
         // Use Float64

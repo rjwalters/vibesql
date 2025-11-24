@@ -45,7 +45,7 @@ pub(super) fn apply_order_by(
         for order_item in order_by {
             let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list);
 
-            if can_use_simd_for_expression(expr_to_eval, raw_rows.len()) {
+            if can_use_simd_for_expression(expr_to_eval, &raw_rows, evaluator) {
                 match eval_expression_batch_simd(expr_to_eval, &raw_rows, evaluator) {
                     Ok(values) => simd_results.push(Some(values)),
                     Err(_) => {
