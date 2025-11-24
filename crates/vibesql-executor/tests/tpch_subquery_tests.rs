@@ -64,12 +64,11 @@ fn test_q2_correlated_scalar_subquery() {
 }
 
 #[test]
-#[ignore] // SLOW: Takes >60s on SF 0.01 (needs scalar subquery caching #2425)
 fn test_q11_scalar_subquery_having() {
     // Q11: Important Stock Identification
     // Tests scalar subquery in HAVING clause
     // Pattern: Uncorrelated scalar subquery for threshold computation
-    // Performance: SLOW - needs optimization (#2425)
+    // Performance: Fast (~3s on SF 0.01) with scalar subquery caching (#2431)
 
     let db = load_vibesql(0.01);
 
@@ -113,12 +112,11 @@ fn test_q13_complex_join_subquery() {
 }
 
 #[test]
-#[ignore] // May timeout without semi-join optimization
 fn test_q20_nested_in_subqueries() {
     // Q20: Potential Part Promotion
     // Tests nested IN subqueries with correlated scalar subquery
     // Pattern: IN with nested IN, plus correlated scalar subquery
-    // Expected: Works but may be slow without semi-join optimization (#2424)
+    // Performance: Fast (~3s on SF 0.01) with semi-join optimization (#2405, #2475)
 
     let db = load_vibesql(0.01);
 
@@ -138,12 +136,11 @@ fn test_q20_nested_in_subqueries() {
 }
 
 #[test]
-#[ignore] // May timeout without semi-join optimization
 fn test_q21_correlated_exists() {
     // Q21: Suppliers Who Kept Orders Waiting
     // Tests EXISTS with correlated predicate and inequality
     // Pattern: EXISTS with complex correlation
-    // Expected: Works but may be slow without semi-join optimization (#2424)
+    // Performance: Moderate (~36s on SF 0.01) with EXISTS to join conversion (#2481, #2473)
 
     let db = load_vibesql(0.01);
 
@@ -164,12 +161,11 @@ fn test_q21_correlated_exists() {
 }
 
 #[test]
-#[ignore] // VERY SLOW: Both queries take >60s each on SF 0.01
 fn test_q11_q13_batch() {
     // Run Q11 and Q13 together to validate both work
-    // FINDINGS: Both queries work but are slower than expected
-    // Q11 needs scalar subquery caching (#2425)
-    // Q13 needs join optimization
+    // Performance: Both queries now complete quickly
+    // Q11: ~3s with scalar subquery caching (#2431)
+    // Q13: ~3s with hash join optimization (#2472)
 
     let db = load_vibesql(0.01);
 
