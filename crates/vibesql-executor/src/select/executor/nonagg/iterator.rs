@@ -14,6 +14,7 @@ use crate::{
         iterator::{FilterIterator, RowIterator, TableScanIterator},
         join::FromResult,
         projection::project_row_combined,
+        projection_simd::try_batch_project_simd,
         window::{expression_has_window_function, has_window_functions},
     },
 };
@@ -230,23 +231,38 @@ impl SelectExecutor<'_> {
         }
 
         // Stage 6: Project columns (handles wildcards, expressions, etc.)
-        // Use pooled buffer to reduce allocation overhead
-        let mut final_rows = self.database.query_buffer_pool().get_row_buffer(filtered_rows.len());
-        for row in &filtered_rows {
-            // Clear CSE cache before projecting each row
-            evaluator.clear_cse_cache();
+        // Try batch SIMD projection first for large datasets
+        let final_rows = if let Some(projected) = try_batch_project_simd(
+            &filtered_rows,
+            &stmt.select_list,
+            &evaluator,
+            &schema,
+            &None, // No window functions in iterator path
+            self.database.query_buffer_pool(),
+        )? {
+            // SIMD batch projection succeeded
+            projected
+        } else {
+            // Fall back to row-by-row projection
+            // Use pooled buffer to reduce allocation overhead
+            let mut rows = self.database.query_buffer_pool().get_row_buffer(filtered_rows.len());
+            for row in &filtered_rows {
+                // Clear CSE cache before projecting each row
+                evaluator.clear_cse_cache();
 
-            let projected_row = project_row_combined(
-                row,
-                &stmt.select_list,
-                &evaluator,
-                &schema,
-                &None, // No window functions in iterator path
-                self.database.query_buffer_pool(),
-            )?;
+                let projected_row = project_row_combined(
+                    row,
+                    &stmt.select_list,
+                    &evaluator,
+                    &schema,
+                    &None, // No window functions in iterator path
+                    self.database.query_buffer_pool(),
+                )?;
 
-            final_rows.push(projected_row);
-        }
+                rows.push(projected_row);
+            }
+            rows
+        };
 
         // Clear CSE cache at end of query to prevent cross-query pollution
         // Cache can persist within a single query for performance, but must be
@@ -255,8 +271,6 @@ impl SelectExecutor<'_> {
 
         // Return intermediate buffer to pool, then return final result
         self.database.query_buffer_pool().return_row_buffer(filtered_rows);
-        let result = std::mem::take(&mut final_rows);
-        self.database.query_buffer_pool().return_row_buffer(final_rows);
-        Ok(result)
+        Ok(final_rows)
     }
 }
