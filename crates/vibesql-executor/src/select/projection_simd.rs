@@ -165,29 +165,5 @@ pub fn try_batch_project_simd(
     Ok(None)
 }
 
-#[cfg(all(test, feature = "simd"))]
-mod tests {
-    use super::*;
-    use vibesql_ast::{BinaryOperator, Expression};
-
-    #[test]
-    fn test_batch_projection_threshold() {
-        // Small dataset should return None
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(20)]),
-        ];
-
-        let columns = vec![SelectItem::Expression {
-            expr: Expression::BinaryOp {
-                left: Box::new(Expression::Identifier("a".to_string())),
-                op: BinaryOperator::Plus,
-                right: Box::new(Expression::Identifier("b".to_string())),
-            },
-            alias: None,
-        }];
-
-        // This should return None due to threshold
-        // (Would need a full evaluator setup to actually test, this is more of a sketch)
-    }
-}
+// TODO: Add comprehensive unit tests for batch SIMD projection
+// Basic functionality verified through integration tests
