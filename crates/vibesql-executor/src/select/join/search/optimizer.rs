@@ -31,6 +31,7 @@ impl JoinOrderSearch {
         let edges = analyzer.edges().to_vec();
         let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database);
 
+        let num_tables = analyzer.tables().len();
         let context = JoinOrderContext {
             all_tables: analyzer.tables().clone(),
             edges,
@@ -40,7 +41,7 @@ impl JoinOrderSearch {
                 table_local_predicates,
             ),
             edge_selectivities,
-            config: ParallelSearchConfig::default(),
+            config: ParallelSearchConfig::with_table_count(num_tables),
         };
 
         Self { context }
