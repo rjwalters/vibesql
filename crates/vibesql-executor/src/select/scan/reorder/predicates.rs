@@ -212,9 +212,30 @@ pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String
                 // Check if both sides are column references
                 // Handle both explicit table qualifiers and implicit (prefix-based) references
 
-                // Helper closure to infer table from column prefix
-                // Uses three-tier matching: 1) exact, 2) prefix, 3) abbreviation
+                // Helper closure to infer table from column name
+                // Uses multi-tier matching for different naming conventions:
+                // 1) SQLLogicTest suffix pattern: column "a1" → table "t1" (numeric suffix)
+                // 2) TPC-H prefix pattern: column "l_orderkey" → table "lineitem" (prefix before underscore)
+                // 3) Abbreviation match: column "ps_suppkey" → table "partsupp"
                 let infer_table = |column: &str| -> Option<String> {
+                    // --- Tier 1: SQLLogicTest suffix pattern ---
+                    // Columns like "a1", "b2", "x9" where the trailing digit indicates the table
+                    // This is common in SQLLogicTest files with tables t1, t2, ..., t9
+                    if let Some(last_char) = column.chars().last() {
+                        if last_char.is_ascii_digit() {
+                            let table_candidate = format!("t{}", last_char);
+                            if tables.contains(&table_candidate) || tables.contains(&table_candidate.to_uppercase()) {
+                                // Found a table matching the suffix pattern
+                                for table in tables {
+                                    if table.eq_ignore_ascii_case(&table_candidate) {
+                                        return Some(table.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // --- Tier 2: TPC-H prefix pattern ---
                     let prefix = column.split('_').next().unwrap_or("").to_uppercase();
                     if prefix.is_empty() {
                         return None;
