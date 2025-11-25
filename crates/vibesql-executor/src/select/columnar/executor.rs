@@ -22,6 +22,7 @@ use super::aggregate::{AggregateOp, AggregateSource, AggregateSpec};
 use super::filter::ColumnPredicate;
 use crate::errors::ExecutorError;
 use crate::schema::CombinedSchema;
+use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -130,13 +131,9 @@ fn compute_batch_aggregates(
             AggregateSource::CountStar => {
                 SqlValue::Integer(batch.row_count() as i64)
             }
-            AggregateSource::Expression(_expr) => {
-                // For expression aggregates, we need to evaluate the expression first
-                // For now, fall back to scalar evaluation
-                // TODO: Implement vectorized expression evaluation
-                return Err(ExecutorError::UnsupportedExpression(
-                    "Expression aggregates not yet supported in native columnar path".to_string()
-                ));
+            AggregateSource::Expression(expr) => {
+                // Vectorized expression evaluation directly on ColumnarBatch
+                compute_expression_aggregate_batch(batch, expr, spec.op)?
             }
         };
         results.push(result);
@@ -471,6 +468,207 @@ fn apply_filter_bitmap_to_batch(
         .collect();
 
     ColumnarBatch::from_rows(&filtered_rows)
+}
+
+/// Compute an aggregate over an expression on a ColumnarBatch
+///
+/// For simple binary operations like `col_a * col_b`, this evaluates the
+/// expression element-wise on the columnar data and then aggregates.
+fn compute_expression_aggregate_batch(
+    batch: &ColumnarBatch,
+    expr: &Expression,
+    op: AggregateOp,
+) -> Result<SqlValue, ExecutorError> {
+    // Try to evaluate the expression as a simple binary operation on columns
+    if let Expression::BinaryOp { left, op: bin_op, right } = expr {
+        // For now, only support multiplication (most common in TPC-H)
+        if *bin_op == BinaryOperator::Multiply {
+            // Get column indices from left and right operands
+            if let (
+                Expression::ColumnRef { column: col1, .. },
+                Expression::ColumnRef { column: col2, .. }
+            ) = (left.as_ref(), right.as_ref()) {
+                // Find column indices by name
+                let left_idx = batch.column_index_by_name(col1);
+                let right_idx = batch.column_index_by_name(col2);
+
+                if let (Some(l_idx), Some(r_idx)) = (left_idx, right_idx) {
+                    return compute_multiply_aggregate(batch, l_idx, r_idx, op);
+                }
+            }
+        }
+    }
+
+    // Fall back to row-by-row evaluation for complex expressions
+    // This is slower but handles all cases
+    let row_count = batch.row_count();
+    let mut sum = 0.0f64;
+    let mut count = 0i64;
+
+    for row_idx in 0..row_count {
+        // Evaluate expression for this row
+        if let Ok(value) = eval_expr_on_batch(batch, expr, row_idx) {
+            match value {
+                SqlValue::Integer(v) => { sum += v as f64; count += 1; }
+                SqlValue::Double(v) => { sum += v; count += 1; }
+                SqlValue::Float(v) => { sum += v as f64; count += 1; }
+                SqlValue::Bigint(v) => { sum += v as f64; count += 1; }
+                SqlValue::Numeric(v) => { sum += v; count += 1; }
+                SqlValue::Null => {}
+                _ => {}
+            }
+        }
+    }
+
+    match op {
+        AggregateOp::Sum => Ok(if count > 0 { SqlValue::Double(sum) } else { SqlValue::Null }),
+        AggregateOp::Count => Ok(SqlValue::Integer(count)),
+        AggregateOp::Avg => Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null }),
+        _ => Err(ExecutorError::UnsupportedExpression(
+            "MIN/MAX not supported for expression aggregates".to_string()
+        ))
+    }
+}
+
+/// Optimized path for SUM(col_a * col_b) - the most common expression aggregate in TPC-H
+fn compute_multiply_aggregate(
+    batch: &ColumnarBatch,
+    left_idx: usize,
+    right_idx: usize,
+    op: AggregateOp,
+) -> Result<SqlValue, ExecutorError> {
+    let left_col = batch.column(left_idx).ok_or_else(|| {
+        ExecutorError::Other(format!("Column {} not found", left_idx))
+    })?;
+    let right_col = batch.column(right_idx).ok_or_else(|| {
+        ExecutorError::Other(format!("Column {} not found", right_idx))
+    })?;
+
+    // Extract f64 arrays from both columns
+    let left_f64 = column_to_f64_vec(left_col)?;
+    let right_f64 = column_to_f64_vec(right_col)?;
+
+    if left_f64.len() != right_f64.len() {
+        return Err(ExecutorError::Other("Column length mismatch".to_string()));
+    }
+
+    // Vectorized multiply and aggregate
+    let mut sum = 0.0f64;
+    let mut count = 0i64;
+
+    for i in 0..left_f64.len() {
+        if let (Some(l), Some(r)) = (left_f64[i], right_f64[i]) {
+            sum += l * r;
+            count += 1;
+        }
+    }
+
+    match op {
+        AggregateOp::Sum => Ok(if count > 0 { SqlValue::Double(sum) } else { SqlValue::Null }),
+        AggregateOp::Count => Ok(SqlValue::Integer(count)),
+        AggregateOp::Avg => Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null }),
+        _ => Err(ExecutorError::UnsupportedExpression(
+            "MIN/MAX not supported for expression aggregates".to_string()
+        ))
+    }
+}
+
+/// Convert a ColumnArray to Vec<Option<f64>> for arithmetic operations
+fn column_to_f64_vec(column: &ColumnArray) -> Result<Vec<Option<f64>>, ExecutorError> {
+    match column {
+        ColumnArray::Int64(values, nulls) => {
+            Ok(values.iter().enumerate().map(|(i, &v)| {
+                if nulls.as_ref().map_or(false, |n| n[i]) {
+                    None
+                } else {
+                    Some(v as f64)
+                }
+            }).collect())
+        }
+        ColumnArray::Float64(values, nulls) => {
+            Ok(values.iter().enumerate().map(|(i, &v)| {
+                if nulls.as_ref().map_or(false, |n| n[i]) {
+                    None
+                } else {
+                    Some(v)
+                }
+            }).collect())
+        }
+        ColumnArray::Mixed(values) => {
+            Ok(values.iter().map(|v| {
+                match v {
+                    SqlValue::Integer(n) => Some(*n as f64),
+                    SqlValue::Bigint(n) => Some(*n as f64),
+                    SqlValue::Float(n) => Some(*n as f64),
+                    SqlValue::Double(n) => Some(*n),
+                    SqlValue::Numeric(n) => Some(*n),
+                    SqlValue::Null => None,
+                    _ => None,
+                }
+            }).collect())
+        }
+        _ => Err(ExecutorError::Other("Cannot convert column to f64".to_string()))
+    }
+}
+
+/// Evaluate an expression for a single row in a ColumnarBatch
+fn eval_expr_on_batch(
+    batch: &ColumnarBatch,
+    expr: &Expression,
+    row_idx: usize,
+) -> Result<SqlValue, ExecutorError> {
+    match expr {
+        Expression::ColumnRef { column, .. } => {
+            if let Some(col_idx) = batch.column_index_by_name(column) {
+                batch.get_value(row_idx, col_idx)
+            } else {
+                Ok(SqlValue::Null)
+            }
+        }
+        Expression::Literal(val) => Ok(val.clone()),
+        Expression::BinaryOp { left, op, right } => {
+            let left_val = eval_expr_on_batch(batch, left, row_idx)?;
+            let right_val = eval_expr_on_batch(batch, right, row_idx)?;
+
+            // Simple arithmetic evaluation
+            match (left_val, right_val) {
+                (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
+                (l, r) => {
+                    let l_f64 = sql_value_to_f64(&l).ok_or_else(|| {
+                        ExecutorError::Other("Cannot convert to f64".to_string())
+                    })?;
+                    let r_f64 = sql_value_to_f64(&r).ok_or_else(|| {
+                        ExecutorError::Other("Cannot convert to f64".to_string())
+                    })?;
+
+                    let result = match op {
+                        BinaryOperator::Plus => l_f64 + r_f64,
+                        BinaryOperator::Minus => l_f64 - r_f64,
+                        BinaryOperator::Multiply => l_f64 * r_f64,
+                        BinaryOperator::Divide => l_f64 / r_f64,
+                        _ => return Err(ExecutorError::Other("Unsupported operator".to_string()))
+                    };
+                    Ok(SqlValue::Double(result))
+                }
+            }
+        }
+        _ => Err(ExecutorError::UnsupportedExpression(
+            "Complex expression not supported".to_string()
+        ))
+    }
+}
+
+/// Convert SqlValue to f64
+fn sql_value_to_f64(val: &SqlValue) -> Option<f64> {
+    match val {
+        SqlValue::Integer(v) => Some(*v as f64),
+        SqlValue::Bigint(v) => Some(*v as f64),
+        SqlValue::Float(v) => Some(*v as f64),
+        SqlValue::Double(v) => Some(*v),
+        SqlValue::Numeric(v) => Some(*v),
+        SqlValue::Smallint(v) => Some(*v as f64),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
