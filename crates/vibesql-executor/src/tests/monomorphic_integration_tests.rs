@@ -371,6 +371,7 @@ fn test_generic_pattern_not_tpch_fallback() {
 }
 
 /// Test 6: Edge case - query with no matching rows
+/// Per SQL standard, SUM of an empty set returns NULL (not 0)
 #[test]
 fn test_generic_pattern_no_matching_rows() {
     let mut db = vibesql_storage::Database::new();
@@ -410,15 +411,14 @@ fn test_generic_pattern_no_matching_rows() {
     let executor = SelectExecutor::new(&db);
     let result = executor.execute(&select_stmt).unwrap();
 
+    // Aggregation without GROUP BY should still return 1 row
     assert_eq!(result.len(), 1);
-    let total = match &result[0].values[0] {
-        SqlValue::Double(v) => *v,
-        SqlValue::Float(v) => *v as f64,
-        SqlValue::Integer(v) => *v as f64,
-        SqlValue::Numeric(v) => *v,
-        other => panic!("Expected numeric result, got {:?}", other),
-    };
-    assert_eq!(total, 0.0, "Expected 0.0 for no matching rows, got {}", total);
+    // Per SQL standard, SUM over empty set returns NULL
+    assert_eq!(
+        result[0].values[0],
+        SqlValue::Null,
+        "SUM of no matching rows should return NULL (SQL standard)"
+    );
 }
 
 // TODO: Test for SUM with simple numeric filters (currently failing - needs investigation)
