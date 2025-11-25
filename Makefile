@@ -4,7 +4,8 @@
 .PHONY: all build build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch clean help analyze-tests analyze-benchmarks analyze
 
 # Default target - fully qualify and update the state of the repo
-all: build test
+# Runs build, all tests, benchmarks, and records results to database
+all: build test benchmark
 
 # Help target
 help:
@@ -32,7 +33,7 @@ help:
 	@echo ""
 	@echo "Utility targets:"
 	@echo "  make clean              - Clean build artifacts"
-	@echo "  make all                - Build and test everything"
+	@echo "  make all                - Build, test, benchmark, and record all results"
 	@echo "  make help               - Show this help message"
 
 #
