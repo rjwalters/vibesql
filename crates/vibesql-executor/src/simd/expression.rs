@@ -44,13 +44,19 @@ const MAX_RECURSION_DEPTH: usize = 32;
 /// Check if an expression can benefit from SIMD evaluation
 ///
 /// Returns true if:
+/// - Row count >= SIMD_THRESHOLD (enough rows to amortize conversion overhead)
 /// - Expression is simple binary arithmetic (+, -, *, /)
 /// - Operands are column references or literals (no complex sub-expressions)
 /// - No subqueries, aggregates, or other complex operations
+/// - No NULL values present (graceful fallback to scalar evaluation)
 #[cfg(feature = "simd")]
-pub fn can_use_simd_for_expression(expr: &Expression, row_count: usize) -> bool {
+pub fn can_use_simd_for_expression(
+    expr: &Expression,
+    rows: &[vibesql_storage::Row],
+    evaluator: &crate::evaluator::CombinedExpressionEvaluator,
+) -> bool {
     // Must have enough rows to amortize conversion overhead
-    if row_count < SIMD_THRESHOLD {
+    if rows.len() < SIMD_THRESHOLD {
         return false;
     }
 
@@ -70,7 +76,13 @@ pub fn can_use_simd_for_expression(expr: &Expression, row_count: usize) -> bool 
             }
 
             // Check if operands are simple (column refs or literals)
-            is_simple_operand(left) && is_simple_operand(right)
+            if !is_simple_operand(left) || !is_simple_operand(right) {
+                return false;
+            }
+
+            // Check for NULL values - if present, fall back to scalar evaluation
+            // This enables true graceful fallback instead of throwing errors
+            !has_null_values(expr, rows, evaluator)
         }
         _ => false,
     }
@@ -103,6 +115,63 @@ fn is_simple_operand(expr: &Expression) -> bool {
     }
 }
 
+/// Extract all column references from an expression tree
+#[cfg(feature = "simd")]
+fn extract_column_refs(expr: &Expression) -> Vec<Expression> {
+    let mut columns = Vec::new();
+    match expr {
+        Expression::ColumnRef { .. } => {
+            columns.push(expr.clone());
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            columns.extend(extract_column_refs(left));
+            columns.extend(extract_column_refs(right));
+        }
+        // Other expression types (literals, etc.) don't contain column refs
+        _ => {}
+    }
+    columns
+}
+
+/// Check if an expression contains NULL values by checking source columns only
+#[cfg(feature = "simd")]
+fn has_null_values(
+    expr: &Expression,
+    rows: &[vibesql_storage::Row],
+    evaluator: &crate::evaluator::CombinedExpressionEvaluator,
+) -> bool {
+    let column_refs = extract_column_refs(expr);
+    if column_refs.is_empty() {
+        return false;
+    }
+
+    let sample_size = rows.len().min(100);
+
+    for row in rows.iter().take(sample_size) {
+        for col_ref in &column_refs {
+            match evaluator.eval(col_ref, row) {
+                Ok(value) if value == SqlValue::Null => return true,
+                Err(_) => return true,
+                _ => {}
+            }
+        }
+    }
+
+    if sample_size < rows.len() {
+        for row in rows.iter().skip(sample_size) {
+            for col_ref in &column_refs {
+                match evaluator.eval(col_ref, row) {
+                    Ok(value) if value == SqlValue::Null => return true,
+                    Err(_) => return true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    false
+}
+
 /// Evaluate an expression in batch mode using SIMD
 ///
 /// # Arguments
@@ -132,8 +201,8 @@ pub fn eval_expression_batch_simd(
         return Ok(Vec::new());
     }
 
-    // Check if we should use SIMD
-    if !can_use_simd_for_expression(expr, rows.len()) {
+    // Check if we should use SIMD (includes NULL detection for graceful fallback)
+    if !can_use_simd_for_expression(expr, rows, evaluator) {
         // Fall back to scalar evaluation
         return eval_expression_scalar(expr, rows, evaluator);
     }
@@ -214,17 +283,19 @@ fn eval_operand_to_buffer(
 }
 
 /// Convert a vector of NumericValues to a typed NumericBuffer
+///
+/// Returns an error if NULL values are present, which indicates a bug in the
+/// NULL detection logic (NULLs should be caught by can_use_simd_for_expression).
 #[cfg(feature = "simd")]
 fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, ExecutorError> {
     // Determine if we can use Int64 or need Float64
     let has_float = values.iter().any(|v| matches!(v, NumericValue::Float64(_)));
-    let has_null = values.iter().any(|v| matches!(v, NumericValue::Null));
 
-    if has_null {
-        // For now, we don't handle NULL values in SIMD path
-        // This is a simplification - full implementation would need NULL bitmask
+    // NULL values should have been detected early by can_use_simd_for_expression()
+    // If we reach here with NULLs, it's a bug in the NULL detection logic
+    if values.iter().any(|v| matches!(v, NumericValue::Null)) {
         return Err(ExecutorError::UnsupportedExpression(
-            "NULL values not yet supported in SIMD expression evaluation".to_string(),
+            "NULL values reached SIMD path despite early detection - this is a bug".to_string(),
         ));
     }
 
@@ -235,7 +306,7 @@ fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, Executo
             .map(|v| match v {
                 NumericValue::Int64(n) => n as f64,
                 NumericValue::Float64(f) => f,
-                NumericValue::Null => 0.0, // Won't happen due to check above
+                NumericValue::Null => unreachable!("NULLs filtered by early detection"),
             })
             .collect();
         Ok(NumericBuffer::Float64(buf))
@@ -245,8 +316,8 @@ fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, Executo
             .into_iter()
             .map(|v| match v {
                 NumericValue::Int64(n) => n,
-                NumericValue::Float64(_) => unreachable!(),
-                NumericValue::Null => 0, // Won't happen due to check above
+                NumericValue::Float64(_) => unreachable!("Mixed types handled above"),
+                NumericValue::Null => unreachable!("NULLs filtered by early detection"),
             })
             .collect();
         Ok(NumericBuffer::Int64(buf))
@@ -270,15 +341,23 @@ fn apply_simd_operation(
                 BinaryOperator::Minus => simd_sub_i64(a, b),
                 BinaryOperator::Multiply => simd_mul_i64(a, b),
                 BinaryOperator::Divide => {
-                    // Integer division requires special handling (div by zero)
-                    return Ok(a
-                        .iter()
+                    // Use SIMD division first, then post-process for divide-by-zero
+                    // This is Option 1 from the issue: SIMD first, fix later
+                    //
+                    // Performance note: This approach gets SIMD benefits for the common
+                    // case (no divide-by-zero) while still correctly handling edge cases.
+                    // The post-processing scan is cheap compared to the scalar loop alternative.
+                    let result = simd_div_i64(a, b);
+
+                    // Convert to SqlValue, replacing divide-by-zero with NULL
+                    return Ok(result
+                        .into_iter()
                         .zip(b.iter())
-                        .map(|(a, b)| {
-                            if *b == 0 {
+                        .map(|(quotient, &divisor)| {
+                            if divisor == 0 {
                                 SqlValue::Null
                             } else {
-                                SqlValue::Bigint(a / b)
+                                SqlValue::Bigint(quotient)
                             }
                         })
                         .collect());
