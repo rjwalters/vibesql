@@ -38,6 +38,7 @@ mod batch;
 mod scan;
 mod filter;
 mod aggregate;
+mod executor;
 
 #[cfg(feature = "simd")]
 mod simd_aggregate;
@@ -50,6 +51,7 @@ mod simd_join;
 
 pub use batch::{ColumnarBatch, ColumnArray};
 pub use scan::ColumnarScan;
+pub use executor::execute_columnar_batch;
 pub use filter::{
     apply_columnar_filter, create_filter_bitmap, create_filter_bitmap_tree,
     evaluate_predicate_tree, extract_column_predicates, extract_predicate_tree, ColumnPredicate,
@@ -332,8 +334,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         let result_row = &result[0];
 
-        // SUM(col0) = 60
-        assert!(matches!(result_row.get(0), Some(&SqlValue::Double(sum)) if (sum - 60.0).abs() < 0.001));
+        // SUM(col0) = 60 (Integer column returns Integer sum)
+        assert_eq!(result_row.get(0), Some(&SqlValue::Integer(60)));
         // AVG(col1) = 2.5
         assert!(matches!(result_row.get(1), Some(&SqlValue::Double(avg)) if (avg - 2.5).abs() < 0.001));
         // MAX(col0) = 30
