@@ -8,7 +8,7 @@ use crate::errors::ExecutorError;
 use crate::simd::comparison::{
     simd_eq_f64, simd_eq_i32, simd_eq_i64, simd_ge_f64, simd_ge_i32, simd_ge_i64, simd_gt_f64,
     simd_gt_i32, simd_gt_i64, simd_le_f64, simd_le_i32, simd_le_i64, simd_lt_f64, simd_lt_i32,
-    simd_lt_i64, simd_ne_i32, simd_ne_i64,
+    simd_lt_i64,
 };
 
 use vibesql_types::SqlValue;

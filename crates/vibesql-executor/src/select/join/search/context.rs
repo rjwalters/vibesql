@@ -25,5 +25,6 @@ pub(super) struct JoinOrderContext {
     pub config: ParallelSearchConfig,
     /// Aggregate analysis for GROUP BY/HAVING optimization
     /// When present, cardinalities may be adjusted to account for post-aggregate filtering
+    #[allow(dead_code)]
     pub aggregate_analysis: Option<AggregateAnalysis>,
 }
