@@ -221,12 +221,14 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         }
 
         // BETWEEN: column BETWEEN low AND high
+        // Only support ASYMMETRIC (default) BETWEEN for columnar optimization
+        // SYMMETRIC BETWEEN falls through to general evaluator which handles bounds swapping
         Expression::Between {
             expr: inner,
             low,
             high,
             negated: false,
-            symmetric: _,
+            symmetric: false,
         } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
@@ -336,12 +338,13 @@ fn extract_predicates_recursive(
         }
 
         // BETWEEN: column BETWEEN low AND high
+        // Only support ASYMMETRIC (default) BETWEEN for columnar optimization
         Expression::Between {
             expr: inner,
             low,
             high,
             negated: false,
-            symmetric: _,
+            symmetric: false,
         } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 if let (Expression::Literal(low_val), Expression::Literal(high_val)) =

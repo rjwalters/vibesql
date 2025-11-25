@@ -176,7 +176,8 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
             }
         }
         // Handle BETWEEN: col BETWEEN low AND high
-        Expression::Between { expr: col_expr, low, high, negated, .. } => {
+        // For SYMMETRIC: swap bounds if low > high
+        Expression::Between { expr: col_expr, low, high, negated, symmetric } => {
             if !negated && is_column_reference(col_expr, column_name) {
                 if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
                     (low.as_ref(), high.as_ref())
@@ -185,9 +186,17 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                     if matches!(low_val, SqlValue::Null) || matches!(high_val, SqlValue::Null) {
                         return None;
                     }
+
+                    // Handle SYMMETRIC: swap bounds if low > high
+                    let (effective_low, effective_high) = if *symmetric && low_val > high_val {
+                        (high_val.clone(), low_val.clone())
+                    } else {
+                        (low_val.clone(), high_val.clone())
+                    };
+
                     return Some(RangePredicate {
-                        start: Some(low_val.clone()),
-                        end: Some(high_val.clone()),
+                        start: Some(effective_low),
+                        end: Some(effective_high),
                         inclusive_start: true,
                         inclusive_end: true,
                     });
@@ -308,8 +317,11 @@ pub(crate) fn where_clause_fully_satisfied_by_index(
             }
         }
         // BETWEEN on indexed column: col BETWEEN low AND high
-        Expression::Between { expr: col_expr, low, high, negated, .. } => {
+        // Only ASYMMETRIC BETWEEN (symmetric: false) can be fully satisfied by index
+        // SYMMETRIC BETWEEN needs bounds swapping handled by evaluator
+        Expression::Between { expr: col_expr, low, high, negated, symmetric } => {
             !negated
+                && !symmetric
                 && is_column_reference(col_expr, indexed_column)
                 && matches!(low.as_ref(), Expression::Literal(_))
                 && matches!(high.as_ref(), Expression::Literal(_))
