@@ -146,10 +146,11 @@ Total execution:      74.88ms
 
 **After optimization** (SIMD columnar filter):
 ```
-Total execution:      55.70ms (26% faster)
-- Convert to batch:   23.75ms  ← new cost
-- SIMD filter:        14.62ms  ← 3x faster than before
-- Aggregate:          0.28ms   ← 4x faster than before
+Total execution:      58.87ms ±1.4ms (21.4% faster, n=5)
+- Convert to batch:   ~26ms    ← new cost
+- SIMD filter:        ~16ms    ← 3x faster than before
+- Aggregate:          ~0.3ms   ← 4x faster than before
+- Batch→rows:         ~16ms    ← implicit conversion
 ```
 
 ### Analysis
@@ -163,8 +164,10 @@ Total execution:      55.70ms (26% faster)
 - Batch conversion: 23.75ms (new overhead)
 
 **Net result**:
-- Overall: 74.88ms → 55.70ms (1.34x speedup, 26% improvement)
-- Still 103x slower than DuckDB (0.54ms target)
+- Overall: 74.88ms → 58.87ms (1.27x speedup, 21.4% improvement)
+- Median: 58.42ms (22.0% improvement)
+- Range: 57.70-61.15ms (±1.4ms stdev)
+- Still 109x slower than DuckDB (0.54ms target)
 
 ### Why Not Faster?
 
@@ -180,8 +183,10 @@ These optimizations would eliminate ~30ms of conversion overhead, potentially ac
 
 ### Next Steps for Further Optimization
 
-1. ⬜ Implement columnar storage layer (avoid initial conversion)
-2. ⬜ Add batch-based aggregation functions
+1. ⬜ Implement batch-native aggregation (#2570) - **NEXT PRIORITY**
+   - Eliminate batch→rows conversion (~16ms savings)
+   - Would bring Q6 to ~42ms (44% total improvement)
+2. ⬜ Implement columnar storage layer (avoid initial conversion)
 3. ⬜ Push filters down to scan layer (predicate pushdown)
 4. ⬜ Profile batch conversion to optimize type inference
 5. ⬜ Add adaptive threshold (skip columnar for small row counts)

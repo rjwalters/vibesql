@@ -141,26 +141,15 @@ pub fn execute_columnar_aggregate(
     #[cfg(feature = "profile-q6")]
     let filter_start = std::time::Instant::now();
 
-    #[cfg(feature = "simd")]
+    // Columnar batch filtering requires SIMD for vectorized operations
+    // Without SIMD, fall back to row-oriented execution (handled by caller)
+    #[cfg(not(feature = "simd"))]
+    compile_error!("Columnar batch filtering requires the 'simd' feature to be enabled");
+
     let filtered_batch = if predicates.is_empty() {
         batch.clone()
     } else {
         simd_filter_batch(&batch, predicates)?
-    };
-
-    #[cfg(not(feature = "simd"))]
-    let filtered_batch = {
-        // Fallback: use row-oriented filter
-        let filter_bitmap = if predicates.is_empty() {
-            None
-        } else {
-            Some(create_filter_bitmap(rows.len(), predicates, |row_idx, col_idx| {
-                rows.get(row_idx).and_then(|row| row.get(col_idx))
-            })?)
-        };
-        // For non-SIMD path, we need to filter the batch manually
-        // This is a simplified fallback - in practice would need proper implementation
-        batch.clone()
     };
 
     #[cfg(feature = "profile-q6")]
