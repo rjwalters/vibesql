@@ -148,6 +148,11 @@ impl ColumnarBatch {
         self.column_names.as_deref()
     }
 
+    /// Get column index by name
+    pub fn column_index_by_name(&self, name: &str) -> Option<usize> {
+        self.column_names.as_ref()?.iter().position(|n| n == name)
+    }
+
     /// Convert from row-oriented storage to columnar batch
     ///
     /// This analyzes the first row to infer column types, then materializes
