@@ -332,8 +332,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         let result_row = &result[0];
 
-        // SUM(col0) = 60
-        assert!(matches!(result_row.get(0), Some(&SqlValue::Double(sum)) if (sum - 60.0).abs() < 0.001));
+        // SUM(col0) = 60 (preserves integer type per #2545)
+        assert_eq!(result_row.get(0), Some(&SqlValue::Integer(60)));
         // AVG(col1) = 2.5
         assert!(matches!(result_row.get(1), Some(&SqlValue::Double(avg)) if (avg - 2.5).abs() < 0.001));
         // MAX(col0) = 30
