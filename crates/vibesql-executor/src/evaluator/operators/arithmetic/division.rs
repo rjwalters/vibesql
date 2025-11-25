@@ -105,6 +105,11 @@ impl Division {
             (super::CoercedValues::Numeric(a, b), ValueType::Float) => {
                 Ok(Numeric(a / b))
             }
+            // ApproximateNumeric with Numeric result type (MySQL mode with Float operands)
+            // MySQL always returns Numeric for division even with Float inputs
+            (super::CoercedValues::ApproximateNumeric(a, b), ValueType::Numeric) => {
+                Ok(Numeric(a / b))
+            }
             // All other combinations should be unreachable due to type coercion rules
             _ => unreachable!("Unexpected combination of coerced type and result type"),
         }
