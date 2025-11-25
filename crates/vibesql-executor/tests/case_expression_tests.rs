@@ -91,10 +91,12 @@ fn test_simple_case_null_handling() {
         else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar("Not Null".to_string())))),
     };
 
-    // Test with NULL status (NULL = NULL should be TRUE in simple CASE)
+    // Test with NULL status
+    // In standard SQL, NULL = NULL returns NULL (not TRUE), so the WHEN clause
+    // does NOT match. The ELSE result should be returned.
     let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Integer(100)]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar("Null Status".to_string()));
+    assert_eq!(result, SqlValue::Varchar("Not Null".to_string()));
 }
 
 #[test]
