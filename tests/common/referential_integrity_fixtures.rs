@@ -8,6 +8,7 @@
 
 #![allow(dead_code)]
 
+use vibesql_ast::Expression;
 use vibesql_catalog::{ColumnSchema, ForeignKeyConstraint, ReferentialAction, TableSchema};
 use vibesql_executor::{DeleteExecutor, UpdateExecutor};
 use vibesql_parser::Parser;
@@ -47,6 +48,47 @@ pub fn create_child_table(
     let columns = vec![
         ColumnSchema::new("ID".to_string(), DataType::Integer, false),
         ColumnSchema::new("PARENT_ID".to_string(), DataType::Integer, true),
+        ColumnSchema::new("DATA".to_string(), DataType::Varchar { max_length: Some(50) }, true),
+    ];
+
+    let fk = ForeignKeyConstraint {
+        name: Some(format!("FK_{}_{}", table_name, parent_table)),
+        column_names: vec!["PARENT_ID".to_string()],
+        column_indices: vec![1],
+        parent_table: parent_table.to_string(),
+        parent_column_names: vec!["ID".to_string()],
+        parent_column_indices: vec![0],
+        on_delete: on_delete.clone(),
+        on_update: on_update.clone(),
+    };
+
+    let mut schema =
+        TableSchema::with_primary_key(table_name.to_string(), columns, vec!["ID".to_string()]);
+    schema.foreign_keys.push(fk);
+
+    db.create_table(schema).unwrap();
+}
+
+/// Create a child table with a foreign key constraint and a default value for the FK column
+///
+/// Creates a table with columns: ID (INTEGER, PK), PARENT_ID (INTEGER, nullable, FK with default), DATA
+/// (VARCHAR(50), nullable)
+///
+/// This is specifically for testing SET DEFAULT referential action.
+pub fn create_child_table_with_default(
+    db: &mut Database,
+    table_name: &str,
+    parent_table: &str,
+    on_delete: ReferentialAction,
+    on_update: ReferentialAction,
+    default_value: i64,
+) {
+    let mut parent_id_column = ColumnSchema::new("PARENT_ID".to_string(), DataType::Integer, true);
+    parent_id_column.set_default(Expression::Literal(SqlValue::Integer(default_value)));
+
+    let columns = vec![
+        ColumnSchema::new("ID".to_string(), DataType::Integer, false),
+        parent_id_column,
         ColumnSchema::new("DATA".to_string(), DataType::Varchar { max_length: Some(50) }, true),
     ];
 
