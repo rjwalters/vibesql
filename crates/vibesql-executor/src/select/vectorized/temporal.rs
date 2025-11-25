@@ -49,6 +49,10 @@ use vibesql_ast::Expression;
 use std::sync::Arc;
 
 // ===== Date32 Extraction Functions =====
+//
+// TODO(#2506): These functions are infrastructure for Phase 3 of SIMD temporal operations.
+// They will be integrated into the query executor in a follow-up PR.
+// The `evaluate_temporal_simd` function below provides the integration point.
 
 /// Extract year component from Date32Array
 ///
@@ -60,6 +64,7 @@ use std::sync::Arc;
 ///
 /// # Performance
 /// SIMD-accelerated: processes 4-8 dates per instruction vs 1 for scalar
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_year_date32(array: &Date32Array) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Year).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract year from date: {}", e)))
@@ -69,6 +74,7 @@ pub fn extract_year_date32(array: &Date32Array) -> Result<Int32Array, ExecutorEr
 ///
 /// Uses Arrow's SIMD-optimized `month()` kernel.
 /// Returns Int32Array with month values (1-12).
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_month_date32(array: &Date32Array) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Month).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract month from date: {}", e)))
@@ -78,6 +84,7 @@ pub fn extract_month_date32(array: &Date32Array) -> Result<Int32Array, ExecutorE
 ///
 /// Uses Arrow's SIMD-optimized `day()` kernel.
 /// Returns Int32Array with day values (1-31).
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_day_date32(array: &Date32Array) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Day).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract day from date: {}", e)))
@@ -86,36 +93,42 @@ pub fn extract_day_date32(array: &Date32Array) -> Result<Int32Array, ExecutorErr
 // ===== Timestamp Extraction Functions =====
 
 /// Extract year component from TimestampMicrosecondArray
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_year_timestamp(array: &TimestampMicrosecondArray) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Year).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract year from timestamp: {}", e)))
 }
 
 /// Extract month component from TimestampMicrosecondArray
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_month_timestamp(array: &TimestampMicrosecondArray) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Month).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract month from timestamp: {}", e)))
 }
 
 /// Extract day component from TimestampMicrosecondArray
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_day_timestamp(array: &TimestampMicrosecondArray) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Day).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract day from timestamp: {}", e)))
 }
 
 /// Extract hour component from TimestampMicrosecondArray
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_hour(array: &TimestampMicrosecondArray) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Hour).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract hour: {}", e)))
 }
 
 /// Extract minute component from TimestampMicrosecondArray
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_minute(array: &TimestampMicrosecondArray) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Minute).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract minute: {}", e)))
 }
 
 /// Extract second component from TimestampMicrosecondArray
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn extract_second(array: &TimestampMicrosecondArray) -> Result<Int32Array, ExecutorError> {
     date_part(array, DatePart::Second).and_then(|arr| Ok(as_primitive_array::<Int32Type>(&arr).clone()))
         .map_err(|e| ExecutorError::Other(format!("Failed to extract second: {}", e)))
@@ -150,6 +163,7 @@ pub fn extract_second(array: &TimestampMicrosecondArray) -> Result<Int32Array, E
 /// let col_ref = Expression::ColumnRef { column: "order_date".to_string(), table: None };
 /// let years = evaluate_temporal_simd(&batch, "YEAR", &col_ref)?;
 /// ```
+#[allow(dead_code)]  // TODO(#2506): Integrate into query executor
 pub fn evaluate_temporal_simd(
     batch: &RecordBatch,
     func_name: &str,
