@@ -7,9 +7,7 @@ use crate::errors::ExecutorError;
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
-#[cfg(feature = "arrow")]
 use arrow::array::{Array, ArrayRef};
-#[cfg(feature = "arrow")]
 use arrow::record_batch::RecordBatch;
 
 /// A columnar batch stores data in column-oriented format for efficient SIMD processing
@@ -199,14 +197,7 @@ impl ColumnarBatch {
     /// # Returns
     ///
     /// A ColumnarBatch ready for SIMD-accelerated query execution
-    #[cfg(feature = "arrow")]
     pub fn from_arrow_batch(batch: &RecordBatch) -> Result<Self, ExecutorError> {
-        use arrow::array::{
-            BooleanArray, Date32Array, Float32Array, Float64Array, Int32Array, Int64Array,
-            StringArray, TimestampMicrosecondArray,
-        };
-        use arrow::datatypes::DataType as ArrowDataType;
-
         let row_count = batch.num_rows();
         let column_count = batch.num_columns();
 
@@ -230,7 +221,6 @@ impl ColumnarBatch {
     }
 
     /// Convert a single Arrow array to ColumnArray
-    #[cfg(feature = "arrow")]
     fn convert_arrow_array(
         array: &ArrayRef,
         data_type: &arrow::datatypes::DataType,

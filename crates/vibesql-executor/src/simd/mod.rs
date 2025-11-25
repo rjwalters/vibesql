@@ -67,6 +67,14 @@ pub mod cpu_features;
 #[cfg(feature = "simd")]
 pub mod dispatch;
 
+// ARM64 NEON-specific modules
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+pub mod arithmetic_neon;
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+pub mod comparison_neon;
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+pub mod aggregation_neon;
+
 // Re-export public API
 #[cfg(feature = "simd")]
 pub use aggregation::*;

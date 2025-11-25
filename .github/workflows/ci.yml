@@ -31,10 +31,10 @@ jobs:
           cache-key-suffix: ci
 
       - name: Run unit tests
-        run: cargo test --release -- --skip run_sqllogictest_suite
+        run: cargo test --release --no-default-features --features parallel,spatial -- --skip run_sqllogictest_suite
 
       - name: Run integration tests
-        run: cargo test --release --test '*' -- --skip run_sqllogictest_suite
+        run: cargo test --release --no-default-features --features parallel,spatial --test '*' -- --skip run_sqllogictest_suite
         continue-on-error: false
 
   # ============================================================================
