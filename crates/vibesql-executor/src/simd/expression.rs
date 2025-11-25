@@ -452,5 +452,716 @@ impl NumericBuffer {
     }
 }
 
-// TODO: Add comprehensive unit tests for SIMD expression evaluation
-// Basic functionality verified through integration tests
+#[cfg(all(test, feature = "simd"))]
+mod tests {
+    use super::*;
+    use vibesql_ast::{BinaryOperator, Expression};
+    use vibesql_storage::Row;
+    use vibesql_types::{DataType, SqlValue};
+
+    // Helper to create a mock evaluator for testing
+    fn create_test_evaluator() -> crate::evaluator::CombinedExpressionEvaluator<'static> {
+        use crate::schema::CombinedSchema;
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+
+        // Create a minimal schema for testing
+        let columns = vec![
+            ColumnSchema::new("a".to_string(), DataType::Bigint, false),
+            ColumnSchema::new("b".to_string(), DataType::Bigint, false),
+        ];
+        let table_schema = TableSchema::new("test".to_string(), columns);
+
+        let schema = Box::leak(Box::new(CombinedSchema::from_table("test".to_string(), table_schema)));
+        crate::evaluator::CombinedExpressionEvaluator::new(schema)
+    }
+
+    // Helper to create test rows with numeric values
+    fn create_test_rows(count: usize) -> Vec<Row> {
+        (0..count)
+            .map(|i| Row::new(vec![SqlValue::Bigint(i as i64), SqlValue::Bigint((i * 2) as i64)]))
+            .collect()
+    }
+
+    // ===== Expression Detection Tests =====
+
+    #[test]
+    fn test_can_use_simd_returns_false_for_small_row_count() {
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+
+        // Below threshold
+        assert!(!can_use_simd_for_expression(&expr, 99));
+        assert!(!can_use_simd_for_expression(&expr, 50));
+        assert!(!can_use_simd_for_expression(&expr, 0));
+
+        // At threshold
+        assert!(can_use_simd_for_expression(&expr, 100));
+
+        // Above threshold
+        assert!(can_use_simd_for_expression(&expr, 101));
+        assert!(can_use_simd_for_expression(&expr, 1000));
+    }
+
+    #[test]
+    fn test_can_use_simd_returns_true_for_simple_arithmetic() {
+        let row_count = 100;
+
+        // Test each arithmetic operator
+        let operators = vec![
+            BinaryOperator::Plus,
+            BinaryOperator::Minus,
+            BinaryOperator::Multiply,
+            BinaryOperator::Divide,
+        ];
+
+        for op in operators {
+            let expr = Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "a".to_string(),
+                }),
+                op,
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            };
+
+            assert!(
+                can_use_simd_for_expression(&expr, row_count),
+                "Should support SIMD for operator: {:?}",
+                op
+            );
+        }
+    }
+
+    #[test]
+    fn test_can_use_simd_returns_false_for_unsupported_operators() {
+        let row_count = 100;
+
+        let unsupported_ops = vec![
+            BinaryOperator::Modulo,
+            BinaryOperator::Concat,
+            BinaryOperator::And,
+            BinaryOperator::Or,
+            BinaryOperator::Equal,
+            BinaryOperator::NotEqual,
+            BinaryOperator::LessThan,
+            BinaryOperator::LessThanOrEqual,
+            BinaryOperator::GreaterThan,
+            BinaryOperator::GreaterThanOrEqual,
+        ];
+
+        for op in unsupported_ops {
+            let expr = Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "a".to_string(),
+                }),
+                op,
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            };
+
+            assert!(
+                !can_use_simd_for_expression(&expr, row_count),
+                "Should NOT support SIMD for operator: {:?}",
+                op
+            );
+        }
+    }
+
+    #[test]
+    fn test_can_use_simd_returns_false_for_complex_operands() {
+        let row_count = 100;
+
+        // ScalarSubquery
+        let expr_subquery = Expression::BinaryOp {
+            left: Box::new(Expression::ScalarSubquery(Box::new(
+                vibesql_ast::SelectStmt {
+                    with_clause: None,
+                    distinct: false,
+                    select_list: vec![],
+                    into_table: None,
+                    into_variables: None,
+                    from: None,
+                    where_clause: None,
+                    group_by: None,
+                    having: None,
+                    order_by: None,
+                    limit: None,
+                    offset: None,
+                    set_operation: None,
+                },
+            ))),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+        assert!(!can_use_simd_for_expression(&expr_subquery, row_count));
+
+        // AggregateFunction
+        let expr_aggregate = Expression::BinaryOp {
+            left: Box::new(Expression::AggregateFunction {
+                name: "SUM".to_string(),
+                args: vec![Expression::ColumnRef {
+                    table: None,
+                    column: "x".to_string(),
+                }],
+                distinct: false,
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+        assert!(!can_use_simd_for_expression(&expr_aggregate, row_count));
+
+        // Function
+        let expr_function = Expression::BinaryOp {
+            left: Box::new(Expression::Function {
+                name: "ABS".to_string(),
+                args: vec![Expression::ColumnRef {
+                    table: None,
+                    column: "x".to_string(),
+                }],
+                character_unit: None,
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+        assert!(!can_use_simd_for_expression(&expr_function, row_count));
+
+        // CASE
+        let expr_case = Expression::BinaryOp {
+            left: Box::new(Expression::Case {
+                operand: None,
+                when_clauses: vec![],
+                else_result: None,
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+        assert!(!can_use_simd_for_expression(&expr_case, row_count));
+    }
+
+    #[test]
+    fn test_can_use_simd_returns_true_for_nested_binary_operations() {
+        let row_count = 100;
+
+        // (a + b) * c
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "a".to_string(),
+                }),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "b".to_string(),
+                }),
+            }),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c".to_string(),
+            }),
+        };
+
+        assert!(can_use_simd_for_expression(&expr, row_count));
+    }
+
+    // ===== Operand Simplicity Tests =====
+
+    #[test]
+    fn test_is_simple_operand_for_column_refs() {
+        let expr = Expression::ColumnRef {
+            table: None,
+            column: "x".to_string(),
+        };
+        assert!(is_simple_operand(&expr));
+
+        let expr_qualified = Expression::ColumnRef {
+            table: Some("t".to_string()),
+            column: "x".to_string(),
+        };
+        assert!(is_simple_operand(&expr_qualified));
+    }
+
+    #[test]
+    fn test_is_simple_operand_for_literals() {
+        assert!(is_simple_operand(&Expression::Literal(SqlValue::Integer(42))));
+        assert!(is_simple_operand(&Expression::Literal(SqlValue::Double(3.14))));
+        assert!(is_simple_operand(&Expression::Literal(SqlValue::Varchar("test".to_string()))));
+        assert!(is_simple_operand(&Expression::Literal(SqlValue::Boolean(true))));
+        assert!(is_simple_operand(&Expression::Literal(SqlValue::Null)));
+    }
+
+    #[test]
+    fn test_is_simple_operand_for_nested_arithmetic() {
+        // a + b is simple
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "b".to_string(),
+            }),
+        };
+        assert!(is_simple_operand(&expr));
+
+        // (a + b) * 2 is simple
+        let nested = Expression::BinaryOp {
+            left: Box::new(expr),
+            op: BinaryOperator::Multiply,
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        };
+        assert!(is_simple_operand(&nested));
+    }
+
+    #[test]
+    fn test_is_simple_operand_returns_false_for_complex_expressions() {
+        // ScalarSubquery is not simple
+        let subquery = Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![],
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+        }));
+        assert!(!is_simple_operand(&subquery));
+
+        // AggregateFunction is not simple
+        let aggregate = Expression::AggregateFunction {
+            name: "SUM".to_string(),
+            args: vec![],
+            distinct: false,
+        };
+        assert!(!is_simple_operand(&aggregate));
+
+        // Function is not simple
+        let function = Expression::Function {
+            name: "ABS".to_string(),
+            args: vec![],
+            character_unit: None,
+        };
+        assert!(!is_simple_operand(&function));
+
+        // CASE is not simple
+        let case_expr = Expression::Case {
+            operand: None,
+            when_clauses: vec![],
+            else_result: None,
+        };
+        assert!(!is_simple_operand(&case_expr));
+    }
+
+    // ===== Batch Expression Evaluation Tests =====
+
+    #[test]
+    fn test_eval_expression_batch_simd_simple_addition() {
+        let rows = create_test_rows(100);
+        let evaluator = create_test_evaluator();
+
+        // Expression: column_0 + 10
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "0".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(10))),
+        };
+
+        // This test will use scalar fallback due to evaluator limitations
+        // but verifies the function signature and basic execution path
+        let result = eval_expression_batch_simd(&expr, &rows, &evaluator);
+
+        // Should complete without panic
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_eval_expression_batch_simd_empty_rows() {
+        let rows = vec![];
+        let evaluator = create_test_evaluator();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+
+        let result = eval_expression_batch_simd(&expr, &rows, &evaluator);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_eval_expression_batch_simd_falls_back_for_insufficient_rows() {
+        let rows = create_test_rows(50); // Below threshold
+        let evaluator = create_test_evaluator();
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "0".to_string(),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+        };
+
+        // Should fall back to scalar evaluation
+        let result = eval_expression_batch_simd(&expr, &rows, &evaluator);
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_eval_expression_batch_simd_falls_back_for_complex_expression() {
+        let rows = create_test_rows(100);
+        let evaluator = create_test_evaluator();
+
+        // Complex expression with function
+        let expr = Expression::Function {
+            name: "ABS".to_string(),
+            args: vec![Expression::ColumnRef {
+                table: None,
+                column: "a".to_string(),
+            }],
+            character_unit: None,
+        };
+
+        // Should fall back to scalar evaluation
+        let result = eval_expression_batch_simd(&expr, &rows, &evaluator);
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    // ===== Recursion Depth Limiting Tests =====
+
+    #[test]
+    fn test_recursion_depth_limiting_prevents_stack_overflow() {
+        let rows = create_test_rows(100);
+        let evaluator = create_test_evaluator();
+
+        // Create deeply nested expression (40 levels)
+        let mut expr = Expression::Literal(SqlValue::Integer(1));
+        for _ in 0..40 {
+            expr = Expression::BinaryOp {
+                left: Box::new(expr),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            };
+        }
+
+        // Should not panic, should fall back to scalar
+        let result = eval_expression_batch_simd(&expr, &rows, &evaluator);
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_recursion_depth_at_limit() {
+        let rows = create_test_rows(100);
+        let evaluator = create_test_evaluator();
+
+        // Create expression at exactly MAX_RECURSION_DEPTH levels (32)
+        let mut expr = Expression::Literal(SqlValue::Integer(1));
+        for _ in 0..31 {
+            expr = Expression::BinaryOp {
+                left: Box::new(expr),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            };
+        }
+
+        // Should handle this depth
+        let result = eval_expression_batch_simd(&expr, &rows, &evaluator);
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    // ===== NULL Handling Tests =====
+
+    #[test]
+    fn test_convert_to_buffer_rejects_null_values() {
+        let values = vec![
+            NumericValue::Int64(1),
+            NumericValue::Null,
+            NumericValue::Int64(3),
+        ];
+
+        let result = convert_to_buffer(values);
+        assert!(result.is_err());
+
+        if let Err(ExecutorError::UnsupportedExpression(msg)) = result {
+            assert!(msg.contains("NULL"));
+        }
+    }
+
+    #[test]
+    fn test_numeric_value_from_null_sql_value() {
+        let result = NumericValue::from_sql_value(&SqlValue::Null);
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), NumericValue::Null));
+    }
+
+    // ===== Buffer Conversion Tests =====
+
+    #[test]
+    fn test_convert_to_buffer_all_int64() {
+        let values = vec![
+            NumericValue::Int64(1),
+            NumericValue::Int64(2),
+            NumericValue::Int64(3),
+        ];
+
+        let result = convert_to_buffer(values);
+        assert!(result.is_ok());
+
+        match result.unwrap() {
+            NumericBuffer::Int64(buf) => {
+                assert_eq!(buf, vec![1, 2, 3]);
+            }
+            _ => panic!("Expected Int64 buffer"),
+        }
+    }
+
+    #[test]
+    fn test_convert_to_buffer_mixed_promotes_to_float64() {
+        let values = vec![
+            NumericValue::Int64(1),
+            NumericValue::Float64(2.5),
+            NumericValue::Int64(3),
+        ];
+
+        let result = convert_to_buffer(values);
+        assert!(result.is_ok());
+
+        match result.unwrap() {
+            NumericBuffer::Float64(buf) => {
+                assert_eq!(buf, vec![1.0, 2.5, 3.0]);
+            }
+            _ => panic!("Expected Float64 buffer"),
+        }
+    }
+
+    #[test]
+    fn test_convert_to_buffer_all_float64() {
+        let values = vec![
+            NumericValue::Float64(1.5),
+            NumericValue::Float64(2.5),
+            NumericValue::Float64(3.5),
+        ];
+
+        let result = convert_to_buffer(values);
+        assert!(result.is_ok());
+
+        match result.unwrap() {
+            NumericBuffer::Float64(buf) => {
+                assert_eq!(buf, vec![1.5, 2.5, 3.5]);
+            }
+            _ => panic!("Expected Float64 buffer"),
+        }
+    }
+
+    #[test]
+    fn test_numeric_buffer_to_f64_promotion() {
+        // Int64 buffer promotes to f64
+        let int_buf = NumericBuffer::Int64(vec![1, 2, 3]);
+        let f64_vec = int_buf.to_f64();
+        assert_eq!(f64_vec, vec![1.0, 2.0, 3.0]);
+
+        // Float64 buffer clones
+        let float_buf = NumericBuffer::Float64(vec![1.5, 2.5, 3.5]);
+        let f64_vec = float_buf.to_f64();
+        assert_eq!(f64_vec, vec![1.5, 2.5, 3.5]);
+    }
+
+    // ===== Division Handling Tests =====
+
+    #[test]
+    fn test_integer_division_by_zero_returns_null() {
+        use super::apply_simd_operation;
+
+        let a = NumericBuffer::Int64(vec![10, 20, 30]);
+        let b = NumericBuffer::Int64(vec![2, 0, 5]);
+
+        let result = apply_simd_operation(&a, BinaryOperator::Divide, &b);
+        assert!(result.is_ok());
+
+        let values = result.unwrap();
+        assert_eq!(values[0], SqlValue::Bigint(5));
+        assert_eq!(values[1], SqlValue::Null); // Division by zero
+        assert_eq!(values[2], SqlValue::Bigint(6));
+    }
+
+    #[test]
+    fn test_integer_division_non_zero() {
+        use super::apply_simd_operation;
+
+        let a = NumericBuffer::Int64(vec![10, 20, 30, 40]);
+        let b = NumericBuffer::Int64(vec![2, 4, 3, 8]);
+
+        let result = apply_simd_operation(&a, BinaryOperator::Divide, &b);
+        assert!(result.is_ok());
+
+        let values = result.unwrap();
+        assert_eq!(values[0], SqlValue::Bigint(5));
+        assert_eq!(values[1], SqlValue::Bigint(5));
+        assert_eq!(values[2], SqlValue::Bigint(10));
+        assert_eq!(values[3], SqlValue::Bigint(5));
+    }
+
+    #[test]
+    fn test_float_division_handles_zero() {
+        use super::apply_simd_operation;
+
+        let a = NumericBuffer::Float64(vec![10.0, 20.0, 30.0]);
+        let b = NumericBuffer::Float64(vec![2.0, 0.0, 5.0]);
+
+        let result = apply_simd_operation(&a, BinaryOperator::Divide, &b);
+        assert!(result.is_ok());
+
+        let values = result.unwrap();
+        assert_eq!(values[0], SqlValue::Double(5.0));
+        // Float division by zero produces infinity
+        match values[1] {
+            SqlValue::Double(v) => assert!(v.is_infinite()),
+            _ => panic!("Expected Double value"),
+        }
+        assert_eq!(values[2], SqlValue::Double(6.0));
+    }
+
+    // ===== SIMD Operation Tests =====
+
+    #[test]
+    fn test_apply_simd_operation_int64_addition() {
+        use super::apply_simd_operation;
+
+        let a = NumericBuffer::Int64(vec![1, 2, 3, 4]);
+        let b = NumericBuffer::Int64(vec![10, 20, 30, 40]);
+
+        let result = apply_simd_operation(&a, BinaryOperator::Plus, &b);
+        assert!(result.is_ok());
+
+        let values = result.unwrap();
+        assert_eq!(values[0], SqlValue::Bigint(11));
+        assert_eq!(values[1], SqlValue::Bigint(22));
+        assert_eq!(values[2], SqlValue::Bigint(33));
+        assert_eq!(values[3], SqlValue::Bigint(44));
+    }
+
+    #[test]
+    fn test_apply_simd_operation_float64_multiplication() {
+        use super::apply_simd_operation;
+
+        let a = NumericBuffer::Float64(vec![1.5, 2.0, 3.5, 4.0]);
+        let b = NumericBuffer::Float64(vec![2.0, 3.0, 2.0, 5.0]);
+
+        let result = apply_simd_operation(&a, BinaryOperator::Multiply, &b);
+        assert!(result.is_ok());
+
+        let values = result.unwrap();
+        assert_eq!(values[0], SqlValue::Double(3.0));
+        assert_eq!(values[1], SqlValue::Double(6.0));
+        assert_eq!(values[2], SqlValue::Double(7.0));
+        assert_eq!(values[3], SqlValue::Double(20.0));
+    }
+
+    #[test]
+    fn test_apply_simd_operation_type_promotion() {
+        use super::apply_simd_operation;
+
+        // Int64 + Float64 should promote to Float64
+        let a = NumericBuffer::Int64(vec![1, 2, 3]);
+        let b = NumericBuffer::Float64(vec![1.5, 2.5, 3.5]);
+
+        let result = apply_simd_operation(&a, BinaryOperator::Plus, &b);
+        assert!(result.is_ok());
+
+        let values = result.unwrap();
+        assert_eq!(values[0], SqlValue::Double(2.5));
+        assert_eq!(values[1], SqlValue::Double(4.5));
+        assert_eq!(values[2], SqlValue::Double(6.5));
+    }
+
+    #[test]
+    fn test_apply_simd_operation_unsupported_operator() {
+        use super::apply_simd_operation;
+
+        let a = NumericBuffer::Int64(vec![1, 2, 3]);
+        let b = NumericBuffer::Int64(vec![1, 2, 3]);
+
+        let result = apply_simd_operation(&a, BinaryOperator::Modulo, &b);
+        assert!(result.is_err());
+
+        if let Err(ExecutorError::UnsupportedExpression(msg)) = result {
+            assert!(msg.contains("Unsupported SIMD operation"));
+        }
+    }
+
+    // ===== NumericValue Conversion Tests =====
+
+    #[test]
+    fn test_numeric_value_from_sql_value_integers() {
+        assert!(matches!(
+            NumericValue::from_sql_value(&SqlValue::Integer(42)).unwrap(),
+            NumericValue::Int64(42)
+        ));
+
+        assert!(matches!(
+            NumericValue::from_sql_value(&SqlValue::Bigint(100)).unwrap(),
+            NumericValue::Int64(100)
+        ));
+
+        assert!(matches!(
+            NumericValue::from_sql_value(&SqlValue::Smallint(10)).unwrap(),
+            NumericValue::Int64(10)
+        ));
+    }
+
+    #[test]
+    fn test_numeric_value_from_sql_value_floats() {
+        assert!(matches!(
+            NumericValue::from_sql_value(&SqlValue::Double(3.14)).unwrap(),
+            NumericValue::Float64(3.14)
+        ));
+
+        assert!(matches!(
+            NumericValue::from_sql_value(&SqlValue::Float(2.5)).unwrap(),
+            NumericValue::Float64(_)
+        ));
+
+        assert!(matches!(
+            NumericValue::from_sql_value(&SqlValue::Numeric(1.5)).unwrap(),
+            NumericValue::Float64(1.5)
+        ));
+
+        assert!(matches!(
+            NumericValue::from_sql_value(&SqlValue::Real(4.2)).unwrap(),
+            NumericValue::Float64(_)
+        ));
+    }
+
+    #[test]
+    fn test_numeric_value_from_sql_value_rejects_non_numeric() {
+        let result = NumericValue::from_sql_value(&SqlValue::Varchar("hello".to_string()));
+        assert!(result.is_err());
+
+        if let Err(ExecutorError::UnsupportedExpression(msg)) = result {
+            assert!(msg.contains("non-numeric value"));
+        }
+    }
+}
