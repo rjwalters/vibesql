@@ -817,4 +817,189 @@ mod tests {
             SqlValue::Double(0.06)
         );
     }
+
+    #[test]
+    fn test_simd_filter_date_less_than() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date < 1996-01-01
+        let predicates = vec![ColumnPredicate::LessThan {
+            column_idx: 0,
+            value: SqlValue::Date(Date {
+                year: 1996,
+                month: 1,
+                day: 1,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match first two rows (1994-01-01, 1995-06-15)
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    #[test]
+    fn test_simd_filter_date_between() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date BETWEEN 1995-01-01 AND 1996-12-31
+        let predicates = vec![ColumnPredicate::Between {
+            column_idx: 0,
+            low: SqlValue::Date(Date {
+                year: 1995,
+                month: 1,
+                day: 1,
+            }),
+            high: SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match middle two rows (1995-06-15, 1996-12-31)
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    #[test]
+    fn test_simd_filter_date_with_nulls() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column including NULLs
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Null]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1996,
+                month: 12,
+                day: 31,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date >= 1996-01-01
+        let predicates = vec![ColumnPredicate::GreaterThanOrEqual {
+            column_idx: 0,
+            value: SqlValue::Date(Date {
+                year: 1996,
+                month: 1,
+                day: 1,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match last two rows (1996-12-31, 1997-03-10), NULLs excluded
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    #[test]
+    fn test_simd_filter_date_equal() {
+        use vibesql_types::Date;
+
+        // Create a batch with date column
+        let rows = vec![
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1994,
+                month: 1,
+                day: 1,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            })]),
+            Row::new(vec![SqlValue::Date(Date {
+                year: 1997,
+                month: 3,
+                day: 10,
+            })]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: date = 1995-06-15
+        let predicates = vec![ColumnPredicate::Equal {
+            column_idx: 0,
+            value: SqlValue::Date(Date {
+                year: 1995,
+                month: 6,
+                day: 15,
+            }),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match two middle rows
+        assert_eq!(filtered.row_count(), 2);
+    }
 }

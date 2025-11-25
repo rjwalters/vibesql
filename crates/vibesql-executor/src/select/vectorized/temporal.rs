@@ -40,18 +40,12 @@
 //! let years = extract_year_date32(&dates)?; // [2020, 2020]
 //! ```
 
-<<<<<<< HEAD
-use arrow::array::{Date32Array, TimestampMicrosecondArray, Int32Array};
-use arrow_arith::temporal;
-use crate::errors::ExecutorError;
-=======
 use arrow::array::{Date32Array, TimestampMicrosecondArray, Int32Array, ArrayRef};
 use arrow::record_batch::RecordBatch;
 use arrow_arith::temporal;
 use crate::errors::ExecutorError;
 use vibesql_ast::Expression;
 use std::sync::Arc;
->>>>>>> origin/main
 
 // ===== Date32 Extraction Functions =====
 
@@ -126,8 +120,6 @@ pub fn extract_second(array: &TimestampMicrosecondArray) -> Result<Int32Array, E
         .map_err(|e| ExecutorError::Other(format!("Failed to extract second: {}", e)))
 }
 
-<<<<<<< HEAD
-=======
 // ===== Vectorized Expression Evaluation =====
 
 /// Evaluate a temporal extraction function on a RecordBatch using SIMD operations
@@ -263,7 +255,6 @@ pub fn evaluate_temporal_simd(
     }
 }
 
->>>>>>> origin/main
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,8 +352,6 @@ mod tests {
         assert_eq!(years.value(0), 2020);
         assert_eq!(years.value(7), 2027);
     }
-<<<<<<< HEAD
-=======
 
     // ===== Tests for evaluate_temporal_simd =====
 
@@ -530,5 +519,4 @@ mod tests {
         assert_eq!(years.value(0), 2020);
         assert!(years.value(999) > 2020); // Should be several years later
     }
->>>>>>> origin/main
 }
