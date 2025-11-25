@@ -211,6 +211,7 @@ async fn test_file(path: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
+#[ignore] // Slow test (~60s+): Run manually with `cargo test test_issue_898_files -- --ignored`
 async fn test_issue_898_files() {
     let files = vec![
         "third_party/sqllogictest/test/select1.test",
