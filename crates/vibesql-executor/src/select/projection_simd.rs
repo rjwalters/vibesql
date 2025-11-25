@@ -57,7 +57,7 @@ pub fn try_batch_project_simd(
     let mut has_simd_expr = false;
     for item in columns {
         if let SelectItem::Expression { expr, .. } = item {
-            if can_use_simd_for_expression(expr, rows.len()) {
+            if can_use_simd_for_expression(expr, rows, evaluator) {
                 has_simd_expr = true;
                 break;
             }
@@ -112,7 +112,7 @@ pub fn try_batch_project_simd(
 
             SelectItem::Expression { expr, .. } => {
                 // Try SIMD evaluation for this expression
-                let values = if can_use_simd_for_expression(expr, rows.len()) {
+                let values = if can_use_simd_for_expression(expr, rows, evaluator) {
                     // Use SIMD path
                     match eval_expression_batch_simd(expr, rows, evaluator) {
                         Ok(v) => v,
