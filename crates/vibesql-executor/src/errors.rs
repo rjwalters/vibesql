@@ -582,6 +582,9 @@ impl From<vibesql_storage::StorageError> for ExecutorError {
             vibesql_storage::StorageError::NoIndexToEvict => {
                 ExecutorError::StorageError("No index available to evict (all indexes are already disk-backed)".to_string())
             }
+            vibesql_storage::StorageError::Other(msg) => {
+                ExecutorError::StorageError(msg)
+            }
         }
     }
 }

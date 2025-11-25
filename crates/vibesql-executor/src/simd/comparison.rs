@@ -349,6 +349,7 @@ pub fn simd_eq_i64(column: &[i64], value: i64) -> Vec<bool> {
 
     result
 }
+
 /// SIMD not-equal comparison for i64 columns
 #[cfg(feature = "simd")]
 pub fn simd_ne_i64(column: &[i64], value: i64) -> Vec<bool> {

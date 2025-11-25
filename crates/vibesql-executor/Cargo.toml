@@ -57,7 +57,7 @@ paste = "1.0"
 env_logger = "0.11"
 
 [features]
-default = ["parallel", "spatial"]
+default = ["parallel", "spatial", "simd"]
 # Parallel processing using rayon (disabled in WASM where it provides no benefit)
 parallel = ["rayon"]
 # Spatial/geospatial query support (optional, reduces binary size)

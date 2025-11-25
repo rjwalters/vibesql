@@ -58,6 +58,9 @@ pub use filter::{
 pub use aggregate::{columnar_group_by, compute_multiple_aggregates, extract_aggregates, AggregateOp, AggregateSpec, AggregateSource};
 
 #[cfg(feature = "simd")]
+pub use aggregate::compute_aggregates_from_batch;
+
+#[cfg(feature = "simd")]
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
 
 #[cfg(feature = "simd")]
@@ -159,18 +162,17 @@ pub fn execute_columnar_aggregate(
             filter_time, filtered_batch.row_count(), rows.len());
     }
 
-    // Phase 3: Convert back to rows and compute aggregates
+    // Phase 3: Compute aggregates directly on batch (no row conversion!)
     #[cfg(feature = "profile-q6")]
     let agg_start = std::time::Instant::now();
 
-    let filtered_rows = filtered_batch.to_rows()?;
-
-    let results = compute_multiple_aggregates(&filtered_rows, aggregates, None, schema)?;
+    // Use batch-native aggregation to avoid to_rows() conversion overhead
+    let results = compute_aggregates_from_batch(&filtered_batch, aggregates, schema)?;
 
     #[cfg(feature = "profile-q6")]
     {
         let agg_time = agg_start.elapsed();
-        eprintln!("[PROFILE-Q6]   Phase 3 - Aggregate: {:?} ({} aggregates)",
+        eprintln!("[PROFILE-Q6]   Phase 3 - Batch-native aggregate: {:?} ({} aggregates)",
             agg_time, aggregates.len());
     }
 
