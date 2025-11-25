@@ -86,7 +86,7 @@ impl SelectExecutor<'_> {
 
         // Execute FROM clause WITHOUT applying WHERE clause
         // The columnar module will apply the WHERE clause using SIMD-accelerated filtering
-        let mut from_result = self.execute_from_with_where(
+        let from_result = self.execute_from_with_where(
             from_clause,
             cte_results,
             None, // Don't filter here - columnar module will handle it with SIMD

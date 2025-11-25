@@ -187,7 +187,7 @@ fn test_subquery_in_complex_where() {
     )
     .expect("Query should succeed");
 
-    // Subquery returns: 300, 500, 600, 250
+    // Subquery returns: 300, 500, 600 (COL3 values where COL3 > 259 OR COL3 >= 500)
     // Main query checks if COL0 matches: 200, 400, 300, 100
     // Match: row 2 has COL0=300
     assert_eq!(result.len(), 1);

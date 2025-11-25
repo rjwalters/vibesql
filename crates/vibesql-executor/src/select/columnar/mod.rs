@@ -60,6 +60,9 @@ pub use filter::{
 pub use aggregate::{columnar_group_by, compute_multiple_aggregates, extract_aggregates, AggregateOp, AggregateSpec, AggregateSource};
 
 #[cfg(feature = "simd")]
+pub use aggregate::compute_aggregates_from_batch;
+
+#[cfg(feature = "simd")]
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
 
 #[cfg(feature = "simd")]
@@ -127,48 +130,51 @@ pub fn execute_columnar_aggregate(
         return Ok(vec![Row::new(values)]);
     }
 
-    // Phase 1: Scan - Create columnar scan structure
+    // Phase 1: Convert to columnar batch for SIMD acceleration
     #[cfg(feature = "profile-q6")]
-    let scan_start = std::time::Instant::now();
+    let batch_start = std::time::Instant::now();
 
-    let _scan = ColumnarScan::new(rows);
+    let batch = ColumnarBatch::from_rows(rows)?;
 
     #[cfg(feature = "profile-q6")]
     {
-        let scan_time = scan_start.elapsed();
-        eprintln!("[PROFILE-Q6]   Phase 1 - Scan: {:?}", scan_time);
+        let batch_time = batch_start.elapsed();
+        eprintln!("[PROFILE-Q6]   Phase 1 - Convert to batch: {:?}", batch_time);
     }
 
-    // Phase 2: Filter - Create filter bitmap for predicate evaluation
+    // Phase 2: Apply SIMD-accelerated filtering
     #[cfg(feature = "profile-q6")]
     let filter_start = std::time::Instant::now();
 
-    let filter_bitmap = if predicates.is_empty() {
-        None
+    // Columnar batch filtering requires SIMD for vectorized operations
+    // Without SIMD, fall back to row-oriented execution (handled by caller)
+    #[cfg(not(feature = "simd"))]
+    compile_error!("Columnar batch filtering requires the 'simd' feature to be enabled");
+
+    let filtered_batch = if predicates.is_empty() {
+        batch.clone()
     } else {
-        Some(create_filter_bitmap(rows.len(), predicates, |row_idx, col_idx| {
-            rows.get(row_idx).and_then(|row| row.get(col_idx))
-        })?)
+        simd_filter_batch(&batch, predicates)?
     };
 
     #[cfg(feature = "profile-q6")]
     {
         let filter_time = filter_start.elapsed();
-        let passed = filter_bitmap.as_ref().map(|bm| bm.iter().filter(|&&b| b).count()).unwrap_or(rows.len());
-        eprintln!("[PROFILE-Q6]   Phase 2 - Filter: {:?} ({}/{} rows passed)",
-            filter_time, passed, rows.len());
+        eprintln!("[PROFILE-Q6]   Phase 2 - SIMD filter: {:?} ({}/{} rows passed)",
+            filter_time, filtered_batch.row_count(), rows.len());
     }
 
-    // Phase 3: Aggregate - Compute aggregate functions with SIMD
+    // Phase 3: Compute aggregates directly on batch (no row conversion!)
     #[cfg(feature = "profile-q6")]
     let agg_start = std::time::Instant::now();
 
-    let results = compute_multiple_aggregates(rows, aggregates, filter_bitmap.as_deref(), schema)?;
+    // Use batch-native aggregation to avoid to_rows() conversion overhead
+    let results = compute_aggregates_from_batch(&filtered_batch, aggregates, schema)?;
 
     #[cfg(feature = "profile-q6")]
     {
         let agg_time = agg_start.elapsed();
-        eprintln!("[PROFILE-Q6]   Phase 3 - Aggregate: {:?} ({} aggregates)",
+        eprintln!("[PROFILE-Q6]   Phase 3 - Batch-native aggregate: {:?} ({} aggregates)",
             agg_time, aggregates.len());
     }
 
@@ -334,7 +340,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         let result_row = &result[0];
 
-        // SUM(col0) = 60 (Integer column returns Integer sum)
+        // SUM(col0) = 60 (preserves integer type per #2545)
         assert_eq!(result_row.get(0), Some(&SqlValue::Integer(60)));
         // AVG(col1) = 2.5
         assert!(matches!(result_row.get(1), Some(&SqlValue::Double(avg)) if (avg - 2.5).abs() < 0.001));

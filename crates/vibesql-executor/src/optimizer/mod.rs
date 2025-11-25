@@ -8,8 +8,10 @@
 //! - Unified predicate classification and index strategy selection
 //! - Subquery rewriting for IN predicate optimization
 //! - Adaptive execution model selection (row-oriented vs columnar)
+//! - Aggregate-aware query optimization for GROUP BY/HAVING performance
 
 pub mod adaptive;
+pub mod aggregate_analysis;
 mod expressions;
 pub mod index_planner;
 pub mod index_strategy;

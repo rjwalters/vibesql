@@ -88,6 +88,7 @@ impl PasswordStore {
     }
 
     /// Add a user with a password (will be hashed with Argon2)
+    #[allow(dead_code)]
     pub fn add_user(&mut self, username: String, password: &str) -> Result<()> {
         let hashed = hash_password_argon2(password)?;
         self.passwords.insert(username, hashed);
@@ -95,6 +96,7 @@ impl PasswordStore {
     }
 
     /// Add a user with an already-hashed password
+    #[allow(dead_code)]
     pub fn add_user_hashed(&mut self, username: String, password_hash: String) {
         self.passwords.insert(username, password_hash);
     }

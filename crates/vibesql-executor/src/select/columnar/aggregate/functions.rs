@@ -6,8 +6,12 @@
 use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
 
+use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::scan::ColumnarScan;
 use super::AggregateOp;
+
+#[cfg(feature = "simd")]
+use crate::simd::aggregation::*;
 
 /// Compute SUM aggregate on a column
 pub(super) fn compute_sum(
@@ -241,4 +245,371 @@ pub(super) fn compute_columnar_aggregate_impl(
         AggregateOp::Min => compute_min(scan, column_idx, filter_bitmap),
         AggregateOp::Max => compute_max(scan, column_idx, filter_bitmap),
     }
+}
+
+// =============================================================================
+// Batch-native aggregate functions (work directly on ColumnarBatch)
+// =============================================================================
+
+/// Compute SUM aggregate directly on a ColumnarBatch column
+///
+/// This function works directly on the typed column arrays in ColumnarBatch,
+/// avoiding the overhead of converting back to rows.
+#[cfg(feature = "simd")]
+pub(super) fn compute_batch_sum(
+    batch: &ColumnarBatch,
+    column_idx: usize,
+) -> Result<SqlValue, ExecutorError> {
+    let column = batch.column(column_idx)
+        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+
+    match column {
+        ColumnArray::Int64(values, nulls) => {
+            if let Some(null_mask) = nulls {
+                // Handle NULLs by filtering them out
+                let filtered: Vec<i64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                if filtered.is_empty() {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Integer(simd_sum_i64(&filtered)))
+                }
+            } else {
+                if values.is_empty() {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Integer(simd_sum_i64(values)))
+                }
+            }
+        }
+        ColumnArray::Float64(values, nulls) => {
+            if let Some(null_mask) = nulls {
+                let filtered: Vec<f64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                if filtered.is_empty() {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Double(simd_sum_f64(&filtered)))
+                }
+            } else {
+                if values.is_empty() {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Double(simd_sum_f64(values)))
+                }
+            }
+        }
+        ColumnArray::Mixed(values) => {
+            // Fallback for mixed type columns
+            compute_mixed_sum(values)
+        }
+        _ => Err(ExecutorError::UnsupportedExpression(
+            format!("Cannot compute SUM on column type: {:?}", column.data_type())
+        )),
+    }
+}
+
+/// Compute COUNT aggregate directly on a ColumnarBatch
+#[cfg(feature = "simd")]
+pub(super) fn compute_batch_count(batch: &ColumnarBatch) -> Result<SqlValue, ExecutorError> {
+    Ok(SqlValue::Integer(batch.row_count() as i64))
+}
+
+/// Compute AVG aggregate directly on a ColumnarBatch column
+#[cfg(feature = "simd")]
+pub(super) fn compute_batch_avg(
+    batch: &ColumnarBatch,
+    column_idx: usize,
+) -> Result<SqlValue, ExecutorError> {
+    let column = batch.column(column_idx)
+        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+
+    match column {
+        ColumnArray::Int64(values, nulls) => {
+            let (sum, count) = if let Some(null_mask) = nulls {
+                let filtered: Vec<i64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                (simd_sum_i64(&filtered), filtered.len())
+            } else {
+                (simd_sum_i64(values), values.len())
+            };
+            if count == 0 {
+                Ok(SqlValue::Null)
+            } else {
+                Ok(SqlValue::Double(sum as f64 / count as f64))
+            }
+        }
+        ColumnArray::Float64(values, nulls) => {
+            let (sum, count) = if let Some(null_mask) = nulls {
+                let filtered: Vec<f64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                (simd_sum_f64(&filtered), filtered.len())
+            } else {
+                (simd_sum_f64(values), values.len())
+            };
+            if count == 0 {
+                Ok(SqlValue::Null)
+            } else {
+                Ok(SqlValue::Double(sum / count as f64))
+            }
+        }
+        ColumnArray::Mixed(values) => {
+            // Fallback for mixed type columns
+            let sum_result = compute_mixed_sum(values)?;
+            let count = values.iter().filter(|v| !matches!(v, SqlValue::Null)).count();
+            match sum_result {
+                SqlValue::Integer(sum) if count > 0 => Ok(SqlValue::Double(sum as f64 / count as f64)),
+                SqlValue::Double(sum) if count > 0 => Ok(SqlValue::Double(sum / count as f64)),
+                SqlValue::Null => Ok(SqlValue::Null),
+                _ => Ok(SqlValue::Null),
+            }
+        }
+        _ => Err(ExecutorError::UnsupportedExpression(
+            format!("Cannot compute AVG on column type: {:?}", column.data_type())
+        )),
+    }
+}
+
+/// Compute MIN aggregate directly on a ColumnarBatch column
+#[cfg(feature = "simd")]
+pub(super) fn compute_batch_min(
+    batch: &ColumnarBatch,
+    column_idx: usize,
+) -> Result<SqlValue, ExecutorError> {
+    let column = batch.column(column_idx)
+        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+
+    match column {
+        ColumnArray::Int64(values, nulls) => {
+            if let Some(null_mask) = nulls {
+                let filtered: Vec<i64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                match simd_min_i64(&filtered) {
+                    Some(min) => Ok(SqlValue::Integer(min)),
+                    None => Ok(SqlValue::Null),
+                }
+            } else {
+                match simd_min_i64(values) {
+                    Some(min) => Ok(SqlValue::Integer(min)),
+                    None => Ok(SqlValue::Null),
+                }
+            }
+        }
+        ColumnArray::Float64(values, nulls) => {
+            if let Some(null_mask) = nulls {
+                let filtered: Vec<f64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                match simd_min_f64(&filtered) {
+                    Some(min) => Ok(SqlValue::Double(min)),
+                    None => Ok(SqlValue::Null),
+                }
+            } else {
+                match simd_min_f64(values) {
+                    Some(min) => Ok(SqlValue::Double(min)),
+                    None => Ok(SqlValue::Null),
+                }
+            }
+        }
+        ColumnArray::Mixed(values) => compute_mixed_min(values),
+        _ => Err(ExecutorError::UnsupportedExpression(
+            format!("Cannot compute MIN on column type: {:?}", column.data_type())
+        )),
+    }
+}
+
+/// Compute MAX aggregate directly on a ColumnarBatch column
+#[cfg(feature = "simd")]
+pub(super) fn compute_batch_max(
+    batch: &ColumnarBatch,
+    column_idx: usize,
+) -> Result<SqlValue, ExecutorError> {
+    let column = batch.column(column_idx)
+        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+
+    match column {
+        ColumnArray::Int64(values, nulls) => {
+            if let Some(null_mask) = nulls {
+                let filtered: Vec<i64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                match simd_max_i64(&filtered) {
+                    Some(max) => Ok(SqlValue::Integer(max)),
+                    None => Ok(SqlValue::Null),
+                }
+            } else {
+                match simd_max_i64(values) {
+                    Some(max) => Ok(SqlValue::Integer(max)),
+                    None => Ok(SqlValue::Null),
+                }
+            }
+        }
+        ColumnArray::Float64(values, nulls) => {
+            if let Some(null_mask) = nulls {
+                let filtered: Vec<f64> = values.iter()
+                    .zip(null_mask.iter())
+                    .filter(|(_, &is_null)| !is_null)
+                    .map(|(&v, _)| v)
+                    .collect();
+                match simd_max_f64(&filtered) {
+                    Some(max) => Ok(SqlValue::Double(max)),
+                    None => Ok(SqlValue::Null),
+                }
+            } else {
+                match simd_max_f64(values) {
+                    Some(max) => Ok(SqlValue::Double(max)),
+                    None => Ok(SqlValue::Null),
+                }
+            }
+        }
+        ColumnArray::Mixed(values) => compute_mixed_max(values),
+        _ => Err(ExecutorError::UnsupportedExpression(
+            format!("Cannot compute MAX on column type: {:?}", column.data_type())
+        )),
+    }
+}
+
+/// Compute batch aggregate (dispatcher for all aggregate types)
+#[cfg(feature = "simd")]
+pub(super) fn compute_batch_aggregate(
+    batch: &ColumnarBatch,
+    column_idx: usize,
+    op: AggregateOp,
+) -> Result<SqlValue, ExecutorError> {
+    match op {
+        AggregateOp::Sum => compute_batch_sum(batch, column_idx),
+        AggregateOp::Count => compute_batch_count(batch),
+        AggregateOp::Avg => compute_batch_avg(batch, column_idx),
+        AggregateOp::Min => compute_batch_min(batch, column_idx),
+        AggregateOp::Max => compute_batch_max(batch, column_idx),
+    }
+}
+
+// Helper functions for mixed-type columns
+
+fn compute_mixed_sum(values: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    let mut int_sum: i64 = 0;
+    let mut float_sum = 0.0;
+    let mut count = 0;
+    let mut has_float = false;
+
+    for value in values {
+        match value {
+            SqlValue::Integer(v) => {
+                if has_float {
+                    float_sum += *v as f64;
+                } else {
+                    int_sum += v;
+                }
+                count += 1;
+            }
+            SqlValue::Bigint(v) => {
+                if has_float {
+                    float_sum += *v as f64;
+                } else {
+                    int_sum += v;
+                }
+                count += 1;
+            }
+            SqlValue::Double(v) => {
+                if !has_float {
+                    float_sum = int_sum as f64;
+                    has_float = true;
+                }
+                float_sum += v;
+                count += 1;
+            }
+            SqlValue::Float(v) => {
+                if !has_float {
+                    float_sum = int_sum as f64;
+                    has_float = true;
+                }
+                float_sum += *v as f64;
+                count += 1;
+            }
+            SqlValue::Numeric(v) => {
+                if !has_float {
+                    float_sum = int_sum as f64;
+                    has_float = true;
+                }
+                float_sum += v;
+                count += 1;
+            }
+            SqlValue::Null => {}
+            _ => return Err(ExecutorError::UnsupportedExpression(
+                format!("Cannot compute SUM on value: {:?}", value)
+            )),
+        }
+    }
+
+    Ok(if count > 0 {
+        if has_float {
+            SqlValue::Double(float_sum)
+        } else {
+            SqlValue::Integer(int_sum)
+        }
+    } else {
+        SqlValue::Null
+    })
+}
+
+fn compute_mixed_min(values: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    let mut min_value: Option<SqlValue> = None;
+
+    for value in values {
+        if !matches!(value, SqlValue::Null) {
+            min_value = Some(match &min_value {
+                None => value.clone(),
+                Some(current_min) => {
+                    if compare_for_min_max(value, current_min) {
+                        value.clone()
+                    } else {
+                        current_min.clone()
+                    }
+                }
+            });
+        }
+    }
+
+    Ok(min_value.unwrap_or(SqlValue::Null))
+}
+
+fn compute_mixed_max(values: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    let mut max_value: Option<SqlValue> = None;
+
+    for value in values {
+        if !matches!(value, SqlValue::Null) {
+            max_value = Some(match &max_value {
+                None => value.clone(),
+                Some(current_max) => {
+                    if compare_for_min_max(current_max, value) {
+                        value.clone()
+                    } else {
+                        current_max.clone()
+                    }
+                }
+            });
+        }
+    }
+
+    Ok(max_value.unwrap_or(SqlValue::Null))
 }

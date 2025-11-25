@@ -174,6 +174,163 @@ fn try_extract_subqueries_to_joins(
     }
 }
 
+/// Extract all table names from a FROM clause (for self-join detection)
+fn collect_table_names(from: &FromClause, names: &mut Vec<String>) {
+    match from {
+        FromClause::Table { name, alias } => {
+            // Use alias if present, otherwise table name
+            names.push(alias.clone().unwrap_or_else(|| name.clone()));
+            names.push(name.clone()); // Also add original name for matching
+        }
+        FromClause::Join { left, right, .. } => {
+            collect_table_names(left, names);
+            collect_table_names(right, names);
+        }
+        FromClause::Subquery { alias, .. } => {
+            names.push(alias.clone());
+        }
+    }
+}
+
+/// Check if a table name conflicts with existing tables in the FROM clause
+fn is_self_join(from: &FromClause, table_name: &str, table_alias: &Option<String>) -> bool {
+    let mut existing_names = Vec::new();
+    collect_table_names(from, &mut existing_names);
+
+    // The effective name is alias if present, otherwise table_name
+    let effective_name = table_alias.as_deref().unwrap_or(table_name);
+
+    // Check if this name conflicts with any existing table
+    existing_names.iter().any(|n| n.eq_ignore_ascii_case(effective_name) || n.eq_ignore_ascii_case(table_name))
+}
+
+/// Get the primary (leftmost) table name from a FROM clause
+/// Returns the effective name (alias if present, otherwise table name)
+fn get_primary_table_name(from: &FromClause) -> Option<String> {
+    match from {
+        FromClause::Table { name, alias } => {
+            Some(alias.clone().unwrap_or_else(|| name.clone()))
+        }
+        FromClause::Join { left, .. } => {
+            get_primary_table_name(left)
+        }
+        FromClause::Subquery { alias, .. } => {
+            Some(alias.clone())
+        }
+    }
+}
+
+/// Qualify an unqualified column reference with a table name
+/// Only rewrites unqualified columns, leaves qualified ones unchanged
+fn qualify_outer_column_refs(expr: &Expression, outer_table: &str) -> Expression {
+    match expr {
+        Expression::ColumnRef { table: None, column } => {
+            // Unqualified column - add outer table qualifier
+            Expression::ColumnRef {
+                table: Some(outer_table.to_string()),
+                column: column.clone(),
+            }
+        }
+        Expression::ColumnRef { table: Some(_), .. } => {
+            // Already qualified - leave unchanged
+            expr.clone()
+        }
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(qualify_outer_column_refs(left, outer_table)),
+            op: op.clone(),
+            right: Box::new(qualify_outer_column_refs(right, outer_table)),
+        },
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: op.clone(),
+            expr: Box::new(qualify_outer_column_refs(inner, outer_table)),
+        },
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args.iter().map(|a| qualify_outer_column_refs(a, outer_table)).collect(),
+            character_unit: character_unit.clone(),
+        },
+        // For other expression types, just clone
+        _ => expr.clone(),
+    }
+}
+
+/// Rewrite column references in an expression to use a new table qualifier
+fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str, new_alias: &str) -> Expression {
+    match expr {
+        Expression::ColumnRef { table, column } => {
+            // Rewrite if:
+            // 1. No table qualifier (unqualified column from the subquery table)
+            // 2. Table qualifier matches the old table name
+            let should_rewrite = match table {
+                None => true, // Unqualified columns from subquery should be rewritten
+                Some(t) => t.eq_ignore_ascii_case(old_table),
+            };
+
+            if should_rewrite {
+                Expression::ColumnRef {
+                    table: Some(new_alias.to_string()),
+                    column: column.clone(),
+                }
+            } else {
+                expr.clone()
+            }
+        }
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(rewrite_column_refs_with_alias(left, old_table, new_alias)),
+            op: op.clone(),
+            right: Box::new(rewrite_column_refs_with_alias(right, old_table, new_alias)),
+        },
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: op.clone(),
+            expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
+        },
+        Expression::IsNull { expr: inner, negated } => Expression::IsNull {
+            expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
+            negated: *negated,
+        },
+        Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
+            low: Box::new(rewrite_column_refs_with_alias(low, old_table, new_alias)),
+            high: Box::new(rewrite_column_refs_with_alias(high, old_table, new_alias)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+        Expression::InList { expr: inner, values, negated } => Expression::InList {
+            expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
+            values: values.iter().map(|v| rewrite_column_refs_with_alias(v, old_table, new_alias)).collect(),
+            negated: *negated,
+        },
+        Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+            expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
+            pattern: Box::new(rewrite_column_refs_with_alias(pattern, old_table, new_alias)),
+            negated: *negated,
+        },
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args.iter().map(|a| rewrite_column_refs_with_alias(a, old_table, new_alias)).collect(),
+            character_unit: character_unit.clone(),
+        },
+        Expression::Case { operand, when_clauses, else_result } => Expression::Case {
+            operand: operand.as_ref().map(|o| Box::new(rewrite_column_refs_with_alias(o, old_table, new_alias))),
+            when_clauses: when_clauses.iter().map(|case_when| {
+                vibesql_ast::CaseWhen {
+                    conditions: case_when.conditions.iter()
+                        .map(|c| rewrite_column_refs_with_alias(c, old_table, new_alias))
+                        .collect(),
+                    result: rewrite_column_refs_with_alias(&case_when.result, old_table, new_alias),
+                }
+            }).collect(),
+            else_result: else_result.as_ref().map(|e| Box::new(rewrite_column_refs_with_alias(e, old_table, new_alias))),
+        },
+        Expression::Cast { expr: inner, data_type } => Expression::Cast {
+            expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
+            data_type: data_type.clone(),
+        },
+        // For other expression types, just clone (they don't contain column refs that need rewriting)
+        _ => expr.clone(),
+    }
+}
+
 /// Try to convert an IN subquery to a SEMI or ANTI join
 fn try_convert_in_to_join(
     from: &FromClause,
@@ -212,19 +369,48 @@ fn try_convert_in_to_join(
         return None;
     }
 
+    // Detect self-join: check if subquery table name conflicts with outer query tables
+    let needs_alias = is_self_join(from, &table_name, &table_alias);
+
+    // Generate a unique alias for self-joins to avoid schema conflicts
+    let (effective_alias, outer_expr_qualified, subquery_column_rewritten, subquery_where_rewritten) = if needs_alias {
+        // Create a unique alias for the right side of the self-join
+        let new_alias = format!("__subquery_{}", table_name);
+
+        // Get the outer table name to qualify outer column references
+        let outer_table_name = get_primary_table_name(from)
+            .unwrap_or_else(|| table_name.clone()); // Fallback to table_name if not found
+
+        // Qualify outer expression columns with the outer table name
+        // This prevents ambiguity when both tables have the same column names
+        let qualified_expr = qualify_outer_column_refs(expr, &outer_table_name);
+
+        // Rewrite column references in the subquery column to use the new alias
+        let rewritten_col = rewrite_column_refs_with_alias(&subquery_column, &table_name, &new_alias);
+
+        // Rewrite column references in the subquery WHERE clause
+        let rewritten_where = subquery.where_clause.as_ref().map(|w| {
+            rewrite_column_refs_with_alias(w, &table_name, &new_alias)
+        });
+
+        (Some(new_alias), qualified_expr, rewritten_col, rewritten_where)
+    } else {
+        (table_alias.clone(), expr.clone(), subquery_column.clone(), subquery.where_clause.clone())
+    };
+
     // Create the join condition: expr = subquery_column
     let join_condition = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(expr.clone()),
-        right: Box::new(subquery_column),
+        left: Box::new(outer_expr_qualified),
+        right: Box::new(subquery_column_rewritten),
     };
 
     // Combine join condition with subquery's WHERE clause if it exists
-    let final_condition = if let Some(subquery_where) = &subquery.where_clause {
+    let final_condition = if let Some(subquery_where) = subquery_where_rewritten {
         Some(Expression::BinaryOp {
             op: BinaryOperator::And,
             left: Box::new(join_condition),
-            right: Box::new(subquery_where.clone()),
+            right: Box::new(subquery_where),
         })
     } else {
         Some(join_condition)
@@ -233,7 +419,7 @@ fn try_convert_in_to_join(
     // Create the right side of the join
     let right_from = FromClause::Table {
         name: table_name,
-        alias: table_alias,
+        alias: effective_alias,
     };
 
     // Create SEMI or ANTI join based on negation
