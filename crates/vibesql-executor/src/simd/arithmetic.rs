@@ -214,6 +214,84 @@ pub fn simd_mul_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
     result
 }
 
+/// SIMD division for i64 columns with automatic dispatch
+///
+/// Automatically selects the best SIMD implementation based on CPU capabilities.
+/// Performs SIMD division without checking for divide-by-zero.
+/// The caller is responsible for handling divide-by-zero cases by checking
+/// the divisor array and replacing invalid results.
+///
+/// # Note
+///
+/// This function performs division on all elements using SIMD, which may
+/// produce undefined results for zero divisors. The calling code in
+/// `expression.rs` handles this by post-processing results to replace
+/// divide-by-zero cases with NULL.
+#[cfg(feature = "simd")]
+pub fn simd_div_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { simd_div_i64_avx512(a, b) };
+        }
+    }
+
+    // Fallback to AVX2/SSE implementation
+    simd_div_i64_avx2(a, b)
+}
+
+/// AVX2/SSE SIMD division for i64 columns (4 elements at a time)
+///
+/// Note: The `wide` crate's i64x4 doesn't support division, so we convert to f64,
+/// divide, and convert back. This matches the semantics of integer division
+/// (truncation towards zero).
+#[cfg(feature = "simd")]
+fn simd_div_i64_avx2(a: &[i64], b: &[i64]) -> Vec<i64> {
+    let mut result = Vec::with_capacity(a.len());
+
+    // Process chunks of 4 elements with SIMD
+    let chunks = a.len() / 4;
+    for i in 0..chunks {
+        let offset = i * 4;
+
+        // Convert i64 to f64 for division (wide crate i64x4 doesn't support div)
+        let a_f64 = f64x4::from([
+            a[offset] as f64,
+            a[offset + 1] as f64,
+            a[offset + 2] as f64,
+            a[offset + 3] as f64,
+        ]);
+        let b_f64 = f64x4::from([
+            b[offset] as f64,
+            b[offset + 1] as f64,
+            b[offset + 2] as f64,
+            b[offset + 3] as f64,
+        ]);
+
+        // Perform SIMD division
+        let quot_f64 = a_f64 / b_f64;
+
+        // Convert back to i64 (truncating towards zero)
+        let arr_f64: [f64; 4] = quot_f64.into();
+        let arr_i64: [i64; 4] = [
+            arr_f64[0] as i64,
+            arr_f64[1] as i64,
+            arr_f64[2] as i64,
+            arr_f64[3] as i64,
+        ];
+
+        result.extend_from_slice(&arr_i64);
+    }
+
+    // Handle remainder elements with scalar fallback
+    let remainder_start = chunks * 4;
+    for i in remainder_start..a.len() {
+        result.push(a[i] / b[i]);
+    }
+
+    result
+}
+
 // AVX-512 implementations (8 elements at a time)
 // These provide 2x throughput on AVX-512 capable CPUs
 
@@ -468,6 +546,57 @@ pub unsafe fn simd_mul_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
     result
 }
 
+/// AVX-512 division for i64 columns (8 elements at a time)
+///
+/// Performs SIMD division without checking for divide-by-zero.
+/// The caller is responsible for handling divide-by-zero cases.
+///
+/// # Safety
+///
+/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
+///
+/// # Note
+///
+/// Division by zero will produce undefined results. The calling code must
+/// check for zero divisors and handle them appropriately.
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
+#[target_feature(enable = "avx512f")]
+pub unsafe fn simd_div_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
+    let mut result = Vec::with_capacity(a.len());
+
+    // Process chunks of 8 elements with AVX-512
+    // Note: AVX-512 doesn't have native i64 division, so we convert to f64,
+    // divide, and convert back. This matches scalar i64 division semantics.
+    let chunks = a.len() / 8;
+    for i in 0..chunks {
+        let offset = i * 8;
+
+        // Load i64 values
+        let a_vec = _mm512_loadu_epi64(a.as_ptr().add(offset) as *const i64);
+        let b_vec = _mm512_loadu_epi64(b.as_ptr().add(offset) as *const i64);
+
+        // Convert to f64 for division (AVX-512 has no native i64 division)
+        let a_f64 = _mm512_cvtepi64_pd(a_vec);
+        let b_f64 = _mm512_cvtepi64_pd(b_vec);
+        let quot_f64 = _mm512_div_pd(a_f64, b_f64);
+
+        // Convert back to i64 (truncating towards zero)
+        let quotient = _mm512_cvttpd_epi64(quot_f64);
+
+        let mut temp = [0i64; 8];
+        _mm512_storeu_epi64(temp.as_mut_ptr() as *mut i64, quotient);
+        result.extend_from_slice(&temp);
+    }
+
+    // Handle remainder elements with scalar fallback
+    let remainder_start = chunks * 8;
+    for i in remainder_start..a.len() {
+        result.push(a[i] / b[i]);
+    }
+
+    result
+}
+
 
 #[cfg(all(test, feature = "simd"))]
 mod tests {
@@ -521,6 +650,31 @@ mod tests {
         let b = vec![2, 3, 4, 5, 6, 7, 8, 9, 10];
         let result = simd_mul_i64(&a, &b);
         assert_eq!(result, vec![2, 6, 12, 20, 30, 42, 56, 72, 90]);
+    }
+
+    #[test]
+    fn test_simd_div_i64() {
+        let a = vec![10, 20, 30, 40, 50, 60, 70, 80, 90];
+        let b = vec![2, 4, 3, 8, 5, 6, 7, 10, 9];
+        let result = simd_div_i64(&a, &b);
+        assert_eq!(result, vec![5, 5, 10, 5, 10, 10, 10, 8, 10]);
+    }
+
+    #[test]
+    fn test_simd_div_i64_negative() {
+        let a = vec![-10, -20, 30, -40, 50];
+        let b = vec![2, 4, -3, 8, -5];
+        let result = simd_div_i64(&a, &b);
+        assert_eq!(result, vec![-5, -5, -10, -5, -10]);
+    }
+
+    #[test]
+    fn test_simd_div_i64_truncation() {
+        // Test that integer division truncates towards zero
+        let a = vec![7, -7, 7, -7];
+        let b = vec![3, 3, -3, -3];
+        let result = simd_div_i64(&a, &b);
+        assert_eq!(result, vec![2, -2, -2, 2]);
     }
 
     // ===== Edge case tests =====
@@ -806,6 +960,33 @@ mod tests {
         let simd_result = simd_mul_i64(&a, &b);
         let scalar_result: Vec<i64> = a.iter().zip(b.iter())
             .map(|(x, y)| x * y)
+            .collect();
+
+        assert_eq!(simd_result, scalar_result);
+    }
+
+    #[test]
+    fn test_simd_matches_scalar_div_i64() {
+        let a: Vec<i64> = (1..101).map(|i| i * 10).collect();
+        let b: Vec<i64> = (1..101).collect();
+
+        let simd_result = simd_div_i64(&a, &b);
+        let scalar_result: Vec<i64> = a.iter().zip(b.iter())
+            .map(|(x, y)| x / y)
+            .collect();
+
+        assert_eq!(simd_result, scalar_result);
+    }
+
+    #[test]
+    fn test_simd_div_i64_with_negatives() {
+        // Test with mixed positive and negative numbers
+        let a: Vec<i64> = (-50..50).map(|i| i * 10).collect();
+        let b: Vec<i64> = (-50..50).filter(|&i| i != 0).collect();
+
+        let simd_result = simd_div_i64(&a[..b.len()], &b);
+        let scalar_result: Vec<i64> = a[..b.len()].iter().zip(b.iter())
+            .map(|(x, y)| x / y)
             .collect();
 
         assert_eq!(simd_result, scalar_result);

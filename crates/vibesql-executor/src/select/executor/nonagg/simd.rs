@@ -26,9 +26,18 @@ pub(super) fn try_simd_filter(
     where_expr: &vibesql_ast::Expression,
     schema: &crate::schema::CombinedSchema,
 ) -> Result<(Vec<vibesql_storage::Row>, bool), ExecutorError> {
+    let simd_debug = std::env::var("SIMD_DEBUG").is_ok();
+
     // Only use SIMD for datasets >= threshold
     if rows.len() < VECTORIZE_THRESHOLD {
+        if simd_debug {
+            eprintln!("[SIMD] Skipping: {} rows < {} threshold", rows.len(), VECTORIZE_THRESHOLD);
+        }
         return Ok((rows, false));
+    }
+
+    if simd_debug {
+        eprintln!("[SIMD] Attempting SIMD filter on {} rows", rows.len());
     }
 
     // Extract column names from combined schema (in order)
@@ -42,8 +51,16 @@ pub(super) fn try_simd_filter(
     // Try to convert rows to RecordBatch
     // If this fails (e.g., unsupported types), fall back to row-based filtering
     let batch = match rows_to_record_batch(&rows, &column_names) {
-        Ok(batch) => batch,
-        Err(_) => {
+        Ok(batch) => {
+            if simd_debug {
+                eprintln!("[SIMD] Successfully converted to RecordBatch");
+            }
+            batch
+        }
+        Err(e) => {
+            if simd_debug {
+                eprintln!("[SIMD] Failed to convert to RecordBatch: {}", e);
+            }
             // Conversion failed (unsupported types, etc.) - fall back to row-based
             return Ok((rows, false));
         }
@@ -52,8 +69,16 @@ pub(super) fn try_simd_filter(
     // Apply SIMD filter
     // If this fails (e.g., complex predicates), fall back to row-based filtering
     let filtered_batch = match filter_record_batch_simd(&batch, where_expr) {
-        Ok(filtered) => filtered,
-        Err(_) => {
+        Ok(filtered) => {
+            if simd_debug {
+                eprintln!("[SIMD] Filter succeeded: {} rows -> {} rows", batch.num_rows(), filtered.num_rows());
+            }
+            filtered
+        }
+        Err(e) => {
+            if simd_debug {
+                eprintln!("[SIMD] Filter failed: {}", e);
+            }
             // SIMD filter failed (complex predicate, etc.) - fall back to row-based
             return Ok((rows, false));
         }
@@ -61,6 +86,10 @@ pub(super) fn try_simd_filter(
 
     // Convert filtered RecordBatch back to rows
     let filtered_rows = record_batch_to_rows(&filtered_batch)?;
+
+    if simd_debug {
+        eprintln!("[SIMD] SIMD path completed successfully");
+    }
 
     Ok((filtered_rows, true))
 }

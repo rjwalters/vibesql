@@ -394,6 +394,117 @@ impl SimdOperations for Avx512Operations {
     }
 }
 
+/// NEON implementation (128-bit SIMD, 2 doubles)
+///
+/// ARM64-specific implementation using NEON intrinsics.
+/// Optimized for ARM processors like Apple Silicon (M1/M2/M3/M4),
+/// AWS Graviton, and other ARM64 server/desktop CPUs.
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+struct NeonOperations;
+
+#[cfg(all(feature = "simd", target_arch = "aarch64"))]
+impl SimdOperations for NeonOperations {
+    fn simd_level(&self) -> SimdLevel {
+        SimdLevel::Neon
+    }
+
+    fn add_f64(&self, a: &[f64], b: &[f64]) -> Vec<f64> {
+        super::arithmetic_neon::neon_add_f64(a, b)
+    }
+
+    fn sub_f64(&self, a: &[f64], b: &[f64]) -> Vec<f64> {
+        super::arithmetic_neon::neon_sub_f64(a, b)
+    }
+
+    fn mul_f64(&self, a: &[f64], b: &[f64]) -> Vec<f64> {
+        super::arithmetic_neon::neon_mul_f64(a, b)
+    }
+
+    fn div_f64(&self, a: &[f64], b: &[f64]) -> Vec<f64> {
+        super::arithmetic_neon::neon_div_f64(a, b)
+    }
+
+    fn add_i64(&self, a: &[i64], b: &[i64]) -> Vec<i64> {
+        super::arithmetic_neon::neon_add_i64(a, b)
+    }
+
+    fn sub_i64(&self, a: &[i64], b: &[i64]) -> Vec<i64> {
+        super::arithmetic_neon::neon_sub_i64(a, b)
+    }
+
+    fn mul_i64(&self, a: &[i64], b: &[i64]) -> Vec<i64> {
+        super::arithmetic_neon::neon_mul_i64(a, b)
+    }
+
+    fn gt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison_neon::neon_gt_f64(column, threshold)
+    }
+
+    fn ge_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison_neon::neon_ge_f64(column, threshold)
+    }
+
+    fn lt_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison_neon::neon_lt_f64(column, threshold)
+    }
+
+    fn le_f64(&self, column: &[f64], threshold: f64) -> Vec<bool> {
+        super::comparison_neon::neon_le_f64(column, threshold)
+    }
+
+    fn eq_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        super::comparison_neon::neon_eq_f64(column, value)
+    }
+
+    fn ne_f64(&self, column: &[f64], value: f64) -> Vec<bool> {
+        super::comparison_neon::neon_ne_f64(column, value)
+    }
+
+    fn gt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        super::comparison_neon::neon_gt_i64(column, threshold)
+    }
+
+    fn lt_i64(&self, column: &[i64], threshold: i64) -> Vec<bool> {
+        super::comparison_neon::neon_lt_i64(column, threshold)
+    }
+
+    fn eq_i64(&self, column: &[i64], value: i64) -> Vec<bool> {
+        super::comparison_neon::neon_eq_i64(column, value)
+    }
+
+    fn sum_f64(&self, column: &[f64]) -> f64 {
+        super::aggregation_neon::neon_sum_f64(column)
+    }
+
+    fn avg_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation_neon::neon_avg_f64(column)
+    }
+
+    fn min_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation_neon::neon_min_f64(column)
+    }
+
+    fn max_f64(&self, column: &[f64]) -> Option<f64> {
+        super::aggregation_neon::neon_max_f64(column)
+    }
+
+    fn sum_i64(&self, column: &[i64]) -> i64 {
+        super::aggregation_neon::neon_sum_i64(column)
+    }
+
+    fn avg_i64(&self, column: &[i64]) -> Option<f64> {
+        super::aggregation_neon::neon_avg_i64(column)
+    }
+
+    fn min_i64(&self, column: &[i64]) -> Option<i64> {
+        super::aggregation_neon::neon_min_i64(column)
+    }
+
+    fn max_i64(&self, column: &[i64]) -> Option<i64> {
+        super::aggregation_neon::neon_max_i64(column)
+    }
+}
+
 /// Get the global SIMD operations implementation
 ///
 /// This function returns a reference to a SIMD operations implementation
@@ -423,9 +534,16 @@ pub fn get_simd_ops() -> &'static dyn SimdOperations {
                     Box::new(Avx2Operations)
                 }
                 SimdLevel::Neon => {
-                    log::info!("Using NEON SIMD operations (128-bit vectors, 2 doubles)");
-                    // NEON would use the same wide-based implementation
-                    Box::new(Avx2Operations)
+                    log::info!("Using ARM64 NEON SIMD operations (128-bit vectors, 2 doubles)");
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        Box::new(NeonOperations)
+                    }
+                    #[cfg(not(target_arch = "aarch64"))]
+                    {
+                        // Fallback if somehow NEON was detected on non-ARM64
+                        Box::new(ScalarOperations)
+                    }
                 }
                 _ => {
                     log::info!("Using scalar fallback (no SIMD)");

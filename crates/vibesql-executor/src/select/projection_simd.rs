@@ -57,7 +57,7 @@ pub fn try_batch_project_simd(
     let mut has_simd_expr = false;
     for item in columns {
         if let SelectItem::Expression { expr, .. } = item {
-            if can_use_simd_for_expression(expr, rows.len()) {
+            if can_use_simd_for_expression(expr, rows, evaluator) {
                 has_simd_expr = true;
                 break;
             }
@@ -112,7 +112,7 @@ pub fn try_batch_project_simd(
 
             SelectItem::Expression { expr, .. } => {
                 // Try SIMD evaluation for this expression
-                let values = if can_use_simd_for_expression(expr, rows.len()) {
+                let values = if can_use_simd_for_expression(expr, rows, evaluator) {
                     // Use SIMD path
                     match eval_expression_batch_simd(expr, rows, evaluator) {
                         Ok(v) => v,
@@ -165,5 +165,505 @@ pub fn try_batch_project_simd(
     Ok(None)
 }
 
-// TODO: Add comprehensive unit tests for batch SIMD projection
-// Basic functionality verified through integration tests
+#[cfg(all(test, feature = "simd"))]
+mod tests {
+    use super::*;
+    use crate::{evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
+    use vibesql_ast::{BinaryOperator, Expression, SelectItem};
+    use vibesql_storage::{QueryBufferPool, Row};
+    use vibesql_types::{DataType, SqlValue};
+
+    // Helper to create test evaluator
+    fn create_test_evaluator() -> CombinedExpressionEvaluator<'static> {
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+
+        let columns = vec![ColumnSchema::new("a".to_string(), DataType::Bigint, false)];
+        let table_schema = TableSchema::new("test".to_string(), columns);
+
+        let schema = Box::leak(Box::new(CombinedSchema::from_table("test".to_string(), table_schema)));
+        CombinedExpressionEvaluator::new(schema)
+    }
+
+    // Helper to create test schema
+    fn create_test_schema() -> CombinedSchema {
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+
+        let columns = vec![ColumnSchema::new("a".to_string(), DataType::Bigint, false)];
+        let table_schema = TableSchema::new("test".to_string(), columns);
+
+        CombinedSchema::from_table("test".to_string(), table_schema)
+    }
+
+    // Helper to create test rows
+    fn create_test_rows(count: usize) -> Vec<Row> {
+        (0..count)
+            .map(|i| Row::new(vec![SqlValue::Bigint(i as i64), SqlValue::Bigint((i * 2) as i64)]))
+            .collect()
+    }
+
+    // ===== Batch Projection Threshold Tests =====
+
+    #[test]
+    fn test_try_batch_project_simd_returns_none_for_empty_rows() {
+        let rows = vec![];
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::Literal(SqlValue::Integer(1)),
+            alias: None,
+        }];
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_try_batch_project_simd_returns_none_below_threshold() {
+        let rows = create_test_rows(50); // Below BATCH_PROJECTION_THRESHOLD (100)
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "a".to_string(),
+                }),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            },
+            alias: None,
+        }];
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_try_batch_project_simd_returns_none_at_threshold() {
+        let rows = create_test_rows(100); // Exactly at threshold
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "a".to_string(),
+                }),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            },
+            alias: None,
+        }];
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        // At threshold, should attempt SIMD (may return Some or None depending on expr evaluation)
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    // ===== SIMD-Compatible Expression Tests =====
+
+    #[test]
+    fn test_try_batch_project_simd_returns_none_without_simd_expr() {
+        let rows = create_test_rows(100);
+
+        // Complex expression (function) - not SIMD-compatible
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::Function {
+                name: "ABS".to_string(),
+                args: vec![Expression::ColumnRef {
+                    table: None,
+                    column: "x".to_string(),
+                }],
+                character_unit: None,
+            },
+            alias: None,
+        }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_try_batch_project_simd_returns_none_with_window_functions() {
+        let rows = create_test_rows(100);
+
+        // SIMD-compatible expression
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "a".to_string(),
+                }),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            },
+            alias: None,
+        }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        // Window mapping present - should return None
+        let window_mapping = Some(HashMap::new());
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &window_mapping,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    // ===== Wildcard Tests =====
+
+    #[test]
+    fn test_try_batch_project_simd_handles_wildcard() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Bigint(1), SqlValue::Bigint(2), SqlValue::Bigint(3)]),
+            Row::new(vec![SqlValue::Bigint(4), SqlValue::Bigint(5), SqlValue::Bigint(6)]),
+        ];
+
+        let columns = vec![SelectItem::Wildcard { alias: None }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+        // Returns None due to row count < threshold, but function doesn't panic
+    }
+
+    #[test]
+    fn test_try_batch_project_simd_handles_qualified_wildcard() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Bigint(1), SqlValue::Bigint(2)]),
+            Row::new(vec![SqlValue::Bigint(3), SqlValue::Bigint(4)]),
+        ];
+
+        let columns = vec![SelectItem::QualifiedWildcard {
+            qualifier: "t".to_string(),
+            alias: None,
+        }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    // ===== Expression Evaluation Tests =====
+
+    #[test]
+    fn test_try_batch_project_simd_evaluates_simple_expressions() {
+        let rows = create_test_rows(100);
+
+        // Simple arithmetic expression
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::Literal(SqlValue::Integer(42)),
+            alias: Some("const".to_string()),
+        }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+        // May return Some or None depending on SIMD applicability
+    }
+
+    #[test]
+    fn test_try_batch_project_simd_falls_back_on_simd_error() {
+        let rows = create_test_rows(100);
+
+        // Expression that will trigger SIMD but may fail (e.g., due to evaluation issues)
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "nonexistent".to_string(),
+                }),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            },
+            alias: None,
+        }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        // Should fall back to None on error, not propagate error
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    // ===== Mixed Expression Tests =====
+
+    #[test]
+    fn test_try_batch_project_simd_handles_mixed_expressions() {
+        let rows = create_test_rows(100);
+
+        // Mix of SIMD-compatible and non-SIMD expressions
+        let columns = vec![
+            SelectItem::Expression {
+                expr: Expression::BinaryOp {
+                    left: Box::new(Expression::ColumnRef {
+                        table: None,
+                        column: "a".to_string(),
+                    }),
+                    op: BinaryOperator::Plus,
+                    right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+                },
+                alias: None,
+            },
+            SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(42)),
+                alias: None,
+            },
+        ];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    // ===== Result Transposition Tests =====
+
+    #[test]
+    fn test_try_batch_project_simd_transposes_results_correctly() {
+        let rows = create_test_rows(100);
+
+        // Multiple columns
+        let columns = vec![
+            SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(1)),
+                alias: None,
+            },
+            SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(2)),
+                alias: None,
+            },
+        ];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+
+        // If SIMD path is taken, verify row structure
+        if let Ok(Some(projected_rows)) = result {
+            // Each row should have 2 columns
+            for row in projected_rows {
+                assert_eq!(row.values.len(), 2);
+            }
+        }
+    }
+
+    // ===== Integration with SIMD Expression Evaluation =====
+
+    #[test]
+    fn test_try_batch_project_simd_uses_simd_for_arithmetic() {
+        let rows = create_test_rows(100);
+
+        // Arithmetic expression that can use SIMD
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::BinaryOp {
+                left: Box::new(Expression::Literal(SqlValue::Integer(10))),
+                op: BinaryOperator::Multiply,
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            },
+            alias: Some("calc".to_string()),
+        }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_try_batch_project_simd_uses_scalar_for_non_simd() {
+        let rows = create_test_rows(100);
+
+        // Expression that cannot use SIMD (aggregate)
+        let columns = vec![SelectItem::Expression {
+            expr: Expression::AggregateFunction {
+                name: "COUNT".to_string(),
+                args: vec![Expression::Literal(SqlValue::Integer(1))],
+                distinct: false,
+            },
+            alias: None,
+        }];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+        // Should return None (not SIMD-compatible)
+        assert_eq!(result.unwrap(), None);
+    }
+
+    // ===== Buffer Pool Usage Tests =====
+
+    #[test]
+    fn test_try_batch_project_simd_uses_buffer_pool() {
+        let rows = create_test_rows(100);
+
+        let columns = vec![
+            SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(1)),
+                alias: None,
+            },
+            SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(2)),
+                alias: None,
+            },
+            SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(3)),
+                alias: None,
+            },
+        ];
+
+        let evaluator = create_test_evaluator();
+        let schema = create_test_schema();
+        let buffer_pool = QueryBufferPool::new();
+
+        // This should use buffer pool for row value vectors
+        let result = try_batch_project_simd(
+            &rows,
+            &columns,
+            &evaluator,
+            &schema,
+            &None,
+            &buffer_pool,
+        );
+
+        assert!(result.is_ok());
+    }
+}

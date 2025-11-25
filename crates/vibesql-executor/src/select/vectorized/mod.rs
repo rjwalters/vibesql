@@ -29,6 +29,7 @@ pub use batch::{
 };
 pub use filter::filter_record_batch_simd;
 pub use predicate::apply_where_filter_vectorized;
+pub use temporal::evaluate_temporal_simd;
 
 /// Default chunk size for vectorized operations
 /// Tuned for L1 cache utilization (typical 32-64KB)
