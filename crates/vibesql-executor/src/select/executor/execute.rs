@@ -152,9 +152,34 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let execute_ctes_start = std::time::Instant::now();
 
-        // Try columnar execution path FIRST for compatible queries
+        // Try NATIVE columnar execution path FIRST (Phase 2b - zero row materialization)
+        // This path operates on ColumnarBatch from storage directly without row conversion
+        #[cfg(feature = "profile-q6")]
+        let native_columnar_start = std::time::Instant::now();
+
+        log::debug!("Checking if native columnar execution is possible...");
+        #[cfg(feature = "profile-q6")]
+        eprintln!("[PROFILE-Q6] Checking native columnar execution eligibility...");
+
+        if let Some(result) = self.try_native_columnar_execution(stmt, cte_results)? {
+            log::debug!("✓ Using NATIVE COLUMNAR execution path (zero-copy, SIMD-accelerated)");
+            #[cfg(feature = "profile-q6")]
+            {
+                let total_execute_ctes = execute_ctes_start.elapsed();
+                let native_columnar_time = native_columnar_start.elapsed();
+                eprintln!("[PROFILE-Q6] ✓ USING NATIVE COLUMNAR EXECUTION (zero-copy)");
+                eprintln!("[PROFILE-Q6]   Native columnar check time: {:?}", native_columnar_time);
+                eprintln!("[PROFILE-Q6]   Total execution time: {:?}", total_execute_ctes);
+            }
+            return Ok(result);
+        }
+        log::debug!("✗ Native columnar execution not used, trying standard columnar path");
+        #[cfg(feature = "profile-q6")]
+        eprintln!("[PROFILE-Q6] ✗ NATIVE COLUMNAR NOT USED - Trying standard columnar path");
+
+        // Try columnar execution path for compatible queries
         // Phase 5: SIMD-accelerated columnar execution provides 6-10x speedup
-        // This runs before monomorphic to allow columnar path to handle aggregate queries
+        // This path converts rows to batch format before processing
         #[cfg(feature = "profile-q6")]
         let columnar_check_start = std::time::Instant::now();
 

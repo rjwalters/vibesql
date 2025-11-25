@@ -69,6 +69,9 @@ simd = ["wide"]
 benchmark-comparison = ["rusqlite", "duckdb"]
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
+# Enable native columnar execution (Phase 2b - zero row materialization)
+# Can also be enabled at runtime via VIBESQL_NATIVE_COLUMNAR environment variable
+native-columnar = []
 # Enable JIT compilation support using Cranelift (research/experimental)
 # Usage: cargo bench --features jit,benchmark-comparison
 jit = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-native"]
