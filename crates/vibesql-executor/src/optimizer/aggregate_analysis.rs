@@ -337,6 +337,107 @@ impl AggregateAnalysis {
         }
     }
 
+    /// Estimate the selectivity of a HAVING clause
+    ///
+    /// Returns estimated fraction of groups that pass the HAVING filter (0.0 to 1.0).
+    /// Lower values indicate more selective filters.
+    ///
+    /// This is a heuristic-based estimation that doesn't require statistics.
+    /// Uses pattern matching on common HAVING predicates to provide reasonable estimates.
+    pub fn estimate_having_selectivity(having: &Expression) -> f64 {
+        match having {
+            // Comparisons with constants
+            Expression::BinaryOp { op, left, right, .. } => {
+                use vibesql_ast::BinaryOperator::*;
+
+                // Handle logical operators first (they combine other predicates)
+                match op {
+                    And => {
+                        let left_sel = Self::estimate_having_selectivity(left);
+                        let right_sel = Self::estimate_having_selectivity(right);
+                        left_sel * right_sel // Both conditions must pass
+                    }
+                    Or => {
+                        let left_sel = Self::estimate_having_selectivity(left);
+                        let right_sel = Self::estimate_having_selectivity(right);
+                        left_sel + right_sel - (left_sel * right_sel) // Either passes
+                    }
+                    _ => {
+                        // Check if comparing aggregate to constant
+                        let has_aggregate = Self::contains_aggregate(left) || Self::contains_aggregate(right);
+                        let has_constant = matches!(left.as_ref(), Expression::Literal(_))
+                            || matches!(right.as_ref(), Expression::Literal(_));
+
+                        if has_aggregate && has_constant {
+                            match op {
+                                // Equality is typically very selective (1-5% of groups)
+                                Equal => 0.05,
+
+                                // Range comparisons moderately selective (10-30%)
+                                GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual => 0.25,
+
+                                // Inequality less selective (50-95%)
+                                NotEqual => 0.75,
+
+                                _ => 0.5, // Unknown operator, assume 50%
+                            }
+                        } else {
+                            // Non-aggregate or non-constant comparison
+                            0.5
+                        }
+                    }
+                }
+            }
+
+            // BETWEEN is moderately selective
+            Expression::Between { expr, .. } => {
+                if Self::contains_aggregate(expr) {
+                    0.3 // 30% of groups in range
+                } else {
+                    0.5
+                }
+            }
+
+            // IN list selectivity depends on list size
+            Expression::In { expr, .. } => {
+                if Self::contains_aggregate(expr) {
+                    0.2 // Subquery IN, assume 20%
+                } else {
+                    0.5
+                }
+            }
+            Expression::InList { expr, values, .. } => {
+                if Self::contains_aggregate(expr) {
+                    // Selectivity proportional to list size, but capped
+                    (values.len() as f64 * 0.05).min(0.5)
+                } else {
+                    0.5
+                }
+            }
+
+            // NOT inverts selectivity
+            Expression::UnaryOp { op: vibesql_ast::UnaryOperator::Not, expr } => {
+                1.0 - Self::estimate_having_selectivity(expr)
+            }
+
+            // IS NULL / IS NOT NULL
+            Expression::IsNull { expr, negated } => {
+                if Self::contains_aggregate(expr) {
+                    if *negated {
+                        0.95 // Most aggregates are NOT NULL
+                    } else {
+                        0.05 // Few aggregates are NULL
+                    }
+                } else {
+                    0.1
+                }
+            }
+
+            // Default: assume 50% selectivity (no information)
+            _ => 0.5,
+        }
+    }
+
     /// Identify opportunities to push aggregation down before joins
     ///
     /// Conditions for pushdown:
@@ -353,7 +454,7 @@ impl AggregateAnalysis {
         // This requires:
         // 1. Join graph analysis to identify join keys
         // 2. Checking if GROUP BY keys match join keys
-        // 3. HAVING selectivity estimation
+        // 3. HAVING selectivity estimation (now implemented above)
         // 4. Table cardinality estimation from statistics
         Vec::new()
     }
@@ -520,5 +621,99 @@ mod tests {
 
         assert!(pushdown.is_beneficial()); // 100,000x reduction
         assert!(pushdown.estimate_benefit() > 0.0);
+    }
+
+    #[test]
+    fn test_having_selectivity_equality() {
+        // HAVING SUM(quantity) = 300 (very selective)
+        let having = Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Equal,
+            left: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "quantity"))),
+            right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(300))),
+        };
+
+        let selectivity = AggregateAnalysis::estimate_having_selectivity(&having);
+        assert_eq!(selectivity, 0.05); // 5% for equality
+    }
+
+    #[test]
+    fn test_having_selectivity_range() {
+        // HAVING SUM(quantity) > 300 (moderately selective)
+        let having = Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::GreaterThan,
+            left: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "quantity"))),
+            right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(300))),
+        };
+
+        let selectivity = AggregateAnalysis::estimate_having_selectivity(&having);
+        assert_eq!(selectivity, 0.25); // 25% for range comparison
+    }
+
+    #[test]
+    fn test_having_selectivity_and() {
+        // HAVING SUM(quantity) > 300 AND COUNT(*) > 5
+        // Combined selectivity: 0.25 * 0.25 = 0.0625
+        let having = Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::GreaterThan,
+                left: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "quantity"))),
+                right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(300))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::GreaterThan,
+                left: Box::new(make_aggregate("COUNT", Expression::Wildcard)),
+                right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
+            }),
+        };
+
+        let selectivity = AggregateAnalysis::estimate_having_selectivity(&having);
+        assert_eq!(selectivity, 0.0625); // 25% * 25%
+    }
+
+    #[test]
+    fn test_having_selectivity_or() {
+        // HAVING SUM(quantity) > 300 OR SUM(quantity) < 50
+        // Combined selectivity: 0.25 + 0.25 - (0.25 * 0.25) = 0.4375
+        let having = Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Or,
+            left: Box::new(Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::GreaterThan,
+                left: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "quantity"))),
+                right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(300))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::LessThan,
+                left: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "quantity"))),
+                right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(50))),
+            }),
+        };
+
+        let selectivity = AggregateAnalysis::estimate_having_selectivity(&having);
+        assert_eq!(selectivity, 0.4375); // 25% + 25% - (25% * 25%)
+    }
+
+    #[test]
+    fn test_having_selectivity_is_null() {
+        // HAVING SUM(quantity) IS NULL (rare for aggregates)
+        let having = Expression::IsNull {
+            expr: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "quantity"))),
+            negated: false,
+        };
+
+        let selectivity = AggregateAnalysis::estimate_having_selectivity(&having);
+        assert_eq!(selectivity, 0.05); // 5% for IS NULL on aggregates
+    }
+
+    #[test]
+    fn test_having_selectivity_is_not_null() {
+        // HAVING SUM(quantity) IS NOT NULL (common for aggregates)
+        let having = Expression::IsNull {
+            expr: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "quantity"))),
+            negated: true,
+        };
+
+        let selectivity = AggregateAnalysis::estimate_having_selectivity(&having);
+        assert_eq!(selectivity, 0.95); // 95% for IS NOT NULL on aggregates
     }
 }
