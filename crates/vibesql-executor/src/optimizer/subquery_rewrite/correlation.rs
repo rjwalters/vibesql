@@ -241,10 +241,21 @@ fn extract_table_prefixes(from: &vibesql_ast::FromClause) -> Vec<char> {
 }
 
 /// Recursively check if FROM clause contains a table reference
+///
+/// When a table has an alias, only the alias is valid for referencing that table
+/// in the current scope. The original table name is "shadowed" by the alias.
+/// This matches SQL standard behavior where `FROM t1 AS x` means only `x.col`
+/// is valid, not `t1.col`.
 fn from_clause_contains_table(from: &vibesql_ast::FromClause, table_name: &str) -> bool {
     match from {
         vibesql_ast::FromClause::Table { name, alias } => {
-            name == table_name || alias.as_ref().is_some_and(|a| a == table_name)
+            // If table has an alias, only the alias is valid for column references
+            // in this scope. The original table name is shadowed.
+            if let Some(a) = alias {
+                a.eq_ignore_ascii_case(table_name)
+            } else {
+                name.eq_ignore_ascii_case(table_name)
+            }
         }
         vibesql_ast::FromClause::Join { left, right, .. } => {
             from_clause_contains_table(left, table_name)
