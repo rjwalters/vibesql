@@ -180,7 +180,7 @@ mod tests {
         let result = cache.get(&sig);
 
         assert!(result.is_some());
-        let (cached_rows, cached_schema) = result.unwrap();
+        let (cached_rows, _cached_schema) = result.unwrap();
         assert_eq!(cached_rows.len(), 2);
         assert_eq!(cached_rows[0].values.len(), 2);
     }

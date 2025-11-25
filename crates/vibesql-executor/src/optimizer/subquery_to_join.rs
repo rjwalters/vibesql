@@ -505,7 +505,6 @@ fn try_convert_exists_to_join(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibesql_types::DataType;
 
     fn simple_table_from(name: &str) -> FromClause {
         FromClause::Table {

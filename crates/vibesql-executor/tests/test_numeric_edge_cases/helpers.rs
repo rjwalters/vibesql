@@ -1,5 +1,7 @@
 //! Common assertion helpers for numeric edge case tests
 
+#![allow(dead_code)]
+
 use vibesql_executor::ExpressionEvaluator;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;

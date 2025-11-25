@@ -2,9 +2,6 @@ mod common;
 
 use vibesql_executor::InsertExecutor;
 
-#[allow(dead_code)] // Test helper - may be used in future tests
-use common::setup_users_table as setup_test_table;
-
 #[test]
 fn test_character_varying_column_with_length() {
     let mut db = vibesql_storage::Database::new();

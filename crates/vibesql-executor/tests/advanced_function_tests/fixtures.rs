@@ -1,5 +1,7 @@
 //! Common fixtures and constants for advanced function tests
 
+#![allow(dead_code)]
+
 use crate::common::create_test_evaluator;
 
 /// Common mathematical constants used in tests

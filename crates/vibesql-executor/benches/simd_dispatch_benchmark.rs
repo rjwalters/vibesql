@@ -8,7 +8,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
 #[cfg(feature = "simd")]
-use vibesql_executor::simd::{dispatched, simd_add_f64, simd_mul_f64, CpuFeatures};
+use vibesql_executor::simd::{dispatched, simd_add_f64, CpuFeatures};
 
 #[cfg(feature = "simd")]
 fn benchmark_dispatch_overhead(c: &mut Criterion) {

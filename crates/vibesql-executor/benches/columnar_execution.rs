@@ -5,7 +5,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use vibesql_executor::select::columnar::{
-    execute_columnar_aggregate, AggregateOp, ColumnPredicate,
+    execute_columnar_aggregate, AggregateOp, AggregateSource, AggregateSpec, ColumnPredicate,
 };
 use vibesql_storage::Row;
 use vibesql_types::{Date, SqlValue};
@@ -129,7 +129,11 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
         ];
 
         // Aggregates: SUM(l_extendedprice), COUNT(*)
-        let aggregates = vec![(1, AggregateOp::Sum), (0, AggregateOp::Count)];
+        let aggregates = vec![
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
+            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::CountStar },
+        ];
+        let aggregates_tuple = vec![(1, AggregateOp::Sum), (0, AggregateOp::Count)];
 
         // Benchmark row-by-row execution
         group.bench_with_input(
@@ -137,7 +141,7 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
             &row_count,
             |b, _| {
                 b.iter(|| {
-                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates));
+                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
                 });
             },
         );
@@ -149,7 +153,7 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let _result =
-                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates).unwrap());
+                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
                 });
             },
         );
@@ -172,6 +176,11 @@ fn bench_simple_aggregation(c: &mut Criterion) {
 
         // Aggregates: SUM(l_extendedprice), AVG(l_discount), COUNT(*)
         let aggregates = vec![
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
+            AggregateSpec { op: AggregateOp::Avg, source: AggregateSource::Column(2) },
+            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::CountStar },
+        ];
+        let aggregates_tuple = vec![
             (1, AggregateOp::Sum),
             (2, AggregateOp::Avg),
             (0, AggregateOp::Count),
@@ -183,7 +192,7 @@ fn bench_simple_aggregation(c: &mut Criterion) {
             &row_count,
             |b, _| {
                 b.iter(|| {
-                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates));
+                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
                 });
             },
         );
@@ -195,7 +204,7 @@ fn bench_simple_aggregation(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let _result =
-                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates).unwrap());
+                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
                 });
             },
         );
@@ -226,7 +235,10 @@ fn bench_selective_filtering(c: &mut Criterion) {
             },
         ];
 
-        let aggregates = vec![(1, AggregateOp::Sum)];
+        let aggregates = vec![
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
+        ];
+        let aggregates_tuple = vec![(1, AggregateOp::Sum)];
 
         // Benchmark row-by-row execution
         group.bench_with_input(
@@ -234,7 +246,7 @@ fn bench_selective_filtering(c: &mut Criterion) {
             &row_count,
             |b, _| {
                 b.iter(|| {
-                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates));
+                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
                 });
             },
         );
@@ -246,7 +258,7 @@ fn bench_selective_filtering(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let _result =
-                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates).unwrap());
+                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
                 });
             },
         );
