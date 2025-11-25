@@ -284,9 +284,11 @@ fn simd_div_i64_avx2(a: &[i64], b: &[i64]) -> Vec<i64> {
     }
 
     // Handle remainder elements with scalar fallback
+    // Use checked_div to avoid panic on divide-by-zero - caller will replace
+    // these with NULL based on the divisor array
     let remainder_start = chunks * 4;
     for i in remainder_start..a.len() {
-        result.push(a[i] / b[i]);
+        result.push(a[i].checked_div(b[i]).unwrap_or(0));
     }
 
     result
@@ -589,9 +591,11 @@ pub unsafe fn simd_div_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
     }
 
     // Handle remainder elements with scalar fallback
+    // Use checked_div to avoid panic on divide-by-zero - caller will replace
+    // these with NULL based on the divisor array
     let remainder_start = chunks * 8;
     for i in remainder_start..a.len() {
-        result.push(a[i] / b[i]);
+        result.push(a[i].checked_div(b[i]).unwrap_or(0));
     }
 
     result

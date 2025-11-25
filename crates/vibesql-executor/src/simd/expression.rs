@@ -468,6 +468,7 @@ mod tests {
         let columns = vec![
             ColumnSchema::new("a".to_string(), DataType::Bigint, false),
             ColumnSchema::new("b".to_string(), DataType::Bigint, false),
+            ColumnSchema::new("c".to_string(), DataType::Bigint, false),
         ];
         let table_schema = TableSchema::new("test".to_string(), columns);
 
@@ -478,7 +479,11 @@ mod tests {
     // Helper to create test rows with numeric values
     fn create_test_rows(count: usize) -> Vec<Row> {
         (0..count)
-            .map(|i| Row::new(vec![SqlValue::Bigint(i as i64), SqlValue::Bigint((i * 2) as i64)]))
+            .map(|i| Row::new(vec![
+                SqlValue::Bigint(i as i64),
+                SqlValue::Bigint((i * 2) as i64),
+                SqlValue::Bigint((i * 3) as i64),
+            ]))
             .collect()
     }
 

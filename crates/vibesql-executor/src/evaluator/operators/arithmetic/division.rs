@@ -124,7 +124,8 @@ impl Division {
         // Fast path for integers (both modes)
         if let (Integer(a), Integer(b)) = (left, right) {
             if *b == 0 {
-                return Err(ExecutorError::DivisionByZero);
+                // SQL standard: division by zero returns NULL
+                return Ok(Null);
             }
             // Integer division truncates toward zero (not floor division)
             let result = ((*a as f64) / (*b as f64)).trunc() as i64;
@@ -142,7 +143,8 @@ impl Division {
         };
 
         if is_zero {
-            return Err(ExecutorError::DivisionByZero);
+            // SQL standard: division by zero returns NULL
+            return Ok(Null);
         }
 
         // Integer division truncates toward zero
