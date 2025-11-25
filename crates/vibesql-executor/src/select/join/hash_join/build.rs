@@ -13,6 +13,7 @@ use crate::simd::hashing::simd_hash_sqlvalue_batch;
 ///
 /// Returns a map from join key to row indices, avoiding storing row references
 /// which enables deferred materialization.
+#[allow(dead_code)]
 pub(super) fn build_hash_table_sequential(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
@@ -37,6 +38,7 @@ pub(super) fn build_hash_table_sequential(
 ///
 /// Performance: 3-6x speedup on large joins (50k+ rows) with 4+ cores
 /// Note: Falls back to sequential when parallel feature is disabled
+#[allow(dead_code)]
 pub(crate) fn build_hash_table_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,

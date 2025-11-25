@@ -255,6 +255,70 @@ pub fn simd_lt_i64(column: &[i64], threshold: i64) -> Vec<bool> {
     result
 }
 
+/// SIMD greater-than-or-equal comparison for i64 columns
+#[cfg(feature = "simd")]
+pub fn simd_ge_i64(column: &[i64], threshold: i64) -> Vec<bool> {
+    let mut result = Vec::with_capacity(column.len());
+
+    let chunks = column.len() / 4;
+    for i in 0..chunks {
+        let offset = i * 4;
+        let values = i64x4::from([
+            column[offset],
+            column[offset + 1],
+            column[offset + 2],
+            column[offset + 3],
+        ]);
+        let thresh = i64x4::from([threshold; 4]);
+        // a >= b is equivalent to !(a < b)
+        let mask = !values.cmp_lt(thresh);
+
+        let arr: [i64; 4] = mask.into();
+        for &val in &arr {
+            result.push(val != 0);
+        }
+    }
+
+    let remainder_start = chunks * 4;
+    for i in remainder_start..column.len() {
+        result.push(column[i] >= threshold);
+    }
+
+    result
+}
+
+/// SIMD less-than-or-equal comparison for i64 columns
+#[cfg(feature = "simd")]
+pub fn simd_le_i64(column: &[i64], threshold: i64) -> Vec<bool> {
+    let mut result = Vec::with_capacity(column.len());
+
+    let chunks = column.len() / 4;
+    for i in 0..chunks {
+        let offset = i * 4;
+        let values = i64x4::from([
+            column[offset],
+            column[offset + 1],
+            column[offset + 2],
+            column[offset + 3],
+        ]);
+        let thresh = i64x4::from([threshold; 4]);
+        // a <= b is equivalent to !(a > b)
+        let mask = !values.cmp_gt(thresh);
+
+        let arr: [i64; 4] = mask.into();
+        for &val in &arr {
+            result.push(val != 0);
+        }
+    }
+
+    let remainder_start = chunks * 4;
+    for i in remainder_start..column.len() {
+        result.push(column[i] <= threshold);
+    }
+
+    result
+}
+
 /// SIMD equality comparison for i64 columns
 #[cfg(feature = "simd")]
 pub fn simd_eq_i64(column: &[i64], value: i64) -> Vec<bool> {

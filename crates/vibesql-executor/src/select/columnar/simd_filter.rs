@@ -8,7 +8,7 @@ use crate::errors::ExecutorError;
 use crate::simd::comparison::{
     simd_eq_f64, simd_eq_i32, simd_eq_i64, simd_ge_f64, simd_ge_i32, simd_ge_i64, simd_gt_f64,
     simd_gt_i32, simd_gt_i64, simd_le_f64, simd_le_i32, simd_le_i64, simd_lt_f64, simd_lt_i32,
-    simd_lt_i64, simd_ne_i32, simd_ne_i64,
+    simd_lt_i64,
 };
 
 use vibesql_types::SqlValue;
@@ -165,6 +165,7 @@ fn evaluate_predicate_i64_simd(
 
         ColumnPredicate::Between { low, high, .. } => {
             // BETWEEN is equivalent to: value >= low AND value <= high
+            // Use i64 SIMD operations to avoid precision loss from i64->f64 conversion
             let low_i64 = match low {
                 SqlValue::Integer(v) => *v,
                 SqlValue::Bigint(v) => *v,
@@ -184,66 +185,42 @@ fn evaluate_predicate_i64_simd(
                 }
             };
 
-            let mut result = vec![true; values.len()];
-            for i in 0..values.len() {
-                result[i] = values[i] >= low_i64 && values[i] <= high_i64;
-            }
-            result
+            // Use i64 SIMD operations to avoid precision loss
+            let ge_low = simd_ge_i64(values, low_i64);
+            let le_high = simd_le_i64(values, high_i64);
+
+            // AND the two masks
+            ge_low
+                .iter()
+                .zip(le_high.iter())
+                .map(|(&a, &b)| a && b)
+                .collect()
         }
 
-        // For LTE and GTE, we use LT/GT and equality checks
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
-            let gt = if let SqlValue::Integer(threshold) = value {
-                simd_gt_i64(values, *threshold)
+            if let SqlValue::Integer(threshold) = value {
+                simd_ge_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
-                simd_gt_i64(values, *threshold)
+                simd_ge_i64(values, *threshold)
             } else {
                 let threshold = value_to_f64(value)
                     .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
-                simd_gt_f64(&f64_values, threshold)
-            };
-
-            let eq = if let SqlValue::Integer(target) = value {
-                simd_eq_i64(values, *target)
-            } else if let SqlValue::Bigint(target) = value {
-                simd_eq_i64(values, *target)
-            } else {
-                let target = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
-                let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
-                simd_eq_f64(&f64_values, target)
-            };
-
-            // OR the two masks
-            gt.iter().zip(eq.iter()).map(|(&a, &b)| a || b).collect()
+                simd_ge_f64(&f64_values, threshold)
+            }
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
-            let lt = if let SqlValue::Integer(threshold) = value {
-                simd_lt_i64(values, *threshold)
+            if let SqlValue::Integer(threshold) = value {
+                simd_le_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
-                simd_lt_i64(values, *threshold)
+                simd_le_i64(values, *threshold)
             } else {
                 let threshold = value_to_f64(value)
                     .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
-                simd_lt_f64(&f64_values, threshold)
-            };
-
-            let eq = if let SqlValue::Integer(target) = value {
-                simd_eq_i64(values, *target)
-            } else if let SqlValue::Bigint(target) = value {
-                simd_eq_i64(values, *target)
-            } else {
-                let target = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
-                let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
-                simd_eq_f64(&f64_values, target)
-            };
-
-            // OR the two masks
-            lt.iter().zip(eq.iter()).map(|(&a, &b)| a || b).collect()
+                simd_le_f64(&f64_values, threshold)
+            }
         }
     };
 
