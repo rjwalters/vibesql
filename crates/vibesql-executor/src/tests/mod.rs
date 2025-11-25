@@ -16,6 +16,7 @@
 //! - `aggregate_distinct`: DISTINCT aggregation tests
 //! - `aggregate_without_from`: Aggregate functions without FROM clause (issue #937)
 //! - `aggregate_caching`: Aggregate result caching tests (Phase 2 of issue #1038)
+//! - `cte_scalar_subquery_tests`: CTE references in scalar subqueries (issue #2602, TPC-H Q15 pattern)
 //! - `select_joins`: JOIN operation tests
 //! - `scalar_subquery_basic_tests`: Basic scalar subquery execution tests
 //! - `scalar_subquery_error_tests`: Scalar subquery error handling tests
@@ -48,6 +49,7 @@
 mod common;
 mod aggregate_caching;
 mod alter_table_constraints;
+mod cte_scalar_subquery_tests;
 mod aggregate_count_sum_avg_tests;
 mod aggregate_distinct;
 mod aggregate_edge_case_tests;
