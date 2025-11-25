@@ -11,7 +11,8 @@ use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-use super::{batching::BatchingManager, cache::CacheManager, execution::TestError, timing::truncate_sql};
+use super::{batching::BatchingManager, cache::CacheManager, timing::truncate_sql};
+use super::super::execution::TestError;
 
 /// Execute a SQL statement with caching, batching, and timing support.
 pub fn execute_sql(
@@ -474,7 +475,7 @@ fn format_query_result(
         })
         .collect();
 
-    use super::formatting::format_sql_value;
+    use super::super::formatting::format_sql_value;
     let formatted_rows: Vec<Vec<String>> = rows
         .iter()
         .map(|row| {

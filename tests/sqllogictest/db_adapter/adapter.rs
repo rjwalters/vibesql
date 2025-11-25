@@ -13,11 +13,11 @@ use vibesql_storage::Database;
 use super::{
     batching::BatchingManager,
     cache::CacheManager,
-    execution::TestError,
     executor,
     pool,
     timing::{detect_statement_type, truncate_sql, TimingTracker},
 };
+use super::super::execution::TestError;
 
 /// Main database adapter for SQLLogicTest runner.
 pub struct VibeSqlDB {

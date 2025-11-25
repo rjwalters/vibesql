@@ -164,6 +164,7 @@ pub fn execute_columnar_aggregate(
     let agg_start = std::time::Instant::now();
 
     let filtered_rows = filtered_batch.to_rows()?;
+
     let results = compute_multiple_aggregates(&filtered_rows, aggregates, None, schema)?;
 
     #[cfg(feature = "profile-q6")]
