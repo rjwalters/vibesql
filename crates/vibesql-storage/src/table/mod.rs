@@ -180,6 +180,47 @@ impl Table {
         &self.rows
     }
 
+    /// Scan table data in columnar format for SIMD-accelerated processing
+    ///
+    /// This method converts the table's rows into a columnar format suitable for
+    /// high-performance analytical queries. Unlike `scan()` which returns row-oriented
+    /// data, this method returns column-oriented data that enables:
+    ///
+    /// - **SIMD vectorization**: Process 4-8 values per CPU instruction
+    /// - **Cache efficiency**: Contiguous column data improves memory access patterns
+    /// - **Type specialization**: Avoid SqlValue enum matching overhead
+    ///
+    /// # Performance
+    ///
+    /// The conversion has O(n * m) cost where n = rows and m = columns.
+    /// For large analytical queries, this cost is amortized by the speedup
+    /// from SIMD operations on the resulting columnar data.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(ColumnarTable)` - Columnar representation of the table data
+    /// * `Err(StorageError)` - If conversion fails due to type mismatches
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let columnar = table.scan_columnar()?;
+    /// // Process with SIMD-accelerated operations
+    /// if let Some(ColumnData::Int64 { values, nulls }) = columnar.get_column("quantity") {
+    ///     // SIMD filtering on values slice
+    /// }
+    /// ```
+    pub fn scan_columnar(&self) -> Result<crate::ColumnarTable, StorageError> {
+        // Get column names from schema
+        let column_names: Vec<String> = self.schema.columns.iter()
+            .map(|c| c.name.clone())
+            .collect();
+
+        // Convert rows to columnar format
+        crate::ColumnarTable::from_rows(&self.rows, &column_names)
+            .map_err(|e| StorageError::Other(format!("Columnar conversion failed: {}", e)))
+    }
+
     /// Get number of rows
     pub fn row_count(&self) -> usize {
         self.rows.len()
@@ -419,5 +460,69 @@ mod tests {
         // Clear should reset
         table.clear();
         assert!(!table.is_in_append_mode());
+    }
+
+    #[test]
+    fn test_scan_columnar() {
+        let mut table = create_test_table();
+
+        // Insert test data
+        table.insert(create_row(1, "Alice")).unwrap();
+        table.insert(create_row(2, "Bob")).unwrap();
+        table.insert(create_row(3, "Charlie")).unwrap();
+
+        // Convert to columnar format
+        let columnar = table.scan_columnar().unwrap();
+
+        // Verify row count
+        assert_eq!(columnar.row_count(), 3);
+        assert_eq!(columnar.column_count(), 2);
+
+        // Verify column data - id column
+        let id_col = columnar.get_column("id").expect("id column should exist");
+        assert_eq!(id_col.len(), 3);
+        assert!(!id_col.is_null(0));
+        assert!(!id_col.is_null(1));
+        assert!(!id_col.is_null(2));
+
+        // Verify column data - name column
+        let name_col = columnar.get_column("name").expect("name column should exist");
+        assert_eq!(name_col.len(), 3);
+    }
+
+    #[test]
+    fn test_scan_columnar_empty_table() {
+        let table = create_test_table();
+
+        // Convert empty table to columnar format
+        let columnar = table.scan_columnar().unwrap();
+
+        // Verify empty result
+        assert_eq!(columnar.row_count(), 0);
+        assert_eq!(columnar.column_count(), 2); // Schema defines 2 columns
+    }
+
+    #[test]
+    fn test_scan_columnar_with_nulls() {
+        let columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("value".to_string(), DataType::Integer, true), // nullable
+        ];
+        let schema = TableSchema::new("test_nulls".to_string(), columns);
+        let mut table = Table::new(schema);
+
+        // Insert rows with NULL values
+        table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(100)] }).unwrap();
+        table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Null] }).unwrap();
+        table.insert(Row { values: vec![SqlValue::Integer(3), SqlValue::Integer(300)] }).unwrap();
+
+        // Convert to columnar format
+        let columnar = table.scan_columnar().unwrap();
+
+        // Verify NULL handling
+        let value_col = columnar.get_column("value").expect("value column should exist");
+        assert!(!value_col.is_null(0)); // 100
+        assert!(value_col.is_null(1));  // NULL
+        assert!(!value_col.is_null(2)); // 300
     }
 }

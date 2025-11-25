@@ -24,6 +24,8 @@ pub enum StorageError {
     LockError(String),
     MemoryBudgetExceeded { used: usize, budget: usize },
     NoIndexToEvict,
+    /// Generic error for other cases
+    Other(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -69,6 +71,7 @@ impl std::fmt::Display for StorageError {
             StorageError::NoIndexToEvict => {
                 write!(f, "No index available to evict (all indexes are already disk-backed)")
             }
+            StorageError::Other(msg) => write!(f, "{}", msg),
         }
     }
 }
