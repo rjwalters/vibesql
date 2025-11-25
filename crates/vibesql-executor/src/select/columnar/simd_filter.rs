@@ -623,12 +623,28 @@ fn value_to_f64(value: &SqlValue) -> Option<f64> {
     }
 }
 
-/// Convert SqlValue::Date to i32 (days since Unix epoch)
+/// Convert SqlValue::Date or string to i32 (days since Unix epoch)
 fn value_to_date_i32(value: &SqlValue) -> Option<i32> {
     match value {
         SqlValue::Date(date) => Some(date_to_days_since_epoch(date)),
+        // Handle text strings that look like dates (YYYY-MM-DD format)
+        SqlValue::Character(s) | SqlValue::Varchar(s) => {
+            parse_date_string(s).map(|d| date_to_days_since_epoch(&d))
+        }
         _ => None,
     }
+}
+
+/// Parse a date string in YYYY-MM-DD format
+fn parse_date_string(s: &str) -> Option<vibesql_types::Date> {
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let year: i32 = parts[0].parse().ok()?;
+    let month: u8 = parts[1].parse().ok()?;
+    let day: u8 = parts[2].parse().ok()?;
+    vibesql_types::Date::new(year, month, day).ok()
 }
 
 /// Convert Date to days since Unix epoch (1970-01-01)
