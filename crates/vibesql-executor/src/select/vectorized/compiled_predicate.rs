@@ -33,6 +33,7 @@ enum CompiledPredicate {
         low: SqlValue,
         high: SqlValue,
         negated: bool,
+        symmetric: bool,
     },
 }
 
@@ -191,9 +192,9 @@ impl CompiledWhereClause {
                 Self::extract_and_predicates(left, schema, predicates) &&
                 Self::extract_and_predicates(right, schema, predicates)
             }
-            Expression::Between { expr: col_expr, low, high, negated, symmetric: _ } => {
+            Expression::Between { expr: col_expr, low, high, negated, symmetric } => {
                 // Try to compile BETWEEN predicate
-                Self::try_compile_between(col_expr, low, high, *negated, schema, predicates)
+                Self::try_compile_between(col_expr, low, high, *negated, *symmetric, schema, predicates)
             }
             _ => {
                 // Try to compile as simple binary comparison
@@ -208,6 +209,7 @@ impl CompiledWhereClause {
         low_expr: &Expression,
         high_expr: &Expression,
         negated: bool,
+        symmetric: bool,
         schema: &CombinedSchema,
         predicates: &mut Vec<CompiledPredicate>,
     ) -> bool {
@@ -240,6 +242,7 @@ impl CompiledWhereClause {
             low,
             high,
             negated,
+            symmetric,
         });
 
         true
@@ -347,9 +350,9 @@ impl CompiledWhereClause {
                 let column_value = &row.values[*column_idx];
                 self.compare_values(column_value, literal, *op)
             }
-            CompiledPredicate::Between { column_idx, low, high, negated } => {
+            CompiledPredicate::Between { column_idx, low, high, negated, symmetric } => {
                 let column_value = &row.values[*column_idx];
-                let result = self.is_between(column_value, low, high)?;
+                let result = self.is_between(column_value, low, high, *symmetric)?;
                 Ok(if *negated { !result } else { result })
             }
         }
@@ -441,11 +444,25 @@ impl CompiledWhereClause {
     }
 
     /// Check if value is between low and high (inclusive)
+    /// For SYMMETRIC: swap bounds if low > high before comparison
     #[inline(always)]
-    fn is_between(&self, value: &SqlValue, low: &SqlValue, high: &SqlValue) -> Result<bool, ExecutorError> {
+    fn is_between(&self, value: &SqlValue, low: &SqlValue, high: &SqlValue, symmetric: bool) -> Result<bool, ExecutorError> {
+        // Handle SYMMETRIC: swap bounds if low > high
+        let (effective_low, effective_high) = if symmetric {
+            // Check if bounds need swapping
+            let low_gt_high = self.compare_values(low, high, ComparisonOp::GreaterThan)?;
+            if low_gt_high {
+                (high, low)
+            } else {
+                (low, high)
+            }
+        } else {
+            (low, high)
+        };
+
         // BETWEEN is inclusive on both ends: value >= low AND value <= high
-        let ge_low = self.compare_values(value, low, ComparisonOp::GreaterThanOrEqual)?;
-        let le_high = self.compare_values(value, high, ComparisonOp::LessThanOrEqual)?;
+        let ge_low = self.compare_values(value, effective_low, ComparisonOp::GreaterThanOrEqual)?;
+        let le_high = self.compare_values(value, effective_high, ComparisonOp::LessThanOrEqual)?;
         Ok(ge_low && le_high)
     }
 }
@@ -636,6 +653,7 @@ mod tests {
             low: SqlValue::Integer(1),
             high: SqlValue::Integer(10),
             negated: false,
+            symmetric: false,
         };
         assert_eq!(between_pred.estimate_selectivity(), 0.10);
     }
