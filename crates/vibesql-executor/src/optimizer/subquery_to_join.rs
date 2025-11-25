@@ -459,9 +459,14 @@ fn try_convert_exists_to_join(
     // EXISTS subqueries should have a WHERE clause with correlation
     let where_clause = subquery.where_clause.as_ref()?;
 
-    // Try to extract a simple equi-join predicate from WHERE
-    // For now, we'll just use the entire WHERE clause as the join condition
-    // A more sophisticated implementation would separate correlation from filters
+    // CRITICAL: Only transform correlated EXISTS subqueries to joins.
+    // Uncorrelated EXISTS (e.g., EXISTS (SELECT 1 FROM t WHERE t.col = 5))
+    // should NOT be converted to a join because the WHERE clause doesn't
+    // correlate with the outer query - it's just a filter on the subquery's table.
+    // Converting it would incorrectly use the filter as a join condition.
+    if !super::subquery_rewrite::correlation::is_correlated(subquery) {
+        return None;
+    }
 
     // Skip if subquery has complex features
     if subquery.group_by.is_some()
