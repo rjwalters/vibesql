@@ -420,33 +420,47 @@ fn test_cross_join() {
 }
 
 #[test]
-#[should_panic(expected = "CROSS JOIN does not support ON clause")]
 fn test_cross_join_with_condition_fails() {
     let mut db = vibesql_storage::Database::new();
 
     let users_schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "id".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(users_schema).unwrap();
 
     let products_schema = vibesql_catalog::TableSchema::new(
         "products".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "id".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(products_schema).unwrap();
 
-    // CROSS JOIN with condition should fail
+    // CROSS JOIN with condition should return an error
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None }),
+            left: Box::new(vibesql_ast::FromClause::Table {
+                name: "users".to_string(),
+                alias: None,
+            }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                name: "products".to_string(),
+                alias: None,
+            }),
             join_type: vibesql_ast::JoinType::Cross,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -469,7 +483,14 @@ fn test_cross_join_with_condition_fails() {
         offset: None,
     };
 
-    let _ = executor.execute(&stmt).unwrap(); // Should panic
+    let result = executor.execute(&stmt);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("CROSS JOIN does not support ON clause"),
+        "Expected error about CROSS JOIN ON clause, got: {}",
+        err
+    );
 }
 
 /// Test that NULL values in join columns do NOT match each other (issue #1877)

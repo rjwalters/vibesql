@@ -51,11 +51,18 @@ pub(crate) fn count_tables_in_from(from: &FromClause) -> usize {
 /// Join reordering changes column ordering, so we only apply it to implicit CROSS joins
 /// from comma-list syntax (FROM t1, t2, t3). Explicit INNER/LEFT/RIGHT joins must
 /// preserve their declared ordering.
+///
+/// Note: CROSS JOINs with ON conditions are NOT valid comma-list syntax and should
+/// not be reordered. This ensures `CROSS JOIN ... ON` goes through the normal path
+/// where the appropriate error is raised (CROSS JOIN does not support ON clause).
 pub(crate) fn all_joins_are_cross(from: &FromClause) -> bool {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } => true,
-        FromClause::Join { left, right, join_type, .. } => {
+        FromClause::Join { left, right, join_type, condition, .. } => {
+            // Must be CROSS join type AND have no ON condition
+            // CROSS JOIN with ON clause is invalid and should not be reordered
             matches!(join_type, vibesql_ast::JoinType::Cross)
+                && condition.is_none()
                 && all_joins_are_cross(left)
                 && all_joins_are_cross(right)
         }
