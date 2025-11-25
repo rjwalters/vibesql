@@ -51,21 +51,9 @@ impl SqliteDB {
                 rows: vec![vec![hash_string]],
             })
         } else {
-            // Flatten multi-column results: each value becomes its own row
-            let mut flattened_rows: Vec<Vec<String>> = Vec::new();
-            let mut flattened_types: Vec<DefaultColumnType> = Vec::new();
-
-            if !types.is_empty() {
-                flattened_types = vec![types[0].clone(); total_values];
-            }
-
-            for row in rows {
-                for val in row {
-                    flattened_rows.push(vec![val.clone()]);
-                }
-            }
-
-            Ok(DBOutput::Rows { types: flattened_types, rows: flattened_rows })
+            // Return rows as-is with one type per column
+            // The sqllogictest framework handles flattening for comparison
+            Ok(DBOutput::Rows { types, rows: rows.to_vec() })
         }
     }
 
@@ -237,7 +225,7 @@ CREATE TABLE types_test (id INTEGER, name TEXT, value REAL)
 statement ok
 INSERT INTO types_test VALUES (1, 'hello', 3.14)
 
-query IRT
+query ITR
 SELECT * FROM types_test
 ----
 1
