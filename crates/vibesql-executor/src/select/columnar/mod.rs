@@ -38,6 +38,7 @@ mod batch;
 mod scan;
 mod filter;
 mod aggregate;
+mod executor;
 
 #[cfg(feature = "simd")]
 mod simd_aggregate;
@@ -50,6 +51,7 @@ mod simd_join;
 
 pub use batch::{ColumnarBatch, ColumnArray};
 pub use scan::ColumnarScan;
+pub use executor::execute_columnar_batch;
 pub use filter::{
     apply_columnar_filter, create_filter_bitmap, create_filter_bitmap_tree,
     evaluate_predicate_tree, extract_column_predicates, extract_predicate_tree, ColumnPredicate,
