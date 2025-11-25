@@ -200,15 +200,17 @@ fn test_on_delete_set_default() {
     // Create parent and child tables with SET DEFAULT
     create_parent_table(&mut db, "PARENT");
 
-    // Create a default parent row
+    // Create a default parent row (id=0 is the default FK value)
     insert_parent_row(&mut db, "PARENT", 0, "Default");
 
-    create_child_table(
+    // Use the helper that sets a default value for PARENT_ID column
+    create_child_table_with_default(
         &mut db,
         "CHILD",
         "PARENT",
         ReferentialAction::SetDefault,
         ReferentialAction::NoAction,
+        0, // default value for PARENT_ID
     );
 
     // Insert test data
