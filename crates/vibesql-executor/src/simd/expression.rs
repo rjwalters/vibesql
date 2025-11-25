@@ -486,6 +486,7 @@ mod tests {
 
     #[test]
     fn test_can_use_simd_returns_false_for_small_row_count() {
+        let evaluator = create_test_evaluator();
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
                 table: None,
@@ -496,21 +497,28 @@ mod tests {
         };
 
         // Below threshold
-        assert!(!can_use_simd_for_expression(&expr, 99));
-        assert!(!can_use_simd_for_expression(&expr, 50));
-        assert!(!can_use_simd_for_expression(&expr, 0));
+        let rows_99 = create_test_rows(99);
+        let rows_50 = create_test_rows(50);
+        let rows_0 = create_test_rows(0);
+        assert!(!can_use_simd_for_expression(&expr, &rows_99, &evaluator));
+        assert!(!can_use_simd_for_expression(&expr, &rows_50, &evaluator));
+        assert!(!can_use_simd_for_expression(&expr, &rows_0, &evaluator));
 
         // At threshold
-        assert!(can_use_simd_for_expression(&expr, 100));
+        let rows_100 = create_test_rows(100);
+        assert!(can_use_simd_for_expression(&expr, &rows_100, &evaluator));
 
         // Above threshold
-        assert!(can_use_simd_for_expression(&expr, 101));
-        assert!(can_use_simd_for_expression(&expr, 1000));
+        let rows_101 = create_test_rows(101);
+        let rows_1000 = create_test_rows(1000);
+        assert!(can_use_simd_for_expression(&expr, &rows_101, &evaluator));
+        assert!(can_use_simd_for_expression(&expr, &rows_1000, &evaluator));
     }
 
     #[test]
     fn test_can_use_simd_returns_true_for_simple_arithmetic() {
-        let row_count = 100;
+        let evaluator = create_test_evaluator();
+        let rows = create_test_rows(100);
 
         // Test each arithmetic operator
         let operators = vec![
@@ -531,7 +539,7 @@ mod tests {
             };
 
             assert!(
-                can_use_simd_for_expression(&expr, row_count),
+                can_use_simd_for_expression(&expr, &rows, &evaluator),
                 "Should support SIMD for operator: {:?}",
                 op
             );
@@ -540,7 +548,8 @@ mod tests {
 
     #[test]
     fn test_can_use_simd_returns_false_for_unsupported_operators() {
-        let row_count = 100;
+        let evaluator = create_test_evaluator();
+        let rows = create_test_rows(100);
 
         let unsupported_ops = vec![
             BinaryOperator::Modulo,
@@ -566,7 +575,7 @@ mod tests {
             };
 
             assert!(
-                !can_use_simd_for_expression(&expr, row_count),
+                !can_use_simd_for_expression(&expr, &rows, &evaluator),
                 "Should NOT support SIMD for operator: {:?}",
                 op
             );
@@ -575,7 +584,8 @@ mod tests {
 
     #[test]
     fn test_can_use_simd_returns_false_for_complex_operands() {
-        let row_count = 100;
+        let evaluator = create_test_evaluator();
+        let rows = create_test_rows(100);
 
         // ScalarSubquery
         let expr_subquery = Expression::BinaryOp {
@@ -599,7 +609,7 @@ mod tests {
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         };
-        assert!(!can_use_simd_for_expression(&expr_subquery, row_count));
+        assert!(!can_use_simd_for_expression(&expr_subquery, &rows, &evaluator));
 
         // AggregateFunction
         let expr_aggregate = Expression::BinaryOp {
@@ -614,7 +624,7 @@ mod tests {
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         };
-        assert!(!can_use_simd_for_expression(&expr_aggregate, row_count));
+        assert!(!can_use_simd_for_expression(&expr_aggregate, &rows, &evaluator));
 
         // Function
         let expr_function = Expression::BinaryOp {
@@ -629,7 +639,7 @@ mod tests {
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         };
-        assert!(!can_use_simd_for_expression(&expr_function, row_count));
+        assert!(!can_use_simd_for_expression(&expr_function, &rows, &evaluator));
 
         // CASE
         let expr_case = Expression::BinaryOp {
@@ -641,12 +651,13 @@ mod tests {
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         };
-        assert!(!can_use_simd_for_expression(&expr_case, row_count));
+        assert!(!can_use_simd_for_expression(&expr_case, &rows, &evaluator));
     }
 
     #[test]
     fn test_can_use_simd_returns_true_for_nested_binary_operations() {
-        let row_count = 100;
+        let evaluator = create_test_evaluator();
+        let rows = create_test_rows(100);
 
         // (a + b) * c
         let expr = Expression::BinaryOp {
@@ -668,7 +679,7 @@ mod tests {
             }),
         };
 
-        assert!(can_use_simd_for_expression(&expr, row_count));
+        assert!(can_use_simd_for_expression(&expr, &rows, &evaluator));
     }
 
     // ===== Operand Simplicity Tests =====
