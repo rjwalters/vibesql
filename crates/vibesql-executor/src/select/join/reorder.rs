@@ -37,20 +37,6 @@ use std::{
 
 use vibesql_ast::{BinaryOperator, Expression};
 
-/// Get standard table abbreviation for TPC-H tables
-/// This mirrors the abbreviation logic in scan/reorder.rs
-fn get_table_abbreviation(table_name: &str) -> String {
-    let table_lower = table_name.to_lowercase();
-    // Known TPC-H table abbreviations
-    match table_lower.as_str() {
-        "partsupp" => "ps".to_string(), // Special case: compound abbreviation
-        _ => {
-            // Default: use first letter as abbreviation
-            table_name.chars().next().map(|c| c.to_lowercase().to_string()).unwrap_or_default()
-        }
-    }
-}
-
 /// Information about a table and its predicates
 #[derive(Debug, Clone)]
 struct TableInfo {
@@ -360,73 +346,34 @@ impl JoinOrderAnalyzer {
         }
     }
 
-    /// Infer table name from column name using schema-based lookup with TPC-H prefix fallback
+    /// Infer table name from column name using schema-based lookup
     ///
-    /// Primary resolution uses the schema-based column-to-table map (if populated).
-    /// Falls back to TPC-H prefix matching only if schema lookup fails.
+    /// Uses the schema-based column-to-table map to resolve column references.
+    /// TPC-H prefix heuristics have been removed - all column resolution now
+    /// relies solely on actual database schema metadata.
     fn infer_table_from_column(&self, column: &str, tables: &HashSet<String>) -> Option<String> {
-        // Primary: Schema-based lookup (uses actual database schema)
-        if !self.column_to_table.is_empty() {
-            let col_lower = column.to_lowercase();
-            if let Some(table) = self.column_to_table.get(&col_lower) {
-                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                    eprintln!("[ANALYZER] Schema lookup: {} -> {}", column, table);
-                }
-                // Verify the table is in our set (could be aliased)
-                if tables.contains(table) {
-                    return Some(table.clone());
-                }
-                // Try case-insensitive match
-                for t in tables {
-                    if t.eq_ignore_ascii_case(table) {
-                        return Some(t.clone());
-                    }
-                }
-                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                    eprintln!("[ANALYZER] Warning: Table {} not in tables set {:?}", table, tables);
-                }
-            } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                eprintln!("[ANALYZER] Warning: Column {} not found in schema map (available: {:?})",
-                    col_lower, self.column_to_table.keys().take(10).collect::<Vec<_>>());
+        // Schema-based lookup only - no heuristic fallbacks
+        let col_lower = column.to_lowercase();
+        if let Some(table) = self.column_to_table.get(&col_lower) {
+            if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                eprintln!("[ANALYZER] Schema lookup: {} -> {}", column, table);
             }
-        }
-
-        // Fallback: TPC-H prefix pattern (kept for compatibility with TPC-H queries)
-        let col_upper = column.to_uppercase();
-
-        // Extract prefix before first underscore (e.g., "L_SUPPKEY" -> "L")
-        let prefix = col_upper.split('_').next()?;
-
-        // Try exact match first
-        if tables.contains(&prefix.to_lowercase()) {
-            return Some(prefix.to_lowercase());
-        }
-
-        // Try prefix matching (prefer shorter names for specificity)
-        let mut prefix_matches: Vec<String> = tables
-            .iter()
-            .filter(|t| t.to_uppercase().starts_with(prefix))
-            .cloned()
-            .collect();
-
-        if !prefix_matches.is_empty() {
-            prefix_matches.sort_by_key(|t| t.len()); // Ascending: prefer shorter matches
-            return prefix_matches.into_iter().next();
-        }
-
-        // Try abbreviation match (e.g., "PS" -> "partsupp")
-        let mut abbrev_matches: Vec<String> = tables
-            .iter()
-            .filter(|t| {
-                let abbrev = get_table_abbreviation(t);
-                abbrev.eq_ignore_ascii_case(prefix)
-            })
-            .cloned()
-            .collect();
-
-        if !abbrev_matches.is_empty() {
-            abbrev_matches.sort_by_key(|t| t.len());
-            return abbrev_matches.into_iter().next();
+            // Verify the table is in our set (could be aliased)
+            if tables.contains(table) {
+                return Some(table.clone());
+            }
+            // Try case-insensitive match
+            for t in tables {
+                if t.eq_ignore_ascii_case(table) {
+                    return Some(t.clone());
+                }
+            }
+            if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                eprintln!("[ANALYZER] Warning: Table {} not in tables set {:?}", table, tables);
+            }
+        } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+            eprintln!("[ANALYZER] Warning: Column {} not found in schema map (available: {:?})",
+                col_lower, self.column_to_table.keys().take(10).collect::<Vec<_>>());
         }
 
         None
