@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use instant::SystemTime;
+use rand::SeedableRng;
 use super::{ColumnStatistics, SamplingConfig, SampleMetadata};
 use super::histogram::BucketStrategy;
 
@@ -52,8 +53,6 @@ impl TableStatistics {
         bucket_strategy: BucketStrategy,
     ) -> Self {
         use super::sampling::{sample_rows};
-        use rand::SeedableRng;
-
         let total_rows = rows.len();
         let config = sampling_config.unwrap_or_else(SamplingConfig::adaptive);
 
@@ -61,7 +60,7 @@ impl TableStatistics {
         let (sample_size, should_sample) = config.determine_sample_size(total_rows);
 
         // Sample rows if needed (Phase 5.2)
-        let mut rng = rand::rngs::StdRng::from_entropy();
+        let mut rng = rand::rngs::StdRng::from_os_rng();
         let sampled_rows = if should_sample {
             sample_rows(rows, &config, &mut rng)
         } else {

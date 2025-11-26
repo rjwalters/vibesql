@@ -6,8 +6,7 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace::{Sampler, TracerProvider};
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use opentelemetry_sdk::Resource;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
@@ -18,7 +17,7 @@ pub struct ObservabilityProvider {
     #[allow(dead_code)]
     meter_provider: Option<SdkMeterProvider>,
     #[allow(dead_code)]
-    tracer_provider: Option<TracerProvider>,
+    tracer_provider: Option<SdkTracerProvider>,
     metrics: Option<ServerMetrics>,
 }
 
@@ -33,10 +32,10 @@ impl ObservabilityProvider {
             });
         }
 
-        let resource = Resource::new(vec![
-            KeyValue::new("service.name", "vibesql-server"),
-            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-        ]);
+        let resource = Resource::builder()
+            .with_service_name("vibesql-server")
+            .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
+            .build();
 
         // Initialize metrics if enabled
         let (meter_provider, metrics) = if config.metrics.enabled {
@@ -47,12 +46,9 @@ impl ObservabilityProvider {
                 .build()
                 .context("Failed to create OTLP metrics exporter")?;
 
-            let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(
-                exporter,
-                runtime::Tokio,
-            )
-            .with_interval(Duration::from_secs(config.metrics.export_interval_seconds))
-            .build();
+            let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+                .with_interval(Duration::from_secs(config.metrics.export_interval_seconds))
+                .build();
 
             let provider = SdkMeterProvider::builder()
                 .with_reader(reader)
@@ -94,8 +90,8 @@ impl ObservabilityProvider {
                 .build()
                 .context("Failed to create OTLP trace exporter")?;
 
-            let provider = TracerProvider::builder()
-                .with_batch_exporter(exporter, runtime::Tokio)
+            let provider = SdkTracerProvider::builder()
+                .with_batch_exporter(exporter)
                 .with_sampler(sampler)
                 .with_resource(resource.clone())
                 .build();

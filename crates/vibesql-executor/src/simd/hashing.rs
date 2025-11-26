@@ -67,7 +67,7 @@ pub fn simd_hash_i64_batch(keys: &[i64], output: &mut [u64]) {
         let hashed = xored * mult_vec;
 
         // Additional mixing for better distribution
-        let rotated = (hashed ^ (hashed >> 32)) * mult_vec;
+        let rotated: i64x4 = (hashed ^ (hashed >> 32)) * mult_vec;
 
         // Store results
         let result = rotated.to_array();
@@ -116,7 +116,7 @@ pub fn simd_hash_f64_batch(keys: &[f64], output: &mut [u64]) {
 
         let xored = keys_vec ^ seed_vec;
         let hashed = xored * mult_vec;
-        let rotated = (hashed ^ (hashed >> 32)) * mult_vec;
+        let rotated: i64x4 = (hashed ^ (hashed >> 32)) * mult_vec;
 
         // Store results
         let result = rotated.to_array();
