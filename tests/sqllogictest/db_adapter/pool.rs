@@ -6,7 +6,8 @@
 //! that is reset between files.
 
 use std::cell::RefCell;
-use vibesql_storage::Database;
+use vibesql_storage::{Database, DatabaseConfig};
+use vibesql_types::SqlMode;
 
 // Thread-local Database pool for reuse across test files within the same worker thread.
 // This avoids the overhead of creating a new Database for each test file (622 files in full suite).
@@ -28,10 +29,13 @@ pub fn get_pooled_database() -> Database {
                 db
             }
             None => {
-                // First use - create new database with MySQL mode (default)
-                // The SQLLogicTest suite was generated from MySQL 8 and expects MySQL semantics
-                // including decimal division (INTEGER / INTEGER → DECIMAL)
-                vibesql_storage::Database::new()
+                // First use - create new database with SQLite mode
+                // The SQLLogicTest suite is from SQLite and expects SQLite semantics
+                // including integer division (INTEGER / INTEGER → INTEGER, truncated)
+                // Tests with `skipif mysql` handle MySQL-incompatible queries
+                let mut config = DatabaseConfig::test_default();
+                config.sql_mode = SqlMode::SQLite;
+                Database::with_config(config)
             }
         }
     })
