@@ -145,6 +145,60 @@ INSERT INTO t1 VALUES (3)
     }
 
     #[test]
+    fn test_preprocess_consecutive_skipif() {
+        // Test case from slt_good_97.test - multiple consecutive skipif directives
+        let input = r#"statement ok
+CREATE TABLE tab1(col0 INTEGER, col1 INTEGER, col2 INTEGER)
+
+skipif mysql # not compatible
+skipif postgresql # PostgreSQL requires AS when renaming output columns
+query II rowsort label-203
+SELECT ALL 42 / col1 + - 21 - col0 col1, - col0 AS col0 FROM tab1 AS cor0
+----
+-112
+-91
+
+statement ok
+SELECT 1
+"#;
+        let output = preprocess_for_mysql(input);
+
+        // The query should be excluded because skipif mysql is present
+        assert!(
+            !output.contains("42 / col1"),
+            "Query with skipif mysql should be excluded even with other skipif directives"
+        );
+        // The following statement should still be included
+        assert!(output.contains("SELECT 1"));
+        // No directives should remain
+        assert!(!output.contains("skipif"));
+    }
+
+    #[test]
+    fn test_preprocess_skipif_other_then_mysql() {
+        // Test order: skipif postgresql followed by skipif mysql
+        let input = r#"skipif postgresql
+skipif mysql
+query I
+SELECT 1
+----
+1
+
+statement ok
+SELECT 2
+"#;
+        let output = preprocess_for_mysql(input);
+
+        // The query should be excluded because skipif mysql is present
+        assert!(
+            !output.contains("SELECT 1"),
+            "Query should be excluded when skipif mysql follows skipif postgresql"
+        );
+        // The following statement should be included
+        assert!(output.contains("SELECT 2"));
+    }
+
+    #[test]
     fn test_preprocess_multiple_consecutive_skipif() {
         // This is the bug from issue #2632 - multiple consecutive skipif directives
         // should accumulate with OR logic, not overwrite each other

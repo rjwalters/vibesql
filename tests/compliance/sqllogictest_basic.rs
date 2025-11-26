@@ -230,6 +230,8 @@ SELECT a + b FROM t1 WHERE c = 3
 "#;
 
     let mut tester = Runner::new(|| async { Ok(VibeSqlDB::new()) });
+    // Add "mysql" label for skipif/onlyif directives
+    tester.add_label("mysql");
 
     match tester.run_script(custom_script) {
         Ok(_) => {
