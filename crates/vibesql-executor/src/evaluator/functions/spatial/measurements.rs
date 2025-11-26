@@ -8,7 +8,8 @@
 use vibesql_types::SqlValue;
 use crate::errors::ExecutorError;
 use super::{sql_value_to_geometry, Geometry};
-use geo::algorithm::{Area, BoundingRect, Centroid, ConvexHull, EuclideanDistance};
+use geo::algorithm::{Area, BoundingRect, Centroid, ConvexHull};
+use geo::{Distance, Euclidean};
 
 /// Helper function to convert WKT string to geo::Geometry
 fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {
@@ -195,7 +196,7 @@ pub fn st_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
             let distance = match (&geom1, &geom2) {
                 (geo::Geometry::Point(p1), geo::Geometry::Point(p2)) => {
-                    p1.euclidean_distance(p2)
+                    Euclidean.distance(*p1, *p2)
                 }
                 _ => {
                     // For other geometry types, calculate minimum distance
@@ -207,7 +208,7 @@ pub fn st_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                             ls.coords()
                                 .map(|coord| {
                                     let p2 = geo::Point::new(coord.x, coord.y);
-                                    p.euclidean_distance(&p2)
+                                    Euclidean.distance(*p, p2)
                                 })
                                 .fold(f64::INFINITY, f64::min)
                         }
@@ -216,7 +217,7 @@ pub fn st_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                             poly.exterior().coords()
                                 .map(|coord| {
                                     let p2 = geo::Point::new(coord.x, coord.y);
-                                    p.euclidean_distance(&p2)
+                                    Euclidean.distance(*p, p2)
                                 })
                                 .fold(f64::INFINITY, f64::min)
                         }
@@ -257,7 +258,7 @@ pub fn st_length(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 for i in 0..coords_vec.len().saturating_sub(1) {
                     let p1 = geo::Point::new(coords_vec[i].x, coords_vec[i].y);
                     let p2 = geo::Point::new(coords_vec[i + 1].x, coords_vec[i + 1].y);
-                    length += p1.euclidean_distance(&p2);
+                    length += Euclidean.distance(p1, p2);
                 }
                 length
             }
@@ -305,7 +306,7 @@ pub fn st_perimeter(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 for i in 0..coords_vec.len().saturating_sub(1) {
                     let p1 = geo::Point::new(coords_vec[i].x, coords_vec[i].y);
                     let p2 = geo::Point::new(coords_vec[i + 1].x, coords_vec[i + 1].y);
-                    length += p1.euclidean_distance(&p2);
+                    length += Euclidean.distance(p1, p2);
                 }
                 length
             }
@@ -652,8 +653,6 @@ fn calculate_hausdorff_distance(
     geom1: &geo::Geometry<f64>,
     geom2: &geo::Geometry<f64>,
 ) -> Result<f64, ExecutorError> {
-    use geo::algorithm::EuclideanDistance;
-
     let coords1 = extract_coordinates(geom1);
     let coords2 = extract_coordinates(geom2);
 
@@ -667,7 +666,7 @@ fn calculate_hausdorff_distance(
         .map(|p1| {
             coords2
                 .iter()
-                .map(|p2| p1.euclidean_distance(p2))
+                .map(|p2| Euclidean.distance(*p1, *p2))
                 .fold(f64::INFINITY, f64::min)
         })
         .fold(f64::NEG_INFINITY, f64::max);
@@ -678,7 +677,7 @@ fn calculate_hausdorff_distance(
         .map(|p2| {
             coords1
                 .iter()
-                .map(|p1| p2.euclidean_distance(p1))
+                .map(|p1| Euclidean.distance(*p2, *p1))
                 .fold(f64::INFINITY, f64::min)
         })
         .fold(f64::NEG_INFINITY, f64::max);

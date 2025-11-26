@@ -10,7 +10,8 @@ use vibesql_types::SqlValue;
 use crate::errors::ExecutorError;
 use super::{sql_value_to_geometry, Geometry};
 use geo::Contains;
-use geo::algorithm::{Intersects, HaversineDistance, EuclideanDistance};
+use geo::algorithm::Intersects;
+use geo::{Distance, Euclidean, Haversine};
 use geo::algorithm::relate::Relate;
 
 /// Helper function to convert WKT string to geo::Geometry
@@ -378,15 +379,15 @@ pub fn st_dwithin(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
             
-            // Use EuclideanDistance trait for all geometry combinations
+            // Use Distance trait for all geometry combinations
             let dist = match (&geom1, &geom2) {
                 (geo::Geometry::Point(p1), geo::Geometry::Point(p2)) => {
                     // For points, use haversine distance (great-circle distance on sphere)
-                    p1.haversine_distance(p2)
+                    Haversine.distance(*p1, *p2)
                 }
                 _ => {
-                    // For all other geometry combinations, use EuclideanDistance
-                    geom1.euclidean_distance(&geom2)
+                    // For all other geometry combinations, use Euclidean distance
+                    Euclidean.distance(&geom1, &geom2)
                 }
             };
             
