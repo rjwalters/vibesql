@@ -39,10 +39,9 @@ pub enum ValueType {
 /// # Examples
 ///
 /// ```
-/// use vibesql_types::{SqlMode, SqlValue};
-/// use vibesql_types::sql_mode::types::{TypeBehavior, ValueType};
+/// use vibesql_types::{SqlMode, SqlValue, MySqlModeFlags, TypeBehavior, ValueType};
 ///
-/// let mysql_mode = SqlMode::MySQL;
+/// let mysql_mode = SqlMode::MySQL { flags: MySqlModeFlags::default() };
 /// let sqlite_mode = SqlMode::SQLite;
 ///
 /// // MySQL always returns Numeric for division
@@ -189,25 +188,29 @@ mod tests {
 
     #[test]
     fn test_has_decimal_type() {
-        assert!(SqlMode::default().has_decimal_type());
+        assert!(SqlMode::MySQL { flags: Default::default() }.has_decimal_type());
         assert!(!SqlMode::SQLite.has_decimal_type());
+        // Default is now SQLite
+        assert!(!SqlMode::default().has_decimal_type());
     }
 
     #[test]
     fn test_uses_dynamic_typing() {
-        assert!(!SqlMode::default().uses_dynamic_typing());
+        assert!(!SqlMode::MySQL { flags: Default::default() }.uses_dynamic_typing());
         assert!(SqlMode::SQLite.uses_dynamic_typing());
+        // Default is now SQLite
+        assert!(SqlMode::default().uses_dynamic_typing());
     }
 
     #[test]
     fn test_permissive_type_coercion() {
-        assert!(SqlMode::default().permissive_type_coercion());
+        assert!(SqlMode::MySQL { flags: Default::default() }.permissive_type_coercion());
         assert!(SqlMode::SQLite.permissive_type_coercion());
     }
 
     #[test]
     fn test_mysql_division_result_type() {
-        let mode = SqlMode::default();
+        let mode = SqlMode::MySQL { flags: Default::default() };
 
         // MySQL always returns Numeric for division
         assert_eq!(

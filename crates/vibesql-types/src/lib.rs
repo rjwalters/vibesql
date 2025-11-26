@@ -15,5 +15,6 @@ mod temporal;
 pub use data_type::DataType;
 pub use sql_mode::{MySqlModeFlags, SqlMode};
 pub use sql_mode::types::{TypeBehavior, ValueType};
+pub use sql_mode::{OperatorBehavior, DivisionBehavior, ConcatOperator};
 pub use sql_value::SqlValue;
 pub use temporal::{Date, Interval, IntervalField, Time, Timestamp};
