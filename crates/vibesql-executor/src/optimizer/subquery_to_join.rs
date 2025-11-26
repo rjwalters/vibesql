@@ -373,15 +373,16 @@ fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str, new_alias:
             expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
             data_type: data_type.clone(),
         },
-        // IN subquery: rewrite the outer expr but NOT the subquery (it has its own scope)
+        // Handle nested IN subqueries: rewrite the outer expression but NOT the subquery
+        // (the subquery has its own scope and column references shouldn't be changed)
         Expression::In { expr: inner, subquery, negated } => Expression::In {
             expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
-            subquery: subquery.clone(), // Don't rewrite inside subquery - separate scope
+            subquery: subquery.clone(), // Don't rewrite inside subquery - different scope
             negated: *negated,
         },
-        // EXISTS subquery: the subquery has its own scope, don't rewrite
+        // Handle EXISTS subqueries similarly - don't rewrite inside the subquery
         Expression::Exists { subquery, negated } => Expression::Exists {
-            subquery: subquery.clone(),
+            subquery: subquery.clone(), // Don't rewrite inside subquery - different scope
             negated: *negated,
         },
         // Scalar subquery: same as EXISTS, separate scope
@@ -772,5 +773,94 @@ mod tests {
 
         // WHERE should only have the simple predicate left
         assert!(transformed.where_clause.is_some(), "Simple predicate should remain in WHERE");
+    }
+
+    #[test]
+    fn test_nested_in_subquery_self_join_column_qualification() {
+        // Test that nested IN subqueries in self-joins properly qualify the outer expression
+        // This is the bug from issue #2630:
+        // SELECT pk FROM tab0 WHERE col3 IN (SELECT col0 FROM tab0 WHERE col0 IN (...) AND col4 >= 7680.91)
+        //
+        // When the outer IN is transformed to a SEMI JOIN, the nested IN's outer column (col0)
+        // should be qualified with the subquery alias (__subquery_TAB0), not left unqualified.
+
+        // Create a nested IN subquery pattern
+        let innermost_subquery = simple_select("tab0", "col3"); // SELECT col3 FROM tab0
+
+        // Middle subquery: SELECT col0 FROM tab0 WHERE col0 IN (innermost) AND col4 >= 7680
+        let mut middle_subquery = simple_select("tab0", "col0");
+        middle_subquery.where_clause = Some(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::In {
+                expr: Box::new(column_ref("col0")), // This should get qualified!
+                subquery: Box::new(innermost_subquery),
+                negated: false,
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::GreaterThanOrEqual,
+                left: Box::new(column_ref("col4")),
+                right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(7680))),
+            }),
+        });
+
+        // Outer query: SELECT pk FROM tab0 WHERE col3 IN (middle_subquery)
+        let mut stmt = simple_select("tab0", "pk");
+        stmt.where_clause = Some(Expression::In {
+            expr: Box::new(column_ref("col3")),
+            subquery: Box::new(middle_subquery),
+            negated: false,
+        });
+
+        let transformed = transform_subqueries_to_joins(&stmt);
+
+        // Should have transformed to a SEMI JOIN
+        match &transformed.from {
+            Some(FromClause::Join {
+                join_type,
+                condition,
+                right,
+                ..
+            }) => {
+                assert!(matches!(join_type, JoinType::Semi), "Should be SEMI join");
+
+                // Check that the right side has the alias
+                match right.as_ref() {
+                    FromClause::Table { alias: Some(alias), .. } => {
+                        assert!(alias.starts_with("__subquery_"), "Should have subquery alias");
+                    }
+                    _ => panic!("Expected aliased table on right side"),
+                }
+
+                // Check the join condition - nested IN's outer column should be qualified
+                if let Some(cond) = condition {
+                    // The condition should contain a nested IN expression
+                    // with a qualified column reference for col0
+                    fn check_nested_in_qualification(expr: &Expression) -> bool {
+                        match expr {
+                            Expression::In { expr: inner_expr, .. } => {
+                                // The outer expression of the nested IN should be qualified
+                                match inner_expr.as_ref() {
+                                    Expression::ColumnRef { table: Some(t), column: c } => {
+                                        t.starts_with("__subquery_") && c.eq_ignore_ascii_case("col0")
+                                    }
+                                    _ => false,
+                                }
+                            }
+                            Expression::BinaryOp { left, right, .. } => {
+                                check_nested_in_qualification(left) || check_nested_in_qualification(right)
+                            }
+                            _ => false,
+                        }
+                    }
+
+                    assert!(
+                        check_nested_in_qualification(cond),
+                        "Nested IN subquery's outer column should be qualified with subquery alias. Condition: {:?}",
+                        cond
+                    );
+                }
+            }
+            _ => panic!("Expected SEMI JOIN in FROM clause"),
+        }
     }
 }

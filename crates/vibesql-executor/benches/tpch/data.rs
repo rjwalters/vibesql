@@ -54,7 +54,7 @@ impl TPCHData {
     }
 
     pub fn random_varchar(&mut self, max_len: usize) -> String {
-        let len = self.rng.gen_range(10..max_len);
+        let len = self.rng.random_range(10..max_len);
         (0..len)
             .map(|_| self.rng.sample(rand::distributions::Alphanumeric) as char)
             .collect()
@@ -64,17 +64,17 @@ impl TPCHData {
         format!(
             "{:02}-{:03}-{:03}-{:04}",
             10 + nation_key,
-            self.rng.gen_range(100..1000),
-            self.rng.gen_range(100..1000),
-            self.rng.gen_range(1000..10000)
+            self.rng.random_range(100..1000),
+            self.rng.random_range(100..1000),
+            self.rng.random_range(1000..10000)
         )
     }
 
     pub fn random_date(&mut self, _start: &str, _end: &str) -> String {
         // Simple date generation between start and end
-        let year = self.rng.gen_range(1992..1999);
-        let month = self.rng.gen_range(1..13);
-        let day = self.rng.gen_range(1..29); // Simplified
+        let year = self.rng.random_range(1992..1999);
+        let month = self.rng.random_range(1..13);
+        let day = self.rng.random_range(1..29); // Simplified
         format!("{:04}-{:02}-{:02}", year, month, day)
     }
 }

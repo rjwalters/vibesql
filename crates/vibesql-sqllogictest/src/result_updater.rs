@@ -269,7 +269,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             let outfilename = format!(
                 "{}{:010}{}",
                 filename.file_name().unwrap().to_str().unwrap().to_owned(),
-                rand::thread_rng().gen_range(0..10_000_000),
+                rand::rng().random_range(0..10_000_000),
                 ".temp"
             );
             let outfilename = filename.parent().unwrap().join(outfilename);

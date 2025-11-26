@@ -33,7 +33,7 @@ rustls = "0.23"
 rustls-pemfile = "2.0"
 
 # Authentication
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["std"] }
 md-5 = "0.10"
 sha2 = "0.10"
 base64 = "0.22"
@@ -41,9 +41,9 @@ hmac = "0.12"
 pbkdf2 = "0.12"
 
 # Configuration and error handling
-toml = "0.8"
+toml = "0.9"
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 
 # Logging
@@ -51,15 +51,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # OpenTelemetry observability
-opentelemetry = { version = "0.27", features = ["metrics", "trace", "logs"] }
-opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "metrics", "trace", "logs"] }
-opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
-tracing-opentelemetry = "0.28"
+opentelemetry = { version = "0.31", features = ["metrics", "trace", "logs"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "metrics", "trace", "logs"] }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+tracing-opentelemetry = "0.32"
 
 # Utilities
 bytes = "1.0"
-dirs = "5.0"
-rand = "0.8"
+dirs = "6.0"
+rand = "0.9"
 
 [dev-dependencies]
 tempfile = "3"

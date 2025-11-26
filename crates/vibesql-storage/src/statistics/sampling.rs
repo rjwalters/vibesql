@@ -7,7 +7,7 @@
 //! - Reservoir sampling: Single-pass streaming sample
 //! - Adaptive sampling: Choose sample size based on table size
 
-use rand::seq::SliceRandom;
+use rand::prelude::IndexedRandom;
 use rand::Rng;
 
 /// Configuration for statistical sampling
@@ -193,7 +193,7 @@ fn reservoir_sample<T: Clone>(rows: &[T], k: usize, rng: &mut impl Rng) -> Vec<T
 
     for (i, row) in rows.iter().enumerate().skip(k) {
         // Randomly decide whether to include this element
-        let j = rng.gen_range(0..=i);
+        let j = rng.random_range(0..=i);
         if j < k {
             reservoir[j] = row.clone();
         }
