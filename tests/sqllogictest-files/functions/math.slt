@@ -1,4 +1,7 @@
 # Math functions
+# Tests run in SQLite mode for consistent integer division behavior
+
+dialect sqlite
 
 # Basic arithmetic
 query I
