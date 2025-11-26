@@ -48,11 +48,24 @@ where
     let table_names: Vec<String> =
         table_refs.iter().map(|t| t.alias.clone().unwrap_or_else(|| t.name.clone())).collect();
 
-    let mut analyzer = JoinOrderAnalyzer::new();
+    // Step 3.5: Build schema-based column-to-table mapping
+    // This uses actual database schema to resolve unqualified column references
+    let column_to_table = utils::build_column_to_table_map(database, &table_names, &table_refs, cte_results);
+
+    // Create analyzer with schema-based column resolution
+    let mut analyzer = JoinOrderAnalyzer::with_column_map(column_to_table.clone());
     analyzer.register_tables(table_names.clone());
 
     // Combine table names into a set for predicate analysis (normalize to lowercase)
     let table_set: HashSet<String> = table_names.iter().map(|t| t.to_lowercase()).collect();
+
+    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+        eprintln!("[JOIN_REORDER] Schema-based column mapping: {} columns resolved from {} tables",
+            column_to_table.len(), table_names.len());
+        if column_to_table.is_empty() && !table_names.is_empty() {
+            eprintln!("[JOIN_REORDER] Warning: No schema columns found for tables: {:?}", table_names);
+        }
+    }
 
     // Step 4: Analyze join conditions to extract edges with their join types
     for condition_with_type in &join_conditions_with_types {
@@ -70,10 +83,8 @@ where
             eprintln!("[JOIN_REORDER] Table set: {:?}", table_set);
         }
 
-        // Extract equijoin conditions from WHERE clause manually
-        // This is simpler and more reliable than using decompose_where_clause,
-        // which requires a full schema with column information
-        let equijoins = predicates::extract_where_equijoins(where_expr, &table_set);
+        // Extract equijoin conditions from WHERE clause using schema-based column resolution
+        let equijoins = predicates::extract_where_equijoins_with_schema(where_expr, &table_set, &column_to_table);
 
         if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
             eprintln!("[JOIN_REORDER] Extracted {} WHERE equijoins", equijoins.len());
@@ -176,9 +187,9 @@ where
                     continue;
                 }
 
-                // Extract tables referenced in this condition
+                // Extract tables referenced in this condition using schema-based column resolution
                 let mut referenced_tables = HashSet::new();
-                graph::extract_referenced_tables(condition, &mut referenced_tables, &table_set);
+                graph::extract_referenced_tables_with_schema(condition, &mut referenced_tables, &table_set, &column_to_table);
 
                 // Check if condition connects the new table with any already-joined table
                 // Condition is applicable if it references the new table AND at least one joined table
@@ -195,6 +206,17 @@ where
             if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                 eprintln!("[JOIN_REORDER] Joining {} to {:?}, found {} applicable conditions",
                     table_name, joined_tables, applicable_conditions.len());
+                eprintln!("[JOIN_REORDER]   join_conditions total: {}", join_conditions.len());
+                for (idx, cond) in join_conditions.iter().enumerate() {
+                    if !applied_conditions.contains(&idx) {
+                        let mut refs = HashSet::new();
+                        graph::extract_referenced_tables_with_schema(cond, &mut refs, &table_set, &column_to_table);
+                        eprintln!("[JOIN_REORDER]   cond[{}] refs: {:?}, new_table: {}, matches_new: {}, matches_joined: {}",
+                            idx, refs, table_name.to_lowercase(),
+                            refs.contains(&table_name.to_lowercase()),
+                            refs.iter().any(|t| joined_tables.contains(t)));
+                    }
+                }
             }
 
             // Always use INNER join for comma-list joins, even when applicable_conditions is empty.

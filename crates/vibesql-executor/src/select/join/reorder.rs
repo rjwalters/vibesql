@@ -121,6 +121,8 @@ pub struct JoinOrderAnalyzer {
     edges: Vec<JoinEdge>,
     /// Selectivity information for each predicate
     selectivity: HashMap<String, Selectivity>,
+    /// Schema-based column-to-table mapping for resolving unqualified columns
+    column_to_table: HashMap<String, String>,
 }
 
 impl Default for JoinOrderAnalyzer {
@@ -132,7 +134,27 @@ impl Default for JoinOrderAnalyzer {
 impl JoinOrderAnalyzer {
     /// Create a new join order analyzer
     pub fn new() -> Self {
-        Self { tables: HashMap::new(), edges: Vec::new(), selectivity: HashMap::new() }
+        Self {
+            tables: HashMap::new(),
+            edges: Vec::new(),
+            selectivity: HashMap::new(),
+            column_to_table: HashMap::new(),
+        }
+    }
+
+    /// Create a new join order analyzer with schema-based column resolution
+    pub fn with_column_map(column_to_table: HashMap<String, String>) -> Self {
+        Self {
+            tables: HashMap::new(),
+            edges: Vec::new(),
+            selectivity: HashMap::new(),
+            column_to_table,
+        }
+    }
+
+    /// Set the column-to-table mapping for schema-based resolution
+    pub fn set_column_map(&mut self, column_to_table: HashMap<String, String>) {
+        self.column_to_table = column_to_table;
     }
 
     /// Register all tables involved in the query
@@ -338,9 +360,38 @@ impl JoinOrderAnalyzer {
         }
     }
 
-    /// Infer table name from column name using prefix matching and abbreviations
-    /// This mirrors the logic in scan/reorder.rs for consistency
+    /// Infer table name from column name using schema-based lookup with TPC-H prefix fallback
+    ///
+    /// Primary resolution uses the schema-based column-to-table map (if populated).
+    /// Falls back to TPC-H prefix matching only if schema lookup fails.
     fn infer_table_from_column(&self, column: &str, tables: &HashSet<String>) -> Option<String> {
+        // Primary: Schema-based lookup (uses actual database schema)
+        if !self.column_to_table.is_empty() {
+            let col_lower = column.to_lowercase();
+            if let Some(table) = self.column_to_table.get(&col_lower) {
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[ANALYZER] Schema lookup: {} -> {}", column, table);
+                }
+                // Verify the table is in our set (could be aliased)
+                if tables.contains(table) {
+                    return Some(table.clone());
+                }
+                // Try case-insensitive match
+                for t in tables {
+                    if t.eq_ignore_ascii_case(table) {
+                        return Some(t.clone());
+                    }
+                }
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[ANALYZER] Warning: Table {} not in tables set {:?}", table, tables);
+                }
+            } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                eprintln!("[ANALYZER] Warning: Column {} not found in schema map (available: {:?})",
+                    col_lower, self.column_to_table.keys().take(10).collect::<Vec<_>>());
+            }
+        }
+
+        // Fallback: TPC-H prefix pattern (kept for compatibility with TPC-H queries)
         let col_upper = column.to_uppercase();
 
         // Extract prefix before first underscore (e.g., "L_SUPPKEY" -> "L")

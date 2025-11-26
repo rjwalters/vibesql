@@ -1,8 +1,9 @@
 //! Utility functions for join reordering
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use vibesql_ast::FromClause;
 use crate::schema::CombinedSchema;
+use crate::select::cte::CteResult;
 
 /// Check if join reordering optimization should be applied
 ///
@@ -171,4 +172,195 @@ pub(super) fn build_column_permutation(
     }
 
     permutation
+}
+
+/// Build a column-to-table mapping using actual database schema
+///
+/// This is the proper schema-based column resolution that replaces heuristic
+/// pattern matching. For each unqualified column reference, we look up which
+/// table(s) contain that column using the actual database schema.
+///
+/// # Parameters
+/// - `database`: The database to query for table schemas
+/// - `table_names`: The tables in the FROM clause (may be aliases)
+/// - `table_refs`: Table references with name/alias info for resolving CTEs and subqueries
+/// - `cte_results`: CTE results for looking up CTE schemas
+///
+/// # Returns
+/// A HashMap mapping column names (lowercase) to the table name that contains them.
+/// If a column exists in multiple tables, it's ambiguous and not included (user must qualify it).
+pub(super) fn build_column_to_table_map(
+    database: &vibesql_storage::Database,
+    table_names: &[String],
+    table_refs: &[super::graph::TableRef],
+    cte_results: &HashMap<String, CteResult>,
+) -> HashMap<String, String> {
+    let mut column_to_table: HashMap<String, Vec<String>> = HashMap::new();
+
+    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+        eprintln!("[JOIN_REORDER] build_column_to_table_map: database.tables.keys(): {:?}",
+            database.tables.keys().collect::<Vec<_>>());
+        eprintln!("[JOIN_REORDER] build_column_to_table_map: table_refs: {:?}",
+            table_refs.iter().map(|r| (&r.name, &r.alias)).collect::<Vec<_>>());
+    }
+
+    for table_name in table_names {
+        let table_lower = table_name.to_lowercase();
+
+        // Find the corresponding TableRef to check if it's a subquery/CTE
+        let table_ref = table_refs.iter().find(|r| {
+            r.alias.as_ref().map(|a| a.to_lowercase()) == Some(table_lower.clone())
+                || r.name.to_lowercase() == table_lower
+        });
+
+        // Get column names for this table
+        let column_names: Vec<String> = if let Some(tr) = table_ref {
+            if tr.is_subquery {
+                // For subqueries, we don't have schema info readily available
+                // Skip for now - subqueries need explicit qualification anyway
+                continue;
+            } else if let Some(cte_result) = cte_results.get(&tr.name) {
+                // CTE: get columns from CTE result schema (CteResult is a tuple: (TableSchema, Vec<Row>))
+                cte_result.0.columns.iter().map(|c| c.name.to_lowercase()).collect()
+            } else {
+                // Regular table: get columns from database
+                // Try multiple case variations and schema prefixes since database keys may vary
+                let actual_table_name = &tr.name;
+                let public_prefixed = format!("public.{}", actual_table_name);
+                let table = database.tables.get(actual_table_name)
+                    .or_else(|| database.tables.get(&actual_table_name.to_lowercase()))
+                    .or_else(|| database.tables.get(&actual_table_name.to_uppercase()))
+                    .or_else(|| database.tables.get(&public_prefixed))
+                    .or_else(|| database.tables.get(&public_prefixed.to_lowercase()))
+                    .or_else(|| database.tables.get(&public_prefixed.to_uppercase()))
+                    .or_else(|| {
+                        // Case-insensitive search through all tables (handles schema.table format)
+                        let target = actual_table_name.to_lowercase();
+                        database.tables.iter().find(|(k, _)| {
+                            let key_lower = k.to_lowercase();
+                            key_lower == target || key_lower.ends_with(&format!(".{}", target))
+                        }).map(|(_, v)| v)
+                    });
+
+                if let Some(t) = table {
+                    t.schema.columns.iter().map(|c| c.name.to_lowercase()).collect()
+                } else {
+                    // Table not found in database - might be an alias or CTE
+                    continue;
+                }
+            }
+        } else {
+            // Direct table lookup without TableRef
+            let public_prefixed = format!("public.{}", table_name);
+            let table = database.tables.get(table_name)
+                .or_else(|| database.tables.get(&table_lower))
+                .or_else(|| database.tables.get(&table_name.to_uppercase()))
+                .or_else(|| database.tables.get(&public_prefixed))
+                .or_else(|| database.tables.get(&public_prefixed.to_lowercase()))
+                .or_else(|| database.tables.get(&public_prefixed.to_uppercase()))
+                .or_else(|| {
+                    // Case-insensitive search through all tables (handles schema.table format)
+                    database.tables.iter().find(|(k, _)| {
+                        let key_lower = k.to_lowercase();
+                        key_lower == table_lower || key_lower.ends_with(&format!(".{}", table_lower))
+                    }).map(|(_, v)| v)
+                });
+
+            if let Some(t) = table {
+                t.schema.columns.iter().map(|c| c.name.to_lowercase()).collect()
+            } else {
+                continue;
+            }
+        };
+
+        // Add columns to the mapping
+        for col_name in column_names {
+            column_to_table.entry(col_name).or_default().push(table_lower.clone());
+        }
+    }
+
+    // Convert to single-table mapping, excluding ambiguous columns
+    let mut result: HashMap<String, String> = HashMap::new();
+    for (col, tables) in column_to_table {
+        if tables.len() == 1 {
+            result.insert(col, tables.into_iter().next().unwrap());
+        }
+        // Ambiguous columns (in multiple tables) are not included
+        // This forces the user to qualify them explicitly
+    }
+
+    result
+}
+
+/// Resolve an unqualified column to its table using schema-based lookup
+///
+/// Returns the table name if the column is found in exactly one table,
+/// None otherwise (column not found or ambiguous).
+pub(super) fn resolve_column_to_table(
+    column: &str,
+    column_to_table: &HashMap<String, String>,
+) -> Option<String> {
+    column_to_table.get(&column.to_lowercase()).cloned()
+}
+
+/// Resolve an unqualified column using schema-based lookup with TPC-H heuristic fallback
+///
+/// Primary resolution uses the schema-based column-to-table map.
+/// Falls back to TPC-H prefix matching ONLY if schema lookup fails.
+/// The SQLLogicTest suffix pattern has been removed as it was test-specific.
+///
+/// # Parameters
+/// - `column`: The unqualified column name
+/// - `column_to_table`: Schema-based column-to-table mapping
+/// - `available_tables`: Set of FROM clause tables (for fallback heuristics)
+pub(super) fn resolve_column_with_fallback(
+    column: &str,
+    column_to_table: &HashMap<String, String>,
+    available_tables: &HashSet<String>,
+) -> Option<String> {
+    // Primary: Schema-based lookup
+    if let Some(table) = resolve_column_to_table(column, column_to_table) {
+        return Some(table);
+    }
+
+    // Fallback: TPC-H prefix pattern only (test-specific heuristics removed)
+    // This handles TPC-H queries where columns like l_orderkey → lineitem
+    let prefix = column.split('_').next().unwrap_or("").to_uppercase();
+    if prefix.is_empty() {
+        return None;
+    }
+
+    // Try exact match, prefix match, then abbreviation match
+    let mut exact_match: Option<String> = None;
+    let mut prefix_matches = Vec::new();
+    let mut abbrev_matches = Vec::new();
+
+    for table in available_tables {
+        let table_upper = table.to_uppercase();
+        if table_upper == prefix {
+            exact_match = Some(table.clone());
+            break;
+        } else if table_upper.starts_with(&prefix) {
+            prefix_matches.push(table.clone());
+        } else {
+            let abbrev = get_table_abbreviation(table);
+            if abbrev.to_uppercase() == prefix {
+                abbrev_matches.push(table.clone());
+            }
+        }
+    }
+
+    if let Some(table) = exact_match {
+        return Some(table);
+    }
+    if !prefix_matches.is_empty() {
+        prefix_matches.sort_by_key(|t| t.len());
+        return prefix_matches.into_iter().next();
+    }
+    if !abbrev_matches.is_empty() {
+        abbrev_matches.sort_by_key(|t| t.len());
+        return abbrev_matches.into_iter().next();
+    }
+
+    None
 }

@@ -1,6 +1,6 @@
 //! Join graph construction and table reference analysis
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use vibesql_ast::{Expression, FromClause, JoinType};
 
 /// Information about a table extracted from a FROM clause
@@ -92,163 +92,111 @@ pub(super) fn extract_conditions_with_types(from: &FromClause, conditions: &mut 
 ///
 /// This function recursively walks an expression tree and collects all table names
 /// mentioned in column references. Used to determine which tables a join condition connects.
-/// Handles both explicit table qualifiers and infers tables from column name prefixes.
+///
+/// Uses schema-based column resolution when a column_to_table map is provided,
+/// falling back to TPC-H prefix heuristics for unresolved columns.
 ///
 /// # Parameters
 /// - `expr`: The expression to analyze
 /// - `output`: HashSet to populate with referenced table names
-/// - `available_tables`: Set of FROM clause tables (for inferring unqualified columns)
+/// - `available_tables`: Set of FROM clause tables
+/// - `column_to_table`: Optional schema-based column-to-table mapping
 pub(super) fn extract_referenced_tables(
     expr: &Expression,
     output: &mut HashSet<String>,
     available_tables: &HashSet<String>,
+) {
+    // Use empty map for legacy compatibility - new code should use extract_referenced_tables_with_schema
+    let empty_map = HashMap::new();
+    extract_referenced_tables_with_schema(expr, output, available_tables, &empty_map);
+}
+
+/// Extract all table names referenced in an expression using schema-based column resolution
+///
+/// This is the preferred method that uses actual database schema to resolve unqualified columns.
+/// Falls back to TPC-H prefix heuristics only when schema lookup fails.
+///
+/// # Parameters
+/// - `expr`: The expression to analyze
+/// - `output`: HashSet to populate with referenced table names
+/// - `available_tables`: Set of FROM clause tables
+/// - `column_to_table`: Schema-based column-to-table mapping
+pub(super) fn extract_referenced_tables_with_schema(
+    expr: &Expression,
+    output: &mut HashSet<String>,
+    available_tables: &HashSet<String>,
+    column_to_table: &HashMap<String, String>,
 ) {
     match expr {
         Expression::ColumnRef { table: Some(table), .. } => {
             output.insert(table.to_lowercase());
         }
         Expression::ColumnRef { table: None, column } => {
-            // Infer table from column name using multiple matching strategies
-            // This handles different naming conventions:
-            // 1. SQLLogicTest suffix pattern: column "a1" → table "t1" (numeric suffix)
-            // 2. TPC-H prefix pattern: column "l_orderkey" → table "lineitem" (prefix before underscore)
-            // 3. Abbreviation match: column "ps_suppkey" → table "partsupp"
-
-            // --- Tier 1: SQLLogicTest suffix pattern ---
-            // Columns like "a1", "b2", "x9" where the trailing digit indicates the table
-            // This is common in SQLLogicTest files with tables t1, t2, ..., t9
-            let mut found = false;
-            if let Some(last_char) = column.chars().last() {
-                if last_char.is_ascii_digit() {
-                    let table_candidate = format!("t{}", last_char);
-                    for table in available_tables {
-                        if table.eq_ignore_ascii_case(&table_candidate) {
-                            output.insert(table.clone());
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if found {
-                return; // Found via suffix pattern, no need for other strategies
-            }
-
-            // --- Tier 2: TPC-H prefix pattern ---
-            // Extract prefix: everything before the first underscore
-            let prefix = column
-                .split('_')
-                .next()
-                .unwrap_or("");
-
-            if !prefix.is_empty() {
-                // Try to find a FROM clause table that starts with this prefix (case-insensitive)
-                let prefix_upper = prefix.to_uppercase();
-
-                // Try three matching strategies in order of specificity:
-                // 1. Exact match (e.g., "P" == "P")
-                // 2. Prefix match (e.g., "P" matches "PART")
-                // 3. Abbreviation match (e.g., "PS" matches "partsupp")
-                let mut exact_match: Option<String> = None;
-                let mut prefix_matches = Vec::new();
-                let mut abbrev_matches = Vec::new();
-
-                for table in available_tables {
-                    let table_upper = table.to_uppercase();
-                    if table_upper == prefix_upper {
-                        exact_match = Some(table.clone());
-                        break;  // Exact match takes priority
-                    } else if table_upper.starts_with(&prefix_upper) {
-                        prefix_matches.push(table.clone());
-                    } else {
-                        // Check abbreviation match (e.g., "ps" → "partsupp")
-                        let abbrev = super::utils::get_table_abbreviation(table);
-                        if abbrev.to_uppercase() == prefix_upper {
-                            abbrev_matches.push(table.clone());
-                        }
-                    }
-                }
-
-                if let Some(table) = exact_match {
-                    output.insert(table);
-                } else if !prefix_matches.is_empty() {
-                    // Sort by length ascending to prefer shorter, more specific matches
-                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
-                    prefix_matches.sort_by_key(|t| t.len());
-                    if let Some(table) = prefix_matches.into_iter().next() {
-                        output.insert(table);
-                    }
-                } else if !abbrev_matches.is_empty() {
-                    // Use abbreviation match as last resort
-                    // Sort by length to prefer shorter names if multiple match
-                    abbrev_matches.sort_by_key(|t| t.len());
-                    if let Some(table) = abbrev_matches.into_iter().next() {
-                        output.insert(table);
-                    }
-                }
+            // Use schema-based lookup with TPC-H fallback
+            if let Some(table) = super::utils::resolve_column_with_fallback(column, column_to_table, available_tables) {
+                output.insert(table.to_lowercase());
             }
         }
         Expression::BinaryOp { left, right, .. } => {
-            extract_referenced_tables(left, output, available_tables);
-            extract_referenced_tables(right, output, available_tables);
+            extract_referenced_tables_with_schema(left, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(right, output, available_tables, column_to_table);
         }
         Expression::UnaryOp { expr, .. } => {
-            extract_referenced_tables(expr, output, available_tables);
+            extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
         }
         Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
             for arg in args {
-                extract_referenced_tables(arg, output, available_tables);
+                extract_referenced_tables_with_schema(arg, output, available_tables, column_to_table);
             }
         }
         Expression::InList { expr, values, .. } => {
-            extract_referenced_tables(expr, output, available_tables);
+            extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
             for item in values {
-                extract_referenced_tables(item, output, available_tables);
+                extract_referenced_tables_with_schema(item, output, available_tables, column_to_table);
             }
         }
         Expression::Between { expr, low, high, .. } => {
-            extract_referenced_tables(expr, output, available_tables);
-            extract_referenced_tables(low, output, available_tables);
-            extract_referenced_tables(high, output, available_tables);
+            extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(low, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(high, output, available_tables, column_to_table);
         }
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                extract_referenced_tables(op, output, available_tables);
+                extract_referenced_tables_with_schema(op, output, available_tables, column_to_table);
             }
             for clause in when_clauses {
                 for condition in &clause.conditions {
-                    extract_referenced_tables(condition, output, available_tables);
+                    extract_referenced_tables_with_schema(condition, output, available_tables, column_to_table);
                 }
-                extract_referenced_tables(&clause.result, output, available_tables);
+                extract_referenced_tables_with_schema(&clause.result, output, available_tables, column_to_table);
             }
             if let Some(else_res) = else_result {
-                extract_referenced_tables(else_res, output, available_tables);
+                extract_referenced_tables_with_schema(else_res, output, available_tables, column_to_table);
             }
         }
         Expression::IsNull { expr, .. } => {
-            extract_referenced_tables(expr, output, available_tables);
+            extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
         }
         Expression::Cast { expr, .. } => {
-            extract_referenced_tables(expr, output, available_tables);
+            extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
         }
         Expression::In { expr, .. } => {
-            extract_referenced_tables(expr, output, available_tables);
+            extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
             // Note: We don't traverse into subqueries as they reference different tables
         }
         Expression::Position { substring, string, .. } => {
-            extract_referenced_tables(substring, output, available_tables);
-            extract_referenced_tables(string, output, available_tables);
+            extract_referenced_tables_with_schema(substring, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(string, output, available_tables, column_to_table);
         }
         Expression::Trim { removal_char, string, .. } => {
             if let Some(char_expr) = removal_char {
-                extract_referenced_tables(char_expr, output, available_tables);
+                extract_referenced_tables_with_schema(char_expr, output, available_tables, column_to_table);
             }
-            extract_referenced_tables(string, output, available_tables);
+            extract_referenced_tables_with_schema(string, output, available_tables, column_to_table);
         }
         Expression::Like { expr, pattern, .. } => {
-            extract_referenced_tables(expr, output, available_tables);
-            extract_referenced_tables(pattern, output, available_tables);
+            extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(pattern, output, available_tables, column_to_table);
         }
         // For other expressions (literals, wildcards, subqueries, etc.), no direct column refs to extract
         _ => {}
