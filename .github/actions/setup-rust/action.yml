@@ -29,7 +29,8 @@ runs:
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        shared-key: rust-${{ inputs.cache-key-suffix }}
+        # x86-64-v2 suffix busts cache after target-cpu change (see .cargo/config.toml)
+        shared-key: rust-${{ inputs.cache-key-suffix }}-x86-64-v2
         # Automatically handles:
         # - ~/.cargo/bin/
         # - ~/.cargo/registry/index/
