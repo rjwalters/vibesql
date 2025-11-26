@@ -275,6 +275,7 @@ fn is_column_ref(expr: &Expression, column_name: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn make_index(columns: Vec<String>) -> IndexMetadata {
         IndexMetadata {
             name: "test_idx".to_string(),

@@ -1,7 +1,7 @@
 //! View DDL executor
 
 use vibesql_ast::{CreateViewStmt, DropViewStmt};
-use vibesql_catalog::ViewDefinition;
+use vibesql_catalog::{ViewDefinition, ViewDropBehavior};
 use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
@@ -53,10 +53,22 @@ impl ViewExecutor {
         stmt: &DropViewStmt,
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
+        // Determine drop behavior:
+        // - CASCADE: drop dependent views recursively
+        // - RESTRICT (explicit): fail if dependents exist
+        // - Neither: SQLite-compatible behavior (just drop, ignore dependents)
+        let drop_behavior = if stmt.cascade {
+            ViewDropBehavior::Cascade
+        } else if stmt.restrict {
+            ViewDropBehavior::Restrict
+        } else {
+            ViewDropBehavior::Silent // SQLite-compatible: allow dropping even with dependents
+        };
+
         // Drop the view
         let result = database
             .catalog
-            .drop_view(&stmt.view_name, stmt.cascade);
+            .drop_view_with_behavior(&stmt.view_name, drop_behavior);
 
         match result {
             Ok(()) => Ok(format!("View '{}' dropped", stmt.view_name)),

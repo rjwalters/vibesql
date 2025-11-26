@@ -249,8 +249,6 @@ impl<'a> IndexPlanner<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Note: Full integration tests are in the index_scan module tests.
     // These tests verify the IndexPlanner API surface.
 

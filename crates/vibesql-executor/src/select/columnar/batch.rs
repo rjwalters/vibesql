@@ -882,7 +882,6 @@ impl ColumnArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibesql_types::Date;
 
     #[test]
     fn test_columnar_batch_creation() {
@@ -1015,7 +1014,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "arrow")]
     fn test_arrow_integration() {
         use arrow::array::{Float64Array, Int64Array};
         use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
@@ -1065,7 +1063,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "arrow")]
     fn test_arrow_integration_with_nulls() {
         use arrow::array::{Float64Array, Int64Array};
         use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};

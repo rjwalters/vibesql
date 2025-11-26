@@ -55,6 +55,7 @@ pub(crate) fn create_procedure_with_in_param(
 }
 
 /// Creates a simple function with minimal boilerplate
+#[allow(dead_code)]
 pub(crate) fn create_simple_function(
     name: &str,
     parameters: Vec<FunctionParameter>,
@@ -74,6 +75,7 @@ pub(crate) fn create_simple_function(
 }
 
 /// Creates an empty function (useful for basic existence tests)
+#[allow(dead_code)]
 pub(crate) fn create_empty_function(name: &str, return_type: DataType) -> CreateFunctionStmt {
     create_simple_function(name, vec![], return_type, vec![])
 }

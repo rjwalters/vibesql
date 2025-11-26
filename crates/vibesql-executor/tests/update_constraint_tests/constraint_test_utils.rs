@@ -131,6 +131,7 @@ pub fn create_employees_table_with_check_bonus(db: &mut Database) {
 }
 
 /// Helper to insert a user row with optional email
+#[allow(dead_code)]
 pub fn insert_user_row(
     db: &mut Database,
     id: i64,

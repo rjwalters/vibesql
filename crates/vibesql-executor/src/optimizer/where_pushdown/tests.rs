@@ -2,7 +2,6 @@
 
 use super::*;
 use super::table_refs::flatten_conjuncts;
-use super::or_conditions::combine_predicates_with_and;
 
 #[test]
 fn test_flatten_conjuncts_single() {

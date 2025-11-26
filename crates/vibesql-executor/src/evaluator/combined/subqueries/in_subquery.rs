@@ -47,13 +47,14 @@ impl CombinedExpressionEvaluator<'_> {
         // Only applies to simple SELECT column FROM table WHERE ... queries
         // This is tried first because it's the fastest when applicable
         if can_use_index_for_in_subquery(subquery, database) {
-            if let Some(index_result) = try_index_optimized_in_subquery(
+            let index_result_opt = try_index_optimized_in_subquery(
                 &expr_val,
                 subquery,
                 negated,
                 database,
                 sql_mode.clone(),
-            )? {
+            )?;
+            if let Some(index_result) = index_result_opt {
                 return Ok(index_result);
             }
             // If index optimization fails, fall through to caching/regular execution

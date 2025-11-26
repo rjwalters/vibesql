@@ -5,6 +5,9 @@
 //! - Query definitions (`queries` module)
 //! - Schema creation and data loading (`schema` module)
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 pub mod data;
 pub mod queries;
 pub mod schema;

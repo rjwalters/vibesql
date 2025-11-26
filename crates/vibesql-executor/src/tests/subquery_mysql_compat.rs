@@ -18,8 +18,6 @@
 //! 4. Nested subquery execution
 //! 5. Error message compatibility
 
-use super::super::*;
-
 // ========================================================================
 // MySQL NULL Handling in Subqueries
 // ========================================================================

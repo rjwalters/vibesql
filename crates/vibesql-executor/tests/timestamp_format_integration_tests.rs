@@ -5,7 +5,7 @@
 mod common;
 
 use vibesql_ast::Statement;
-use vibesql_executor::{CreateTableExecutor, InsertExecutor, SelectExecutor};
+use vibesql_executor::{InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use common::setup_timestamps_table as setup_test_table;

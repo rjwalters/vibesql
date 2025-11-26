@@ -109,6 +109,11 @@ pub struct DropViewStmt {
     pub view_name: String,
     pub if_exists: bool,
     pub cascade: bool,
+    /// Whether RESTRICT was explicitly specified.
+    /// When neither CASCADE nor RESTRICT is specified, we use SQLite-compatible
+    /// behavior (allow dropping views even if dependents exist).
+    /// When RESTRICT is explicit, we enforce dependency checks.
+    pub restrict: bool,
 }
 
 /// CREATE TRIGGER statement

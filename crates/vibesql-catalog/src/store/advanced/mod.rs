@@ -34,3 +34,6 @@ mod views;
 // Note: All methods are defined as `impl Catalog` in each module,
 // so they are automatically available on the Catalog type.
 // No explicit re-exports are needed since the impls are applied directly.
+
+// Re-export ViewDropBehavior for use by external code
+pub use views::ViewDropBehavior;
