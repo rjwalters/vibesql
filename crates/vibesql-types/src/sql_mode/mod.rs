@@ -59,6 +59,32 @@ impl Default for SqlMode {
     }
 }
 
+impl std::fmt::Display for SqlMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SqlMode::MySQL { .. } => write!(f, "mysql"),
+            SqlMode::SQLite => write!(f, "sqlite"),
+        }
+    }
+}
+
+impl std::str::FromStr for SqlMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "mysql" => Ok(SqlMode::MySQL {
+                flags: MySqlModeFlags::default(),
+            }),
+            "sqlite" => Ok(SqlMode::SQLite),
+            _ => Err(format!(
+                "Unknown SQL mode: '{}'. Valid modes: mysql, sqlite",
+                s
+            )),
+        }
+    }
+}
+
 impl SqlMode {
     /// Check if division should return floating-point (true) or integer (false)
     #[deprecated(
@@ -347,5 +373,71 @@ mod tests {
             sqlite_mode.string_concat_operator(),
             ConcatOperator::PipePipe
         );
+    }
+
+    // Tests for FromStr and Display implementations
+
+    #[test]
+    fn test_display_mysql() {
+        let mode = SqlMode::MySQL {
+            flags: MySqlModeFlags::default(),
+        };
+        assert_eq!(mode.to_string(), "mysql");
+    }
+
+    #[test]
+    fn test_display_sqlite() {
+        let mode = SqlMode::SQLite;
+        assert_eq!(mode.to_string(), "sqlite");
+    }
+
+    #[test]
+    fn test_from_str_mysql() {
+        let mode: SqlMode = "mysql".parse().unwrap();
+        assert!(matches!(mode, SqlMode::MySQL { .. }));
+    }
+
+    #[test]
+    fn test_from_str_sqlite() {
+        let mode: SqlMode = "sqlite".parse().unwrap();
+        assert!(matches!(mode, SqlMode::SQLite));
+    }
+
+    #[test]
+    fn test_from_str_case_insensitive() {
+        let mode1: SqlMode = "MYSQL".parse().unwrap();
+        assert!(matches!(mode1, SqlMode::MySQL { .. }));
+
+        let mode2: SqlMode = "SQLite".parse().unwrap();
+        assert!(matches!(mode2, SqlMode::SQLite));
+
+        let mode3: SqlMode = "MySql".parse().unwrap();
+        assert!(matches!(mode3, SqlMode::MySQL { .. }));
+    }
+
+    #[test]
+    fn test_from_str_invalid() {
+        let result: Result<SqlMode, _> = "invalid".parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Unknown SQL mode"));
+        assert!(err.contains("invalid"));
+    }
+
+    #[test]
+    fn test_roundtrip() {
+        // MySQL roundtrip
+        let mysql = SqlMode::MySQL {
+            flags: MySqlModeFlags::default(),
+        };
+        let mysql_str = mysql.to_string();
+        let mysql_parsed: SqlMode = mysql_str.parse().unwrap();
+        assert!(matches!(mysql_parsed, SqlMode::MySQL { .. }));
+
+        // SQLite roundtrip
+        let sqlite = SqlMode::SQLite;
+        let sqlite_str = sqlite.to_string();
+        let sqlite_parsed: SqlMode = sqlite_str.parse().unwrap();
+        assert!(matches!(sqlite_parsed, SqlMode::SQLite));
     }
 }

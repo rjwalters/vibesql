@@ -173,6 +173,25 @@ impl SchemaExecutor {
         // Evaluate the value expression
         let value = evaluator.eval(&stmt.value, &empty_row)?;
 
+        // Special handling for sql_mode variable - update the SQL mode
+        if stmt.variable.eq_ignore_ascii_case("sql_mode") {
+            // Extract the mode string from the value
+            let mode_str = match &value {
+                vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => s.clone(),
+                other => other.to_string(),
+            };
+
+            // Parse the mode string into SqlMode
+            let mode: vibesql_types::SqlMode = mode_str.parse().map_err(|e: String| {
+                ExecutorError::StorageError(e)
+            })?;
+
+            // Set the SQL mode (this also updates the @@sql_mode session variable)
+            database.set_sql_mode(mode.clone());
+
+            return Ok(format!("SQL mode set to '{}'", mode));
+        }
+
         // Set the session variable in the database
         // Note: For now, we ignore the GLOBAL scope and always set session variables
         // Implementing true GLOBAL variables would require a separate storage mechanism
