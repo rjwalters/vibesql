@@ -129,18 +129,11 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
         ];
 
         // Aggregates: SUM(l_extendedprice), COUNT(*)
-<<<<<<< Updated upstream
-=======
         let aggregates_tuple = vec![(1, AggregateOp::Sum), (0, AggregateOp::Count)];
->>>>>>> Stashed changes
         let aggregates = vec![
             AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
             AggregateSpec { op: AggregateOp::Count, source: AggregateSource::CountStar },
         ];
-<<<<<<< Updated upstream
-        let aggregates_tuple = vec![(1, AggregateOp::Sum), (0, AggregateOp::Count)];
-=======
->>>>>>> Stashed changes
 
         // Benchmark row-by-row execution
         group.bench_with_input(
@@ -182,14 +175,6 @@ fn bench_simple_aggregation(c: &mut Criterion) {
         let predicates = vec![];
 
         // Aggregates: SUM(l_extendedprice), AVG(l_discount), COUNT(*)
-<<<<<<< Updated upstream
-        let aggregates = vec![
-            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
-            AggregateSpec { op: AggregateOp::Avg, source: AggregateSource::Column(2) },
-            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::CountStar },
-        ];
-=======
->>>>>>> Stashed changes
         let aggregates_tuple = vec![
             (1, AggregateOp::Sum),
             (2, AggregateOp::Avg),
@@ -250,17 +235,10 @@ fn bench_selective_filtering(c: &mut Criterion) {
             },
         ];
 
-<<<<<<< Updated upstream
-        let aggregates = vec![
-            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
-        ];
-        let aggregates_tuple = vec![(1, AggregateOp::Sum)];
-=======
         let aggregates_tuple = vec![(1, AggregateOp::Sum)];
         let aggregates = vec![
             AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
         ];
->>>>>>> Stashed changes
 
         // Benchmark row-by-row execution
         group.bench_with_input(
