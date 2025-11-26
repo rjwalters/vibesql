@@ -103,11 +103,31 @@ impl PredicateEvaluator for IntegerComparisonEvaluator {
             return Ok(false);
         }
 
-        // Extract i64 value (fast path - minimal enum matching)
-        let val_i64 = match value {
-            SqlValue::Integer(i) => *i,
-            SqlValue::Smallint(i) => *i as i64,
-            SqlValue::Bigint(i) => *i,
+        // Try integer comparison first (fast path)
+        if let Some(val_i64) = match value {
+            SqlValue::Integer(i) => Some(*i),
+            SqlValue::Smallint(i) => Some(*i as i64),
+            SqlValue::Bigint(i) => Some(*i),
+            _ => None,
+        } {
+            let result = match self.op {
+                ComparisonOp::Lt => val_i64 < self.constant,
+                ComparisonOp::Le => val_i64 <= self.constant,
+                ComparisonOp::Gt => val_i64 > self.constant,
+                ComparisonOp::Ge => val_i64 >= self.constant,
+                ComparisonOp::Eq => val_i64 == self.constant,
+                ComparisonOp::NotEq => val_i64 != self.constant,
+            };
+            return Ok(result);
+        }
+
+        // Fall back to float comparison for approximate numeric types
+        // SQL standard requires implicit coercion between numeric types
+        let val_f64 = match value {
+            SqlValue::Double(f) => *f,
+            SqlValue::Float(f) => *f as f64,
+            SqlValue::Real(f) => *f as f64,
+            SqlValue::Numeric(f) => *f,
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: value.clone(),
@@ -117,14 +137,14 @@ impl PredicateEvaluator for IntegerComparisonEvaluator {
             }
         };
 
-        // Perform comparison without enum matching
+        let const_f64 = self.constant as f64;
         let result = match self.op {
-            ComparisonOp::Lt => val_i64 < self.constant,
-            ComparisonOp::Le => val_i64 <= self.constant,
-            ComparisonOp::Gt => val_i64 > self.constant,
-            ComparisonOp::Ge => val_i64 >= self.constant,
-            ComparisonOp::Eq => val_i64 == self.constant,
-            ComparisonOp::NotEq => val_i64 != self.constant,
+            ComparisonOp::Lt => val_f64 < const_f64,
+            ComparisonOp::Le => val_f64 <= const_f64,
+            ComparisonOp::Gt => val_f64 > const_f64,
+            ComparisonOp::Ge => val_f64 >= const_f64,
+            ComparisonOp::Eq => (val_f64 - const_f64).abs() < f64::EPSILON,
+            ComparisonOp::NotEq => (val_f64 - const_f64).abs() >= f64::EPSILON,
         };
 
         Ok(result)
@@ -288,6 +308,42 @@ mod tests {
         // Test: NULL > 10 = false
         let row = create_test_row(vec![SqlValue::Null]);
         assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+    }
+
+    #[test]
+    fn test_integer_comparison_with_float_column() {
+        // Issue #2609: IntegerComparisonEvaluator must handle Float column values
+        // This happens when comparing a Float column with an Integer literal
+
+        // Test: Float(822.1) >= -10 = true
+        let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Ge, -10);
+        let row = create_test_row(vec![SqlValue::Float(822.1)]);
+        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+
+        // Test: Float(593.78) >= -77 = true
+        let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Ge, -77);
+        let row = create_test_row(vec![SqlValue::Float(593.78)]);
+        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+
+        // Test: Float(-100.5) >= -10 = false
+        let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Ge, -10);
+        let row = create_test_row(vec![SqlValue::Float(-100.5)]);
+        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+
+        // Test: Double column with integer constant
+        let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Lt, 100);
+        let row = create_test_row(vec![SqlValue::Double(50.5)]);
+        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+
+        // Test: Real column with integer constant
+        let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Gt, 0);
+        let row = create_test_row(vec![SqlValue::Real(25.0)]);
+        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+
+        // Test: Numeric column with integer constant
+        let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Le, 50);
+        let row = create_test_row(vec![SqlValue::Numeric(49.99)]);
+        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
     }
 
     #[test]
