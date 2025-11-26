@@ -80,6 +80,69 @@ impl ColumnData {
         self.len() == 0
     }
 
+    /// Estimate the memory size of this column in bytes
+    ///
+    /// This is used for memory budgeting in the columnar cache.
+    /// The estimate includes:
+    /// - Value storage (type-specific size * element count)
+    /// - NULL bitmap (1 byte per element, not packed)
+    /// - Vec overhead (capacity, length, pointer)
+    pub fn size_in_bytes(&self) -> usize {
+        const VEC_OVERHEAD: usize = 3 * std::mem::size_of::<usize>(); // ptr, len, cap
+
+        match self {
+            ColumnData::Int64 { values, nulls } => {
+                VEC_OVERHEAD * 2
+                    + values.capacity() * std::mem::size_of::<i64>()
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+            ColumnData::Float64 { values, nulls } => {
+                VEC_OVERHEAD * 2
+                    + values.capacity() * std::mem::size_of::<f64>()
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+            ColumnData::String { values, nulls } => {
+                // For strings, we need to account for the String struct overhead
+                // plus the actual string data on the heap
+                let string_overhead = std::mem::size_of::<String>(); // ptr, len, cap
+                let string_data: usize = values.iter().map(|s| s.capacity()).sum();
+                VEC_OVERHEAD * 2
+                    + values.capacity() * string_overhead
+                    + string_data
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+            ColumnData::Bool { values, nulls } => {
+                VEC_OVERHEAD * 2
+                    + values.capacity() * std::mem::size_of::<bool>()
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+            ColumnData::Date { values, nulls } => {
+                VEC_OVERHEAD * 2
+                    + values.capacity() * std::mem::size_of::<Date>()
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+            ColumnData::Time { values, nulls } => {
+                VEC_OVERHEAD * 2
+                    + values.capacity() * std::mem::size_of::<Time>()
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+            ColumnData::Timestamp { values, nulls } => {
+                VEC_OVERHEAD * 2
+                    + values.capacity() * std::mem::size_of::<Timestamp>()
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+            ColumnData::Interval { values, nulls } => {
+                // Interval contains a String, so we need to account for that
+                let interval_overhead = std::mem::size_of::<Interval>();
+                let string_data: usize = values.iter().map(|i| i.value.capacity()).sum();
+                VEC_OVERHEAD * 2
+                    + values.capacity() * interval_overhead
+                    + string_data
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
+        }
+    }
+
     /// Check if the value at the given index is NULL
     pub fn is_null(&self, index: usize) -> bool {
         match self {
@@ -519,6 +582,40 @@ impl ColumnarTable {
     /// Get all column names
     pub fn column_names(&self) -> &[String] {
         &self.column_names
+    }
+
+    /// Estimate the memory size of this columnar table in bytes
+    ///
+    /// This is used for memory budgeting in the columnar cache.
+    /// The estimate includes:
+    /// - All column data (via ColumnData::size_in_bytes)
+    /// - HashMap overhead for columns
+    /// - Vec overhead for column_names
+    /// - String storage for column names
+    pub fn size_in_bytes(&self) -> usize {
+        const VEC_OVERHEAD: usize = 3 * std::mem::size_of::<usize>();
+        // HashMap has ~48 bytes base overhead plus per-bucket overhead
+        const HASHMAP_BASE_OVERHEAD: usize = 48;
+        const HASHMAP_ENTRY_OVERHEAD: usize = 8; // approximate per-entry overhead
+
+        let columns_size: usize = self.columns.values().map(|c| c.size_in_bytes()).sum();
+
+        let column_names_size: usize = self.column_names.iter().map(|s| {
+            std::mem::size_of::<String>() + s.capacity()
+        }).sum();
+
+        // HashMap keys (column names stored again)
+        let hashmap_keys_size: usize = self.columns.keys().map(|s| {
+            std::mem::size_of::<String>() + s.capacity()
+        }).sum();
+
+        std::mem::size_of::<Self>()  // Base struct size
+            + columns_size
+            + HASHMAP_BASE_OVERHEAD
+            + self.columns.len() * HASHMAP_ENTRY_OVERHEAD
+            + hashmap_keys_size
+            + VEC_OVERHEAD
+            + column_names_size
     }
 }
 

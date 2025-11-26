@@ -303,6 +303,11 @@ impl UpdateExecutor {
             database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, index);
         }
 
+        // Invalidate columnar cache since table data has changed
+        if update_count > 0 {
+            database.invalidate_columnar_cache(&stmt.table_name);
+        }
+
         // Fire AFTER STATEMENT triggers (unless we're already inside a trigger context)
         if trigger_context.is_none() {
             crate::TriggerFirer::execute_after_statement_triggers(

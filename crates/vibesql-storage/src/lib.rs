@@ -6,6 +6,7 @@ pub mod backend;
 pub mod btree;
 pub mod buffer;
 pub mod columnar;
+pub mod columnar_cache;
 pub mod database;
 pub mod error;
 pub mod index;
@@ -19,6 +20,7 @@ pub mod table;
 pub use backend::{StorageBackend, StorageFile};
 pub use buffer::{BufferPool, BufferPoolStats};
 pub use columnar::{ColumnData, ColumnarTable};
+pub use columnar_cache::{CacheStats, ColumnarCache};
 pub use database::{
     Database, DatabaseConfig, IndexData, IndexManager, IndexMetadata, SpillPolicy,
     SpatialIndexMetadata, TransactionState,
