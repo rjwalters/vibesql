@@ -93,8 +93,8 @@ fn try_extract_subqueries_to_joins(
     match where_clause {
         // Single IN subquery
         Expression::In { expr, subquery, negated } => {
-            if let Some(join) = try_convert_in_to_join(from, expr, subquery, *negated) {
-                return Some((join, None)); // Removed WHERE clause entirely
+            if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
+                return Some((result.from, None)); // Removed WHERE clause entirely
             }
             None
         }
@@ -104,9 +104,16 @@ fn try_extract_subqueries_to_joins(
             // Try left side first - check both IN and EXISTS
             match left.as_ref() {
                 Expression::In { expr, subquery, negated } => {
-                    if let Some(join) = try_convert_in_to_join(from, expr, subquery, *negated) {
+                    if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
                         // Successfully converted left IN side, keep right side as WHERE clause
-                        return Some((join, Some((**right).clone())));
+                        // For self-joins, qualify unqualified columns in remaining WHERE to prevent
+                        // incorrect predicate pushdown to the aliased subquery table
+                        let remaining_where = if let Some(outer_table) = &result.outer_table_for_qualification {
+                            qualify_outer_column_refs(right, outer_table)
+                        } else {
+                            (**right).clone()
+                        };
+                        return Some((result.from, Some(remaining_where)));
                     }
                 }
                 Expression::Exists { subquery, negated } => {
@@ -121,9 +128,16 @@ fn try_extract_subqueries_to_joins(
             // Try right side - check both IN and EXISTS
             match right.as_ref() {
                 Expression::In { expr, subquery, negated } => {
-                    if let Some(join) = try_convert_in_to_join(from, expr, subquery, *negated) {
+                    if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
                         // Successfully converted right IN side, keep left side as WHERE clause
-                        return Some((join, Some((**left).clone())));
+                        // For self-joins, qualify unqualified columns in remaining WHERE to prevent
+                        // incorrect predicate pushdown to the aliased subquery table
+                        let remaining_where = if let Some(outer_table) = &result.outer_table_for_qualification {
+                            qualify_outer_column_refs(left, outer_table)
+                        } else {
+                            (**left).clone()
+                        };
+                        return Some((result.from, Some(remaining_where)));
                     }
                 }
                 Expression::Exists { subquery, negated } => {
@@ -331,13 +345,21 @@ fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str, new_alias:
     }
 }
 
+/// Result of converting an IN subquery to a join
+/// Contains the new FROM clause and optional outer table name for self-join qualification
+struct InToJoinResult {
+    from: FromClause,
+    /// If this was a self-join, contains the outer table name for qualifying remaining WHERE clauses
+    outer_table_for_qualification: Option<String>,
+}
+
 /// Try to convert an IN subquery to a SEMI or ANTI join
 fn try_convert_in_to_join(
     from: &FromClause,
     expr: &Expression,
     subquery: &SelectStmt,
     negated: bool,
-) -> Option<FromClause> {
+) -> Option<InToJoinResult> {
     // Only handle simple subqueries:
     // - Single table in FROM clause
     // - Single column in SELECT list
@@ -373,9 +395,13 @@ fn try_convert_in_to_join(
     let needs_alias = is_self_join(from, &table_name, &table_alias);
 
     // Generate a unique alias for self-joins to avoid schema conflicts
-    let (effective_alias, outer_expr_qualified, subquery_column_rewritten, subquery_where_rewritten) = if needs_alias {
+    let (effective_alias, outer_expr_qualified, subquery_column_rewritten, subquery_where_rewritten, outer_table_for_qual) = if needs_alias {
         // Create a unique alias for the right side of the self-join
         let new_alias = format!("__subquery_{}", table_name);
+
+        if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+            eprintln!("[SUBQUERY_TRANSFORM] Self-join detected: table={}, new_alias={}", table_name, new_alias);
+        }
 
         // Get the outer table name to qualify outer column references
         let outer_table_name = get_primary_table_name(from)
@@ -393,9 +419,16 @@ fn try_convert_in_to_join(
             rewrite_column_refs_with_alias(w, &table_name, &new_alias)
         });
 
-        (Some(new_alias), qualified_expr, rewritten_col, rewritten_where)
+        if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+            eprintln!("[SUBQUERY_TRANSFORM] outer_table_name={}", outer_table_name);
+            eprintln!("[SUBQUERY_TRANSFORM] qualified_expr={:?}", qualified_expr);
+            eprintln!("[SUBQUERY_TRANSFORM] rewritten_col={:?}", rewritten_col);
+            eprintln!("[SUBQUERY_TRANSFORM] rewritten_where={:?}", rewritten_where);
+        }
+
+        (Some(new_alias), qualified_expr, rewritten_col, rewritten_where, Some(outer_table_name))
     } else {
-        (table_alias.clone(), expr.clone(), subquery_column.clone(), subquery.where_clause.clone())
+        (table_alias.clone(), expr.clone(), subquery_column.clone(), subquery.where_clause.clone(), None)
     };
 
     // Create the join condition: expr = subquery_column
@@ -434,11 +467,20 @@ fn try_convert_in_to_join(
         left: Box::new(from.clone()),
         right: Box::new(right_from),
         join_type,
-        condition: final_condition,
+        condition: final_condition.clone(),
         natural: false,
     };
 
-    Some(new_from)
+    if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+        eprintln!("[SUBQUERY_TRANSFORM] Final condition: {:?}", final_condition);
+        eprintln!("[SUBQUERY_TRANSFORM] New FROM: {:?}", new_from);
+        eprintln!("[SUBQUERY_TRANSFORM] outer_table_for_qualification: {:?}", outer_table_for_qual);
+    }
+
+    Some(InToJoinResult {
+        from: new_from,
+        outer_table_for_qualification: outer_table_for_qual,
+    })
 }
 
 /// Try to convert an EXISTS subquery to a SEMI or ANTI join
