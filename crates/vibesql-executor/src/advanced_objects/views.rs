@@ -1,6 +1,7 @@
 //! Executor for VIEW objects (SQL:1999)
 
 use vibesql_ast::*;
+use vibesql_catalog::ViewDropBehavior;
 use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
@@ -49,7 +50,19 @@ pub fn execute_drop_view(stmt: &DropViewStmt, db: &mut Database) -> Result<(), E
         return Ok(());
     }
 
-    // Handle CASCADE to drop dependent views
-    db.catalog.drop_view(&stmt.view_name, stmt.cascade)?;
+    // Determine drop behavior:
+    // - CASCADE: drop dependent views recursively
+    // - RESTRICT (explicit): fail if dependents exist
+    // - Neither: SQLite-compatible behavior (just drop, ignore dependents)
+    let drop_behavior = if stmt.cascade {
+        ViewDropBehavior::Cascade
+    } else if stmt.restrict {
+        ViewDropBehavior::Restrict
+    } else {
+        ViewDropBehavior::Silent // SQLite-compatible: allow dropping even with dependents
+    };
+
+    db.catalog
+        .drop_view_with_behavior(&stmt.view_name, drop_behavior)?;
     Ok(())
 }

@@ -71,35 +71,31 @@ where
 
 /// Evaluate a column predicate on a specific value
 ///
-/// Returns true if the value satisfies the predicate
+/// Returns true if the value satisfies the predicate.
+/// Returns false if either the value or predicate threshold is NULL (per SQL standard).
 pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool {
+    use std::cmp::Ordering;
+
     match predicate {
         ColumnPredicate::LessThan { value: threshold, .. } => {
-            compare_values(value, threshold) == std::cmp::Ordering::Less
+            compare_values(value, threshold).equals(Ordering::Less)
         }
         ColumnPredicate::GreaterThan { value: threshold, .. } => {
-            compare_values(value, threshold) == std::cmp::Ordering::Greater
+            compare_values(value, threshold).equals(Ordering::Greater)
         }
         ColumnPredicate::GreaterThanOrEqual { value: threshold, .. } => {
-            matches!(
-                compare_values(value, threshold),
-                std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
-            )
+            compare_values(value, threshold).matches(&[Ordering::Greater, Ordering::Equal])
         }
         ColumnPredicate::LessThanOrEqual { value: threshold, .. } => {
-            matches!(
-                compare_values(value, threshold),
-                std::cmp::Ordering::Less | std::cmp::Ordering::Equal
-            )
+            compare_values(value, threshold).matches(&[Ordering::Less, Ordering::Equal])
         }
         ColumnPredicate::Equal { value: target, .. } => {
-            compare_values(value, target) == std::cmp::Ordering::Equal
+            compare_values(value, target).equals(Ordering::Equal)
         }
         ColumnPredicate::Between { low, high, .. } => {
-            let cmp_low = compare_values(value, low);
-            let cmp_high = compare_values(value, high);
-            let passes_low = matches!(cmp_low, std::cmp::Ordering::Greater | std::cmp::Ordering::Equal);
-            let passes_high = matches!(cmp_high, std::cmp::Ordering::Less | std::cmp::Ordering::Equal);
+            // Both bounds must pass - if either comparison involves NULL, it returns false
+            let passes_low = compare_values(value, low).matches(&[Ordering::Greater, Ordering::Equal]);
+            let passes_high = compare_values(value, high).matches(&[Ordering::Less, Ordering::Equal]);
             passes_low && passes_high
         }
     }

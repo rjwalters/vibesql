@@ -381,7 +381,6 @@ pub fn columnar_hash_join_inner(
 mod tests {
     use super::*;
     use vibesql_types::SqlValue;
-    use vibesql_storage::Row;
 
     fn make_int64_batch(key_values: Vec<i64>, data_values: Vec<i64>) -> ColumnarBatch {
         let row_count = key_values.len();

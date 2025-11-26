@@ -360,6 +360,10 @@ name = "issue_898"
 path = "tests/regression/issue_898.rs"
 
 [[test]]
+name = "issue_2599"
+path = "tests/regression/issue_2599.rs"
+
+[[test]]
 name = "issue_923"
 path = "tests/regression/issue_923.rs"
 

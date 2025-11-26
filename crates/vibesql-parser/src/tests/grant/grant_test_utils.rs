@@ -65,6 +65,7 @@ pub fn assert_grantees(grant: &GrantStmt, expected: &[&str]) {
 }
 
 /// Asserts that the WITH GRANT OPTION flag matches the expected value.
+#[allow(dead_code)]
 pub fn assert_with_grant_option(grant: &GrantStmt, expected: bool) {
     assert_eq!(grant.with_grant_option, expected);
 }

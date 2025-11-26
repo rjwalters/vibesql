@@ -13,6 +13,21 @@ use crate::simd::comparison::{
 
 use vibesql_types::SqlValue;
 
+/// Check if any value in a predicate is NULL
+/// Per SQL standard, any comparison with NULL returns UNKNOWN (treated as false in WHERE)
+fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
+    match predicate {
+        ColumnPredicate::LessThan { value, .. }
+        | ColumnPredicate::GreaterThan { value, .. }
+        | ColumnPredicate::GreaterThanOrEqual { value, .. }
+        | ColumnPredicate::LessThanOrEqual { value, .. }
+        | ColumnPredicate::Equal { value, .. } => matches!(value, SqlValue::Null),
+        ColumnPredicate::Between { low, high, .. } => {
+            matches!(low, SqlValue::Null) || matches!(high, SqlValue::Null)
+        }
+    }
+}
+
 /// Apply SIMD-accelerated filtering to a columnar batch
 ///
 /// Returns a new batch containing only the rows that pass all predicates.
@@ -75,6 +90,12 @@ fn evaluate_predicate_simd(
     batch: &ColumnarBatch,
     predicate: &ColumnPredicate,
 ) -> Result<Vec<bool>, ExecutorError> {
+    // NULL handling: any comparison with NULL returns false (UNKNOWN in SQL)
+    // Return all-false mask immediately if predicate contains NULL literal
+    if predicate_contains_null(predicate) {
+        return Ok(vec![false; batch.row_count()]);
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }

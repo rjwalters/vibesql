@@ -483,8 +483,6 @@ impl TpchQ6JitPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     #[cfg(feature = "jit")]
     fn test_jit_plan_creation() {

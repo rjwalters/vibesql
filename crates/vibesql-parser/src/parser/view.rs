@@ -108,15 +108,16 @@ impl Parser {
         let view_name = self.parse_qualified_identifier()?;
 
         // Check for optional CASCADE or RESTRICT
-        // SQL standard defaults to RESTRICT (do not drop dependent objects)
-        let cascade = if self.peek_keyword(Keyword::Cascade) {
+        // When neither is specified, we use SQLite-compatible behavior
+        // (allow dropping views even if dependents exist)
+        let (cascade, restrict) = if self.peek_keyword(Keyword::Cascade) {
             self.consume_keyword(Keyword::Cascade)?;
-            true
+            (true, false)
         } else if self.peek_keyword(Keyword::Restrict) {
             self.consume_keyword(Keyword::Restrict)?;
-            false
+            (false, true)
         } else {
-            false // RESTRICT is the SQL standard default
+            (false, false) // Neither specified - SQLite-compatible behavior
         };
 
         // Expect semicolon or EOF
@@ -124,6 +125,6 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::DropViewStmt { view_name, if_exists, cascade })
+        Ok(vibesql_ast::DropViewStmt { view_name, if_exists, cascade, restrict })
     }
 }

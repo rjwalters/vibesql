@@ -1,8 +1,6 @@
 //! Error Message Tests (Issue #1445)
 
 use super::*;
-use crate::procedural::ExecutionContext;
-use crate::procedural::executor::execute_procedural_statement;
 
 #[test]
 fn test_procedure_not_found_error_message() {

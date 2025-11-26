@@ -28,7 +28,7 @@ pub use foreign_key::{ForeignKeyConstraint, ReferentialAction};
 pub use index::{IndexMetadata, IndexType, IndexedColumn, SortOrder};
 pub use privilege::PrivilegeGrant;
 pub use schema::Schema;
-pub use store::Catalog;
+pub use store::{Catalog, ViewDropBehavior};
 pub use table::TableSchema;
 pub use trigger::TriggerDefinition;
 pub use type_definition::{TypeAttribute, TypeDefinition, TypeDefinitionKind};
