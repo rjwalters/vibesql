@@ -397,8 +397,9 @@ fn test_cast_integer_to_double() {
 
 #[test]
 fn test_cast_double_to_integer() {
+    // MySQL rounds to nearest integer when casting to INTEGER (not truncate)
     let result = eval_function("CAST", vec![double_lit(42.9), varchar_lit("INTEGER")]);
-    assert_eq!(result, vibesql_types::SqlValue::Integer(42));
+    assert_eq!(result, vibesql_types::SqlValue::Integer(43));
 }
 
 #[test]
