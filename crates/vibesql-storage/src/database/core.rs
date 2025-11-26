@@ -7,15 +7,20 @@ use super::metadata::Metadata;
 use super::operations::{Operations, SpatialIndexMetadata};
 use super::transactions::TransactionChange;
 use super::DatabaseConfig;
+use crate::columnar_cache::ColumnarCache;
 use crate::{QueryBufferPool, Row, StorageError, Table};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use vibesql_ast::IndexColumn;
 
 pub use super::operations::SpatialIndexMetadata as ExportedSpatialIndexMetadata;
 
+/// Default columnar cache budget (256MB)
+const DEFAULT_COLUMNAR_CACHE_BUDGET: usize = 256 * 1024 * 1024;
+
 /// In-memory database - manages catalog and tables through focused modules
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Database {
     /// Public catalog access for backward compatibility
     pub catalog: vibesql_catalog::Catalog,
@@ -27,6 +32,26 @@ pub struct Database {
     sql_mode: vibesql_types::SqlMode,
     /// Buffer pool for reducing query execution allocations
     query_buffer_pool: QueryBufferPool,
+    /// LRU cache for columnar table representations
+    /// Shared via Arc to allow cloning without duplicating cache data
+    columnar_cache: Arc<ColumnarCache>,
+}
+
+impl Clone for Database {
+    fn clone(&self) -> Self {
+        Database {
+            catalog: self.catalog.clone(),
+            lifecycle: self.lifecycle.clone(),
+            metadata: self.metadata.clone(),
+            operations: self.operations.clone(),
+            tables: self.tables.clone(),
+            sql_mode: self.sql_mode.clone(),
+            query_buffer_pool: self.query_buffer_pool.clone(),
+            // Clone creates a new cache with same config but empty data
+            // This is intentional - cloned databases shouldn't share cache state
+            columnar_cache: Arc::new(ColumnarCache::new(self.columnar_cache.max_memory())),
+        }
+    }
 }
 
 impl Database {
@@ -43,6 +68,7 @@ impl Database {
             tables: HashMap::new(),
             sql_mode: vibesql_types::SqlMode::default(),
             query_buffer_pool: QueryBufferPool::new(),
+            columnar_cache: Arc::new(ColumnarCache::new(DEFAULT_COLUMNAR_CACHE_BUDGET)),
         }
     }
 
@@ -81,8 +107,10 @@ impl Database {
     /// let db = Database::with_config(DatabaseConfig::server_default());
     /// ```
     pub fn with_config(config: DatabaseConfig) -> Self {
+        let columnar_cache_budget = config.columnar_cache_budget;
         let mut db = Self::new();
         db.sql_mode = config.sql_mode.clone();
+        db.columnar_cache = Arc::new(ColumnarCache::new(columnar_cache_budget));
         db.operations.set_config(config);
         db
     }
@@ -100,8 +128,10 @@ impl Database {
     /// );
     /// ```
     pub fn with_path_and_config(path: PathBuf, config: DatabaseConfig) -> Self {
+        let columnar_cache_budget = config.columnar_cache_budget;
         let mut db = Self::new();
         db.sql_mode = config.sql_mode.clone();
+        db.columnar_cache = Arc::new(ColumnarCache::new(columnar_cache_budget));
         db.operations.set_database_path(path.join("data"));
         db.operations.set_config(config);
         db
@@ -128,8 +158,10 @@ impl Database {
         path: PathBuf,
         config: DatabaseConfig,
     ) -> Result<Self, crate::StorageError> {
+        let columnar_cache_budget = config.columnar_cache_budget;
         let mut db = Self::new();
         db.sql_mode = config.sql_mode.clone();
+        db.columnar_cache = Arc::new(ColumnarCache::new(columnar_cache_budget));
         db.operations.set_database_path(path.join("data"));
         db.operations.set_config(config);
 
@@ -153,6 +185,9 @@ impl Database {
         self.operations.reset();
 
         self.tables.clear();
+
+        // Clear the columnar cache
+        self.columnar_cache.clear();
     }
 
     // ============================================================================
@@ -339,6 +374,8 @@ impl Database {
 
     /// Drop a table
     pub fn drop_table(&mut self, name: &str) -> Result<(), StorageError> {
+        // Invalidate columnar cache before dropping
+        self.columnar_cache.invalidate(name);
         self.operations.drop_table(&mut self.catalog, &mut self.tables, name)
     }
 
@@ -355,6 +392,9 @@ impl Database {
             table_name: table_name.to_string(),
             row,
         });
+
+        // Invalidate columnar cache for this table
+        self.columnar_cache.invalidate(table_name);
 
         Ok(())
     }
@@ -384,6 +424,9 @@ impl Database {
                 row,
             });
         }
+
+        // Invalidate columnar cache for this table
+        self.columnar_cache.invalidate(table_name);
 
         Ok(row_indices.len())
     }
@@ -690,6 +733,89 @@ impl Database {
     /// Clear all cached procedure/function bodies
     pub fn clear_routine_cache(&mut self) {
         self.metadata.clear_routine_cache();
+    }
+
+    // ============================================================================
+    // Columnar Cache Methods
+    // ============================================================================
+
+    /// Get columnar representation of a table, using cache if available
+    ///
+    /// This method provides an Arc-wrapped columnar representation of the table,
+    /// enabling zero-copy sharing between queries. The cache automatically manages
+    /// memory via LRU eviction.
+    ///
+    /// # Arguments
+    /// * `table_name` - Name of the table to get columnar representation for
+    ///
+    /// # Returns
+    /// * `Ok(Some(Arc<ColumnarTable>))` - Cached or newly converted columnar data
+    /// * `Ok(None)` - Table not found
+    /// * `Err(StorageError)` - Conversion failed
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// if let Some(columnar) = db.get_columnar("lineitem")? {
+    ///     // Use columnar data for SIMD operations
+    /// }
+    /// ```
+    pub fn get_columnar(&self, table_name: &str) -> Result<Option<Arc<crate::ColumnarTable>>, StorageError> {
+        // Check cache first
+        if let Some(cached) = self.columnar_cache.get(table_name) {
+            return Ok(Some(cached));
+        }
+
+        // Table not in cache - need to get table and convert
+        let table = match self.get_table(table_name) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Convert to columnar format
+        let columnar = table.scan_columnar()?;
+
+        // Insert into cache and return
+        let cached = self.columnar_cache.insert(table_name, columnar);
+        Ok(Some(cached))
+    }
+
+    /// Invalidate columnar cache entry for a table
+    ///
+    /// Called automatically when a table is modified (INSERT/UPDATE/DELETE)
+    /// to ensure the cache doesn't serve stale data.
+    pub fn invalidate_columnar_cache(&self, table_name: &str) {
+        self.columnar_cache.invalidate(table_name);
+    }
+
+    /// Clear all columnar cache entries
+    pub fn clear_columnar_cache(&self) {
+        self.columnar_cache.clear();
+    }
+
+    /// Get columnar cache statistics
+    ///
+    /// Returns statistics about cache hits, misses, evictions, and conversions.
+    /// Useful for monitoring cache effectiveness and tuning the cache budget.
+    pub fn columnar_cache_stats(&self) -> crate::columnar_cache::CacheStats {
+        self.columnar_cache.stats()
+    }
+
+    /// Get current columnar cache memory usage in bytes
+    pub fn columnar_cache_memory_usage(&self) -> usize {
+        self.columnar_cache.memory_usage()
+    }
+
+    /// Get columnar cache memory budget in bytes
+    pub fn columnar_cache_budget(&self) -> usize {
+        self.columnar_cache.max_memory()
+    }
+
+    /// Set the columnar cache memory budget
+    ///
+    /// Note: This creates a new cache, discarding all cached data.
+    /// Call this before loading data for best results.
+    pub fn set_columnar_cache_budget(&mut self, max_bytes: usize) {
+        self.columnar_cache = Arc::new(ColumnarCache::new(max_bytes));
     }
 }
 

@@ -207,14 +207,20 @@ impl SelectExecutor<'_> {
         // Build schema for this table
         let schema = CombinedSchema::from_table(table_name.clone(), table.schema.clone());
 
-        // Get columnar representation from storage
+        // Get columnar representation from cache or convert from storage
         #[cfg(feature = "profile-q6")]
         let scan_start = std::time::Instant::now();
 
-        let columnar_table = match table.scan_columnar() {
-            Ok(ct) => ct,
+        // Use the database-level columnar cache for Arc-based sharing
+        // This avoids the clone overhead (~14ms) on cache hits
+        let columnar_arc = match self.database.get_columnar(&table_name) {
+            Ok(Some(ct)) => ct,
+            Ok(None) => {
+                log::debug!("Native columnar: table not found in cache or storage");
+                return Ok(None);
+            }
             Err(e) => {
-                log::debug!("Native columnar: scan_columnar failed: {:?}", e);
+                log::debug!("Native columnar: get_columnar failed: {:?}", e);
                 return Ok(None);
             }
         };
@@ -222,21 +228,25 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         {
             let scan_time = scan_start.elapsed();
+            let cache_stats = self.database.columnar_cache_stats();
             eprintln!(
-                "[PROFILE-Q6] Native columnar scan: {:?} ({} rows)",
+                "[PROFILE-Q6] Native columnar scan: {:?} ({} rows, cache hits: {}, misses: {})",
                 scan_time,
-                columnar_table.row_count()
+                columnar_arc.row_count(),
+                cache_stats.hits,
+                cache_stats.misses
             );
         }
 
         log::info!(
             "Native columnar execution: table={}, rows={}",
             table_name,
-            columnar_table.row_count()
+            columnar_arc.row_count()
         );
 
         // Convert to ColumnarBatch (zero-copy when possible)
-        let batch = columnar::ColumnarBatch::from_storage_columnar(&columnar_table)?;
+        // Use Arc deref to pass a reference to the cached ColumnarTable
+        let batch = columnar::ColumnarBatch::from_storage_columnar(&columnar_arc)?;
 
         // Extract predicates from WHERE clause
         let predicates = stmt.where_clause.as_ref()

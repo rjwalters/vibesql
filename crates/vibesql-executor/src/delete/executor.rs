@@ -240,6 +240,11 @@ impl DeleteExecutor {
         // Rebuild user-defined indexes since row indices may have changed
         database.rebuild_indexes(&stmt.table_name);
 
+        // Invalidate columnar cache since table data has changed
+        if deleted_count > 0 {
+            database.invalidate_columnar_cache(&stmt.table_name);
+        }
+
         // Step 6: Fire AFTER DELETE ROW triggers for each deleted row
         for (_, row) in &rows_and_indices_to_delete {
             crate::TriggerFirer::execute_after_triggers(
@@ -359,6 +364,11 @@ fn execute_truncate(database: &mut Database, table_name: &str) -> Result<usize, 
 
     // Clear all data at once (O(1) operation)
     table.clear();
+
+    // Invalidate columnar cache since table data has changed
+    if row_count > 0 {
+        database.invalidate_columnar_cache(table_name);
+    }
 
     Ok(row_count)
 }
