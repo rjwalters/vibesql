@@ -1,0 +1,117 @@
+# Dialect-specific boolean and comparison tests
+#
+# This file tests differences in boolean handling and comparisons:
+# - Boolean literal representation
+# - Truth value evaluation
+# - Comparison behavior
+
+# =============================================================================
+# Boolean tests in MySQL mode
+# =============================================================================
+
+dialect mysql
+
+# Boolean literals (MySQL uses 1/0 internally)
+query I
+SELECT TRUE
+----
+1
+
+query I
+SELECT FALSE
+----
+0
+
+# Boolean expressions return 1/0
+query I
+SELECT 1 = 1
+----
+1
+
+query I
+SELECT 1 = 2
+----
+0
+
+# Boolean in arithmetic
+query I
+SELECT TRUE + TRUE
+----
+2
+
+query I
+SELECT TRUE * 5
+----
+5
+
+# NOT operator
+query I
+SELECT NOT TRUE
+----
+0
+
+query I
+SELECT NOT FALSE
+----
+1
+
+# =============================================================================
+# Boolean tests in SQLite mode
+# =============================================================================
+
+dialect sqlite
+
+# SQLite also uses 1/0 for booleans
+query I
+SELECT 1 = 1
+----
+1
+
+query I
+SELECT 1 = 2
+----
+0
+
+# SQLite boolean arithmetic
+query I
+SELECT (1=1) + (2=2)
+----
+2
+
+# =============================================================================
+# String comparison tests
+# =============================================================================
+
+dialect mysql
+
+# String comparison - MySQL mode uses case-insensitive comparison by default
+query I
+SELECT 'abc' = 'abc'
+----
+1
+
+# MySQL mode: case-insensitive comparison (like MySQL's default utf8 collation)
+query I
+SELECT 'abc' = 'ABC'
+----
+1
+
+dialect sqlite
+
+# SQLite mode string comparison
+query I
+SELECT 'abc' = 'abc'
+----
+1
+
+query I
+SELECT 'ABC' = 'ABC'
+----
+1
+
+# Note: vibesql currently uses case-insensitive comparison in both dialects
+# This differs from SQLite's default case-sensitive behavior
+query I
+SELECT 'abc' = 'ABC'
+----
+1

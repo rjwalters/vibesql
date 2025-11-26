@@ -1,0 +1,95 @@
+# Dialect-specific string handling tests
+#
+# This file tests differences in string handling between dialects:
+# - String concatenation operators
+# - NULL behavior in string operations
+#
+# Note: These tests use explicit CAST() for type coercion since vibesql
+# doesn't support implicit integer-to-string conversion in concatenation.
+# CONCAT_WS is not yet implemented in vibesql.
+
+# =============================================================================
+# SQLite-style string concatenation (|| operator)
+# =============================================================================
+
+dialect sqlite
+
+# Basic concatenation with || operator
+query T
+SELECT 'Hello' || ' ' || 'World'
+----
+Hello World
+
+# Concatenation with explicit CAST (vibesql requires explicit type conversion)
+query T
+SELECT 'Value: ' || CAST(42 AS VARCHAR)
+----
+Value: 42
+
+# Empty string concatenation
+query T
+SELECT 'prefix' || '' || 'suffix'
+----
+prefixsuffix
+
+# =============================================================================
+# MySQL-style string operations
+# =============================================================================
+
+dialect mysql
+
+# CONCAT function
+query T
+SELECT CONCAT('Hello', ' ', 'World')
+----
+Hello World
+
+# CONCAT with explicit CAST (vibesql requires explicit type conversion)
+query T
+SELECT CONCAT('Value: ', CAST(42 AS VARCHAR))
+----
+Value: 42
+
+# Empty string handling in CONCAT
+query T
+SELECT CONCAT('prefix', '', 'suffix')
+----
+prefixsuffix
+
+# =============================================================================
+# NULL handling in string operations
+# =============================================================================
+
+# In MySQL mode: CONCAT with NULL returns NULL
+query T
+SELECT CONCAT('Hello', NULL)
+----
+NULL
+
+dialect sqlite
+
+# In SQLite mode: || with NULL returns NULL
+query T
+SELECT 'Hello' || NULL
+----
+NULL
+
+# =============================================================================
+# Verify dialect switching works for string operations
+# =============================================================================
+
+dialect mysql
+
+# MySQL CONCAT still works after switching back
+query T
+SELECT CONCAT('a', 'b', 'c')
+----
+abc
+
+dialect sqlite
+
+# SQLite || still works after switching back
+query T
+SELECT 'x' || 'y' || 'z'
+----
+xyz
