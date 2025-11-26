@@ -316,7 +316,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix generic filter tests (broken on main)
     fn test_generic_pattern_q6_like() {
         // Create lineitem-like schema
         let table = TableSchema::new(
@@ -360,7 +359,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix generic filter tests (broken on main)
     fn test_generic_pattern_different_table() {
         // Create a sales table with similar structure
         let table = TableSchema::new(

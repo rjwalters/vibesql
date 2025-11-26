@@ -421,13 +421,8 @@ fn test_generic_pattern_no_matching_rows() {
     );
 }
 
-// TODO: Test for SUM with simple numeric filters (currently failing - needs investigation)
-// This test is temporarily disabled while we investigate why simple numeric comparisons
-// on DoublePrecision columns aren't matching the generic pattern correctly.
-// The other 6 tests provide good coverage of the generic monomorphic pattern system.
 #[test]
-#[ignore]
-fn test_generic_pattern_mixed_types_disabled() {
+fn test_generic_pattern_mixed_types() {
     let mut db = vibesql_storage::Database::new();
 
     let schema = vibesql_catalog::TableSchema::new(
