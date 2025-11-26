@@ -45,6 +45,7 @@
 //! - `alter_table_constraints`: ALTER TABLE ADD/DROP PRIMARY KEY and FOREIGN KEY tests (Phase 6 of issue #1388)
 //! - `non_unique_disk_index_tests`: Non-unique disk-backed index integration tests (issue #1575, PR #1571)
 //! - `monomorphic_integration_tests`: Generic monomorphic pattern integration tests (issue #2244)
+//! - `sql_mode_tests`: SET SQL_MODE tests for runtime dialect switching (issue #2658)
 
 mod common;
 mod aggregate_caching;
@@ -110,3 +111,4 @@ mod truncate_cascade_tests;
 mod truncate_table_tests;
 mod unique_index_tests;
 mod view_tests;
+mod sql_mode_tests;
