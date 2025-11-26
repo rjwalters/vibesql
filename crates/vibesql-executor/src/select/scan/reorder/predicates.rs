@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use vibesql_ast::{BinaryOperator, Expression};
+use super::utils::resolve_column_with_fallback;
 
 /// Extract table-local predicates from a WHERE clause expression
 ///
@@ -111,11 +112,14 @@ pub(super) fn extract_in_predicates_from_or(
     result
 }
 
-/// Extract equijoin conditions from a WHERE clause expression
+/// Extract equijoin conditions from a WHERE clause expression using schema-based column resolution
 ///
-/// Recursively walks the expression tree looking for binary equality operations
-/// that reference columns from two different tables.
-pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String>) -> Vec<Expression> {
+/// This is the preferred method that uses actual database schema to resolve unqualified columns.
+pub(super) fn extract_where_equijoins_with_schema(
+    expr: &Expression,
+    tables: &HashSet<String>,
+    column_to_table: &HashMap<String, String>,
+) -> Vec<Expression> {
     let mut equijoins = Vec::new();
 
     // Helper function to collect all branches of an OR expression into a flat list
@@ -164,13 +168,14 @@ pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String
     fn extract_recursive(
         expr: &Expression,
         tables: &HashSet<String>,
+        column_to_table: &HashMap<String, String>,
         equijoins: &mut Vec<Expression>,
     ) {
         match expr {
             // Binary AND: recurse into both sides
             Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
-                extract_recursive(left, tables, equijoins);
-                extract_recursive(right, tables, equijoins);
+                extract_recursive(left, tables, column_to_table, equijoins);
+                extract_recursive(right, tables, column_to_table, equijoins);
             }
             // Binary OR: extract common equijoins from all branches
             Expression::BinaryOp { op: BinaryOperator::Or, .. } => {
@@ -190,7 +195,7 @@ pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String
                 let mut branch_equijoins: Vec<Vec<Expression>> = Vec::new();
                 for branch in &branches {
                     let mut branch_eqs = Vec::new();
-                    extract_recursive(branch, tables, &mut branch_eqs);
+                    extract_recursive(branch, tables, column_to_table, &mut branch_eqs);
                     branch_equijoins.push(branch_eqs);
                 }
 
@@ -210,65 +215,20 @@ pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String
             // Binary EQUAL: check if it's an equijoin
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
                 // Check if both sides are column references
-                // Handle both explicit table qualifiers and implicit (prefix-based) references
-
-                // Helper closure to infer table from column prefix
-                // Uses three-tier matching: 1) exact, 2) prefix, 3) abbreviation
-                let infer_table = |column: &str| -> Option<String> {
-                    let prefix = column.split('_').next().unwrap_or("").to_uppercase();
-                    if prefix.is_empty() {
-                        return None;
-                    }
-
-                    // Collect all matching tables (exact, prefix, and abbreviation matches)
-                    let mut exact_matches = Vec::new();
-                    let mut prefix_matches = Vec::new();
-                    let mut abbrev_matches = Vec::new();
-
-                    for table in tables {
-                        let table_upper = table.to_uppercase();
-                        if table_upper == prefix {
-                            exact_matches.push(table.clone());
-                        } else if table_upper.starts_with(&prefix) {
-                            prefix_matches.push(table.clone());
-                        } else {
-                            // Check abbreviation match (e.g., "ps" → "partsupp")
-                            let abbrev = super::utils::get_table_abbreviation(table);
-                            if abbrev.to_uppercase() == prefix {
-                                abbrev_matches.push(table.clone());
-                            }
-                        }
-                    }
-
-                    // Prefer exact match (e.g., "P" -> "P" table if it exists)
-                    if !exact_matches.is_empty() {
-                        return exact_matches.into_iter().next();
-                    }
-
-                    // For prefix matches, prefer shorter (more specific) tables
-                    // This ensures "PART" matches before "PARTSUPP" for prefix "P"
-                    if !prefix_matches.is_empty() {
-                        prefix_matches.sort_by_key(|t| t.len());
-                        return prefix_matches.into_iter().next();
-                    }
-
-                    // Use abbreviation match as last resort (e.g., "PS" -> "partsupp")
-                    if !abbrev_matches.is_empty() {
-                        abbrev_matches.sort_by_key(|t| t.len());
-                        return abbrev_matches.into_iter().next();
-                    }
-
-                    None
-                };
+                // Use schema-based lookup with TPC-H fallback
 
                 let left_table = match left.as_ref() {
                     Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => infer_table(column),
+                    Expression::ColumnRef { table: None, column } => {
+                        resolve_column_with_fallback(column, column_to_table, tables)
+                    }
                     _ => None,
                 };
                 let right_table = match right.as_ref() {
                     Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => infer_table(column),
+                    Expression::ColumnRef { table: None, column } => {
+                        resolve_column_with_fallback(column, column_to_table, tables)
+                    }
                     _ => None,
                 };
 
@@ -295,6 +255,6 @@ pub(super) fn extract_where_equijoins(expr: &Expression, tables: &HashSet<String
         }
     }
 
-    extract_recursive(expr, tables, &mut equijoins);
+    extract_recursive(expr, tables, column_to_table, &mut equijoins);
     equijoins
 }
