@@ -237,6 +237,12 @@ impl CompiledWhereClause {
             _ => return false,
         };
 
+        // Reject NULL bounds - fall back to regular evaluator for proper 3-valued logic
+        // Issue #2633: NOT BETWEEN with NULL bound requires NULL result, not boolean negation
+        if matches!(low, SqlValue::Null) || matches!(high, SqlValue::Null) {
+            return false;
+        }
+
         predicates.push(CompiledPredicate::Between {
             column_idx,
             low,
@@ -726,5 +732,87 @@ mod tests {
 
         // NULL > 10 should return false (not true, not NULL)
         assert!(!compiled.evaluate(&row).unwrap());
+    }
+
+    #[test]
+    fn test_between_with_null_bound_not_compiled() {
+        // Issue #2633: BETWEEN with NULL bounds should NOT be compiled
+        // to avoid incorrect 3-valued logic handling in the fast path
+        let schema = make_test_schema();
+
+        // l_quantity NOT BETWEEN 31 AND NULL
+        // This should fall back to regular evaluator for proper NULL semantics
+        let expr = Expression::Between {
+            expr: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "l_quantity".to_string(),
+            }),
+            low: Box::new(Expression::Literal(SqlValue::Integer(31))),
+            high: Box::new(Expression::Literal(SqlValue::Null)),
+            negated: true,
+            symmetric: false,
+        };
+
+        // Should NOT compile - returns None to fall back to regular evaluator
+        let compiled = CompiledWhereClause::try_compile(&expr, &schema);
+        assert!(compiled.is_none(), "BETWEEN with NULL bound should not be compiled");
+
+        // Also test with NULL low bound
+        let expr_null_low = Expression::Between {
+            expr: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "l_quantity".to_string(),
+            }),
+            low: Box::new(Expression::Literal(SqlValue::Null)),
+            high: Box::new(Expression::Literal(SqlValue::Integer(100))),
+            negated: false,
+            symmetric: false,
+        };
+
+        let compiled_null_low = CompiledWhereClause::try_compile(&expr_null_low, &schema);
+        assert!(compiled_null_low.is_none(), "BETWEEN with NULL low bound should not be compiled");
+    }
+
+    #[test]
+    fn test_between_with_non_null_bounds_compiled() {
+        // Verify that BETWEEN with non-NULL bounds still compiles correctly
+        let schema = make_test_schema();
+
+        // l_quantity BETWEEN 10 AND 100
+        let expr = Expression::Between {
+            expr: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "l_quantity".to_string(),
+            }),
+            low: Box::new(Expression::Literal(SqlValue::Integer(10))),
+            high: Box::new(Expression::Literal(SqlValue::Integer(100))),
+            negated: false,
+            symmetric: false,
+        };
+
+        let compiled = CompiledWhereClause::try_compile(&expr, &schema);
+        assert!(compiled.is_some(), "BETWEEN with non-NULL bounds should compile");
+
+        let compiled = compiled.unwrap();
+
+        // Test row in range
+        let row_in_range = Row {
+            values: vec![
+                SqlValue::Integer(50),
+                SqlValue::Double(0.05),
+                SqlValue::Varchar("1994-01-01".to_string()),
+            ],
+        };
+        assert!(compiled.evaluate(&row_in_range).unwrap());
+
+        // Test row out of range
+        let row_out_of_range = Row {
+            values: vec![
+                SqlValue::Integer(200),
+                SqlValue::Double(0.05),
+                SqlValue::Varchar("1994-01-01".to_string()),
+            ],
+        };
+        assert!(!compiled.evaluate(&row_out_of_range).unwrap());
     }
 }

@@ -1,6 +1,6 @@
 //! Utility functions for join reordering
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use vibesql_ast::FromClause;
 use crate::schema::CombinedSchema;
 use crate::select::cte::CteResult;
@@ -66,28 +66,6 @@ pub(crate) fn all_joins_are_cross(from: &FromClause) -> bool {
                 && condition.is_none()
                 && all_joins_are_cross(left)
                 && all_joins_are_cross(right)
-        }
-    }
-}
-
-/// Get table abbreviation for matching column prefixes
-///
-/// TPC-H uses abbreviations for compound table names:
-/// - "ps" → "partsupp" (partsupp is "part" + "supplier" abbreviated)
-/// - "c" → "customer", "l" → "lineitem", etc. (standard prefixes)
-///
-/// This enables matching abbreviation-style column prefixes (e.g., ps_partkey → partsupp)
-pub(super) fn get_table_abbreviation(table_name: &str) -> String {
-    let table_lower = table_name.to_lowercase();
-
-    // Known TPC-H table abbreviations
-    match table_lower.as_str() {
-        "partsupp" => "ps".to_string(),  // Special case: compound abbreviation
-        _ => {
-            // Default: use first letter as abbreviation
-            table_name.chars().next()
-                .map(|c| c.to_lowercase().to_string())
-                .unwrap_or_default()
         }
     }
 }
@@ -303,64 +281,17 @@ pub(super) fn resolve_column_to_table(
     column_to_table.get(&column.to_lowercase()).cloned()
 }
 
-/// Resolve an unqualified column using schema-based lookup with TPC-H heuristic fallback
+/// Resolve an unqualified column using schema-based lookup
 ///
-/// Primary resolution uses the schema-based column-to-table map.
-/// Falls back to TPC-H prefix matching ONLY if schema lookup fails.
-/// The SQLLogicTest suffix pattern has been removed as it was test-specific.
+/// Uses the schema-based column-to-table map to resolve column references.
+/// All column resolution relies solely on actual database schema metadata.
 ///
 /// # Parameters
 /// - `column`: The unqualified column name
 /// - `column_to_table`: Schema-based column-to-table mapping
-/// - `available_tables`: Set of FROM clause tables (for fallback heuristics)
 pub(super) fn resolve_column_with_fallback(
     column: &str,
     column_to_table: &HashMap<String, String>,
-    available_tables: &HashSet<String>,
 ) -> Option<String> {
-    // Primary: Schema-based lookup
-    if let Some(table) = resolve_column_to_table(column, column_to_table) {
-        return Some(table);
-    }
-
-    // Fallback: TPC-H prefix pattern only (test-specific heuristics removed)
-    // This handles TPC-H queries where columns like l_orderkey → lineitem
-    let prefix = column.split('_').next().unwrap_or("").to_uppercase();
-    if prefix.is_empty() {
-        return None;
-    }
-
-    // Try exact match, prefix match, then abbreviation match
-    let mut exact_match: Option<String> = None;
-    let mut prefix_matches = Vec::new();
-    let mut abbrev_matches = Vec::new();
-
-    for table in available_tables {
-        let table_upper = table.to_uppercase();
-        if table_upper == prefix {
-            exact_match = Some(table.clone());
-            break;
-        } else if table_upper.starts_with(&prefix) {
-            prefix_matches.push(table.clone());
-        } else {
-            let abbrev = get_table_abbreviation(table);
-            if abbrev.to_uppercase() == prefix {
-                abbrev_matches.push(table.clone());
-            }
-        }
-    }
-
-    if let Some(table) = exact_match {
-        return Some(table);
-    }
-    if !prefix_matches.is_empty() {
-        prefix_matches.sort_by_key(|t| t.len());
-        return prefix_matches.into_iter().next();
-    }
-    if !abbrev_matches.is_empty() {
-        abbrev_matches.sort_by_key(|t| t.len());
-        return abbrev_matches.into_iter().next();
-    }
-
-    None
+    resolve_column_to_table(column, column_to_table)
 }
