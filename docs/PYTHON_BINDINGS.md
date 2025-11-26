@@ -771,9 +771,10 @@ cursor.execute("""
     WHERE status = 'pending'
 """)
 
-# Note: View query expansion is not yet supported
-# The view is created but cannot be queried yet
-# This feature is planned for a future release
+# Query the view
+cursor.execute("SELECT * FROM active_orders")
+for row in cursor.fetchall():
+    print(row)  # (2, 'Bob', 200.0)
 ```
 
 ### Example 5: Window Functions
@@ -821,8 +822,8 @@ for row in cursor.fetchall():
 ## See Also
 
 - [README.md](../README.md) - Project overview
-- [FEATURE_STATUS.md](FEATURE_STATUS.md) - Feature breakdown
-- [CLI_GUIDE.md](CLI_GUIDE.md) - CLI documentation
+- [Feature Status](reference/FEATURE_STATUS.md) - SQL feature breakdown
+- [CLI Guide](CLI_GUIDE.md) - CLI documentation
 
 ---
 

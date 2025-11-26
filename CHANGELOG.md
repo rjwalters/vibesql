@@ -5,44 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Deprecated
-- Deprecated `SqlMode::division_returns_float()` method in favor of `TypeBehavior::division_result_type()`
-  - Migration: Use `mode.division_result_type(&left, &right)` instead of `mode.division_returns_float()`
-  - The new method provides more precise type information (returns `ValueType` enum instead of bool)
-  - Method will be removed in next major version
+## [0.1.0] - Unreleased
 
 ### Added
-- Added `--force` flag to `./scripts/sqllogictest` script to repopulate work queue with all 623 test files
-  - Enables fresh test runs from scratch
-  - Bypasses smart filtering for reproducible results
-  - Usage: `./scripts/sqllogictest run --force --time 300`
-- Added parser support for MySQL/SQLite indexed column prefix syntax (PR #1622)
-  - Syntax: `UNIQUE (column(n))`, `PRIMARY KEY (column(n))`, `CREATE INDEX idx ON table (column(n))`
-  - Prefix length stored in AST (`IndexColumn.prefix_length`)
-  - Current implementation: indexes operate on full column (prefix not enforced yet)
-  - Enables SQLLogicTest compatibility and future prefix index optimization
-  - Documentation: See README.md "Indexed Column Prefix Syntax" section
-
-### Fixed
-- Fixed all cargo build warnings (removed unused code, added `#[allow(dead_code)]` to test utilities)
-- Fixed sqllogictest script to use `--package vibesql` flag for proper test execution
-- Fixed test build warnings in multiple test modules
-- Fixed test failures after COUNT(*) return type changed from Numeric to Integer (PR #1206)
-  - Updated `parallel_execution_tests.rs`, `predicate_pushdown_tests.rs`, and `test_predicate_pushdown_integration.rs`
-  - Fixed `type_display_tests.rs` to expect MySQL-compatible numeric formatting
-  - Fixed `expression_mapper.rs` doctest compilation
-- Fixed deployment workflow failure due to pnpm version mismatch
-  - Updated GitHub Actions to use pnpm 9 to match local lockfile version
-
-### Changed
-- COUNT(*) now returns INTEGER type instead of NUMERIC for SQL standard compliance
-- Numeric whole numbers now display without decimal places (MySQL compatibility)
-
-## [0.1.0] - 2025-11-10
-
-### Added - Initial Release
 
 #### Core SQL Engine
 - **Complete SQL:1999 Core compliance** - All 169 mandatory Core features implemented
@@ -105,7 +70,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Conversion functions** - CAST, COALESCE, NULLIF
 - **Conditional expressions** - CASE...WHEN...THEN...ELSE...END
 - **Pattern matching** - LIKE, BETWEEN, IN
-- **NULL handling functions** - IS NULL, IS NOT NULL, COALESCE, NULLIF
+- **NULL handling** - IS NULL, IS NOT NULL, COALESCE, NULLIF
+
+#### Query Optimization
+- **Columnar execution engine** - SIMD-accelerated analytical queries
+- **Columnar cache** - Lazy conversion with automatic invalidation on mutations
+- **Join reordering** - Cost-based optimization for multi-way joins
+- **Predicate pushdown** - Filters pushed to table scans
+- **Subquery-to-join transformation** - Converts correlated subqueries to efficient joins
+- **Hash joins** for equi-join conditions
+- **Index-based query optimization**
+- **Query plan caching** for repeated queries
 
 #### Bindings & Interfaces
 - **Rust library** - Full programmatic API
@@ -122,17 +97,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQLLogicTest integration** - Progressive conformance testing
 - **Comprehensive unit tests** for all components
 - **Integration tests** for end-to-end scenarios
-- **Property-based testing** for edge cases
 
 #### Documentation
 - **API documentation** for all public interfaces
 - **Examples** demonstrating common use cases
-- **README** with quickstart guide
 - **Live browser demo** at https://rjwalters.github.io/vibesql/
 
-### Technical Details
+### Architecture
 
-#### Architecture
 - **10 modular crates**:
   - `vibesql-types` - Type system
   - `vibesql-ast` - Abstract Syntax Tree
@@ -145,26 +117,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `vibesql-wasm-bindings` - WebAssembly
   - `vibesql-python-bindings` - Python interface
 
-#### Performance Features
-- **Query plan caching** for repeated queries
-- **Predicate pushdown** optimization
-- **Index-based query optimization**
-- **Hash joins** for equi-join conditions
-- **Lazy evaluation** with iterator-based execution
-- **Parallel query execution** (where applicable)
-
-#### Development
-- **100% AI-generated code** using Claude Code and Loom orchestration
-- **65,000+ lines of Rust code**
-- **Built in under 2 weeks** (Oct 25 - Nov 1, 2025)
-- **Continuous integration** with automated testing
-- **Automated PR reviews** via AI Judge agents
-
 ### Known Limitations
 
-- **In-memory storage** - Primary storage is in-memory with SQL dump persistence (save/load to `.sql` files)
+- **In-memory storage** - Primary storage is in-memory with SQL dump persistence
 - **Single-threaded** - No concurrent transactions
-- **Limited optimization** - No cost-based query optimizer yet
 - **No network protocol** - Library/CLI only (no server mode)
 
 ### Links
@@ -173,5 +129,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation**: https://docs.rs/vibesql
 - **Live Demo**: https://rjwalters.github.io/vibesql/
 - **Crates.io**: https://crates.io/crates/vibesql
-
-[0.1.0]: https://github.com/rjwalters/vibesql/releases/tag/v0.1.0

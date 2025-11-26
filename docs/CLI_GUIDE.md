@@ -153,8 +153,6 @@ vibesql> CREATE VIEW recent_orders AS
 View created: RECENT_ORDERS
 ```
 
-**Note**: View query expansion (SELECT from views) is not yet supported but is planned for a future release.
-
 ### Output Control
 
 **`\f <format>`** - Set output format
@@ -638,5 +636,4 @@ UNION ALL
 ## See Also
 
 - [README.md](../README.md) - Project overview and features
-- [SQL:1999 Conformance](../docs/testing/SQL1999_CONFORMANCE.md) - Supported SQL features
-- [Quick Start](../README.md#quick-start) - Getting started guide
+- [SQL:1999 Conformance](testing/SQL1999_CONFORMANCE.md) - Supported SQL features
