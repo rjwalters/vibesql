@@ -60,54 +60,91 @@ fn parse_json_examples(
 
     // Parse the JSON
     let json: serde_json::Value = serde_json::from_str(content)?;
-    let category_obj = json.as_object().ok_or("JSON root must be an object")?;
+    let root_obj = json.as_object().ok_or("JSON root must be an object")?;
 
-    for (example_id, example_value) in category_obj {
-        let example_obj =
-            example_value.as_object().ok_or(format!("Example {} must be an object", example_id))?;
+    // Get the examples section
+    let examples_value = match root_obj.get("examples") {
+        Some(v) => v,
+        None => return Ok(examples),
+    };
 
-        let sql = example_obj
-            .get("sql")
-            .and_then(|v| v.as_str())
-            .ok_or(format!("Example {} missing sql field", example_id))?
-            .to_string();
-
-        let title = example_obj
-            .get("title")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("Example {}", example_id));
-
-        let database = example_obj
-            .get("database")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "northwind".to_string());
-
-        // Parse expected results from JSON or SQL comments
-        let expected_rows = example_obj.get("expectedRows").and_then(|v| v.as_array()).map(|arr| {
-            arr.iter()
-                .filter_map(|row| row.as_array())
-                .map(|row| {
-                    row.iter().filter_map(|cell| cell.as_str().map(|s| s.to_string())).collect()
-                })
-                .collect()
-        });
-
-        let expected_count =
-            example_obj.get("expectedCount").and_then(|v| v.as_u64()).map(|n| n as usize);
-
-        examples.push(WebDemoExample {
-            id: example_id.clone(),
-            title,
-            database,
-            sql,
-            expected_rows,
-            expected_count,
-        });
+    // Handle two formats:
+    // 1. Standard format: "examples" is an object with example IDs as keys
+    // 2. Queries format: "examples" has a "queries" array (e.g., sqllogictest.json)
+    if let Some(examples_obj) = examples_value.as_object() {
+        // Check if this is the queries array format
+        if let Some(queries_array) = examples_obj.get("queries").and_then(|v| v.as_array()) {
+            // Format 2: queries array
+            for query_value in queries_array {
+                if let Some(example) = parse_example_object(query_value, None) {
+                    examples.push(example);
+                }
+            }
+        } else {
+            // Format 1: standard object with example IDs as keys
+            for (example_id, example_value) in examples_obj {
+                if let Some(example) = parse_example_object(example_value, Some(example_id)) {
+                    examples.push(example);
+                }
+            }
+        }
     }
 
     Ok(examples)
+}
+
+/// Parse a single example object into a WebDemoExample
+/// Returns None if the object doesn't have required fields (like sql)
+fn parse_example_object(
+    value: &serde_json::Value,
+    fallback_id: Option<&String>,
+) -> Option<WebDemoExample> {
+    let obj = value.as_object()?;
+
+    // sql is required
+    let sql = obj.get("sql").and_then(|v| v.as_str())?.to_string();
+
+    // id can come from the object or the fallback (key name)
+    let id = obj
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| fallback_id.cloned())?;
+
+    let title = obj
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("Example {}", id));
+
+    let database = obj
+        .get("database")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "northwind".to_string());
+
+    // Parse expected results from JSON
+    let expected_rows = obj.get("expectedRows").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|row| row.as_array())
+            .map(|row| {
+                row.iter()
+                    .filter_map(|cell| cell.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .collect()
+    });
+
+    let expected_count = obj.get("expectedCount").and_then(|v| v.as_u64()).map(|n| n as usize);
+
+    Some(WebDemoExample {
+        id,
+        title,
+        database,
+        sql,
+        expected_rows,
+        expected_count,
+    })
 }
 
 /// Parse expected results from SQL comment blocks
