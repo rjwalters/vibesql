@@ -132,7 +132,7 @@ pub(super) fn extract_referenced_tables_with_schema(
         }
         Expression::ColumnRef { table: None, column } => {
             // Use schema-based lookup
-            if let Some(table) = super::utils::resolve_column_with_fallback(column, column_to_table, available_tables) {
+            if let Some(table) = super::utils::resolve_column_with_fallback(column, column_to_table) {
                 output.insert(table.to_lowercase());
             }
         }

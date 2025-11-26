@@ -1,6 +1,6 @@
 //! Utility functions for join reordering
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use vibesql_ast::FromClause;
 use crate::schema::CombinedSchema;
 use crate::select::cte::CteResult;
@@ -284,18 +284,14 @@ pub(super) fn resolve_column_to_table(
 /// Resolve an unqualified column using schema-based lookup
 ///
 /// Uses the schema-based column-to-table map to resolve column references.
-/// TPC-H prefix heuristics have been removed - all column resolution now
-/// relies solely on actual database schema metadata.
+/// All column resolution relies solely on actual database schema metadata.
 ///
 /// # Parameters
 /// - `column`: The unqualified column name
 /// - `column_to_table`: Schema-based column-to-table mapping
-/// - `_available_tables`: Unused, kept for API compatibility
 pub(super) fn resolve_column_with_fallback(
     column: &str,
     column_to_table: &HashMap<String, String>,
-    _available_tables: &HashSet<String>,
 ) -> Option<String> {
-    // Schema-based lookup only - no heuristic fallbacks
     resolve_column_to_table(column, column_to_table)
 }

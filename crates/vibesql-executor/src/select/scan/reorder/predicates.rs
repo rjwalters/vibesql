@@ -44,7 +44,7 @@ pub(super) fn flatten_and_chain(expr: &Expression) -> Vec<Expression> {
     }
 }
 
-/// Extract IN predicates from OR expressions for predicate pushdown (TPC-H Q7 optimization)
+/// Extract IN predicates from OR expressions for predicate pushdown
 ///
 /// Transforms: `((t1.col = 'A' AND t2.col = 'B') OR (t1.col = 'B' AND t2.col = 'A'))`
 /// Into: `t1.col IN ('A', 'B')` and `t2.col IN ('A', 'B')`
@@ -220,14 +220,14 @@ pub(super) fn extract_where_equijoins_with_schema(
                 let left_table = match left.as_ref() {
                     Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
                     Expression::ColumnRef { table: None, column } => {
-                        resolve_column_with_fallback(column, column_to_table, tables)
+                        resolve_column_with_fallback(column, column_to_table)
                     }
                     _ => None,
                 };
                 let right_table = match right.as_ref() {
                     Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
                     Expression::ColumnRef { table: None, column } => {
-                        resolve_column_with_fallback(column, column_to_table, tables)
+                        resolve_column_with_fallback(column, column_to_table)
                     }
                     _ => None,
                 };

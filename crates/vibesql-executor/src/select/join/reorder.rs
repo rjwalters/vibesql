@@ -349,8 +349,7 @@ impl JoinOrderAnalyzer {
     /// Infer table name from column name using schema-based lookup
     ///
     /// Uses the schema-based column-to-table map to resolve column references.
-    /// TPC-H prefix heuristics have been removed - all column resolution now
-    /// relies solely on actual database schema metadata.
+    /// All column resolution relies solely on actual database schema metadata.
     fn infer_table_from_column(&self, column: &str, tables: &HashSet<String>) -> Option<String> {
         // Schema-based lookup only - no heuristic fallbacks
         if self.column_to_table.is_empty() {
