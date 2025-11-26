@@ -32,7 +32,20 @@ where
     // Execute left and right sides with WHERE clause for predicate pushdown
     // Note: ORDER BY is not optimized at JOIN level, so we pass None
     let left_result = super::execute_from_clause(left, cte_results, database, where_clause, None, outer_row, outer_schema, execute_subquery)?;
-    let right_result = super::execute_from_clause(right, cte_results, database, where_clause, None, outer_row, outer_schema, execute_subquery)?;
+
+    // For SEMI and ANTI joins (from IN/EXISTS subquery transformations), we must NOT pass
+    // the outer WHERE clause to the right side. The right side represents the subquery
+    // table, and the outer query's WHERE conditions should not be pushed down to it.
+    // The subquery's own WHERE conditions are already included in the JOIN condition
+    // (see subquery_to_join.rs), so they will be applied during the join.
+    //
+    // Bug fix for #2599: Passing outer WHERE clause to the right side caused incorrect
+    // index scans that filtered out rows that should have been in the subquery result.
+    let right_where_clause = match join_type {
+        vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti => None,
+        _ => where_clause,
+    };
+    let right_result = super::execute_from_clause(right, cte_results, database, right_where_clause, None, outer_row, outer_schema, execute_subquery)?;
 
     // For NATURAL JOIN, generate the implicit join condition based on common column names
     let natural_join_condition = if natural {
