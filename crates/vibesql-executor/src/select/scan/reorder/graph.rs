@@ -93,8 +93,7 @@ pub(super) fn extract_conditions_with_types(from: &FromClause, conditions: &mut 
 /// This function recursively walks an expression tree and collects all table names
 /// mentioned in column references. Used to determine which tables a join condition connects.
 ///
-/// Uses schema-based column resolution when a column_to_table map is provided,
-/// falling back to TPC-H prefix heuristics for unresolved columns.
+/// Uses schema-based column resolution via the column_to_table map.
 ///
 /// # Parameters
 /// - `expr`: The expression to analyze
@@ -113,8 +112,8 @@ pub(super) fn extract_referenced_tables(
 
 /// Extract all table names referenced in an expression using schema-based column resolution
 ///
-/// This is the preferred method that uses actual database schema to resolve unqualified columns.
-/// Falls back to TPC-H prefix heuristics only when schema lookup fails.
+/// This method uses actual database schema to resolve unqualified columns.
+/// No heuristic fallbacks are used - unresolved columns are simply skipped.
 ///
 /// # Parameters
 /// - `expr`: The expression to analyze
@@ -132,7 +131,7 @@ pub(super) fn extract_referenced_tables_with_schema(
             output.insert(table.to_lowercase());
         }
         Expression::ColumnRef { table: None, column } => {
-            // Use schema-based lookup with TPC-H fallback
+            // Use schema-based lookup
             if let Some(table) = super::utils::resolve_column_with_fallback(column, column_to_table, available_tables) {
                 output.insert(table.to_lowercase());
             }

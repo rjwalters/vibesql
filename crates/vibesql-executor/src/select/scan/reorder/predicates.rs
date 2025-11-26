@@ -215,7 +215,7 @@ pub(super) fn extract_where_equijoins_with_schema(
             // Binary EQUAL: check if it's an equijoin
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
                 // Check if both sides are column references
-                // Use schema-based lookup with TPC-H fallback
+                // Use schema-based lookup
 
                 let left_table = match left.as_ref() {
                     Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
