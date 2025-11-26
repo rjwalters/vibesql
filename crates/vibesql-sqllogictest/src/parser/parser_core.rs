@@ -301,6 +301,81 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
     Ok(records)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::DefaultColumnType;
+    use crate::directive_parser::Condition;
+
+    #[test]
+    fn test_skipif_with_inline_comment() {
+        // Test that skipif mysql # comment is parsed correctly
+        let script = r#"skipif mysql # not compatible
+query I
+SELECT 1
+----
+1
+"#;
+        let records: Vec<Record<DefaultColumnType>> = parse(script).unwrap();
+
+        // Should have: Condition(SkipIf{mysql}), Query{...}
+        let mut found_skipif = false;
+        for record in &records {
+            if let Record::Condition(Condition::SkipIf { label }) = record {
+                assert_eq!(label, "mysql");
+                found_skipif = true;
+            }
+        }
+        assert!(found_skipif, "Should have parsed skipif mysql correctly");
+    }
+
+    #[test]
+    fn test_onlyif_with_inline_comment() {
+        // Test that onlyif mysql # comment is parsed correctly
+        let script = r#"onlyif mysql # MySQL-specific syntax
+statement ok
+SELECT 1
+"#;
+        let records: Vec<Record<DefaultColumnType>> = parse(script).unwrap();
+
+        let mut found_onlyif = false;
+        for record in &records {
+            if let Record::Condition(Condition::OnlyIf { label }) = record {
+                assert_eq!(label, "mysql");
+                found_onlyif = true;
+            }
+        }
+        assert!(found_onlyif, "Should have parsed onlyif mysql correctly");
+    }
+
+    #[test]
+    fn test_multiple_skipif_with_comments() {
+        // Test multiple skipif directives as found in real test files
+        let script = r#"skipif mysql # not compatible
+skipif postgresql # PostgreSQL requires AS
+query I
+SELECT 1
+----
+1
+"#;
+        let records: Vec<Record<DefaultColumnType>> = parse(script).unwrap();
+
+        let mut mysql_skipif = false;
+        let mut postgresql_skipif = false;
+        for record in &records {
+            if let Record::Condition(Condition::SkipIf { label }) = record {
+                match label.as_str() {
+                    "mysql" => mysql_skipif = true,
+                    "postgresql" => postgresql_skipif = true,
+                    _ => {}
+                }
+            }
+        }
+        assert!(mysql_skipif, "Should have parsed skipif mysql");
+        assert!(postgresql_skipif, "Should have parsed skipif postgresql");
+    }
+}
+
 /// Parse a sqllogictest file. The included scripts are inserted after the `include` record.
 pub fn parse_file<T: ColumnType>(filename: impl AsRef<Path>) -> Result<Vec<Record<T>>, ParseError> {
     let filename = filename.as_ref().to_str().unwrap();
