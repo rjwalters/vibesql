@@ -249,10 +249,12 @@ impl SelectExecutor<'_> {
 
             // Validate column references BEFORE processing rows (issue #2654)
             // This ensures column errors are caught even when tables are empty
-            super::validation::validate_select_columns(
+            // Pass procedural context to allow procedure variables in WHERE clause
+            super::validation::validate_select_columns_with_context(
                 &stmt.select_list,
                 stmt.where_clause.as_ref(),
                 &from_result.schema,
+                self.procedural_context,
             )?;
 
             self.execute_without_aggregation(stmt, from_result, cte_results)?

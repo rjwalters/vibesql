@@ -62,11 +62,13 @@ impl SelectExecutor<'_> {
         // Validate column references BEFORE processing rows (issue #2654)
         // This ensures column errors are caught even when tables are empty
         // Only validate if we have a FROM clause (skip for SELECT without FROM)
+        // Pass procedural context to allow procedure variables in WHERE clause
         if stmt.from.is_some() {
-            crate::select::executor::validation::validate_select_columns(
+            crate::select::executor::validation::validate_select_columns_with_context(
                 &stmt.select_list,
                 stmt.where_clause.as_ref(),
                 &from_result.schema,
+                self.procedural_context,
             )?;
         }
 

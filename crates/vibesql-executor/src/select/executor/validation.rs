@@ -200,6 +200,29 @@ pub fn validate_select_columns(
     where_clause: Option<&Expression>,
     schema: &CombinedSchema,
 ) -> Result<(), ExecutorError> {
+    validate_select_columns_with_context(select_list, where_clause, schema, None)
+}
+
+/// Validate all column references with optional procedural context
+///
+/// When a procedural context is provided, variable names from the context are
+/// allowed as column references (they will be resolved at runtime).
+pub fn validate_select_columns_with_context(
+    select_list: &[SelectItem],
+    where_clause: Option<&Expression>,
+    schema: &CombinedSchema,
+    procedural_context: Option<&crate::procedural::ExecutionContext>,
+) -> Result<(), ExecutorError> {
+    // Collect procedure variable names if in procedural context
+    let proc_vars: std::collections::HashSet<String> = procedural_context
+        .map(|ctx| {
+            ctx.get_available_names()
+                .into_iter()
+                .flat_map(|name| vec![name.clone(), name.to_lowercase()])
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut column_refs = Vec::new();
 
     // Extract column references from SELECT list
@@ -237,6 +260,12 @@ pub fn validate_select_columns(
 
     // Validate each column reference
     for col_ref in &column_refs {
+        // Skip validation for procedure variables (unqualified only)
+        if col_ref.table.is_none() {
+            if proc_vars.contains(&col_ref.column) || proc_vars.contains(&col_ref.column.to_lowercase()) {
+                continue;
+            }
+        }
         validate_column_ref(col_ref, schema)?;
     }
 

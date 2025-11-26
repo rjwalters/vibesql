@@ -7,7 +7,7 @@
 //!
 //! The execution path includes optimizations like SIMD filtering and spatial indexes.
 
-use super::{builder::SelectExecutor, simd::try_simd_filter, validation::validate_select_column_references};
+use super::{builder::SelectExecutor, simd::try_simd_filter, validation::validate_select_column_references_with_context};
 #[cfg(feature = "spatial")]
 use super::super::index_optimization::try_spatial_index_optimization;
 use crate::{
@@ -45,7 +45,8 @@ impl SelectExecutor<'_> {
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Validate column references upfront, before row iteration
         // This ensures proper error messages even when the table is empty
-        validate_select_column_references(stmt, &from_result.schema)?;
+        // Pass procedural context to allow procedure variables in WHERE clause
+        validate_select_column_references_with_context(stmt, &from_result.schema, self.procedural_context)?;
 
         // Phase D: Use iterator-based execution for simple queries
         // This provides memory efficiency and early termination for LIMIT queries
