@@ -1,15 +1,17 @@
-//! Comprehensive tests for case-insensitive identifier lookups
+//! Comprehensive tests for case sensitivity identifier lookups
 //!
 //! Tests the case_sensitive_identifiers setting in the catalog which controls
 //! whether table and view lookups are case-sensitive or case-insensitive.
 //!
-//! Default behavior (case_sensitive_identifiers = false):
-//! - Lookups are case-insensitive (MySQL compatible)
-//! - "users", "USERS", "Users" all refer to the same table
-//!
-//! When case_sensitive_identifiers = true:
+//! Default behavior (case_sensitive_identifiers = true, SQL:1999 compliant):
 //! - Lookups are case-sensitive (SQL standard)
+//! - The parser normalizes unquoted identifiers to uppercase
+//! - Delimited identifiers preserve their exact case
 //! - "users" and "USERS" are different tables
+//!
+//! When case_sensitive_identifiers = false (MySQL compatible mode):
+//! - Lookups are case-insensitive
+//! - "users", "USERS", "Users" all refer to the same table
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Database;
@@ -17,10 +19,14 @@ use vibesql_types::DataType;
 
 /// Test basic table creation and lookup with different cases (case-insensitive mode)
 #[test]
-fn test_table_lookup_case_insensitive_default() {
+fn test_table_lookup_case_insensitive_when_enabled() {
     let mut db = Database::new();
 
-    // Default is case-insensitive
+    // Default is case-sensitive (SQL:1999 compliant)
+    assert!(db.catalog.is_case_sensitive_identifiers());
+
+    // Enable case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
     assert!(!db.catalog.is_case_sensitive_identifiers());
 
     // Create table with lowercase name
@@ -40,10 +46,13 @@ fn test_table_lookup_case_insensitive_default() {
     assert!(db.catalog.get_table("uSeRs").is_some(), "Should find 'uSeRs'");
 }
 
-/// Test table creation with uppercase and lookup with lowercase
+/// Test table creation with uppercase and lookup with lowercase (case-insensitive mode)
 #[test]
-fn test_table_lookup_created_uppercase() {
+fn test_table_lookup_created_uppercase_when_case_insensitive() {
     let mut db = Database::new();
+
+    // Enable case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
 
     // Create table with uppercase name
     let schema = TableSchema::new(
@@ -61,10 +70,13 @@ fn test_table_lookup_created_uppercase() {
     assert!(db.catalog.get_table("Products").is_some());
 }
 
-/// Test mixed case table creation
+/// Test mixed case table creation (case-insensitive mode)
 #[test]
-fn test_table_lookup_mixed_case() {
+fn test_table_lookup_mixed_case_when_case_insensitive() {
     let mut db = Database::new();
+
+    // Enable case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
 
     // Create table with mixed case name
     let schema = TableSchema::new(
@@ -84,8 +96,11 @@ fn test_table_lookup_mixed_case() {
 
 /// Test DROP TABLE with different cases (case-insensitive mode)
 #[test]
-fn test_drop_table_case_insensitive() {
+fn test_drop_table_case_insensitive_when_enabled() {
     let mut db = Database::new();
+
+    // Enable case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
 
     // Create table with lowercase
     let schema = TableSchema::new(
@@ -102,10 +117,13 @@ fn test_drop_table_case_insensitive() {
     assert!(db.catalog.get_table("ORDERS").is_none());
 }
 
-/// Test DROP TABLE with mixed case
+/// Test DROP TABLE with mixed case (case-insensitive mode)
 #[test]
-fn test_drop_table_mixed_case() {
+fn test_drop_table_mixed_case_when_case_insensitive() {
     let mut db = Database::new();
+
+    // Enable case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
 
     // Create with mixed case
     let schema = TableSchema::new(
@@ -159,7 +177,11 @@ fn test_case_sensitive_mode() {
 fn test_toggle_case_sensitivity() {
     let mut db = Database::new();
 
-    // Default is case-insensitive
+    // Default is case-sensitive (SQL:1999 compliant)
+    assert!(db.catalog.is_case_sensitive_identifiers());
+
+    // Start in case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
     assert!(!db.catalog.is_case_sensitive_identifiers());
 
     // Create table in case-insensitive mode with uppercase name
@@ -191,13 +213,16 @@ fn test_toggle_case_sensitivity() {
     assert!(db.catalog.get_table("ORDERS").is_some());
 }
 
-/// Test view lookups with case insensitivity
+/// Test view lookups with case insensitivity (case-insensitive mode)
 #[test]
-fn test_view_lookup_case_insensitive() {
+fn test_view_lookup_case_insensitive_when_enabled() {
     use vibesql_catalog::ViewDefinition;
     use vibesql_ast;
 
     let mut db = Database::new();
+
+    // Enable case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
 
     // Create a base table
     let schema = TableSchema::new(
@@ -253,19 +278,22 @@ fn test_view_lookup_case_insensitive() {
     };
     db.catalog.create_view(view).unwrap();
 
-    // Should find view with different cases (case-insensitive by default)
+    // Should find view with different cases (case-insensitive mode enabled)
     assert!(db.catalog.get_view("active_users").is_some());
     assert!(db.catalog.get_view("ACTIVE_USERS").is_some());
     assert!(db.catalog.get_view("Active_Users").is_some());
 }
 
-/// Test DROP VIEW with case insensitivity
+/// Test DROP VIEW with case insensitivity (case-insensitive mode)
 #[test]
-fn test_drop_view_case_insensitive() {
+fn test_drop_view_case_insensitive_when_enabled() {
     use vibesql_catalog::ViewDefinition;
     use vibesql_ast;
 
     let mut db = Database::new();
+
+    // Enable case-insensitive mode for this test
+    db.catalog.set_case_sensitive_identifiers(false);
 
     // Create a base table
     let schema = TableSchema::new(
