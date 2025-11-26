@@ -1,10 +1,45 @@
 use vibesql_types::SqlValue;
 
+/// Result of comparing two SqlValues, accounting for NULL semantics
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CompareResult {
+    /// Normal ordering result
+    Ordering(std::cmp::Ordering),
+    /// At least one value is NULL - comparison is UNKNOWN
+    Unknown,
+}
+
+impl CompareResult {
+    /// Check if comparison result equals a specific ordering
+    /// Returns false for Unknown (NULL comparisons always fail in WHERE)
+    pub fn equals(&self, expected: std::cmp::Ordering) -> bool {
+        match self {
+            CompareResult::Ordering(ord) => *ord == expected,
+            CompareResult::Unknown => false,
+        }
+    }
+
+    /// Check if comparison result matches any of the given orderings
+    /// Returns false for Unknown (NULL comparisons always fail in WHERE)
+    pub fn matches(&self, orderings: &[std::cmp::Ordering]) -> bool {
+        match self {
+            CompareResult::Ordering(ord) => orderings.contains(ord),
+            CompareResult::Unknown => false,
+        }
+    }
+}
+
 /// Compare two SqlValues for ordering
 ///
-/// Handles both same-type and mixed numeric type comparisons by coercing to f64
-pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
+/// Handles both same-type and mixed numeric type comparisons by coercing to f64.
+/// Returns CompareResult::Unknown if either value is NULL (per SQL standard).
+pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
     use std::cmp::Ordering;
+
+    // NULL handling: any comparison involving NULL returns UNKNOWN
+    if matches!(a, SqlValue::Null) || matches!(b, SqlValue::Null) {
+        return CompareResult::Unknown;
+    }
 
     // Try to extract numeric value as f64 for cross-type comparison
     fn to_f64(v: &SqlValue) -> Option<f64> {
@@ -20,7 +55,7 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
         }
     }
 
-    match (a, b) {
+    CompareResult::Ordering(match (a, b) {
         // Same-type comparisons (fast path)
         (SqlValue::Integer(a), SqlValue::Integer(b)) => a.cmp(b),
         (SqlValue::Bigint(a), SqlValue::Bigint(b)) => a.cmp(b),
@@ -72,5 +107,5 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
                 Ordering::Equal
             }
         }
-    }
+    })
 }
