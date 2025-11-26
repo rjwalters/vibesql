@@ -1,6 +1,6 @@
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::combine_with_and,
-    schema::CombinedSchema,
+    schema::CombinedSchema, timeout::TimeoutContext,
 };
 use super::from_iterator::FromIterator;
 
@@ -237,6 +237,7 @@ pub(super) fn nested_loop_join(
     natural: bool,
     database: &vibesql_storage::Database,
     additional_equijoins: &[vibesql_ast::Expression],
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     // Try to use hash join for INNER JOINs with simple equi-join conditions
     if let vibesql_ast::JoinType::Inner = join_type {
@@ -626,19 +627,19 @@ pub(super) fn nested_loop_join(
     };
 
     let mut result = match join_type {
-        vibesql_ast::JoinType::Inner => nested_loop_inner_join(left, right, &combined_condition, database),
+        vibesql_ast::JoinType::Inner => nested_loop_inner_join(left, right, &combined_condition, database, timeout_ctx),
         vibesql_ast::JoinType::LeftOuter => {
-            nested_loop_left_outer_join(left, right, &combined_condition, database)
+            nested_loop_left_outer_join(left, right, &combined_condition, database, timeout_ctx)
         }
         vibesql_ast::JoinType::RightOuter => {
-            nested_loop_right_outer_join(left, right, &combined_condition, database)
+            nested_loop_right_outer_join(left, right, &combined_condition, database, timeout_ctx)
         }
         vibesql_ast::JoinType::FullOuter => {
-            nested_loop_full_outer_join(left, right, &combined_condition, database)
+            nested_loop_full_outer_join(left, right, &combined_condition, database, timeout_ctx)
         }
-        vibesql_ast::JoinType::Cross => nested_loop_cross_join(left, right, &combined_condition, database),
-        vibesql_ast::JoinType::Semi => nested_loop_semi_join(left, right, &combined_condition, database),
-        vibesql_ast::JoinType::Anti => nested_loop_anti_join(left, right, &combined_condition, database),
+        vibesql_ast::JoinType::Cross => nested_loop_cross_join(left, right, &combined_condition, database, timeout_ctx),
+        vibesql_ast::JoinType::Semi => nested_loop_semi_join(left, right, &combined_condition, database, timeout_ctx),
+        vibesql_ast::JoinType::Anti => nested_loop_anti_join(left, right, &combined_condition, database, timeout_ctx),
     }?;
 
     // For NATURAL JOIN, remove duplicate columns from the result

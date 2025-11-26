@@ -33,6 +33,7 @@ pub mod schema;
 mod schema_ddl;
 pub mod select;
 mod select_into;
+pub mod timeout;
 #[cfg(feature = "simd")]
 pub mod simd;
 mod transaction;
@@ -74,6 +75,7 @@ pub use trigger_ddl::TriggerExecutor;
 pub use type_ddl::TypeExecutor;
 pub use update::UpdateExecutor;
 pub use view_ddl::ViewExecutor;
+pub use timeout::TimeoutContext;
 
 #[cfg(test)]
 mod tests;

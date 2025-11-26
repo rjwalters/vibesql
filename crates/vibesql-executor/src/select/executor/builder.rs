@@ -29,7 +29,7 @@ pub struct SelectExecutor<'a> {
     /// Flag to prevent logging the same warning multiple times
     pub(super) memory_warning_logged: Cell<bool>,
     /// Query start time (for timeout enforcement)
-    pub(super) start_time: Instant,
+    pub(crate) start_time: Instant,
     /// Timeout in seconds (defaults to MAX_QUERY_EXECUTION_SECONDS)
     pub timeout_seconds: u64,
     /// Cache for aggregate results within a single group
