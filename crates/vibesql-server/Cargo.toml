@@ -33,7 +33,7 @@ rustls = "0.23"
 rustls-pemfile = "2.0"
 
 # Authentication
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["std"] }
 md-5 = "0.10"
 sha2 = "0.10"
 base64 = "0.22"

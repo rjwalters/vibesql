@@ -19,7 +19,7 @@ pub fn simd_gt_f64(column: &[f64], threshold: f64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = f64x4::from([threshold; 4]);
-        let mask = values.cmp_gt(thresh);
+        let mask = values.simd_gt(thresh);
 
         // Extract individual boolean values from the mask
         let arr: [f64; 4] = mask.into();
@@ -53,7 +53,7 @@ pub fn simd_ge_f64(column: &[f64], threshold: f64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = f64x4::from([threshold; 4]);
-        let mask = values.cmp_ge(thresh);
+        let mask = values.simd_ge(thresh);
 
         let arr: [f64; 4] = mask.into();
         for &val in &arr {
@@ -84,7 +84,7 @@ pub fn simd_lt_f64(column: &[f64], threshold: f64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = f64x4::from([threshold; 4]);
-        let mask = values.cmp_lt(thresh);
+        let mask = values.simd_lt(thresh);
 
         let arr: [f64; 4] = mask.into();
         for &val in &arr {
@@ -115,7 +115,7 @@ pub fn simd_le_f64(column: &[f64], threshold: f64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = f64x4::from([threshold; 4]);
-        let mask = values.cmp_le(thresh);
+        let mask = values.simd_le(thresh);
 
         let arr: [f64; 4] = mask.into();
         for &val in &arr {
@@ -146,7 +146,7 @@ pub fn simd_eq_f64(column: &[f64], value: f64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let val = f64x4::from([value; 4]);
-        let mask = values.cmp_eq(val);
+        let mask = values.simd_eq(val);
 
         let arr: [f64; 4] = mask.into();
         for &v in &arr {
@@ -177,7 +177,7 @@ pub fn simd_ne_f64(column: &[f64], value: f64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let val = f64x4::from([value; 4]);
-        let mask = values.cmp_ne(val);
+        let mask = values.simd_ne(val);
 
         let arr: [f64; 4] = mask.into();
         for &v in &arr {
@@ -208,7 +208,7 @@ pub fn simd_gt_i64(column: &[i64], threshold: i64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = i64x4::from([threshold; 4]);
-        let mask = values.cmp_gt(thresh);
+        let mask = values.simd_gt(thresh);
 
         let arr: [i64; 4] = mask.into();
         for &val in &arr {
@@ -239,7 +239,7 @@ pub fn simd_lt_i64(column: &[i64], threshold: i64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = i64x4::from([threshold; 4]);
-        let mask = values.cmp_lt(thresh);
+        let mask = values.simd_lt(thresh);
 
         let arr: [i64; 4] = mask.into();
         for &val in &arr {
@@ -271,7 +271,7 @@ pub fn simd_ge_i64(column: &[i64], threshold: i64) -> Vec<bool> {
         ]);
         let thresh = i64x4::from([threshold; 4]);
         // a >= b is equivalent to !(a < b)
-        let mask = !values.cmp_lt(thresh);
+        let mask = !values.simd_lt(thresh);
 
         let arr: [i64; 4] = mask.into();
         for &val in &arr {
@@ -303,7 +303,7 @@ pub fn simd_le_i64(column: &[i64], threshold: i64) -> Vec<bool> {
         ]);
         let thresh = i64x4::from([threshold; 4]);
         // a <= b is equivalent to !(a > b)
-        let mask = !values.cmp_gt(thresh);
+        let mask = !values.simd_gt(thresh);
 
         let arr: [i64; 4] = mask.into();
         for &val in &arr {
@@ -334,7 +334,7 @@ pub fn simd_eq_i64(column: &[i64], value: i64) -> Vec<bool> {
             column[offset + 3],
         ]);
         let val = i64x4::from([value; 4]);
-        let mask = values.cmp_eq(val);
+        let mask = values.simd_eq(val);
 
         let arr: [i64; 4] = mask.into();
         for &v in &arr {
@@ -366,7 +366,7 @@ pub fn simd_ne_i64(column: &[i64], value: i64) -> Vec<bool> {
         ]);
         let val = i64x4::from([value; 4]);
         // NE is equivalent to NOT(EQ)
-        let mask_eq = values.cmp_eq(val);
+        let mask_eq = values.simd_eq(val);
         let arr: [i64; 4] = mask_eq.into();
         for &v in &arr {
             result.push(v == 0); // NOT EQ
@@ -396,7 +396,7 @@ pub fn simd_gt_i32(column: &[i32], threshold: i32) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = i32x4::from([threshold; 4]);
-        let mask = values.cmp_gt(thresh);
+        let mask = values.simd_gt(thresh);
 
         let arr: [i32; 4] = mask.into();
         for &val in &arr {
@@ -428,7 +428,7 @@ pub fn simd_ge_i32(column: &[i32], threshold: i32) -> Vec<bool> {
         ]);
         let thresh = i32x4::from([threshold; 4]);
         // GE is equivalent to NOT(LT)
-        let mask_lt = values.cmp_lt(thresh);
+        let mask_lt = values.simd_lt(thresh);
         let arr: [i32; 4] = mask_lt.into();
         for &val in &arr {
             result.push(val == 0); // NOT LT
@@ -458,7 +458,7 @@ pub fn simd_lt_i32(column: &[i32], threshold: i32) -> Vec<bool> {
             column[offset + 3],
         ]);
         let thresh = i32x4::from([threshold; 4]);
-        let mask = values.cmp_lt(thresh);
+        let mask = values.simd_lt(thresh);
 
         let arr: [i32; 4] = mask.into();
         for &val in &arr {
@@ -490,7 +490,7 @@ pub fn simd_le_i32(column: &[i32], threshold: i32) -> Vec<bool> {
         ]);
         let thresh = i32x4::from([threshold; 4]);
         // LE is equivalent to NOT(GT)
-        let mask_gt = values.cmp_gt(thresh);
+        let mask_gt = values.simd_gt(thresh);
         let arr: [i32; 4] = mask_gt.into();
         for &val in &arr {
             result.push(val == 0); // NOT GT
@@ -520,7 +520,7 @@ pub fn simd_eq_i32(column: &[i32], value: i32) -> Vec<bool> {
             column[offset + 3],
         ]);
         let val = i32x4::from([value; 4]);
-        let mask = values.cmp_eq(val);
+        let mask = values.simd_eq(val);
 
         let arr: [i32; 4] = mask.into();
         for &v in &arr {
@@ -552,7 +552,7 @@ pub fn simd_ne_i32(column: &[i32], value: i32) -> Vec<bool> {
         ]);
         let val = i32x4::from([value; 4]);
         // NE is equivalent to NOT(EQ)
-        let mask_eq = values.cmp_eq(val);
+        let mask_eq = values.simd_eq(val);
         let arr: [i32; 4] = mask_eq.into();
         for &v in &arr {
             result.push(v == 0); // NOT EQ

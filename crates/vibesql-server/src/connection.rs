@@ -185,7 +185,7 @@ impl ConnectionHandler {
 
                 // Generate random salt
                 use rand::Rng;
-                let salt: [u8; 4] = rand::thread_rng().gen();
+                let salt: [u8; 4] = rand::rng().random();
 
                 self.send_md5_password_request(&salt).await?;
 
