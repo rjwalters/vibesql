@@ -87,6 +87,13 @@ pub enum Record<T: ColumnType> {
     Condition(Condition),
     /// Connection statements to specify the connection to use for the following statement.
     Connection(Connection),
+    /// Dialect switch directive - changes SQL dialect mode for subsequent tests.
+    /// Executes SET SQL_MODE = '<mode>' on the database.
+    Dialect {
+        loc: Location,
+        /// The dialect mode: "mysql", "sqlite", "postgresql", etc.
+        mode: String,
+    },
     Comment(Vec<String>),
     Newline,
     /// Internally injected record which should not occur in the test file.
@@ -164,6 +171,9 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                     write!(f, "connection {}", conn)?;
                 }
                 Ok(())
+            }
+            Record::Dialect { loc: _, mode } => {
+                write!(f, "dialect {mode}")
             }
             Record::HashThreshold { loc: _, threshold } => {
                 write!(f, "hash-threshold {threshold}")

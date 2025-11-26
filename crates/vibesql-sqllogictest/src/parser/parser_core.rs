@@ -95,6 +95,12 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     loc,
                 });
             }
+            ["dialect", mode] => {
+                records.push(Record::Dialect {
+                    loc,
+                    mode: mode.to_string(),
+                });
+            }
             ["skipif", label] => {
                 let cond = Condition::SkipIf {
                     label: label.to_string(),
@@ -373,6 +379,97 @@ SELECT 1
         }
         assert!(mysql_skipif, "Should have parsed skipif mysql");
         assert!(postgresql_skipif, "Should have parsed skipif postgresql");
+    }
+
+    #[test]
+    fn test_dialect_mysql() {
+        let script = r#"dialect mysql
+
+query I
+SELECT 5 DIV 2
+----
+2
+"#;
+        let records: Vec<Record<DefaultColumnType>> = parse(script).unwrap();
+
+        let mut found_dialect = false;
+        for record in &records {
+            if let Record::Dialect { mode, .. } = record {
+                assert_eq!(mode, "mysql");
+                found_dialect = true;
+            }
+        }
+        assert!(found_dialect, "Should have parsed dialect mysql");
+    }
+
+    #[test]
+    fn test_dialect_sqlite() {
+        let script = r#"dialect sqlite
+
+query I
+SELECT 5 / 2
+----
+2
+"#;
+        let records: Vec<Record<DefaultColumnType>> = parse(script).unwrap();
+
+        let mut found_dialect = false;
+        for record in &records {
+            if let Record::Dialect { mode, .. } = record {
+                assert_eq!(mode, "sqlite");
+                found_dialect = true;
+            }
+        }
+        assert!(found_dialect, "Should have parsed dialect sqlite");
+    }
+
+    #[test]
+    fn test_multiple_dialect_switches() {
+        let script = r#"dialect mysql
+
+query I
+SELECT 1
+----
+1
+
+dialect sqlite
+
+query I
+SELECT 2
+----
+2
+
+dialect mysql
+
+query I
+SELECT 3
+----
+3
+"#;
+        let records: Vec<Record<DefaultColumnType>> = parse(script).unwrap();
+
+        let dialects: Vec<&str> = records
+            .iter()
+            .filter_map(|r| {
+                if let Record::Dialect { mode, .. } = r {
+                    Some(mode.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(dialects, vec!["mysql", "sqlite", "mysql"]);
+    }
+
+    #[test]
+    fn test_dialect_display() {
+        let script = "dialect mysql";
+        let records: Vec<Record<DefaultColumnType>> = parse(script).unwrap();
+
+        let dialect_record = records.iter().find(|r| matches!(r, Record::Dialect { .. }));
+        assert!(dialect_record.is_some());
+        assert_eq!(format!("{}", dialect_record.unwrap()), "dialect mysql");
     }
 }
 
