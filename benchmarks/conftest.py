@@ -6,7 +6,13 @@ import vibesql
 import json
 import platform
 import psutil
+import sys
 from pathlib import Path
+
+# Ensure the benchmarks directory is in the Python path for utils imports
+benchmarks_dir = Path(__file__).parent
+if str(benchmarks_dir) not in sys.path:
+    sys.path.insert(0, str(benchmarks_dir))
 
 # pytest-benchmark configuration
 def pytest_configure(config):

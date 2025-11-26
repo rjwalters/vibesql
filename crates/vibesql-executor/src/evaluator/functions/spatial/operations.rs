@@ -207,22 +207,22 @@ pub fn st_simplify(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
             let simplified = match geom {
                 geo::Geometry::LineString(ls) => {
-                    let simplified_ls = ls.simplify(&tolerance);
+                    let simplified_ls = ls.simplify(tolerance);
                     geo::Geometry::LineString(simplified_ls)
                 }
                 geo::Geometry::MultiLineString(mls) => {
                     let simplified_mls = mls.0.iter()
-                        .map(|ls| ls.simplify(&tolerance))
+                        .map(|ls| ls.simplify(tolerance))
                         .collect();
                     geo::Geometry::MultiLineString(geo::MultiLineString(simplified_mls))
                 }
                 geo::Geometry::Polygon(poly) => {
-                    let simplified_poly = poly.simplify(&tolerance);
+                    let simplified_poly = poly.simplify(tolerance);
                     geo::Geometry::Polygon(simplified_poly)
                 }
                 geo::Geometry::MultiPolygon(mp) => {
                     let simplified_mp = mp.0.iter()
-                        .map(|p| p.simplify(&tolerance))
+                        .map(|p| p.simplify(tolerance))
                         .collect();
                     geo::Geometry::MultiPolygon(geo::MultiPolygon(simplified_mp))
                 }

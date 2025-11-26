@@ -14,7 +14,7 @@ use super::{
     cte::CteResult,
     join::{nested_loop_join, FromResult},
 };
-use crate::{errors::ExecutorError, optimizer::PredicateDecomposition};
+use crate::{errors::ExecutorError, optimizer::PredicateDecomposition, timeout::TimeoutContext};
 
 /// Specification for reordered join execution
 #[derive(Debug, Clone)]
@@ -266,6 +266,8 @@ where
         };
 
         // nested_loop_join with WHERE clause equijoins for hash join optimization (Phase 3)
+        // Note: Using default timeout context - proper timeout propagation is a future improvement
+        let timeout_ctx = TimeoutContext::new_default();
         result = match nested_loop_join(
             result,
             next_result,
@@ -274,6 +276,7 @@ where
             false,
             database,
             &applicable_equijoins,
+            &timeout_ctx,
         ) {
             Ok(r) => r,
             Err(e) => return Some(Err(e)),

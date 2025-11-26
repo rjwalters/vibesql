@@ -6,6 +6,7 @@ use rayon::prelude::*;
 use super::FromResult;
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
+use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
@@ -17,16 +18,21 @@ use crate::select::parallel::ParallelConfig;
 fn build_hash_table_sequential(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
-) -> HashMap<vibesql_types::SqlValue, ()> {
+    timeout_ctx: &TimeoutContext,
+) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
     let mut hash_table: HashMap<vibesql_types::SqlValue, ()> = HashMap::new();
-    for row in build_rows.iter() {
+    for (idx, row) in build_rows.iter().enumerate() {
+        // Check timeout periodically during build phase
+        if idx % CHECK_INTERVAL == 0 {
+            timeout_ctx.check()?;
+        }
         let key = row.values[build_col_idx].clone();
         // Skip NULL values - they never match in equi-joins
         if key != vibesql_types::SqlValue::Null {
             hash_table.insert(key, ());
         }
     }
-    hash_table
+    Ok(hash_table)
 }
 
 /// Build hash table in parallel for anti-join
@@ -41,15 +47,19 @@ fn build_hash_table_sequential(
 fn build_hash_table_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
-) -> HashMap<vibesql_types::SqlValue, ()> {
+    timeout_ctx: &TimeoutContext,
+) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
     #[cfg(feature = "parallel")]
     {
         let config = ParallelConfig::global();
 
         // Use sequential fallback for small inputs
         if !config.should_parallelize_join(build_rows.len()) {
-            return build_hash_table_sequential(build_rows, build_col_idx);
+            return build_hash_table_sequential(build_rows, build_col_idx, timeout_ctx);
         }
+
+        // Check timeout before parallel execution (can't check mid-parallel easily)
+        timeout_ctx.check()?;
 
         // Phase 1: Parallel build of partial hash tables
         // Each thread processes a chunk and builds its own hash table
@@ -68,20 +78,24 @@ fn build_hash_table_parallel(
             })
             .collect();
 
+        // Check timeout after parallel build
+        timeout_ctx.check()?;
+
         // Phase 2: Sequential merge of partial tables
         // This is fast because we only need to insert keys, not append vectors
-        partial_tables.into_iter().fold(HashMap::new(), |mut acc, partial| {
+        let result = partial_tables.into_iter().fold(HashMap::new(), |mut acc, partial| {
             for (key, _) in partial {
                 acc.insert(key, ());
             }
             acc
-        })
+        });
+        Ok(result)
     }
 
     #[cfg(not(feature = "parallel"))]
     {
         // Always use sequential build when parallel feature is disabled
-        build_hash_table_sequential(build_rows, build_col_idx)
+        build_hash_table_sequential(build_rows, build_col_idx, timeout_ctx)
     }
 }
 
@@ -110,6 +124,9 @@ pub(super) fn hash_anti_join(
     left_col_idx: usize,
     right_col_idx: usize,
 ) -> Result<FromResult, ExecutorError> {
+    // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
+    let timeout_ctx = TimeoutContext::new_default();
+
     // Get left and right row data
     let left_rows = left.rows();
     let right_rows = right.rows();
@@ -118,14 +135,19 @@ pub(super) fn hash_anti_join(
     // Key: join column value
     // Value: () (we only need to know if the key exists, not store row indices)
     // Automatically uses parallel build when beneficial (based on row count and hardware)
-    let hash_table = build_hash_table_parallel(right_rows, right_col_idx);
+    let hash_table = build_hash_table_parallel(right_rows, right_col_idx, &timeout_ctx)?;
 
     // Probe phase: Check each left row for absence of a match
     // We only emit left rows that have NO match in the right table
     let estimated_capacity = left_rows.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
 
-    for left_row in left_rows.iter() {
+    for (idx, left_row) in left_rows.iter().enumerate() {
+        // Check timeout periodically during probe phase
+        if idx % CHECK_INTERVAL == 0 {
+            timeout_ctx.check()?;
+        }
+
         let key = &left_row.values[left_col_idx];
 
         // Skip NULL values - they never match in equi-joins, so they should be returned
@@ -182,6 +204,9 @@ pub(super) fn hash_anti_join_with_filter(
         return hash_anti_join(left, right, left_col_idx, right_col_idx);
     }
 
+    // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
+    let timeout_ctx = TimeoutContext::new_default();
+
     let filter = additional_filter.unwrap();
 
     // Get left and right row data
@@ -193,6 +218,10 @@ pub(super) fn hash_anti_join_with_filter(
     let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
 
     for (idx, row) in right_rows.iter().enumerate() {
+        // Check timeout periodically during build phase
+        if idx % CHECK_INTERVAL == 0 {
+            timeout_ctx.check()?;
+        }
         let key = row.values[right_col_idx].clone();
         // Skip NULL values - they never match in equi-joins
         if key != vibesql_types::SqlValue::Null {
@@ -206,6 +235,7 @@ pub(super) fn hash_anti_join_with_filter(
 
     // Create evaluator for filter evaluation
     let evaluator = CombinedExpressionEvaluator::with_database(combined_schema, database);
+    let mut probe_iterations = 0;
 
     // Helper to create combined row (same as in hash_semi_join_with_filter)
     let create_combined_row = |left_row: &vibesql_storage::Row, right_row: &vibesql_storage::Row| {
@@ -215,6 +245,12 @@ pub(super) fn hash_anti_join_with_filter(
     };
 
     for left_row in left_rows.iter() {
+        // Check timeout periodically during probe phase
+        probe_iterations += 1;
+        if probe_iterations % CHECK_INTERVAL == 0 {
+            timeout_ctx.check()?;
+        }
+
         let key = &left_row.values[left_col_idx];
 
         // Skip NULL values - they never match in equi-joins, so they should be returned

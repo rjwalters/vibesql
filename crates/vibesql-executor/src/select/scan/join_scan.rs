@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::{
     errors::ExecutorError, optimizer::PredicatePlan, select::cte::CteResult,
+    timeout::TimeoutContext,
 };
 
 /// Execute a JOIN operation
@@ -99,6 +100,9 @@ where
 
     // Perform nested loop join with equijoin predicates from WHERE clause
     use crate::select::join::nested_loop_join;
+    // Note: Using default timeout context - proper timeout propagation from SelectExecutor
+    // is a future improvement (see issue #2631 for context)
+    let timeout_ctx = TimeoutContext::new_default();
     let result = nested_loop_join(
         left_result,
         right_result,
@@ -107,6 +111,7 @@ where
         natural,
         database,
         &equijoin_predicates,
+        &timeout_ctx,
     )?;
     Ok(result)
 }
