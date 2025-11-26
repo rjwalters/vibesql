@@ -63,7 +63,6 @@ fn test_table_not_found_error() {
 }
 
 #[test]
-#[ignore] // TODO: Implement column validation in SELECT statement execution
 fn test_column_not_found_error() {
     let mut db = Database::new();
 

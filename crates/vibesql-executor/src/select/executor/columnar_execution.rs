@@ -106,6 +106,14 @@ impl SelectExecutor<'_> {
         // Extract schema before accessing rows (to avoid borrow checker issues)
         let schema = from_result.schema.clone();
 
+        // Validate column references BEFORE processing (issue #2654)
+        // This ensures column errors are caught even when tables are empty
+        super::validation::validate_select_columns(
+            &stmt.select_list,
+            stmt.where_clause.as_ref(),
+            &schema,
+        )?;
+
         // Extract expressions from SELECT list (only Expression items, skip wildcards)
         let select_exprs: Vec<_> = stmt
             .select_list
@@ -206,6 +214,14 @@ impl SelectExecutor<'_> {
 
         // Build schema for this table
         let schema = CombinedSchema::from_table(table_name.clone(), table.schema.clone());
+
+        // Validate column references BEFORE processing (issue #2654)
+        // This ensures column errors are caught even when tables are empty
+        super::validation::validate_select_columns(
+            &stmt.select_list,
+            stmt.where_clause.as_ref(),
+            &schema,
+        )?;
 
         // Get columnar representation from cache or convert from storage
         #[cfg(feature = "profile-q6")]
