@@ -5,6 +5,7 @@ use vibesql_ast::{Expression, FromClause};
 use crate::{
     errors::ExecutorError,
     schema::CombinedSchema,
+    timeout::TimeoutContext,
     select::{
         cte::CteResult,
         join::{nested_loop_join, JoinOrderAnalyzer, JoinOrderSearch},
@@ -224,6 +225,8 @@ where
             // Using CROSS join would trigger memory limit checks for large Cartesian products.
             let join_type = &vibesql_ast::JoinType::Inner;
 
+            // Note: Using default timeout context - proper timeout propagation is a future improvement
+            let timeout_ctx = TimeoutContext::new_default();
             result = Some(nested_loop_join(
                 prev_result,
                 table_result,
@@ -232,6 +235,7 @@ where
                 false, // Not a NATURAL JOIN
                 database,
                 &applicable_conditions, // Pass only the applicable conditions for this join
+                &timeout_ctx,
             )?);
         } else {
             result = Some(table_result);

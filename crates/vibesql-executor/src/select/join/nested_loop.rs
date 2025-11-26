@@ -1,7 +1,7 @@
 use super::{combine_rows, FromResult};
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator, limits::MAX_MEMORY_BYTES,
-    schema::CombinedSchema,
+    schema::CombinedSchema, timeout::{TimeoutContext, CHECK_INTERVAL},
 };
 
 /// Maximum number of rows allowed in a join result to prevent memory exhaustion
@@ -94,8 +94,10 @@ fn execute_optimized_equijoin(
     remaining_condition: Option<&vibesql_ast::Expression>,
     schema: &CombinedSchema,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     let mut result_rows = Vec::new();
+    let mut iterations = 0;
 
     // Create evaluator for remaining conditions if needed
     let evaluator = if remaining_condition.is_some() {
@@ -108,6 +110,12 @@ fn execute_optimized_equijoin(
         let left_value = &left_row.values[left_col_idx];
 
         for right_row in right_rows {
+            // Check timeout periodically
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
             let right_value = &right_row.values[right_col_idx];
 
             // OPTIMIZATION: Compare values BEFORE allocating combined_row
@@ -155,12 +163,20 @@ fn execute_nested_loop_classic(
     condition: &Option<vibesql_ast::Expression>,
     schema: &CombinedSchema,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     let evaluator = CombinedExpressionEvaluator::with_database(schema, database);
     let mut result_rows = Vec::new();
+    let mut iterations = 0;
 
     for left_row in left_rows {
         for right_row in right_rows {
+            // Check timeout periodically
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
             // Combine rows using optimized helper (single allocation)
             let combined_row = combine_rows(left_row, right_row);
 
@@ -200,6 +216,7 @@ pub(super) fn nested_loop_inner_join(
     mut right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     // Check for potential cartesian product before execution
     // This catches INNER JOINs with non-selective conditions (e.g., WHERE true)
@@ -263,11 +280,12 @@ pub(super) fn nested_loop_inner_join(
                 remaining_condition.as_ref(),
                 &combined_schema,
                 database,
+                timeout_ctx,
             )?
         }
         EquijoinEvalStrategy::Complex => {
             // SLOW PATH: Use existing algorithm (allocate then evaluate)
-            execute_nested_loop_classic(left.rows(), right.rows(), condition, &combined_schema, database)?
+            execute_nested_loop_classic(left.rows(), right.rows(), condition, &combined_schema, database, timeout_ctx)?
         }
     };
 
@@ -280,6 +298,7 @@ pub(super) fn nested_loop_left_outer_join(
     mut right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     // Note: No memory check here. Hash join is selected in mod.rs BEFORE this function is called.
     // OUTER JOINs typically preserve at least the left table size, making estimates more reliable.
@@ -311,10 +330,17 @@ pub(super) fn nested_loop_left_outer_join(
 
     // Nested loop LEFT OUTER JOIN algorithm
     let mut result_rows = Vec::new();
+    let mut iterations = 0;
     for left_row in left.rows() {
         let mut matched = false;
 
         for right_row in right.rows() {
+            // Check timeout periodically
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
             // Combine rows using optimized helper (single allocation)
             let combined_row = combine_rows(left_row, right_row);
 
@@ -364,6 +390,7 @@ pub(super) fn nested_loop_right_outer_join(
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     // Note: Memory check removed - delegates to LEFT OUTER JOIN which also doesn't check.
 
@@ -382,7 +409,7 @@ pub(super) fn nested_loop_right_outer_join(
         .len();
 
     // Do LEFT OUTER JOIN with swapped sides
-    let mut swapped_result = nested_loop_left_outer_join(right, left, condition, database)?;
+    let mut swapped_result = nested_loop_left_outer_join(right, left, condition, database, timeout_ctx)?;
 
     // Now we need to reorder the columns in the result
     // The swapped result has right columns first, then left columns
@@ -411,6 +438,7 @@ pub(super) fn nested_loop_full_outer_join(
     mut right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     // Note: Memory check removed - full outer joins are rare and typically used
     // with smaller datasets. Hash join is tried first for equijoins anyway.
@@ -452,12 +480,19 @@ pub(super) fn nested_loop_full_outer_join(
     // FULL OUTER JOIN = LEFT OUTER JOIN + unmatched rows from right
     let mut result_rows = Vec::new();
     let mut right_matched = vec![false; right.rows().len()];
+    let mut iterations = 0;
 
     // First pass: LEFT OUTER JOIN logic
     for left_row in left.rows() {
         let mut matched = false;
 
         for (right_idx, right_row) in right.rows().iter().enumerate() {
+            // Check timeout periodically
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
             // Combine rows using optimized helper (single allocation)
             let combined_row = combine_rows(left_row, right_row);
 
@@ -519,6 +554,7 @@ pub(super) fn nested_loop_cross_join(
     mut right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     _database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     // CROSS JOIN should not have a condition
     if condition.is_some() {
@@ -553,8 +589,14 @@ pub(super) fn nested_loop_cross_join(
 
     // CROSS JOIN = Cartesian product (every row from left × every row from right)
     let mut result_rows = Vec::new();
+    let mut iterations = 0;
     for left_row in left.rows() {
         for right_row in right.rows() {
+            // Check timeout periodically
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
             result_rows.push(combine_rows(left_row, right_row));
         }
     }
@@ -571,6 +613,7 @@ pub(super) fn nested_loop_semi_join(
     mut right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     let left_schema = left.schema.clone();
 
@@ -599,12 +642,19 @@ pub(super) fn nested_loop_semi_join(
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
     let mut result_rows = Vec::new();
+    let mut iterations = 0;
 
     // For each left row, check if there's at least one matching right row
     for left_row in left.rows() {
         let mut has_match = false;
 
         for right_row in right.rows() {
+            // Check timeout periodically
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
             let combined_row = combine_rows(left_row, right_row);
 
             // Check join condition
@@ -647,6 +697,7 @@ pub(super) fn nested_loop_anti_join(
     mut right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
     let left_schema = left.schema.clone();
 
@@ -675,12 +726,19 @@ pub(super) fn nested_loop_anti_join(
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
     let mut result_rows = Vec::new();
+    let mut iterations = 0;
 
     // For each left row, check if there are NO matching right rows
     for left_row in left.rows() {
         let mut has_match = false;
 
         for right_row in right.rows() {
+            // Check timeout periodically
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
             let combined_row = combine_rows(left_row, right_row);
 
             // Check join condition

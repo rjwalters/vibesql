@@ -9,6 +9,7 @@ use crate::{
     errors::ExecutorError,
     schema::CombinedSchema,
     select::RowIterator,
+    timeout::{TimeoutContext, CHECK_INTERVAL},
 };
 
 /// Hash join iterator that lazily produces joined rows
@@ -45,6 +46,10 @@ pub struct HashJoinIterator<L: RowIterator> {
     /// Number of right columns (for NULL padding)
     #[allow(dead_code)]
     right_col_count: usize,
+    /// Timeout context for query timeout enforcement
+    timeout_ctx: TimeoutContext,
+    /// Iteration counter for periodic timeout checks
+    iteration_count: usize,
 }
 
 impl<L: RowIterator> HashJoinIterator<L> {
@@ -89,11 +94,21 @@ impl<L: RowIterator> HashJoinIterator<L> {
         let combined_schema =
             CombinedSchema::combine(left.schema().clone(), right_table_name, right_schema);
 
+        // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
+        let timeout_ctx = TimeoutContext::new_default();
+
         // Build phase: Create hash table from right side
         // This is the one-time materialization cost
         let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>> = HashMap::new();
+        let mut build_iterations = 0;
 
         for row in right.into_rows() {
+            // Check timeout periodically during build phase
+            build_iterations += 1;
+            if build_iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
             let key = row.values[right_col_idx].clone();
 
             // Skip NULL values - they never match in equi-joins
@@ -112,6 +127,8 @@ impl<L: RowIterator> HashJoinIterator<L> {
             current_matches: Vec::new(),
             match_index: 0,
             right_col_count,
+            timeout_ctx,
+            iteration_count: 0,
         })
     }
 
@@ -126,6 +143,14 @@ impl<L: RowIterator> Iterator for HashJoinIterator<L> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            // Check timeout periodically during probe phase
+            self.iteration_count += 1;
+            if self.iteration_count % CHECK_INTERVAL == 0 {
+                if let Err(e) = self.timeout_ctx.check() {
+                    return Some(Err(e));
+                }
+            }
+
             // If we have remaining matches for current left row, return next match
             if self.match_index < self.current_matches.len() {
                 let right_row = &self.current_matches[self.match_index];
