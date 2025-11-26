@@ -263,7 +263,40 @@ fn qualify_outer_column_refs(expr: &Expression, outer_table: &str) -> Expression
             args: args.iter().map(|a| qualify_outer_column_refs(a, outer_table)).collect(),
             character_unit: character_unit.clone(),
         },
-        // For other expression types, just clone
+        Expression::IsNull { expr: inner, negated } => Expression::IsNull {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_table)),
+            negated: *negated,
+        },
+        Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_table)),
+            low: Box::new(qualify_outer_column_refs(low, outer_table)),
+            high: Box::new(qualify_outer_column_refs(high, outer_table)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+        Expression::InList { expr: inner, values, negated } => Expression::InList {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_table)),
+            values: values.iter().map(|v| qualify_outer_column_refs(v, outer_table)).collect(),
+            negated: *negated,
+        },
+        Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_table)),
+            pattern: Box::new(qualify_outer_column_refs(pattern, outer_table)),
+            negated: *negated,
+        },
+        Expression::Cast { expr: inner, data_type } => Expression::Cast {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_table)),
+            data_type: data_type.clone(),
+        },
+        // IN subquery: qualify the outer expr but NOT the subquery (it has its own scope)
+        Expression::In { expr: inner, subquery, negated } => Expression::In {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_table)),
+            subquery: subquery.clone(), // Don't qualify inside subquery - separate scope
+            negated: *negated,
+        },
+        // EXISTS and scalar subqueries have their own scope, don't qualify inside
+        Expression::Exists { .. } | Expression::ScalarSubquery(_) => expr.clone(),
+        // For other expression types (Literal, Wildcard, etc.), just clone
         _ => expr.clone(),
     }
 }
@@ -340,6 +373,19 @@ fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str, new_alias:
             expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
             data_type: data_type.clone(),
         },
+        // IN subquery: rewrite the outer expr but NOT the subquery (it has its own scope)
+        Expression::In { expr: inner, subquery, negated } => Expression::In {
+            expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
+            subquery: subquery.clone(), // Don't rewrite inside subquery - separate scope
+            negated: *negated,
+        },
+        // EXISTS subquery: the subquery has its own scope, don't rewrite
+        Expression::Exists { subquery, negated } => Expression::Exists {
+            subquery: subquery.clone(),
+            negated: *negated,
+        },
+        // Scalar subquery: same as EXISTS, separate scope
+        Expression::ScalarSubquery(subquery) => Expression::ScalarSubquery(subquery.clone()),
         // For other expression types, just clone (they don't contain column refs that need rewriting)
         _ => expr.clone(),
     }
