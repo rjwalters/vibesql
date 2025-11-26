@@ -29,6 +29,7 @@ pub struct TestStats {
 }
 
 impl TestStats {
+    #[allow(dead_code)]
     pub fn pass_rate(&self) -> f64 {
         let relevant_total = self.total - self.skipped;
         if relevant_total == 0 {

@@ -174,6 +174,7 @@ pub fn get_test_file_timeout_for(file_name: &str) -> u64 {
 /// Returns timeout in seconds
 ///
 /// DEPRECATED: Use get_test_file_timeout_for() instead to support per-file timeouts
+#[allow(dead_code)]
 pub fn get_test_file_timeout() -> u64 {
     get_test_file_timeout_for("")
 }
