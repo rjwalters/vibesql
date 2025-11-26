@@ -542,11 +542,32 @@ impl Operations {
     }
 
     /// Drop all spatial indexes associated with a table (CASCADE behavior)
+    ///
+    /// Matching is case-insensitive and handles both qualified ("schema.table")
+    /// and unqualified ("table") names.
     pub fn drop_spatial_indexes_for_table(&mut self, table_name: &str) -> Vec<String> {
+        // Normalize for case-insensitive comparison
+        let search_name_upper = table_name.to_uppercase();
+
+        // Extract just the table name part if qualified (e.g., "public.users" -> "users")
+        let search_table_only = search_name_upper
+            .rsplit('.')
+            .next()
+            .unwrap_or(&search_name_upper);
+
         let indexes_to_drop: Vec<String> = self
             .spatial_indexes
             .iter()
-            .filter(|(_, (metadata, _))| metadata.table_name == table_name)
+            .filter(|(_, (metadata, _))| {
+                let stored_upper = metadata.table_name.to_uppercase();
+                let stored_table_only = stored_upper
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&stored_upper);
+
+                // Match if full names match OR unqualified parts match
+                stored_upper == search_name_upper || stored_table_only == search_table_only
+            })
             .map(|(name, _)| name.clone())
             .collect();
 

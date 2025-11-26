@@ -509,17 +509,40 @@ impl IndexManager {
     ///
     /// # Arguments
     ///
-    /// * `table_name` - The qualified name of the table (e.g., "public.users")
+    /// * `table_name` - The table name, which may be qualified (e.g., "public.users") or
+    ///                  unqualified (e.g., "users"). Matching is case-insensitive and handles
+    ///                  both qualified and unqualified names.
     ///
     /// # Returns
     ///
     /// Vector of index names that were dropped (for logging/debugging)
     pub fn drop_indexes_for_table(&mut self, table_name: &str) -> Vec<String> {
+        // Normalize for case-insensitive comparison
+        let search_name_upper = table_name.to_uppercase();
+
+        // Extract just the table name part if qualified (e.g., "public.users" -> "users")
+        let search_table_only = search_name_upper
+            .rsplit('.')
+            .next()
+            .unwrap_or(&search_name_upper);
+
         // Collect index names to drop (can't modify while iterating)
+        // Match if:
+        // 1. Exact match (case-insensitive), OR
+        // 2. Index's unqualified table name matches our unqualified search name
         let indexes_to_drop: Vec<String> = self
             .indexes
             .iter()
-            .filter(|(_, metadata)| metadata.table_name == table_name)
+            .filter(|(_, metadata)| {
+                let stored_upper = metadata.table_name.to_uppercase();
+                let stored_table_only = stored_upper
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&stored_upper);
+
+                // Match if full names match OR unqualified parts match
+                stored_upper == search_name_upper || stored_table_only == search_table_only
+            })
             .map(|(name, _)| name.clone())
             .collect();
 
