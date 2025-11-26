@@ -13,6 +13,16 @@
 //! Storage → ColumnarBatch → SIMD Filter → SIMD Aggregate → Vec<Row> (only at output)
 //!          ↑ Zero-copy     ↑ 4-8x faster  ↑ 10x faster   ↑ Minimal materialization
 //! ```
+//!
+//! ## Phase 3: GROUP BY Support
+//!
+//! Phase 3 extends columnar execution to support GROUP BY queries using hash-based
+//! aggregation. This enables TPC-H Q1 style queries to use the columnar path.
+//!
+//! ```text
+//! Storage → ColumnarBatch → SIMD Filter → Hash GROUP BY → Vec<Row>
+//!          ↑ Zero-copy     ↑ 4-8x faster  ↑ Hash aggregation
+//! ```
 
 use std::collections::HashMap;
 
@@ -250,11 +260,20 @@ impl SelectExecutor<'_> {
             }
         };
 
+        // Check if this query has GROUP BY
+        let has_group_by = stmt.group_by.is_some();
+
         // Execute using native columnar pipeline
         #[cfg(feature = "profile-q6")]
         let exec_start = std::time::Instant::now();
 
-        let result = columnar::execute_columnar_batch(&batch, &predicates, &aggregates, Some(&schema))?;
+        let result = if has_group_by {
+            // GROUP BY path: Use hash-based grouping
+            self.execute_columnar_group_by(stmt, &batch, &predicates, &aggregates, &schema)?
+        } else {
+            // Non-GROUP BY path: Simple aggregation
+            columnar::execute_columnar_batch(&batch, &predicates, &aggregates, Some(&schema))?
+        };
 
         #[cfg(feature = "profile-q6")]
         {
@@ -266,12 +285,139 @@ impl SelectExecutor<'_> {
         }
 
         log::info!(
-            "Native columnar execution completed: {} predicates, {} aggregates",
+            "Native columnar execution completed: {} predicates, {} aggregates, group_by={}",
             predicates.len(),
-            aggregates.len()
+            aggregates.len(),
+            has_group_by
         );
 
         Ok(Some(result))
+    }
+
+    /// Execute a GROUP BY query using columnar hash aggregation
+    ///
+    /// This method implements the GROUP BY path for native columnar execution,
+    /// using hash-based grouping with the existing `columnar_group_by` function.
+    fn execute_columnar_group_by(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+        batch: &columnar::ColumnarBatch,
+        predicates: &[columnar::ColumnPredicate],
+        aggregates: &[columnar::AggregateSpec],
+        schema: &CombinedSchema,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        #[cfg(feature = "profile-q6")]
+        let start = std::time::Instant::now();
+
+        // Phase 1: Apply SIMD filtering to get filtered batch
+        let filtered_batch = if predicates.is_empty() {
+            batch.clone()
+        } else {
+            #[cfg(feature = "simd")]
+            {
+                columnar::simd_filter_batch(batch, predicates)?
+            }
+            #[cfg(not(feature = "simd"))]
+            {
+                // Scalar fallback - convert to rows, filter, convert back
+                let rows = batch.to_rows()?;
+                let filter_bitmap = columnar::create_filter_bitmap(
+                    rows.len(),
+                    predicates,
+                    |row_idx, col_idx| rows.get(row_idx).and_then(|r| r.get(col_idx)),
+                )?;
+                let filtered_rows: Vec<_> = rows
+                    .into_iter()
+                    .zip(filter_bitmap.iter())
+                    .filter_map(|(row, &pass)| if pass { Some(row) } else { None })
+                    .collect();
+                columnar::ColumnarBatch::from_rows(&filtered_rows)?
+            }
+        };
+
+        #[cfg(feature = "profile-q6")]
+        {
+            let filter_time = start.elapsed();
+            eprintln!(
+                "[PROFILE-Q6]   GROUP BY Phase 1 - Filter: {:?} ({}/{} rows)",
+                filter_time,
+                filtered_batch.row_count(),
+                batch.row_count()
+            );
+        }
+
+        // Phase 2: Extract group column indices from GROUP BY clause
+        let group_by_clause = stmt.group_by.as_ref().ok_or_else(|| {
+            ExecutorError::Other("GROUP BY clause required for group_by execution".to_string())
+        })?;
+
+        let group_cols: Vec<usize> = group_by_clause
+            .iter()
+            .filter_map(|expr| {
+                match expr {
+                    vibesql_ast::Expression::ColumnRef { table, column } => {
+                        schema.get_column_index(table.as_deref(), column)
+                    }
+                    _ => None, // Only simple column references supported for now
+                }
+            })
+            .collect();
+
+        if group_cols.len() != group_by_clause.len() {
+            log::debug!("GROUP BY contains non-column expressions, falling back to row-oriented");
+            return Err(ExecutorError::Other(
+                "GROUP BY with non-column expressions not supported in columnar path".to_string()
+            ));
+        }
+
+        // Phase 3: Convert aggregates to (column_idx, op) format for columnar_group_by
+        let agg_cols: Vec<(usize, columnar::AggregateOp)> = aggregates
+            .iter()
+            .filter_map(|spec| {
+                match &spec.source {
+                    columnar::AggregateSource::Column(idx) => Some((*idx, spec.op)),
+                    columnar::AggregateSource::CountStar => {
+                        // For COUNT(*), use column 0 with Count op
+                        Some((0, columnar::AggregateOp::Count))
+                    }
+                    columnar::AggregateSource::Expression(_) => {
+                        // Expression aggregates not yet supported in GROUP BY path
+                        // TODO: Add support for expression aggregates in GROUP BY
+                        log::debug!("Expression aggregate in GROUP BY not yet supported");
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        if agg_cols.len() != aggregates.len() {
+            log::debug!("Some aggregates not supported in columnar GROUP BY path");
+            return Err(ExecutorError::Other(
+                "Expression aggregates not supported in columnar GROUP BY path".to_string()
+            ));
+        }
+
+        #[cfg(feature = "profile-q6")]
+        let group_start = std::time::Instant::now();
+
+        // Phase 4: Convert batch to rows for columnar_group_by
+        // TODO: Implement native batch-based GROUP BY to avoid this conversion
+        let rows = filtered_batch.to_rows()?;
+
+        // Phase 5: Execute hash-based GROUP BY aggregation
+        let result = columnar::columnar_group_by(&rows, &group_cols, &agg_cols, None)?;
+
+        #[cfg(feature = "profile-q6")]
+        {
+            let group_time = group_start.elapsed();
+            eprintln!(
+                "[PROFILE-Q6]   GROUP BY Phase 2 - Hash aggregation: {:?} ({} groups)",
+                group_time,
+                result.len()
+            );
+        }
+
+        Ok(result)
     }
 }
 

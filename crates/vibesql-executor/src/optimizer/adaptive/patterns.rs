@@ -10,7 +10,7 @@ use super::query::{
 /// Detect if a query has analytical patterns suitable for columnar execution
 ///
 /// Returns true if the query benefits from columnar execution based on:
-/// - Has aggregation (aggregate functions like SUM, AVG, COUNT WITHOUT GROUP BY)
+/// - Has aggregation (aggregate functions like SUM, AVG, COUNT)
 /// - Has arithmetic expressions (price * quantity, price * (1 - discount))
 /// - Single table only (no JOINs yet - Phase 5 limitation)
 /// - Selective projection (few columns, not SELECT *)
@@ -23,32 +23,26 @@ use super::query::{
 /// - Aggregations: SIMD can process multiple values per instruction
 /// - Arithmetic: Vectorized operations on packed column data
 /// - Scans: Better cache locality when accessing few columns
+/// - GROUP BY: Hash-based grouping with vectorized aggregation
 ///
 /// Row-oriented is better for:
 /// - Point lookups: Single row access patterns
 /// - Wide projections: Need all columns anyway
 /// - Complex joins: Tuple-at-a-time processing more flexible
-/// - GROUP BY: Not yet supported in Phase 5
 ///
-/// # Phase 5 Current Capabilities
+/// # Phase 6 Capabilities
 ///
 /// Current columnar execution supports:
-/// - Aggregation WITHOUT GROUP BY (e.g., SELECT SUM(price) FROM orders)
+/// - Aggregation with or without GROUP BY (e.g., SELECT SUM(price) FROM orders GROUP BY category)
 /// - Single table scans (no JOINs)
 /// - Simple predicates (=, <, >, <=, >=, BETWEEN, AND)
 /// - Arithmetic expressions in aggregates (e.g., SUM(a * b))
 ///
 /// NOT supported yet (TODO: Future phases):
-/// - GROUP BY aggregations
 /// - JOIN operations
 /// - DISTINCT
 /// - Window functions
 pub(super) fn has_analytical_pattern(query: &SelectStmt) -> bool {
-    // Phase 5 limitation: No GROUP BY support yet
-    if has_group_by(query) {
-        return false;
-    }
-
     // Phase 5 limitation: Single table only (no joins)
     if !is_single_table(query) {
         return false;
@@ -67,14 +61,16 @@ pub(super) fn has_analytical_pattern(query: &SelectStmt) -> bool {
     let has_aggregation = has_aggregate_functions(query);
     let has_arithmetic = has_arithmetic_expressions(query);
     let selective_projection = has_selective_projection(query);
+    let has_grouping = has_group_by(query);
 
     // Columnar execution is beneficial if:
     // 1. Has aggregation (aggregate functions like SUM/AVG/COUNT), AND
-    // 2. Either has arithmetic OR selective projection
+    // 2. Either has arithmetic OR selective projection OR GROUP BY
     //
     // This ensures we only use columnar for queries that benefit from:
     // - Aggregation: Columnar aggregates are much faster with SIMD
     // - Arithmetic: Vectorized operations on column data
     // - Selective columns: Avoid conversion overhead for wide rows
-    has_aggregation && (has_arithmetic || selective_projection)
+    // - GROUP BY: Hash-based grouping with efficient aggregate computation
+    has_aggregation && (has_arithmetic || selective_projection || has_grouping)
 }

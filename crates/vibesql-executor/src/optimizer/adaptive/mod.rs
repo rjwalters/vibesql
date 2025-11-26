@@ -155,9 +155,9 @@ mod tests {
     }
 
     #[test]
-    fn test_row_oriented_for_group_by() {
+    fn test_columnar_for_group_by() {
         // SELECT region, SUM(price * quantity) FROM orders GROUP BY region
-        // Phase 5 limitation: GROUP BY not supported in columnar execution yet
+        // Phase 6: GROUP BY with aggregation is now supported in columnar execution
         let query = SelectStmt {
             with_clause: None,
             distinct: false,
@@ -206,8 +206,8 @@ mod tests {
             set_operation: None,
         };
 
-        // Should use row-oriented (GROUP BY not supported in Phase 5)
-        assert_eq!(choose_execution_model(&query), ExecutionModel::RowOriented);
+        // Should use columnar (GROUP BY with aggregation is now supported in Phase 6)
+        assert_eq!(choose_execution_model(&query), ExecutionModel::Columnar);
     }
 
     #[test]
