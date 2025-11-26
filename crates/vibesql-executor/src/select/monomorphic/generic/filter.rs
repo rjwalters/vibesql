@@ -429,7 +429,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix generic filter tests (broken on main)
     fn test_filter_extraction_simple_comparison() {
         // Create schema with a sales table
         let table = TableSchema::new(
