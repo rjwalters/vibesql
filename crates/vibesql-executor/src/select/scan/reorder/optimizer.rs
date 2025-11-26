@@ -110,7 +110,7 @@ where
         HashMap::new()
     };
 
-    // Also extract IN predicates from OR expressions (TPC-H Q7 optimization)
+    // Also extract IN predicates from OR expressions
     if let Some(where_expr) = where_clause {
         for (table, preds) in predicates::extract_in_predicates_from_or(where_expr, &table_set) {
             table_local_predicates.entry(table).or_default().extend(preds);
