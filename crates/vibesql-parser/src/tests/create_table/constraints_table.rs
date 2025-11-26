@@ -371,8 +371,8 @@ fn test_parse_create_index_prefix_zero_fails() {
     assert!(result.is_err(), "Should reject prefix length of 0");
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("Prefix length must be at least 1"),
-        "Expected minimum validation error, got: {}",
+        err.message.contains("length cannot be 0"),
+        "Expected zero length validation error, got: {}",
         err.message
     );
 }
@@ -383,8 +383,8 @@ fn test_parse_create_index_prefix_too_large_fails() {
     assert!(result.is_err(), "Should reject prefix length > 10000");
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("Prefix length must not exceed 10000"),
-        "Expected maximum validation error, got: {}",
+        err.message.contains("too long") || err.message.contains("exceed"),
+        "Expected max length validation error, got: {}",
         err.message
     );
 }

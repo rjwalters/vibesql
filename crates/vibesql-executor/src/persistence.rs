@@ -10,7 +10,7 @@ use vibesql_storage::Database;
 
 use crate::{
     CreateIndexExecutor, CreateTableExecutor, ExecutorError, InsertExecutor, RoleExecutor,
-    SchemaExecutor,
+    SchemaExecutor, UpdateExecutor, ViewExecutor,
 };
 
 /// Load database from SQL dump file
@@ -106,11 +106,17 @@ fn execute_statement_for_load(
         vibesql_ast::Statement::CreateIndex(index_stmt) => {
             CreateIndexExecutor::execute(&index_stmt, db)?;
         }
+        vibesql_ast::Statement::CreateView(view_stmt) => {
+            ViewExecutor::execute_create_view(&view_stmt, db)?;
+        }
         vibesql_ast::Statement::CreateRole(role_stmt) => {
             RoleExecutor::execute_create_role(&role_stmt, db)?;
         }
         vibesql_ast::Statement::Insert(insert_stmt) => {
             InsertExecutor::execute(db, &insert_stmt)?;
+        }
+        vibesql_ast::Statement::Update(update_stmt) => {
+            UpdateExecutor::execute(&update_stmt, db)?;
         }
         _ => {
             return Err(ExecutorError::Other(format!(

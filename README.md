@@ -12,11 +12,11 @@
 ## Highlights
 
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
-- **100% SQLLogicTest conformance** - 628/628 files (~5.9M tests)
+- **100% SQLLogicTest conformance** - 624 files (~5.9M tests)
 - **Full-featured CLI** with PostgreSQL-compatible commands
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
-- **171,000+ lines** of Rust across 10 crates
+- **215,000+ lines** of Rust across 11 crates
 
 Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
 
