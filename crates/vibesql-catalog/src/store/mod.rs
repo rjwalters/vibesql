@@ -32,6 +32,9 @@ mod schemas;
 mod session;
 mod tables;
 
+// Re-export types from submodules
+pub use advanced::ViewDropBehavior;
+
 /// Database catalog - manages all schemas and their objects.
 #[derive(Debug, Clone)]
 pub struct Catalog {

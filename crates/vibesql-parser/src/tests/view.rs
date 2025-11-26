@@ -123,6 +123,7 @@ fn test_drop_view_simple() {
         assert_eq!(stmt.view_name, "MY_VIEW");
         assert!(!stmt.if_exists);
         assert!(!stmt.cascade);
+        assert!(!stmt.restrict); // Neither CASCADE nor RESTRICT specified
     } else {
         panic!("Expected DropView statement");
     }
@@ -138,6 +139,7 @@ fn test_drop_view_if_exists() {
         assert_eq!(stmt.view_name, "MY_VIEW");
         assert!(stmt.if_exists);
         assert!(!stmt.cascade);
+        assert!(!stmt.restrict);
     } else {
         panic!("Expected DropView statement");
     }
@@ -153,6 +155,7 @@ fn test_drop_view_cascade() {
         assert_eq!(stmt.view_name, "MY_VIEW");
         assert!(!stmt.if_exists);
         assert!(stmt.cascade);
+        assert!(!stmt.restrict);
     } else {
         panic!("Expected DropView statement");
     }
@@ -167,7 +170,8 @@ fn test_drop_view_restrict() {
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
         assert_eq!(stmt.view_name, "MY_VIEW");
         assert!(!stmt.if_exists);
-        assert!(!stmt.cascade); // RESTRICT means cascade is false
+        assert!(!stmt.cascade);
+        assert!(stmt.restrict); // RESTRICT explicitly specified
     } else {
         panic!("Expected DropView statement");
     }
@@ -183,6 +187,7 @@ fn test_drop_view_if_exists_cascade() {
         assert_eq!(stmt.view_name, "MY_VIEW");
         assert!(stmt.if_exists);
         assert!(stmt.cascade);
+        assert!(!stmt.restrict);
     } else {
         panic!("Expected DropView statement");
     }

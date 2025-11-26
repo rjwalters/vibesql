@@ -2,6 +2,17 @@
 
 use crate::{errors::CatalogError, view::ViewDefinition};
 
+/// Drop behavior for views
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewDropBehavior {
+    /// CASCADE: drop dependent views recursively
+    Cascade,
+    /// RESTRICT: fail if dependents exist
+    Restrict,
+    /// Silent: drop the view, ignore dependents (SQLite-compatible)
+    Silent,
+}
+
 impl super::super::Catalog {
     // ============================================================================
     // View Management Methods
@@ -44,8 +55,16 @@ impl super::super::Catalog {
         self.views.keys().cloned().collect()
     }
 
-    /// Drop a VIEW
-    pub fn drop_view(&mut self, name: &str, cascade: bool) -> Result<(), CatalogError> {
+    /// Drop a VIEW with specified behavior
+    ///
+    /// - `Cascade`: Drop dependent views recursively
+    /// - `Restrict`: Fail if dependents exist
+    /// - `Silent`: Drop the view, ignore dependents (SQLite-compatible)
+    pub fn drop_view_with_behavior(
+        &mut self,
+        name: &str,
+        behavior: ViewDropBehavior,
+    ) -> Result<(), CatalogError> {
         // Normalize the key for case-insensitive lookup
         let key = if self.case_sensitive_identifiers {
             name.to_string()
@@ -58,30 +77,49 @@ impl super::super::Catalog {
             return Err(CatalogError::ViewNotFound(name.to_string()));
         }
 
-        // If CASCADE, drop all dependent views recursively
-        if cascade {
-            // Find all views that depend on this view or table
-            // Use the original name for dependency checking (not the normalized key)
-            let dependent_views = self.find_dependent_views(name);
-            let views_to_drop = dependent_views.clone();
-            for dependent_view in views_to_drop {
-                // Recursively drop dependent views (they might have their own dependents)
-                self.drop_view(&dependent_view, true)?;
+        match behavior {
+            ViewDropBehavior::Cascade => {
+                // Find all views that depend on this view or table
+                // Use the original name for dependency checking (not the normalized key)
+                let dependent_views = self.find_dependent_views(name);
+                let views_to_drop = dependent_views.clone();
+                for dependent_view in views_to_drop {
+                    // Recursively drop dependent views (they might have their own dependents)
+                    self.drop_view_with_behavior(&dependent_view, ViewDropBehavior::Cascade)?;
+                }
             }
-        } else {
-            // If RESTRICT (not CASCADE): Check for dependent views and fail if any exist
-            let dependent_views = self.find_dependent_views(name);
-            if !dependent_views.is_empty() {
-                return Err(CatalogError::ViewInUse {
-                    view_name: name.to_string(),
-                    dependent_views,
-                });
+            ViewDropBehavior::Restrict => {
+                // Check for dependent views and fail if any exist
+                let dependent_views = self.find_dependent_views(name);
+                if !dependent_views.is_empty() {
+                    return Err(CatalogError::ViewInUse {
+                        view_name: name.to_string(),
+                        dependent_views,
+                    });
+                }
+            }
+            ViewDropBehavior::Silent => {
+                // SQLite-compatible behavior: just drop the view, don't check dependents
+                // Dependent views will fail at query time if they reference this view
             }
         }
 
         // Finally, drop the view itself using the normalized key
         self.views.remove(&key);
         Ok(())
+    }
+
+    /// Drop a VIEW (legacy method, defaults to RESTRICT behavior)
+    ///
+    /// This maintains backward compatibility with existing code.
+    /// Use `drop_view_with_behavior` for explicit control.
+    pub fn drop_view(&mut self, name: &str, cascade: bool) -> Result<(), CatalogError> {
+        let behavior = if cascade {
+            ViewDropBehavior::Cascade
+        } else {
+            ViewDropBehavior::Restrict
+        };
+        self.drop_view_with_behavior(name, behavior)
     }
 
     /// Find all views that depend on a given view or table
