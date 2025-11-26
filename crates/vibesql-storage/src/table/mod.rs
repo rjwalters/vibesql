@@ -103,7 +103,7 @@ use crate::{Row, StorageError};
 ///     // Process row...
 /// }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Table {
     /// Table schema defining structure and constraints
     pub schema: vibesql_catalog::TableSchema,
@@ -124,6 +124,27 @@ pub struct Table {
 
     /// Counter for modifications since last statistics update
     modifications_since_stats: usize,
+
+    /// Cached columnar representation for SIMD-accelerated queries
+    /// Invalidated on any table modification (INSERT/UPDATE/DELETE)
+    /// Uses RwLock for thread-safe interior mutability since scan_columnar takes &self
+    columnar_cache: std::sync::RwLock<Option<crate::ColumnarTable>>,
+}
+
+impl Clone for Table {
+    fn clone(&self) -> Self {
+        // Clone the columnar cache if present
+        let cached = self.columnar_cache.read().unwrap().clone();
+        Table {
+            schema: self.schema.clone(),
+            rows: self.rows.clone(),
+            indexes: self.indexes.clone(),
+            append_tracker: self.append_tracker.clone(),
+            statistics: self.statistics.clone(),
+            modifications_since_stats: self.modifications_since_stats,
+            columnar_cache: std::sync::RwLock::new(cached),
+        }
+    }
 }
 
 impl Table {
@@ -138,6 +159,7 @@ impl Table {
             append_tracker: AppendModeTracker::new(),
             statistics: None,
             modifications_since_stats: 0,
+            columnar_cache: std::sync::RwLock::new(None),
         }
     }
 
@@ -171,6 +193,9 @@ impl Table {
                 stats.mark_stale();
             }
         }
+
+        // Invalidate columnar cache on modification
+        *self.columnar_cache.write().unwrap() = None;
 
         Ok(())
     }
@@ -211,14 +236,27 @@ impl Table {
     /// }
     /// ```
     pub fn scan_columnar(&self) -> Result<crate::ColumnarTable, StorageError> {
+        // Check cache first (read lock)
+        {
+            let cache = self.columnar_cache.read().unwrap();
+            if let Some(cached) = cache.as_ref() {
+                return Ok(cached.clone());
+            }
+        }
+
         // Get column names from schema
         let column_names: Vec<String> = self.schema.columns.iter()
             .map(|c| c.name.clone())
             .collect();
 
         // Convert rows to columnar format
-        crate::ColumnarTable::from_rows(&self.rows, &column_names)
-            .map_err(|e| StorageError::Other(format!("Columnar conversion failed: {}", e)))
+        let columnar = crate::ColumnarTable::from_rows(&self.rows, &column_names)
+            .map_err(|e| StorageError::Other(format!("Columnar conversion failed: {}", e)))?;
+
+        // Cache the result for future queries (write lock)
+        *self.columnar_cache.write().unwrap() = Some(columnar.clone());
+
+        Ok(columnar)
     }
 
     /// Get number of rows
@@ -270,6 +308,8 @@ impl Table {
         self.indexes.clear();
         // Reset append mode tracking
         self.append_tracker.reset();
+        // Invalidate columnar cache
+        *self.columnar_cache.write().unwrap() = None;
     }
 
     /// Update a row at the specified index
@@ -290,6 +330,9 @@ impl Table {
 
         // Update indexes (delegate to IndexManager)
         self.indexes.update_for_update(&self.schema, &old_row, &normalized_row, index);
+
+        // Invalidate columnar cache
+        *self.columnar_cache.write().unwrap() = None;
 
         Ok(())
     }
@@ -339,6 +382,9 @@ impl Table {
             &affected_indexes,
         );
 
+        // Invalidate columnar cache
+        *self.columnar_cache.write().unwrap() = None;
+
         Ok(())
     }
 
@@ -370,6 +416,11 @@ impl Table {
         // IndexManager)
         self.indexes.rebuild(&self.schema, &self.rows);
 
+        // Invalidate columnar cache
+        if !indices_and_rows_to_delete.is_empty() {
+            *self.columnar_cache.write().unwrap() = None;
+        }
+
         indices_and_rows_to_delete.len()
     }
 
@@ -383,6 +434,8 @@ impl Table {
             self.rows.remove(pos);
             // Rebuild indexes since row indices changed (delegate to IndexManager)
             self.indexes.rebuild(&self.schema, &self.rows);
+            // Invalidate columnar cache
+            *self.columnar_cache.write().unwrap() = None;
             Ok(())
         } else {
             Err(StorageError::RowNotFound)
