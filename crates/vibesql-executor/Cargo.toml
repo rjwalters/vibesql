@@ -20,38 +20,38 @@ rayon = { version = "1.10", optional = true }
 indexmap = "2.0"
 hex = "0.4"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
-geo = { version = "0.28", optional = true }
-wkt = { version = "0.10", optional = true }
+geo = { version = "0.31", optional = true }
+wkt = { version = "0.14", optional = true }
 rstar = { version = "0.12", optional = true }
-lru = "0.12"
+lru = "0.16"
 log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
 
 # SIMD dependencies for columnar acceleration
-wide = { version = "0.7", optional = true }
+wide = { version = "0.8", optional = true }
 
 # Arrow dependencies for vectorized execution
 # Using 53.0+ for chrono 0.4.42 compatibility (fixes quarter() method ambiguity)
-arrow = "53.0"
-arrow-array = "53.0"
-arrow-arith = "53.0"  # For SIMD-accelerated temporal operations
-arrow-select = "53.0"
+arrow = "57.1"
+arrow-array = "57.1"
+arrow-arith = "57.1"  # For SIMD-accelerated temporal operations
+arrow-select = "57.1"
 
 # Optional benchmark-comparison dependencies
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
 
 # Optional JIT compilation dependencies
-cranelift = { version = "0.115", optional = true }
-cranelift-jit = { version = "0.115", optional = true }
-cranelift-module = { version = "0.115", optional = true }
-cranelift-native = { version = "0.115", optional = true }
+cranelift = { version = "0.126", optional = true }
+cranelift-jit = { version = "0.126", optional = true }
+cranelift-module = { version = "0.126", optional = true }
+cranelift-native = { version = "0.126", optional = true }
 
 [dev-dependencies]
 vibesql-parser = { version = "0.1.0", path = "../vibesql-parser" }
-criterion = { version = "0.5", features = ["html_reports"] }
-rand = "0.8"
-rand_chacha = "0.3"
+criterion = { version = "0.7", features = ["html_reports"] }
+rand = "0.9"
+rand_chacha = "0.9"
 rust_decimal = "1.33"
 paste = "1.0"
 env_logger = "0.11"
