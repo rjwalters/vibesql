@@ -56,7 +56,7 @@ impl TPCHData {
     pub fn random_varchar(&mut self, max_len: usize) -> String {
         let len = self.rng.random_range(10..max_len);
         (0..len)
-            .map(|_| self.rng.sample(rand::distributions::Alphanumeric) as char)
+            .map(|_| self.rng.sample(rand::distr::Alphanumeric) as char)
             .collect()
     }
 
