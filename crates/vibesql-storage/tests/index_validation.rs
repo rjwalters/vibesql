@@ -445,7 +445,6 @@ mod index_operations_tests {
     }
 
     #[test]
-    #[ignore] // TODO: CASCADE behavior not yet implemented - indexes persist after table drop
     fn test_cascade_drop_indexes_with_table() {
         let mut db = Database::new();
 
