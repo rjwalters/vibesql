@@ -145,3 +145,7 @@ required-features = ["benchmark-comparison"]
 [[bench]]
 name = "simd_dispatch_benchmark"
 harness = false
+
+[[bench]]
+name = "columnar_execution"
+harness = false

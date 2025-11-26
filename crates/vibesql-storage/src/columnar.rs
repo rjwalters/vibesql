@@ -41,6 +41,234 @@ use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 
 use crate::Row;
 
+/// Column type classification for fast pre-allocation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColumnTypeClass {
+    Int64,
+    Float64,
+    String,
+    Bool,
+    Date,
+    Time,
+    Timestamp,
+    Interval,
+    Null,
+}
+
+/// Builder for constructing column data with pre-allocated capacity
+struct ColumnBuilder {
+    type_class: ColumnTypeClass,
+    int64_values: Vec<i64>,
+    float64_values: Vec<f64>,
+    string_values: Vec<String>,
+    bool_values: Vec<bool>,
+    date_values: Vec<Date>,
+    time_values: Vec<Time>,
+    timestamp_values: Vec<Timestamp>,
+    interval_values: Vec<Interval>,
+    nulls: Vec<bool>,
+}
+
+impl ColumnBuilder {
+    fn new(type_class: ColumnTypeClass, capacity: usize) -> Self {
+        let mut builder = ColumnBuilder {
+            type_class,
+            int64_values: Vec::new(),
+            float64_values: Vec::new(),
+            string_values: Vec::new(),
+            bool_values: Vec::new(),
+            date_values: Vec::new(),
+            time_values: Vec::new(),
+            timestamp_values: Vec::new(),
+            interval_values: Vec::new(),
+            nulls: Vec::with_capacity(capacity),
+        };
+
+        // Pre-allocate the appropriate vector based on type
+        match type_class {
+            ColumnTypeClass::Int64 | ColumnTypeClass::Null => {
+                builder.int64_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Float64 => {
+                builder.float64_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::String => {
+                builder.string_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Bool => {
+                builder.bool_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Date => {
+                builder.date_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Time => {
+                builder.time_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Timestamp => {
+                builder.timestamp_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Interval => {
+                builder.interval_values = Vec::with_capacity(capacity);
+            }
+        }
+
+        builder
+    }
+
+    fn push(&mut self, value: &SqlValue) -> Result<(), String> {
+        match (self.type_class, value) {
+            // Int64 handling
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Integer(v)) => {
+                self.int64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Bigint(v)) => {
+                self.int64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Smallint(v)) => {
+                self.int64_values.push(*v as i64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Null) => {
+                self.int64_values.push(0);
+                self.nulls.push(true);
+            }
+
+            // Float64 handling
+            (ColumnTypeClass::Float64, SqlValue::Float(v)) => {
+                self.float64_values.push(*v as f64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Double(v)) => {
+                self.float64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Real(v)) => {
+                self.float64_values.push(*v as f64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Numeric(v)) => {
+                self.float64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Unsigned(v)) => {
+                self.float64_values.push(*v as f64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Null) => {
+                self.float64_values.push(0.0);
+                self.nulls.push(true);
+            }
+
+            // String handling
+            (ColumnTypeClass::String, SqlValue::Varchar(v)) => {
+                self.string_values.push(v.clone());
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::String, SqlValue::Character(v)) => {
+                self.string_values.push(v.clone());
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::String, SqlValue::Null) => {
+                self.string_values.push(String::new());
+                self.nulls.push(true);
+            }
+
+            // Bool handling
+            (ColumnTypeClass::Bool, SqlValue::Boolean(v)) => {
+                self.bool_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Bool, SqlValue::Null) => {
+                self.bool_values.push(false);
+                self.nulls.push(true);
+            }
+
+            // Date handling
+            (ColumnTypeClass::Date, SqlValue::Date(v)) => {
+                self.date_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Date, SqlValue::Null) => {
+                self.date_values.push(Date::new(1970, 1, 1).unwrap());
+                self.nulls.push(true);
+            }
+
+            // Time handling
+            (ColumnTypeClass::Time, SqlValue::Time(v)) => {
+                self.time_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Time, SqlValue::Null) => {
+                self.time_values.push(Time::new(0, 0, 0, 0).unwrap());
+                self.nulls.push(true);
+            }
+
+            // Timestamp handling
+            (ColumnTypeClass::Timestamp, SqlValue::Timestamp(v)) => {
+                self.timestamp_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Timestamp, SqlValue::Null) => {
+                let date = Date::new(1970, 1, 1).unwrap();
+                let time = Time::new(0, 0, 0, 0).unwrap();
+                self.timestamp_values.push(Timestamp::new(date, time));
+                self.nulls.push(true);
+            }
+
+            // Interval handling
+            (ColumnTypeClass::Interval, SqlValue::Interval(v)) => {
+                self.interval_values.push(v.clone());
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Interval, SqlValue::Null) => {
+                self.interval_values.push(Interval::new("0".to_string()));
+                self.nulls.push(true);
+            }
+
+            // Type mismatch - use same error message format as original for compatibility
+            (expected, got) => {
+                return Err(format!(
+                    "Column has mixed types: expected {:?}, got {}",
+                    expected,
+                    got.type_name()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn build(self) -> ColumnData {
+        match self.type_class {
+            ColumnTypeClass::Int64 | ColumnTypeClass::Null => {
+                ColumnData::Int64 { values: self.int64_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Float64 => {
+                ColumnData::Float64 { values: self.float64_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::String => {
+                ColumnData::String { values: self.string_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Bool => {
+                ColumnData::Bool { values: self.bool_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Date => {
+                ColumnData::Date { values: self.date_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Time => {
+                ColumnData::Time { values: self.time_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Timestamp => {
+                ColumnData::Timestamp { values: self.timestamp_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Interval => {
+                ColumnData::Interval { values: self.interval_values, nulls: self.nulls }
+            }
+        }
+    }
+}
+
 /// Typed column data with NULL bitmap
 ///
 /// Each variant stores a vector of non-NULL values and a separate bitmap
@@ -154,7 +382,7 @@ impl ColumnarTable {
         ColumnarTable { columns: HashMap::new(), column_names: Vec::new(), row_count: 0 }
     }
 
-    /// Convert row-oriented data to columnar format
+    /// Convert row-oriented data to columnar format (optimized single-pass)
     ///
     /// # Arguments
     /// * `rows` - Vector of rows to convert
@@ -165,8 +393,101 @@ impl ColumnarTable {
     /// * `Err(String)` if column count mismatch or incompatible types
     ///
     /// # Performance
-    /// O(n * m) where n = rows, m = columns
+    /// O(n * m) single pass through all data
     pub fn from_rows(rows: &[Row], column_names: &[String]) -> Result<Self, String> {
+        Self::from_rows_fast(rows, column_names)
+    }
+
+    /// Fast single-pass row-to-columnar conversion
+    ///
+    /// This optimized implementation:
+    /// 1. Infers column types from first row (O(m))
+    /// 2. Pre-allocates all column vectors (O(m))
+    /// 3. Single pass through rows distributing values (O(n*m))
+    ///
+    /// Total complexity: O(n*m) with better cache locality than multi-pass
+    fn from_rows_fast(rows: &[Row], column_names: &[String]) -> Result<Self, String> {
+        if rows.is_empty() {
+            return Ok(ColumnarTable {
+                columns: HashMap::new(),
+                column_names: column_names.to_vec(),
+                row_count: 0,
+            });
+        }
+
+        let row_count = rows.len();
+        let col_count = column_names.len();
+
+        // Validate first row column count
+        if rows[0].len() != col_count {
+            return Err(format!(
+                "Row 0 has {} columns, expected {}",
+                rows[0].len(),
+                col_count
+            ));
+        }
+
+        // Infer column types from first row (or first non-null value)
+        let col_types: Vec<_> = (0..col_count)
+            .map(|col_idx| {
+                rows.iter()
+                    .filter_map(|row| row.get(col_idx))
+                    .find(|v| !v.is_null())
+                    .map(Self::classify_type)
+                    .unwrap_or(ColumnTypeClass::Null)
+            })
+            .collect();
+
+        // Pre-allocate column storage based on inferred types
+        let mut column_builders: Vec<ColumnBuilder> = col_types
+            .iter()
+            .map(|t| ColumnBuilder::new(*t, row_count))
+            .collect();
+
+        // Single pass through rows - distribute values to columns
+        for (row_idx, row) in rows.iter().enumerate() {
+            if row.len() != col_count {
+                return Err(format!(
+                    "Row {} has {} columns, expected {}",
+                    row_idx,
+                    row.len(),
+                    col_count
+                ));
+            }
+
+            for (col_idx, value) in row.values.iter().enumerate() {
+                column_builders[col_idx].push(value)?;
+            }
+        }
+
+        // Build final columns HashMap - consume builders
+        let mut columns = HashMap::with_capacity(col_count);
+        for (col_name, builder) in column_names.iter().zip(column_builders.into_iter()) {
+            columns.insert(col_name.clone(), builder.build());
+        }
+
+        Ok(ColumnarTable { columns, column_names: column_names.to_vec(), row_count })
+    }
+
+    /// Classify SqlValue into a column type for pre-allocation
+    fn classify_type(value: &SqlValue) -> ColumnTypeClass {
+        match value {
+            SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => ColumnTypeClass::Int64,
+            SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)
+            | SqlValue::Numeric(_) | SqlValue::Unsigned(_) => ColumnTypeClass::Float64,
+            SqlValue::Varchar(_) | SqlValue::Character(_) => ColumnTypeClass::String,
+            SqlValue::Boolean(_) => ColumnTypeClass::Bool,
+            SqlValue::Date(_) => ColumnTypeClass::Date,
+            SqlValue::Time(_) => ColumnTypeClass::Time,
+            SqlValue::Timestamp(_) => ColumnTypeClass::Timestamp,
+            SqlValue::Interval(_) => ColumnTypeClass::Interval,
+            SqlValue::Null => ColumnTypeClass::Null,
+        }
+    }
+
+    /// Original multi-pass row-to-columnar conversion (kept for reference)
+    #[allow(dead_code)]
+    fn from_rows_original(rows: &[Row], column_names: &[String]) -> Result<Self, String> {
         if rows.is_empty() {
             return Ok(ColumnarTable {
                 columns: HashMap::new(),
