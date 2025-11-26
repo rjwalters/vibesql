@@ -149,20 +149,6 @@ fn collect_select_aliases(select_list: &[vibesql_ast::SelectItem]) -> std::colle
     aliases
 }
 
-/// Validate that all column references in a SELECT statement resolve to columns in the schema.
-///
-/// This validation happens before row iteration, ensuring proper error messages
-/// even when the table is empty (has no rows to process).
-///
-/// Returns `Ok(())` if all column references are valid, or `Err(ColumnNotFound)` with
-/// context about available columns if a reference cannot be resolved.
-pub(super) fn validate_select_column_references(
-    stmt: &vibesql_ast::SelectStmt,
-    schema: &CombinedSchema,
-) -> Result<(), ExecutorError> {
-    validate_select_column_references_with_context(stmt, schema, None)
-}
-
 /// Validate column references with optional procedural context
 ///
 /// When a procedural context is provided, variable names from the context are
