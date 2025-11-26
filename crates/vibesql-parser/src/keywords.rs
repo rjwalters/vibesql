@@ -298,11 +298,16 @@ impl Keyword {
     /// These are "unreserved" keywords that are only treated as keywords in specific contexts.
     ///
     /// This follows SQLite's behavior where temporal type keywords (TIMESTAMP, DATE, TIME, INTERVAL)
-    /// can be used as identifiers without quoting.
+    /// and interval unit keywords (YEAR, MONTH, DAY, etc.) can be used as identifiers without quoting.
     pub fn can_be_identifier(&self) -> bool {
         matches!(
             self,
-            Keyword::Timestamp | Keyword::Date | Keyword::Time | Keyword::Interval
+            // Temporal type keywords
+            Keyword::Timestamp | Keyword::Date | Keyword::Time | Keyword::Interval |
+            // Interval unit keywords (used in EXTRACT, DATE_ADD, etc. but also valid as identifiers)
+            Keyword::Year | Keyword::Quarter | Keyword::Month | Keyword::Week |
+            Keyword::Day | Keyword::Hour | Keyword::Minute | Keyword::Second |
+            Keyword::Microsecond
         )
     }
 }
