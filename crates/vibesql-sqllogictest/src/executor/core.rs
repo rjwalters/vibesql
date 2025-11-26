@@ -146,6 +146,26 @@ impl RunnerLocals {
     }
 }
 
+/// Supported SQL dialects for auto-switching.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SqlDialect {
+    /// MySQL 8.0+ compatibility mode (default)
+    #[default]
+    MySQL,
+    /// SQLite 3 compatibility mode
+    SQLite,
+}
+
+impl SqlDialect {
+    /// Get the SQL mode string for SET SQL_MODE command.
+    pub fn as_sql_mode_str(&self) -> &'static str {
+        match self {
+            SqlDialect::MySQL => "mysql",
+            SqlDialect::SQLite => "sqlite",
+        }
+    }
+}
+
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     pub(super) conn: Connections<D, M>,
@@ -164,6 +184,12 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     pub(super) labels: HashSet<String>,
     /// Local variables/context for the runner.
     pub(super) locals: RunnerLocals,
+    /// Whether to automatically switch SQL dialect based on skipif/onlyif conditions.
+    /// When enabled, instead of skipping tests with `skipif mysql` or `skipif sqlite`,
+    /// the harness switches to the appropriate dialect and runs the test.
+    pub(super) auto_switch_dialect: bool,
+    /// Current SQL dialect being used.
+    pub(super) current_dialect: SqlDialect,
 }
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
@@ -183,12 +209,54 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             labels: HashSet::new(),
             conn: Connections::new(make_conn),
             locals: RunnerLocals::default(),
+            auto_switch_dialect: false,
+            current_dialect: SqlDialect::default(),
         }
     }
 
     /// Add a label for condition `skipif` and `onlyif`.
     pub fn add_label(&mut self, label: &str) {
         self.labels.insert(label.to_string());
+    }
+
+    /// Enable automatic SQL dialect switching based on skipif/onlyif conditions.
+    ///
+    /// When enabled, instead of skipping tests with `skipif mysql` or `skipif sqlite`,
+    /// the harness automatically switches to the appropriate dialect and runs the test.
+    ///
+    /// This allows the test harness to run all tests regardless of dialect, maximizing
+    /// test coverage.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mut tester = Runner::new(make_conn);
+    /// tester.enable_auto_switch_dialect();
+    ///
+    /// // Tests with `skipif mysql` will now run in sqlite mode
+    /// // Tests with `skipif sqlite` will now run in mysql mode
+    /// ```
+    pub fn enable_auto_switch_dialect(&mut self) {
+        self.auto_switch_dialect = true;
+    }
+
+    /// Disable automatic SQL dialect switching.
+    pub fn disable_auto_switch_dialect(&mut self) {
+        self.auto_switch_dialect = false;
+    }
+
+    /// Set the default SQL dialect for the runner.
+    pub fn with_default_dialect(&mut self, dialect: SqlDialect) {
+        self.current_dialect = dialect;
+    }
+
+    /// Get the current SQL dialect.
+    pub fn current_dialect(&self) -> &SqlDialect {
+        &self.current_dialect
+    }
+
+    /// Check if auto dialect switching is enabled.
+    pub fn is_auto_switch_dialect_enabled(&self) -> bool {
+        self.auto_switch_dialect
     }
 
     /// Set a local variable for substitution.
@@ -363,5 +431,35 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Shutdown all connections in the runner.
     pub fn shutdown(&mut self) {
         block_on(self.shutdown_async());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sql_dialect_default() {
+        assert_eq!(SqlDialect::default(), SqlDialect::MySQL);
+    }
+
+    #[test]
+    fn test_sql_dialect_as_sql_mode_str() {
+        assert_eq!(SqlDialect::MySQL.as_sql_mode_str(), "mysql");
+        assert_eq!(SqlDialect::SQLite.as_sql_mode_str(), "sqlite");
+    }
+
+    #[test]
+    fn test_sql_dialect_equality() {
+        assert_eq!(SqlDialect::MySQL, SqlDialect::MySQL);
+        assert_eq!(SqlDialect::SQLite, SqlDialect::SQLite);
+        assert_ne!(SqlDialect::MySQL, SqlDialect::SQLite);
+    }
+
+    #[test]
+    fn test_sql_dialect_clone() {
+        let dialect = SqlDialect::SQLite;
+        let cloned = dialect.clone();
+        assert_eq!(dialect, cloned);
     }
 }

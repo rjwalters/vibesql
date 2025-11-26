@@ -59,6 +59,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 hash_threshold: self.hash_threshold,
                 labels: self.labels.clone(),
                 locals,
+                auto_switch_dialect: self.auto_switch_dialect,
+                current_dialect: self.current_dialect.clone(),
             };
 
             tasks.push(async move {
