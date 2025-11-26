@@ -35,6 +35,9 @@ async fn run_test_file_async(contents: &str) -> (Result<(), TestError>, Vec<Test
     let mut tester = Runner::new(|| async { Ok(VibeSqlDB::new()) });
     // Enable hash mode with threshold of 8 (standard SQLLogicTest behavior)
     tester.with_hash_threshold(8);
+    // Add "mysql" label for skipif/onlyif directives
+    // VibeSQL uses MySQL-compatible division (returns REAL/DECIMAL for integer division)
+    tester.add_label("mysql");
 
     match tester.run_script(&preprocessed) {
         Ok(_) => (Ok(()), vec![]),

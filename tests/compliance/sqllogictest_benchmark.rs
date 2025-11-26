@@ -624,6 +624,8 @@ where
     let mut runner = sqllogictest::Runner::new(|| async {
         Ok::<_, TestError>(DB::default())
     });
+    // Add "mysql" label for skipif/onlyif directives
+    runner.add_label("mysql");
 
     eprintln!("Running {} on {:?}...", engine_name, test_file);
 

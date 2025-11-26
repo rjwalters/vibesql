@@ -47,6 +47,8 @@ async fn test_select5_sampled_regression() {
     }
 
     let mut runner = Runner::new(|| async { Ok(VibeSqlDB::new()) });
+    // Add "mysql" label for skipif/onlyif directives
+    runner.add_label("mysql");
 
     // Run the sampled test - should complete quickly
     let result = runner.run_file_async(test_file).await;
@@ -91,6 +93,8 @@ async fn test_select5_full_suite() {
     }
 
     let mut runner = Runner::new(|| async { Ok(VibeSqlDB::new()) });
+    // Add "mysql" label for skipif/onlyif directives
+    runner.add_label("mysql");
 
     // Run the full test with timeout protection
     let result = tokio::time::timeout(TEST_TIMEOUT, runner.run_file_async(test_file)).await;

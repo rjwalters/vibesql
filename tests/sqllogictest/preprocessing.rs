@@ -10,12 +10,24 @@ pub fn preprocess_for_mysql(content: &str) -> String {
         if line.starts_with("onlyif ") {
             let dialect =
                 line.trim_start_matches("onlyif ").split_whitespace().next().unwrap_or("");
-            skip_next_record = dialect != "mysql";
+            // Only clear skip if this is for mysql, otherwise keep existing skip state
+            if dialect == "mysql" {
+                // onlyif mysql - include this record, clear any pending skip
+                skip_next_record = false;
+            } else {
+                // onlyif <other> - skip this record (unless already skipping)
+                skip_next_record = true;
+            }
             continue; // Don't include the directive line
         } else if line.starts_with("skipif ") {
             let dialect =
                 line.trim_start_matches("skipif ").split_whitespace().next().unwrap_or("");
-            skip_next_record = dialect == "mysql";
+            // Accumulate skips - if already skipping, stay skipping
+            // Only set skip if this is mysql; don't clear existing skip
+            if dialect == "mysql" {
+                skip_next_record = true;
+            }
+            // If dialect is not mysql, don't change skip_next_record (preserve any existing skip)
             continue; // Don't include the directive line
         }
 
@@ -121,5 +133,59 @@ INSERT INTO t1 VALUES (3)
         // No directives should remain
         assert!(!output.contains("onlyif"));
         assert!(!output.contains("skipif"));
+    }
+
+    #[test]
+    fn test_preprocess_consecutive_skipif() {
+        // Test case from slt_good_97.test - multiple consecutive skipif directives
+        let input = r#"statement ok
+CREATE TABLE tab1(col0 INTEGER, col1 INTEGER, col2 INTEGER)
+
+skipif mysql # not compatible
+skipif postgresql # PostgreSQL requires AS when renaming output columns
+query II rowsort label-203
+SELECT ALL 42 / col1 + - 21 - col0 col1, - col0 AS col0 FROM tab1 AS cor0
+----
+-112
+-91
+
+statement ok
+SELECT 1
+"#;
+        let output = preprocess_for_mysql(input);
+
+        // The query should be excluded because skipif mysql is present
+        assert!(
+            !output.contains("42 / col1"),
+            "Query with skipif mysql should be excluded even with other skipif directives"
+        );
+        // The following statement should still be included
+        assert!(output.contains("SELECT 1"));
+        // No directives should remain
+        assert!(!output.contains("skipif"));
+    }
+
+    #[test]
+    fn test_preprocess_skipif_other_then_mysql() {
+        // Test order: skipif postgresql followed by skipif mysql
+        let input = r#"skipif postgresql
+skipif mysql
+query I
+SELECT 1
+----
+1
+
+statement ok
+SELECT 2
+"#;
+        let output = preprocess_for_mysql(input);
+
+        // The query should be excluded because skipif mysql is present
+        assert!(
+            !output.contains("SELECT 1"),
+            "Query should be excluded when skipif mysql follows skipif postgresql"
+        );
+        // The following statement should be included
+        assert!(output.contains("SELECT 2"));
     }
 }

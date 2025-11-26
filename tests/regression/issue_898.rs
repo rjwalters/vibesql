@@ -178,6 +178,8 @@ async fn test_file(path: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     // Enable hash mode with threshold of 8 (standard SQLLogicTest behavior)
     tester.with_hash_threshold(8);
+    // Add "mysql" label for skipif/onlyif directives
+    tester.add_label("mysql");
 
     match tester.run_script(&contents) {
         Ok(_) => {

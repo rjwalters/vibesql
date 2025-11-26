@@ -34,6 +34,9 @@ macro_rules! harness {
 
 pub fn test(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Result<(), Failed> {
     let mut tester = Runner::new(make_conn);
+    // Add "mysql" label for skipif/onlyif directives
+    // VibeSQL uses MySQL-compatible division (returns REAL/DECIMAL for integer division)
+    tester.add_label("mysql");
     tester.run_file(filename)?;
     tester.shutdown();
     Ok(())

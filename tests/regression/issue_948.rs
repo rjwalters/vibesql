@@ -112,6 +112,8 @@ impl AsyncDB for TestDB {
 #[tokio::test]
 async fn test_issue_948_decimal_formatting() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(TestDB::new()) });
+    // Add "mysql" label for skipif/onlyif directives
+    tester.add_label("mysql");
 
     let script = r#"
 statement ok
