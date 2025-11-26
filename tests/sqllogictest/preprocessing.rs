@@ -1,6 +1,15 @@
 //! Test file preprocessing for MySQL-specific directives.
 
 /// Preprocess test file content to filter MySQL-specific directives
+///
+/// Handles stacked skipif/onlyif directives correctly. For example:
+///   skipif mysql
+///   skipif postgresql
+///   query I
+///   SELECT ...
+///
+/// The above should skip the test for BOTH mysql AND postgresql modes.
+/// When running in MySQL mode, the test is skipped because of `skipif mysql`.
 pub fn preprocess_for_mysql(content: &str) -> String {
     let mut output_lines = Vec::new();
     let mut skip_next_record = false;
@@ -10,12 +19,16 @@ pub fn preprocess_for_mysql(content: &str) -> String {
         if line.starts_with("onlyif ") {
             let dialect =
                 line.trim_start_matches("onlyif ").split_whitespace().next().unwrap_or("");
-            skip_next_record = dialect != "mysql";
+            // Only run if dialect matches mysql; combine with previous skip status using OR
+            // If already skipping, stay skipping. If onlyif doesn't match, start skipping.
+            skip_next_record = skip_next_record || dialect != "mysql";
             continue; // Don't include the directive line
         } else if line.starts_with("skipif ") {
             let dialect =
                 line.trim_start_matches("skipif ").split_whitespace().next().unwrap_or("");
-            skip_next_record = dialect == "mysql";
+            // Skip if dialect matches mysql; combine with previous skip status using OR
+            // If already skipping, stay skipping. If skipif matches mysql, start skipping.
+            skip_next_record = skip_next_record || dialect == "mysql";
             continue; // Don't include the directive line
         }
 
@@ -121,5 +134,67 @@ INSERT INTO t1 VALUES (3)
         // No directives should remain
         assert!(!output.contains("onlyif"));
         assert!(!output.contains("skipif"));
+    }
+
+    #[test]
+    fn test_preprocess_stacked_skipif_directives() {
+        // Bug fix for issue #2635: Stacked skipif directives were not handled correctly.
+        // When a test has both "skipif mysql" and "skipif postgresql", the second
+        // directive was incorrectly resetting the skip flag because postgresql != mysql.
+        let input = r#"skipif mysql # not compatible
+skipif postgresql # PostgreSQL requires AS when renaming output columns
+query I rowsort label-59
+SELECT DISTINCT - 65 / + - ( + col1 ) + + 47 col0 FROM tab2
+----
+47
+48
+
+statement ok
+SELECT 1
+"#;
+        let output = preprocess_for_mysql(input);
+
+        // The query should be SKIPPED because of "skipif mysql"
+        // Before the fix, this was incorrectly included because "skipif postgresql"
+        // reset the skip flag to false.
+        assert!(
+            !output.contains("SELECT DISTINCT"),
+            "Query with skipif mysql should be excluded even when followed by skipif postgresql"
+        );
+
+        // The next statement after the blank line should be included
+        assert!(
+            output.contains("SELECT 1"),
+            "Statement after blank line should be included"
+        );
+    }
+
+    #[test]
+    fn test_preprocess_stacked_onlyif_directives() {
+        // Test stacked onlyif directives - test should only run if ALL conditions are met
+        let input = r#"onlyif mysql
+onlyif postgresql
+query I
+SELECT 1
+----
+1
+
+statement ok
+SELECT 2
+"#;
+        let output = preprocess_for_mysql(input);
+
+        // The query requires BOTH mysql AND postgresql, which is impossible
+        // So it should be skipped (onlyif postgresql fails for mysql mode)
+        assert!(
+            !output.contains("SELECT 1"),
+            "Query with onlyif mysql + onlyif postgresql should be excluded in mysql mode"
+        );
+
+        // The next statement after the blank line should be included
+        assert!(
+            output.contains("SELECT 2"),
+            "Statement after blank line should be included"
+        );
     }
 }
