@@ -37,6 +37,21 @@ pub fn test(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Resul
     // Add "mysql" label for skipif/onlyif directives
     // VibeSQL uses MySQL-compatible division (returns REAL/DECIMAL for integer division)
     tester.add_label("mysql");
+    // Enable auto-switching of SQL dialect based on skipif/onlyif conditions.
+    // This allows tests with `skipif mysql` to run in sqlite mode and vice versa,
+    // maximizing test coverage instead of skipping tests.
+    tester.enable_auto_switch_dialect();
+    tester.run_file(filename)?;
+    tester.shutdown();
+    Ok(())
+}
+
+/// Test with auto-dialect switching disabled.
+/// Use this when you want the original skip behavior based on labels.
+pub fn test_no_auto_switch(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Result<(), Failed> {
+    let mut tester = Runner::new(make_conn);
+    tester.add_label("mysql");
+    // Auto-switch is disabled by default, but we explicitly note it here
     tester.run_file(filename)?;
     tester.shutdown();
     Ok(())
