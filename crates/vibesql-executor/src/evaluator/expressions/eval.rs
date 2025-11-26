@@ -365,6 +365,12 @@ impl ExpressionEvaluator<'_> {
         column: &str,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        // Special case: "*" is a wildcard used in COUNT(*) and is not a real column
+        // Return NULL here - the actual COUNT(*) logic handles this specially
+        if column == "*" {
+            return Ok(vibesql_types::SqlValue::Null);
+        }
+
         // Check procedural context first (variables/parameters take precedence over table columns)
         // This is only checked when there's no table qualifier, as variables don't have table prefixes
         if table_qualifier.is_none() {

@@ -17,6 +17,7 @@ mod execute;
 mod index_optimization;
 mod nonagg;
 mod utils;
+pub(crate) mod validation;
 
 #[cfg(test)]
 mod memory_tests;

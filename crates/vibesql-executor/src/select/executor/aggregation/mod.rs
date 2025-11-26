@@ -59,6 +59,17 @@ impl SelectExecutor<'_> {
             }
         };
 
+        // Validate column references BEFORE processing rows (issue #2654)
+        // This ensures column errors are caught even when tables are empty
+        // Only validate if we have a FROM clause (skip for SELECT without FROM)
+        if stmt.from.is_some() {
+            crate::select::executor::validation::validate_select_columns(
+                &stmt.select_list,
+                stmt.where_clause.as_ref(),
+                &from_result.schema,
+            )?;
+        }
+
         // Extract schema for evaluator before moving from_result
         let schema = from_result.schema.clone();
 

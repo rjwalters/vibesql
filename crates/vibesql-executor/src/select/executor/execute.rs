@@ -246,6 +246,15 @@ impl SelectExecutor<'_> {
             // Pass WHERE and ORDER BY to execute_from for optimization
             let from_result =
                 self.execute_from_with_where(from_clause, cte_results, stmt.where_clause.as_ref(), stmt.order_by.as_deref())?;
+
+            // Validate column references BEFORE processing rows (issue #2654)
+            // This ensures column errors are caught even when tables are empty
+            super::validation::validate_select_columns(
+                &stmt.select_list,
+                stmt.where_clause.as_ref(),
+                &from_result.schema,
+            )?;
+
             self.execute_without_aggregation(stmt, from_result, cte_results)?
         } else {
             // SELECT without FROM - evaluate expressions as a single row

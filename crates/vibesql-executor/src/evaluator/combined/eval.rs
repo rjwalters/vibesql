@@ -57,6 +57,12 @@ impl CombinedExpressionEvaluator<'_> {
 
             // Column reference - look up column index (with optional table qualifier)
             vibesql_ast::Expression::ColumnRef { table, column } => {
+                // Special case: "*" is a wildcard used in COUNT(*) and is not a real column
+                // Return NULL here - the actual COUNT(*) logic handles this specially
+                if column == "*" {
+                    return Ok(vibesql_types::SqlValue::Null);
+                }
+
                 // Check procedural context first (variables/parameters take precedence over table columns)
                 // This is only checked when there's no table qualifier, as variables don't have table prefixes
                 if table.is_none() {
