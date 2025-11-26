@@ -1,0 +1,109 @@
+# Dialect-specific division tests
+#
+# This file tests the difference in integer division behavior between dialects:
+# - MySQL: Integer division returns a decimal (5/2 = 2.5)
+# - SQLite: Integer division returns an integer (5/2 = 2)
+#
+# The dialect directive switches the SQL_MODE at runtime.
+
+# =============================================================================
+# MySQL-style division (default mode)
+# MySQL returns decimal for integer division
+# =============================================================================
+
+dialect mysql
+
+query R
+SELECT 5 / 2
+----
+2.500
+
+query R
+SELECT 10 / 4
+----
+2.500
+
+query R
+SELECT 7 / 3
+----
+2.333
+
+# Division with larger numbers
+query R
+SELECT 100 / 7
+----
+14.286
+
+# Division resulting in a whole number still shows decimal
+query R
+SELECT 10 / 5
+----
+2.000
+
+# Division with negative numbers
+query R
+SELECT -7 / 2
+----
+-3.500
+
+query R
+SELECT 7 / -2
+----
+-3.500
+
+# =============================================================================
+# SQLite-style division (integer truncation)
+# SQLite returns integer for integer division
+# =============================================================================
+
+dialect sqlite
+
+query I
+SELECT 5 / 2
+----
+2
+
+query I
+SELECT 10 / 4
+----
+2
+
+query I
+SELECT 7 / 3
+----
+2
+
+# Division with larger numbers
+query I
+SELECT 100 / 7
+----
+14
+
+# Division resulting in a whole number
+query I
+SELECT 10 / 5
+----
+2
+
+# Division with negative numbers (truncates toward zero)
+query I
+SELECT -7 / 2
+----
+-3
+
+query I
+SELECT 7 / -2
+----
+-3
+
+# =============================================================================
+# Switch back to MySQL mode
+# =============================================================================
+
+dialect mysql
+
+# Verify we're back in MySQL mode
+query R
+SELECT 9 / 4
+----
+2.250

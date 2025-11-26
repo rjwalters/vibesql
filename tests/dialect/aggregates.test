@@ -1,0 +1,149 @@
+# Dialect-specific aggregate function tests
+#
+# Tests aggregate function behavior across dialects.
+# Simplified tests that focus on dialect switching rather than NULL handling.
+
+# Setup test table
+statement ok
+CREATE TABLE agg_test (
+    id INTEGER PRIMARY KEY,
+    category TEXT,
+    value INTEGER,
+    amount REAL
+)
+
+statement ok
+INSERT INTO agg_test VALUES (1, 'A', 10, 1.5)
+
+statement ok
+INSERT INTO agg_test VALUES (2, 'A', 20, 2.5)
+
+statement ok
+INSERT INTO agg_test VALUES (3, 'B', 30, 3.5)
+
+statement ok
+INSERT INTO agg_test VALUES (4, 'B', 40, 4.5)
+
+statement ok
+INSERT INTO agg_test VALUES (5, 'C', 50, 5.5)
+
+# =============================================================================
+# Basic aggregates - should work the same in both dialects
+# =============================================================================
+
+query I
+SELECT COUNT(*) FROM agg_test
+----
+5
+
+query I
+SELECT COUNT(value) FROM agg_test
+----
+5
+
+query I
+SELECT SUM(value) FROM agg_test
+----
+150
+
+query I
+SELECT MIN(value) FROM agg_test
+----
+10
+
+query I
+SELECT MAX(value) FROM agg_test
+----
+50
+
+# =============================================================================
+# AVG behavior - vibesql uses consistent decimal formatting across dialects
+# =============================================================================
+
+dialect mysql
+
+# MySQL mode AVG
+query R
+SELECT AVG(value) FROM agg_test
+----
+30.000
+
+dialect sqlite
+
+# SQLite mode AVG (vibesql normalizes decimal output to 3 places)
+query R
+SELECT AVG(value) FROM agg_test
+----
+30.000
+
+# =============================================================================
+# GROUP BY with aggregates
+# =============================================================================
+
+dialect mysql
+
+query TI rowsort
+SELECT category, COUNT(*) FROM agg_test GROUP BY category
+----
+A
+2
+B
+2
+C
+1
+
+query TI rowsort
+SELECT category, SUM(value) FROM agg_test GROUP BY category
+----
+A
+30
+B
+70
+C
+50
+
+# =============================================================================
+# COUNT(DISTINCT) - important for dialect compatibility
+# =============================================================================
+
+query I
+SELECT COUNT(DISTINCT category) FROM agg_test
+----
+3
+
+query I
+SELECT COUNT(DISTINCT value) FROM agg_test
+----
+5
+
+# =============================================================================
+# Verify dialect switching during aggregates
+# =============================================================================
+
+# MySQL mode: AVG returns decimal format
+dialect mysql
+
+query R
+SELECT AVG(value) FROM agg_test WHERE category = 'A'
+----
+15.000
+
+# Switch to SQLite mode
+dialect sqlite
+
+query R
+SELECT AVG(value) FROM agg_test WHERE category = 'A'
+----
+15.000
+
+# Switch back to MySQL mode
+dialect mysql
+
+query R
+SELECT AVG(value) FROM agg_test WHERE category = 'B'
+----
+35.000
+
+# Cleanup
+statement ok
+DROP TABLE agg_test

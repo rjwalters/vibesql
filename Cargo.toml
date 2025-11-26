@@ -396,6 +396,11 @@ path = "tests/parser/directive_comments.rs"
 name = "error_handling"
 path = "tests/parser/error_handling.rs"
 
+# Dialect-specific tests - verify SQL dialect switching
+[[test]]
+name = "dialect_tests"
+path = "tests/dialect/mod.rs"
+
 # Custom release profile optimized for WASM size
 [profile.wasm-release]
 inherits = "release"
