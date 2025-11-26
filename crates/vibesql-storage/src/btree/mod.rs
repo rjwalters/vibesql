@@ -278,17 +278,4 @@ mod tests {
         // - Compare results with incremental insert
     }
 
-    /// Performance benchmark placeholder
-    ///
-    /// Once #1473 (IndexManager integration) is complete, this will benchmark
-    /// bulk load vs incremental insert performance
-    #[test]
-    #[ignore] // TODO(#1473): Benchmark test - implement after IndexManager integration
-    fn benchmark_bulk_load_vs_incremental() {
-        // TODO: Implement once incremental insert is available
-        // Expected results for 100K entries:
-        // - Bulk load: ~1-2 seconds
-        // - Incremental insert: ~10-20 seconds
-        // - Speedup: 5-10x
-    }
 }

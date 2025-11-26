@@ -849,22 +849,6 @@ fn test_null_foreign_key_values() {
 }
 
 #[test]
-#[ignore] // TODO: Requires transaction support - deferred constraint checking is out of scope
-fn test_deferred_constraint_checking() {
-    // Test that constraints can be deferred to end of transaction
-    // Allows temporary constraint violations during transaction
-    // SQL standard feature: SET CONSTRAINTS ... DEFERRED
-    //
-    // Implementation requires:
-    // 1. Transaction support (BEGIN, COMMIT, ROLLBACK)
-    // 2. SET CONSTRAINTS command parsing and execution
-    // 3. Constraint validation mode tracking per transaction
-    // 4. Deferred validation queue that runs at COMMIT time
-    //
-    // This is a Phase 4 feature that depends on full transaction support
-}
-
-#[test]
 fn test_delete_multiple_parents_with_shared_child() {
     let mut db = Database::new();
 

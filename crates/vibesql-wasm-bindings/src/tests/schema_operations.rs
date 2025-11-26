@@ -158,16 +158,3 @@ fn test_execute_sequences() {
     }
 }
 
-#[test]
-#[ignore] // CREATE TYPE and DROP TYPE support is limited - testing via execute.rs wrapping
-fn test_execute_types() {
-    // Note: CREATE TYPE with full syntax is not yet supported by the parser
-    // The execute.rs module handles these statement types when they ARE supported
-    // This test documents the intended functionality for when parser support is added
-
-    // When parser support is ready, this will test:
-    // 1. CREATE TYPE custom_type AS ...
-    // 2. DROP TYPE custom_type
-
-    // For now, this test is ignored but serves as documentation
-}
