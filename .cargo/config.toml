@@ -1,6 +1,12 @@
 [build]
 rustc-wrapper = "sccache"
 
+# Use baseline x86-64-v2 (SSE4.2) for Linux CI compatibility
+# GitHub Actions runners may not support AVX/AVX2 instructions
+# This ensures SIMD code uses only SSE instructions on Linux
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=x86-64-v2"]
+
 [alias]
 # Coverage commands using cargo-llvm-cov
 coverage = "llvm-cov --workspace --html"
