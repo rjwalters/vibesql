@@ -7,5 +7,5 @@ mod validator;
 
 // Re-export public types and traits
 pub use core::{
-    AsyncDB, DB, Partitioner, Runner, RunnerLocals, default_partitioner,
+    AsyncDB, DB, Partitioner, Runner, RunnerLocals, SqlDialect, default_partitioner,
 };

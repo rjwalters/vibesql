@@ -10,9 +10,74 @@ use crate::column_type::ColumnType;
 use crate::error_handling::AnyError;
 use crate::output::{RecordOutput, DBOutput};
 use crate::parser::*;
-use super::core::{AsyncDB, Runner};
+use super::core::{AsyncDB, Runner, SqlDialect};
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
+    /// Infer the required SQL dialect from skipif/onlyif conditions.
+    ///
+    /// Returns the dialect that should be used to run this test, or None if:
+    /// - No dialect-specific conditions are present
+    /// - The condition refers to an unsupported dialect (like postgresql)
+    fn infer_required_dialect(conditions: &[Condition]) -> Option<SqlDialect> {
+        for cond in conditions {
+            match cond {
+                // skipif mysql means "this test is for non-MySQL dialects" -> use sqlite
+                Condition::SkipIf { label } if label.eq_ignore_ascii_case("mysql") => {
+                    return Some(SqlDialect::SQLite);
+                }
+                // skipif sqlite means "this test is for non-SQLite dialects" -> use mysql
+                Condition::SkipIf { label } if label.eq_ignore_ascii_case("sqlite") => {
+                    return Some(SqlDialect::MySQL);
+                }
+                // onlyif mysql means "this test is MySQL-specific" -> use mysql
+                Condition::OnlyIf { label } if label.eq_ignore_ascii_case("mysql") => {
+                    return Some(SqlDialect::MySQL);
+                }
+                // onlyif sqlite means "this test is SQLite-specific" -> use sqlite
+                Condition::OnlyIf { label } if label.eq_ignore_ascii_case("sqlite") => {
+                    return Some(SqlDialect::SQLite);
+                }
+                // Other labels (postgresql, etc.) - not supported, return None to let normal skip logic handle
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Switch to the specified dialect if different from current.
+    /// Returns an error output if the switch fails, or None on success.
+    async fn switch_dialect_if_needed(
+        &mut self,
+        required: &SqlDialect,
+    ) -> Option<RecordOutput<D::ColumnType>> {
+        if &self.current_dialect == required {
+            return None; // Already in the right dialect
+        }
+
+        let conn = match self.conn.get(Connection::Default).await {
+            Ok(conn) => conn,
+            Err(e) => {
+                return Some(RecordOutput::Statement {
+                    count: 0,
+                    error: Some(Arc::new(e)),
+                });
+            }
+        };
+
+        let sql = format!("SET SQL_MODE = '{}'", required.as_sql_mode_str());
+        match conn.run(&sql).await {
+            Ok(_) => {
+                tracing::debug!("Auto-switched dialect to: {:?}", required);
+                self.current_dialect = required.clone();
+                None // Success
+            }
+            Err(e) => Some(RecordOutput::Statement {
+                count: 0,
+                error: Some(Arc::new(e)),
+            }),
+        }
+    }
+
     pub async fn apply_record(
         &mut self,
         record: Record<D::ColumnType>,
@@ -56,6 +121,32 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
+                let conn = match self.conn.get(connection.clone()).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        return RecordOutput::Statement {
+                            count: 0,
+                            error: Some(Arc::new(e)),
+                        }
+                    }
+                };
+
+                // Auto-switch dialect if enabled and conditions indicate a dialect requirement
+                if self.auto_switch_dialect {
+                    if let Some(required_dialect) = Self::infer_required_dialect(&conditions) {
+                        if let Some(error_output) = self.switch_dialect_if_needed(&required_dialect).await {
+                            return error_output;
+                        }
+                        // Don't skip - we've switched to the required dialect, now execute the test
+                    } else if should_skip(&self.labels, conn.engine_name(), &conditions) {
+                        // Non-dialect condition (e.g., postgresql) - use normal skip logic
+                        return RecordOutput::Nothing;
+                    }
+                } else if should_skip(&self.labels, conn.engine_name(), &conditions) {
+                    return RecordOutput::Nothing;
+                }
+
+                // Re-acquire connection since switch_dialect_if_needed may have used it
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
                     Err(e) => {
@@ -65,9 +156,6 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         }
                     }
                 };
-                if should_skip(&self.labels, conn.engine_name(), &conditions) {
-                    return RecordOutput::Nothing;
-                }
 
                 let ret = conn.run(&sql).await;
                 match ret {
@@ -206,6 +294,33 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
+                let conn = match self.conn.get(connection.clone()).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        return RecordOutput::Query {
+                            error: Some(Arc::new(e)),
+                            types: vec![],
+                            rows: vec![],
+                        }
+                    }
+                };
+
+                // Auto-switch dialect if enabled and conditions indicate a dialect requirement
+                if self.auto_switch_dialect {
+                    if let Some(required_dialect) = Self::infer_required_dialect(&conditions) {
+                        if let Some(error_output) = self.switch_dialect_if_needed(&required_dialect).await {
+                            return error_output;
+                        }
+                        // Don't skip - we've switched to the required dialect, now execute the test
+                    } else if should_skip(&self.labels, conn.engine_name(), &conditions) {
+                        // Non-dialect condition (e.g., postgresql) - use normal skip logic
+                        return RecordOutput::Nothing;
+                    }
+                } else if should_skip(&self.labels, conn.engine_name(), &conditions) {
+                    return RecordOutput::Nothing;
+                }
+
+                // Re-acquire connection since switch_dialect_if_needed may have used it
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
                     Err(e) => {
@@ -216,9 +331,6 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         }
                     }
                 };
-                if should_skip(&self.labels, conn.engine_name(), &conditions) {
-                    return RecordOutput::Nothing;
-                }
 
                 let (mut types, mut rows) = match conn.run(&sql).await {
                     Ok(out) => match out {
@@ -370,6 +482,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 match conn.run(&sql).await {
                     Ok(_) => {
                         tracing::debug!("Switched dialect to: {}", mode);
+                        // Update current dialect tracking
+                        self.current_dialect = match mode.to_lowercase().as_str() {
+                            "sqlite" => SqlDialect::SQLite,
+                            _ => SqlDialect::MySQL,
+                        };
                         RecordOutput::Nothing
                     }
                     Err(e) => RecordOutput::Statement {
@@ -386,5 +503,89 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             | Record::Condition(_)
             | Record::Connection(_) => RecordOutput::Nothing,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::Condition;
+
+    // Helper trait to allow testing infer_required_dialect without a full Runner
+    fn test_infer_dialect(conditions: &[Condition]) -> Option<SqlDialect> {
+        // Copy the logic from Runner::infer_required_dialect
+        for cond in conditions {
+            match cond {
+                Condition::SkipIf { label } if label.eq_ignore_ascii_case("mysql") => {
+                    return Some(SqlDialect::SQLite);
+                }
+                Condition::SkipIf { label } if label.eq_ignore_ascii_case("sqlite") => {
+                    return Some(SqlDialect::MySQL);
+                }
+                Condition::OnlyIf { label } if label.eq_ignore_ascii_case("mysql") => {
+                    return Some(SqlDialect::MySQL);
+                }
+                Condition::OnlyIf { label } if label.eq_ignore_ascii_case("sqlite") => {
+                    return Some(SqlDialect::SQLite);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn test_infer_dialect_skipif_mysql() {
+        let conditions = vec![Condition::SkipIf { label: "mysql".to_string() }];
+        assert_eq!(test_infer_dialect(&conditions), Some(SqlDialect::SQLite));
+    }
+
+    #[test]
+    fn test_infer_dialect_skipif_sqlite() {
+        let conditions = vec![Condition::SkipIf { label: "sqlite".to_string() }];
+        assert_eq!(test_infer_dialect(&conditions), Some(SqlDialect::MySQL));
+    }
+
+    #[test]
+    fn test_infer_dialect_onlyif_mysql() {
+        let conditions = vec![Condition::OnlyIf { label: "mysql".to_string() }];
+        assert_eq!(test_infer_dialect(&conditions), Some(SqlDialect::MySQL));
+    }
+
+    #[test]
+    fn test_infer_dialect_onlyif_sqlite() {
+        let conditions = vec![Condition::OnlyIf { label: "sqlite".to_string() }];
+        assert_eq!(test_infer_dialect(&conditions), Some(SqlDialect::SQLite));
+    }
+
+    #[test]
+    fn test_infer_dialect_case_insensitive() {
+        let conditions = vec![Condition::SkipIf { label: "MySQL".to_string() }];
+        assert_eq!(test_infer_dialect(&conditions), Some(SqlDialect::SQLite));
+
+        let conditions = vec![Condition::OnlyIf { label: "SQLITE".to_string() }];
+        assert_eq!(test_infer_dialect(&conditions), Some(SqlDialect::SQLite));
+    }
+
+    #[test]
+    fn test_infer_dialect_postgresql_not_supported() {
+        let conditions = vec![Condition::SkipIf { label: "postgresql".to_string() }];
+        assert_eq!(test_infer_dialect(&conditions), None);
+    }
+
+    #[test]
+    fn test_infer_dialect_no_conditions() {
+        let conditions: Vec<Condition> = vec![];
+        assert_eq!(test_infer_dialect(&conditions), None);
+    }
+
+    #[test]
+    fn test_infer_dialect_multiple_conditions() {
+        // First matching condition wins
+        let conditions = vec![
+            Condition::SkipIf { label: "postgresql".to_string() },
+            Condition::SkipIf { label: "mysql".to_string() },
+        ];
+        assert_eq!(test_infer_dialect(&conditions), Some(SqlDialect::SQLite));
     }
 }
