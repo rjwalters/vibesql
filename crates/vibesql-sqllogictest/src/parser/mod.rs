@@ -254,6 +254,7 @@ select * from foo;
                     Record::Subtest { loc, .. } => normalize_loc(loc),
                     Record::Halt { loc, .. } => normalize_loc(loc),
                     Record::HashThreshold { loc, .. } => normalize_loc(loc),
+                    Record::Dialect { loc, .. } => normalize_loc(loc),
                     // even though these variants don't include a
                     // location include them in this match statement
                     // so if new variants are added, this match

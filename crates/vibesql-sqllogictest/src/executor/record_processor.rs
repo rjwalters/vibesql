@@ -354,6 +354,30 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 tracing::error!("halt record encountered. It's likely a bug of the runtime.");
                 RecordOutput::Nothing
             }
+            Record::Dialect { mode, loc: _ } => {
+                // Execute SET SQL_MODE to switch dialect
+                let conn = match self.conn.get(Connection::Default).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        return RecordOutput::Statement {
+                            count: 0,
+                            error: Some(Arc::new(e)),
+                        }
+                    }
+                };
+
+                let sql = format!("SET SQL_MODE = '{}'", mode);
+                match conn.run(&sql).await {
+                    Ok(_) => {
+                        tracing::debug!("Switched dialect to: {}", mode);
+                        RecordOutput::Nothing
+                    }
+                    Err(e) => RecordOutput::Statement {
+                        count: 0,
+                        error: Some(Arc::new(e)),
+                    }
+                }
+            }
             Record::Include { .. }
             | Record::Newline
             | Record::Comment(_)
