@@ -1,18 +1,7 @@
 //! Sysbench Schema Creation and Data Loading
 //!
 //! This module provides schema creation and data loading functions for sysbench
-//! OLTP benchmarks across multiple database engines (VibeSQL, SQLite, DuckDB).
-//!
-//! The schema matches the standard sysbench `sbtest` table:
-//! ```sql
-//! CREATE TABLE sbtest1 (
-//!   id INTEGER NOT NULL PRIMARY KEY,
-//!   k INTEGER NOT NULL DEFAULT 0,
-//!   c CHAR(120) NOT NULL DEFAULT '',
-//!   pad CHAR(60) NOT NULL DEFAULT ''
-//! );
-//! CREATE INDEX k_idx ON sbtest1(k);
-//! ```
+//! benchmark tables across multiple database engines (VibeSQL, SQLite, DuckDB).
 
 use super::data::SysbenchData;
 use vibesql_storage::Database as VibeDB;
@@ -26,14 +15,22 @@ use rusqlite::Connection as SqliteConn;
 // Database Loaders
 // =============================================================================
 
-/// Load a VibeSQL database with sysbench schema and data.
+/// Load VibeSQL with sysbench schema and data
+///
+/// # Arguments
+/// * `table_size` - Number of rows to generate (default: 10,000)
 pub fn load_vibesql(table_size: usize) -> VibeDB {
     let mut db = VibeDB::new();
     let mut data = SysbenchData::new(table_size);
 
-    create_sysbench_schema_vibesql(&mut db);
+    // Create schema
+    create_sbtest_schema_vibesql(&mut db);
+
+    // Load data
     load_sbtest_vibesql(&mut db, &mut data);
-    create_sysbench_indexes_vibesql(&mut db);
+
+    // Create indexes (primary key + secondary index on k)
+    create_sbtest_indexes_vibesql(&mut db);
 
     // Compute statistics for query optimization
     if let Some(table) = db.get_table_mut("SBTEST1") {
@@ -43,68 +40,72 @@ pub fn load_vibesql(table_size: usize) -> VibeDB {
     db
 }
 
-/// Load a SQLite database with sysbench schema and data.
+/// Load SQLite with sysbench schema and data
 #[cfg(feature = "benchmark-comparison")]
 pub fn load_sqlite(table_size: usize) -> SqliteConn {
     let conn = SqliteConn::open_in_memory().unwrap();
     let mut data = SysbenchData::new(table_size);
 
-    create_sysbench_schema_sqlite(&conn);
+    // Create schema
+    create_sbtest_schema_sqlite(&conn);
+
+    // Load data
     load_sbtest_sqlite(&conn, &mut data);
 
     conn
 }
 
-/// Load a DuckDB database with sysbench schema and data.
+/// Load DuckDB with sysbench schema and data
 #[cfg(feature = "benchmark-comparison")]
 pub fn load_duckdb(table_size: usize) -> DuckDBConn {
     let conn = DuckDBConn::open_in_memory().unwrap();
     let mut data = SysbenchData::new(table_size);
 
-    create_sysbench_schema_duckdb(&conn);
+    // Create schema
+    create_sbtest_schema_duckdb(&conn);
+
+    // Load data
     load_sbtest_duckdb(&conn, &mut data);
 
     conn
 }
 
 // =============================================================================
-// Schema Creation
+// Schema Creation - VibeSQL
 // =============================================================================
 
-fn create_sysbench_schema_vibesql(db: &mut VibeDB) {
+fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
 
-    // Table/column names are uppercase to match SQL parser behavior
-    // (SQL identifiers are case-insensitive and normalized to uppercase)
+    // sbtest1 table (standard sysbench OLTP table)
+    // Using Varchar for string columns for compatibility with SQL UPDATE statements
+    // (the SQL parser produces SqlValue::Varchar for string literals)
+    // Note: default values are handled at insert time, not schema level
     db.create_table(TableSchema::new(
         "SBTEST1".to_string(),
         vec![
             ColumnSchema {
-                name: "ID".to_string(),
+                name: "id".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
             },
             ColumnSchema {
-                name: "K".to_string(),
+                name: "k".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
             },
             ColumnSchema {
-                name: "C".to_string(),
-                data_type: DataType::Varchar {
-                    max_length: Some(120),
-                },
+                name: "c".to_string(),
+                data_type: DataType::Varchar { max_length: Some(120) },
                 nullable: false,
                 default_value: None,
             },
             ColumnSchema {
-                name: "PAD".to_string(),
-                data_type: DataType::Varchar {
-                    max_length: Some(60),
-                },
+                name: "pad".to_string(),
+                data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: false,
                 default_value: None,
             },
@@ -113,124 +114,109 @@ fn create_sysbench_schema_vibesql(db: &mut VibeDB) {
     .unwrap();
 }
 
-fn create_sysbench_indexes_vibesql(db: &mut VibeDB) {
+fn create_sbtest_indexes_vibesql(db: &mut VibeDB) {
     use vibesql_ast::{IndexColumn, OrderDirection};
 
-    // Primary key index on id
+    // Primary key index on id column
     db.create_index(
         "idx_sbtest1_pk".to_string(),
         "SBTEST1".to_string(),
         true, // unique
         vec![IndexColumn {
-            column_name: "ID".to_string(),
+            column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
     )
     .unwrap();
 
-    // Secondary index on k (standard sysbench index)
+    // Secondary index on k column (k_1)
     db.create_index(
-        "k_idx".to_string(),
+        "k_1".to_string(),
         "SBTEST1".to_string(),
         false, // not unique
         vec![IndexColumn {
-            column_name: "K".to_string(),
+            column_name: "k".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
     )
     .unwrap();
 }
-
-#[cfg(feature = "benchmark-comparison")]
-fn create_sysbench_schema_sqlite(conn: &SqliteConn) {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE sbtest1 (
-            id INTEGER NOT NULL PRIMARY KEY,
-            k INTEGER NOT NULL DEFAULT 0,
-            c TEXT NOT NULL DEFAULT '',
-            pad TEXT NOT NULL DEFAULT ''
-        );
-        CREATE INDEX k_idx ON sbtest1(k);
-    "#,
-    )
-    .unwrap();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn create_sysbench_schema_duckdb(conn: &DuckDBConn) {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE sbtest1 (
-            id INTEGER NOT NULL PRIMARY KEY,
-            k INTEGER NOT NULL DEFAULT 0,
-            c VARCHAR(120) NOT NULL DEFAULT '',
-            pad VARCHAR(60) NOT NULL DEFAULT ''
-        );
-        CREATE INDEX k_idx ON sbtest1(k);
-    "#,
-    )
-    .unwrap();
-}
-
-// =============================================================================
-// Data Loading
-// =============================================================================
 
 fn load_sbtest_vibesql(db: &mut VibeDB, data: &mut SysbenchData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    for i in 1..=data.table_size {
-        // k is a random value in [1, table_size] (sysbench default)
-        let k = (i * 499) % data.table_size + 1; // Deterministic pseudo-random
-
+    while let Some((id, k, c, pad)) = data.next_row() {
         let row = Row::new(vec![
-            SqlValue::Integer(i as i64),
-            SqlValue::Integer(k as i64),
-            SqlValue::Varchar(data.generate_c()),
-            SqlValue::Varchar(data.generate_pad()),
+            SqlValue::Integer(id),
+            SqlValue::Integer(k),
+            SqlValue::Varchar(c),
+            SqlValue::Varchar(pad),
         ]);
         db.insert_row("SBTEST1", row).unwrap();
     }
 }
 
+// =============================================================================
+// Schema Creation - SQLite
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn create_sbtest_schema_sqlite(conn: &SqliteConn) {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE sbtest1 (
+            id INTEGER PRIMARY KEY,
+            k INTEGER NOT NULL DEFAULT 0,
+            c CHAR(120) NOT NULL DEFAULT '',
+            pad CHAR(60) NOT NULL DEFAULT ''
+        );
+        CREATE INDEX k_1 ON sbtest1(k);
+        "#,
+    )
+    .unwrap();
+}
+
 #[cfg(feature = "benchmark-comparison")]
 fn load_sbtest_sqlite(conn: &SqliteConn, data: &mut SysbenchData) {
     let mut stmt = conn
-        .prepare("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)")
+        .prepare("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
         .unwrap();
 
-    for i in 1..=data.table_size {
-        let k = (i * 499) % data.table_size + 1;
-
-        stmt.execute(rusqlite::params![
-            i as i64,
-            k as i64,
-            data.generate_c(),
-            data.generate_pad(),
-        ])
-        .unwrap();
+    while let Some((id, k, c, pad)) = data.next_row() {
+        stmt.execute(rusqlite::params![id, k, c, pad]).unwrap();
     }
+}
+
+// =============================================================================
+// Schema Creation - DuckDB
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE sbtest1 (
+            id INTEGER PRIMARY KEY,
+            k INTEGER NOT NULL DEFAULT 0,
+            c VARCHAR(120) NOT NULL DEFAULT '',
+            pad VARCHAR(60) NOT NULL DEFAULT ''
+        );
+        CREATE INDEX k_1 ON sbtest1(k);
+        "#,
+    )
+    .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_sbtest_duckdb(conn: &DuckDBConn, data: &mut SysbenchData) {
     let mut stmt = conn
-        .prepare("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)")
+        .prepare("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
         .unwrap();
 
-    for i in 1..=data.table_size {
-        let k = (i * 499) % data.table_size + 1;
-
-        stmt.execute(duckdb::params![
-            i as i64,
-            k as i64,
-            data.generate_c(),
-            data.generate_pad(),
-        ])
-        .unwrap();
+    while let Some((id, k, c, pad)) = data.next_row() {
+        stmt.execute(duckdb::params![id, k, c, pad]).unwrap();
     }
 }
