@@ -4012,8 +4012,8 @@ fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(wp_web_page_id),
-            SqlValue::Date(Date::from_str("1998-01-01").unwrap()),  // wp_rec_start_date
-            SqlValue::Null,  // wp_rec_end_date
+            SqlValue::Integer(1),  // wp_rec_start_date_sk - reference to date_dim
+            SqlValue::Null,  // wp_rec_end_date_sk
             SqlValue::Integer(((i - 1) / 20 + 1) as i64),  // wp_creation_date_sk
             SqlValue::Integer(((i - 1) / 10 + 1) as i64),  // wp_access_date_sk
             SqlValue::Varchar("N".to_string()),  // wp_autogen_flag
@@ -4042,8 +4042,8 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(web_site_id),
-            SqlValue::Date(Date::from_str("1998-01-01").unwrap()),  // web_rec_start_date
-            SqlValue::Null,  // web_rec_end_date
+            SqlValue::Integer(1),  // web_rec_start_date_sk - reference to date_dim
+            SqlValue::Null,  // web_rec_end_date_sk
             SqlValue::Varchar(format!("site_{}", i)),  // web_name
             SqlValue::Integer(((i - 1) / 5 + 1) as i64),  // web_open_date_sk
             SqlValue::Null,  // web_close_date_sk
