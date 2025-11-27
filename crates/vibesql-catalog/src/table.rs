@@ -501,6 +501,9 @@ impl TableSchema {
                     .is_some_and(|e| Self::expression_references_column(e, column_name))
                     || Self::expression_references_column(string, column_name)
             }
+            vibesql_ast::Expression::Extract { expr, .. } => {
+                Self::expression_references_column(expr, column_name)
+            }
             vibesql_ast::Expression::Like { expr, pattern, .. } => {
                 Self::expression_references_column(expr, column_name)
                     || Self::expression_references_column(pattern, column_name)

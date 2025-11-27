@@ -65,6 +65,7 @@ enum ExprTag {
     MatchAgainst = 0x1B,
     PseudoVariable = 0x1C,
     SessionVariable = 0x1D,
+    Extract = 0x1E,
 }
 
 impl ExprTag {
@@ -100,6 +101,7 @@ impl ExprTag {
             0x1B => Ok(ExprTag::MatchAgainst),
             0x1C => Ok(ExprTag::PseudoVariable),
             0x1D => Ok(ExprTag::SessionVariable),
+            0x1E => Ok(ExprTag::Extract),
             _ => Err(StorageError::NotImplemented(format!(
                 "Unknown expression tag: 0x{:02X}",
                 tag
@@ -365,6 +367,11 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
         Expression::SessionVariable { name } => {
             write_tag!(writer, ExprTag::SessionVariable);
             write_string(writer, name)?;
+        }
+        Expression::Extract { field, expr } => {
+            write_tag!(writer, ExprTag::Extract);
+            write_interval_unit(writer, field)?;
+            write_expression(writer, expr)?;
         }
     }
     Ok(())
@@ -634,6 +641,11 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
         ExprTag::SessionVariable => {
             let name = read_string(reader)?;
             Ok(Expression::SessionVariable { name })
+        }
+        ExprTag::Extract => {
+            let field = read_interval_unit(reader)?;
+            let expr = Box::new(read_expression(reader)?);
+            Ok(Expression::Extract { field, expr })
         }
     }
 }

@@ -155,6 +155,9 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
             }
             extract_from_expression(string, tables);
         }
+        vibesql_ast::Expression::Extract { expr, .. } => {
+            extract_from_expression(expr, tables);
+        }
         vibesql_ast::Expression::QuantifiedComparison { expr, subquery, .. } => {
             extract_from_expression(expr, tables);
             let subquery_tables = extract_tables_from_select(subquery);

@@ -138,6 +138,17 @@ pub enum Expression {
         string: Box<Expression>,
     },
 
+    /// EXTRACT expression
+    /// Example: EXTRACT(YEAR FROM date_column)
+    /// Example: EXTRACT(MONTH FROM '2024-01-15')
+    /// Example: EXTRACT(DAY FROM order_date)
+    /// SQL:1999 Section 6.18: Datetime value function
+    /// Extracts a date/time field from a datetime or interval expression
+    Extract {
+        field: IntervalUnit,
+        expr: Box<Expression>,
+    },
+
     /// LIKE pattern matching
     /// Example: name LIKE 'John%'
     /// Example: email NOT LIKE '%spam%'

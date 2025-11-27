@@ -158,6 +158,11 @@ impl ExpressionEvaluator<'_> {
                 self.eval_trim(position, removal_char, string, row)
             }
 
+            // EXTRACT expression
+            vibesql_ast::Expression::Extract { field, expr } => {
+                self.eval_extract(field, expr, row)
+            }
+
             // LIKE pattern matching
             vibesql_ast::Expression::Like { expr, pattern, negated } => {
                 self.eval_like(expr, pattern, *negated, row)

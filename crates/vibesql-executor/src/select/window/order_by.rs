@@ -92,6 +92,9 @@ fn collect_window_functions_from_expression(
             }
             collect_window_functions_from_expression(string, window_functions);
         }
+        Expression::Extract { expr, .. } => {
+            collect_window_functions_from_expression(expr, window_functions);
+        }
         Expression::Exists { .. }
         | Expression::ScalarSubquery(_)
         | Expression::QuantifiedComparison { .. } => {
