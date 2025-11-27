@@ -62,6 +62,8 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     load_nation_sqlite(&conn);
     load_customer_sqlite(&conn, &mut data);
     load_supplier_sqlite(&conn, &mut data);
+    load_part_sqlite(&conn, &mut data);
+    load_partsupp_sqlite(&conn, &mut data);
     load_orders_sqlite(&conn, &mut data);
     load_lineitem_sqlite(&conn, &mut data);
 
@@ -81,6 +83,8 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     load_nation_duckdb(&conn);
     load_customer_duckdb(&conn, &mut data);
     load_supplier_duckdb(&conn, &mut data);
+    load_part_duckdb(&conn, &mut data);
+    load_partsupp_duckdb(&conn, &mut data);
     load_orders_duckdb(&conn, &mut data);
     load_lineitem_duckdb(&conn, &mut data);
 
@@ -1124,6 +1128,64 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     }
 }
 
+#[cfg(feature = "benchmark-comparison")]
+fn load_part_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
+    use super::data::{COLORS, CONTAINERS, TYPES};
+
+    let mut stmt = conn
+        .prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
+
+    for i in 0..data.part_count {
+        let color1 = COLORS[i % COLORS.len()];
+        let color2 = COLORS[(i * 7) % COLORS.len()];
+        let p_name = format!("{} {} {}", color1, TYPES[i % TYPES.len()], color2);
+        let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
+
+        stmt.execute(rusqlite::params![
+            i as i64 + 1,
+            p_name,
+            format!("Manufacturer#{}", (i % 5) + 1),
+            format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1),
+            TYPES[i % TYPES.len()],
+            ((i % 50) + 1) as i64,
+            CONTAINERS[i % CONTAINERS.len()],
+            retailprice,
+            data.random_varchar(23),
+        ])
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_part_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
+    use super::data::{COLORS, CONTAINERS, TYPES};
+
+    let mut stmt = conn
+        .prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
+
+    for i in 0..data.part_count {
+        let color1 = COLORS[i % COLORS.len()];
+        let color2 = COLORS[(i * 7) % COLORS.len()];
+        let p_name = format!("{} {} {}", color1, TYPES[i % TYPES.len()], color2);
+        let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
+
+        stmt.execute(duckdb::params![
+            i as i64 + 1,
+            p_name,
+            format!("Manufacturer#{}", (i % 5) + 1),
+            format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1),
+            TYPES[i % TYPES.len()],
+            ((i % 50) + 1) as i64,
+            CONTAINERS[i % CONTAINERS.len()],
+            retailprice,
+            data.random_varchar(23),
+        ])
+        .unwrap();
+    }
+}
+
 // =============================================================================
 // Data Loading (PARTSUPP - generated data)
 // =============================================================================
@@ -1145,6 +1207,56 @@ fn load_partsupp_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
                 SqlValue::Varchar(data.random_varchar(199)),
             ]);
             db.insert_row("PARTSUPP", row).unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_partsupp_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
+    let mut stmt = conn
+        .prepare("INSERT INTO partsupp VALUES (?, ?, ?, ?, ?)")
+        .unwrap();
+
+    // Each part is supplied by 4 suppliers
+    for part_key in 1..=data.part_count {
+        for j in 0..4 {
+            let supp_key = ((part_key + (j * (data.supplier_count / 4 + (part_key - 1) / data.supplier_count))) % data.supplier_count) + 1;
+            let availqty = ((part_key * 17 + j * 31) % 9999) + 1;
+            let supplycost = ((part_key * 13 + j * 7) % 100000) as f64 / 100.0 + 1.0;
+
+            stmt.execute(rusqlite::params![
+                part_key as i64,
+                supp_key as i64,
+                availqty as i64,
+                supplycost,
+                data.random_varchar(199),
+            ])
+            .unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_partsupp_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
+    let mut stmt = conn
+        .prepare("INSERT INTO partsupp VALUES (?, ?, ?, ?, ?)")
+        .unwrap();
+
+    // Each part is supplied by 4 suppliers
+    for part_key in 1..=data.part_count {
+        for j in 0..4 {
+            let supp_key = ((part_key + (j * (data.supplier_count / 4 + (part_key - 1) / data.supplier_count))) % data.supplier_count) + 1;
+            let availqty = ((part_key * 17 + j * 31) % 9999) + 1;
+            let supplycost = ((part_key * 13 + j * 7) % 100000) as f64 / 100.0 + 1.0;
+
+            stmt.execute(duckdb::params![
+                part_key as i64,
+                supp_key as i64,
+                availqty as i64,
+                supplycost,
+                data.random_varchar(199),
+            ])
+            .unwrap();
         }
     }
 }
