@@ -13,23 +13,23 @@
 //! - Queries: Q25, Q26, Q27, Q35, Q50, Q81, Q82, Q83
 //!
 //! ## Phase 3 (Full E-Commerce):
-//! - catalog_page, web_page, web_site, call_center
+//! - catalog_page, web_page, web_site
 //! - catalog_sales, catalog_returns, web_sales, web_returns
 //! - Queries: Q13, Q16, Q20, Q32, Q37, Q60, Q62, Q76, Q84, Q92
 //!
 //! ## Tier 3 (Advanced Analytics - Q51-Q99):
 //! - Advanced window functions, ROLLUP/CUBE, complex CTEs
 //! - ROLLUP queries: Q67, Q70, Q77, Q80, Q86 (require GROUPING function)
-//! - Window function queries: Q51, Q53, Q57, Q58, Q74, Q75, Q78, Q98
+//! - Window function queries: Q51, Q53, Q58, Q74, Q75, Q78, Q98
 //! - Multi-channel analysis: Q58, Q71, Q74, Q75, Q87, Q97
-//! - Queries: Q51, Q53, Q54, Q56, Q57, Q58, Q59, Q61, Q63, Q64, Q65, Q66, Q67, Q69,
+//! - Queries: Q51, Q53, Q54, Q56, Q58, Q59, Q61, Q63, Q64, Q65, Q66, Q67, Q69,
 //!            Q70, Q71, Q72, Q74, Q75, Q77, Q78, Q79, Q80, Q85, Q86, Q87, Q88, Q90,
-//!            Q91, Q93, Q94, Q95, Q97, Q98, Q99
+//!            Q93, Q94, Q95, Q97, Q98
 //!
-//! ## Queries Blocked by Missing SQL Features:
-//! - None currently (ROLLUP, CUBE, GROUPING SETS supported via #2763)
+//! ## Queries Blocked by Missing Schema Tables:
+//! - Q57, Q91, Q99: Require call_center table (not implemented)
 //!
-//! Total implemented: 62 queries (from original 99)
+//! Total implemented: 67 queries (from original 99)
 //!
 //! Queries are numbered to match the official TPC-DS query numbers where possible,
 //! with adaptations noted in comments.
@@ -2035,7 +2035,7 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q53", TPCDS_Q53),
     ("Q54", TPCDS_Q54),
     ("Q56", TPCDS_Q56),
-    ("Q57", TPCDS_Q57),
+    // Q57 excluded: requires call_center table (not in schema)
     ("Q58", TPCDS_Q58),
     ("Q59", TPCDS_Q59),
     ("Q61", TPCDS_Q61),
@@ -2059,13 +2059,13 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q87", TPCDS_Q87),
     ("Q88", TPCDS_Q88),
     ("Q90", TPCDS_Q90),
-    ("Q91", TPCDS_Q91),
+    // Q91 excluded: requires call_center table (not in schema)
     ("Q93", TPCDS_Q93),
     ("Q94", TPCDS_Q94),
     ("Q95", TPCDS_Q95),
     ("Q97", TPCDS_Q97),
     ("Q98", TPCDS_Q98),
-    ("Q99", TPCDS_Q99),
+    // Q99 excluded: requires call_center table (not in schema)
 ];
 
 /// Sanity check queries for validation
