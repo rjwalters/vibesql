@@ -214,7 +214,7 @@ impl SelectExecutor<'_> {
         evaluator: &CombinedExpressionEvaluator,
         grouping_context: &GroupingContext,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-        // Check for GROUPING() function call
+        // Check for GROUPING() or GROUPING_ID() function call
         if let vibesql_ast::Expression::Function { name, args, .. } = expr {
             if name.eq_ignore_ascii_case("GROUPING") {
                 // GROUPING() function - returns 1 if the column is rolled up, 0 otherwise
@@ -226,6 +226,18 @@ impl SelectExecutor<'_> {
                 }
                 let result = grouping_context.is_rolled_up(&args[0]);
                 return Ok(vibesql_types::SqlValue::Integer(result as i64));
+            }
+
+            if name.eq_ignore_ascii_case("GROUPING_ID") {
+                // GROUPING_ID() function - returns a bitmap for multiple columns
+                // Formula: GROUPING(c1) * 2^(n-1) + GROUPING(c2) * 2^(n-2) + ... + GROUPING(cn)
+                if args.is_empty() {
+                    return Err(ExecutorError::UnsupportedExpression(
+                        "GROUPING_ID() requires at least 1 argument".to_string(),
+                    ));
+                }
+                let result = grouping_context.grouping_id(args);
+                return Ok(vibesql_types::SqlValue::Integer(result));
             }
         }
 

@@ -347,3 +347,167 @@ fn test_cube_with_count_distinct() {
     assert!(grand_total.is_some());
     assert_eq!(get_i64(&grand_total.unwrap().values[1]), 2); // Widget and Gadget
 }
+
+// ============================================================================
+// GROUPING_ID() Function Tests
+// ============================================================================
+
+#[test]
+fn test_grouping_id_with_rollup_two_columns() {
+    let db = setup_db();
+
+    // GROUPING_ID(year, quarter) returns a bitmap:
+    // - (year, quarter): 0 (binary 00) - both present
+    // - (year, NULL): 1 (binary 01) - quarter rolled up
+    // - (NULL, NULL): 3 (binary 11) - both rolled up
+    let rows = execute_query(
+        &db,
+        "SELECT year, quarter, GROUPING_ID(year, quarter), SUM(amount)
+         FROM sales GROUP BY ROLLUP(year, quarter)",
+    );
+
+    assert_eq!(rows.len(), 6);
+
+    // Grand total: GROUPING_ID = 3 (binary 11)
+    let grand_total = rows
+        .iter()
+        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
+    assert!(grand_total.is_some());
+    assert_eq!(get_i64(&grand_total.unwrap().values[2]), 3); // GROUPING_ID(year, quarter) = 3
+
+    // Year subtotal: GROUPING_ID = 1 (binary 01)
+    let year_subtotal = rows
+        .iter()
+        .find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
+    assert!(year_subtotal.is_some());
+    assert_eq!(get_i64(&year_subtotal.unwrap().values[2]), 1); // GROUPING_ID(year, quarter) = 1
+
+    // Detail row: GROUPING_ID = 0 (binary 00)
+    let detail = rows
+        .iter()
+        .find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
+    assert!(detail.is_some());
+    assert_eq!(get_i64(&detail.unwrap().values[2]), 0); // GROUPING_ID(year, quarter) = 0
+}
+
+#[test]
+fn test_grouping_id_with_cube_three_columns() {
+    let db = setup_db();
+
+    // CUBE(year, quarter, region) produces 2^3 = 8 grouping combinations
+    // GROUPING_ID shows which columns are rolled up as a bitmap
+    let rows = execute_query(
+        &db,
+        "SELECT year, quarter, region, GROUPING_ID(year, quarter, region), SUM(amount)
+         FROM sales GROUP BY CUBE(year, quarter, region)",
+    );
+
+    // For CUBE(year, quarter, region), all 8 combinations should be present
+    // Grand total: GROUPING_ID = 7 (binary 111)
+    let grand_total = rows
+        .iter()
+        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]) && is_null(&r.values[2]));
+    assert!(grand_total.is_some());
+    assert_eq!(get_i64(&grand_total.unwrap().values[3]), 7); // All rolled up
+
+    // region-only subtotal: GROUPING_ID = 6 (binary 110) - year and quarter rolled up
+    let region_only = rows.iter().find(|r| {
+        is_null(&r.values[0]) && is_null(&r.values[1]) && !is_null(&r.values[2])
+    });
+    assert!(region_only.is_some());
+    assert_eq!(get_i64(&region_only.unwrap().values[3]), 6);
+
+    // Detail row: GROUPING_ID = 0 (binary 000)
+    let detail = rows.iter().find(|r| {
+        !is_null(&r.values[0]) && !is_null(&r.values[1]) && !is_null(&r.values[2])
+    });
+    assert!(detail.is_some());
+    assert_eq!(get_i64(&detail.unwrap().values[3]), 0);
+}
+
+#[test]
+fn test_grouping_id_single_column() {
+    let db = setup_db();
+
+    // GROUPING_ID with single column - same as GROUPING()
+    let rows = execute_query(
+        &db,
+        "SELECT year, GROUPING_ID(year), SUM(amount) FROM sales GROUP BY ROLLUP(year)",
+    );
+
+    assert_eq!(rows.len(), 3);
+
+    // Grand total: GROUPING_ID(year) = 1
+    let grand_total = rows.iter().find(|r| is_null(&r.values[0]));
+    assert!(grand_total.is_some());
+    assert_eq!(get_i64(&grand_total.unwrap().values[1]), 1);
+
+    // Regular row: GROUPING_ID(year) = 0
+    let regular = rows.iter().find(|r| get_i64(&r.values[0]) == 2023);
+    assert!(regular.is_some());
+    assert_eq!(get_i64(&regular.unwrap().values[1]), 0);
+}
+
+#[test]
+fn test_grouping_id_with_grouping_sets() {
+    let db = setup_db();
+
+    // GROUPING SETS allows explicit grouping specification
+    let rows = execute_query(
+        &db,
+        "SELECT year, quarter, GROUPING_ID(year, quarter), SUM(amount)
+         FROM sales GROUP BY GROUPING SETS((year, quarter), (year), ())",
+    );
+
+    assert_eq!(rows.len(), 6);
+
+    // Verify GROUPING_ID values match the grouping sets
+    // Grand total (): GROUPING_ID = 3
+    let grand_total = rows
+        .iter()
+        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
+    assert!(grand_total.is_some());
+    assert_eq!(get_i64(&grand_total.unwrap().values[2]), 3);
+
+    // Year only (year): GROUPING_ID = 1
+    let year_only = rows
+        .iter()
+        .find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
+    assert!(year_only.is_some());
+    assert_eq!(get_i64(&year_only.unwrap().values[2]), 1);
+
+    // Detail (year, quarter): GROUPING_ID = 0
+    let detail = rows
+        .iter()
+        .find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
+    assert!(detail.is_some());
+    assert_eq!(get_i64(&detail.unwrap().values[2]), 0);
+}
+
+#[test]
+fn test_grouping_id_subset_of_groupby_columns() {
+    let db = setup_db();
+
+    // GROUPING_ID can be called with a subset of GROUP BY columns
+    let rows = execute_query(
+        &db,
+        "SELECT year, quarter, region, GROUPING_ID(year, region), SUM(amount)
+         FROM sales GROUP BY ROLLUP(year, quarter, region)",
+    );
+
+    // Find the row where only year is present (quarter and region are rolled up)
+    // GROUPING_ID(year, region) for this row should be:
+    // year present (0), region rolled up (1) = binary 01 = 1
+    let year_only = rows.iter().find(|r| {
+        !is_null(&r.values[0]) && is_null(&r.values[1]) && is_null(&r.values[2])
+    });
+    assert!(year_only.is_some());
+    assert_eq!(get_i64(&year_only.unwrap().values[3]), 1);
+
+    // Grand total: GROUPING_ID(year, region) = 3 (both rolled up)
+    let grand_total = rows.iter().find(|r| {
+        is_null(&r.values[0]) && is_null(&r.values[1]) && is_null(&r.values[2])
+    });
+    assert!(grand_total.is_some());
+    assert_eq!(get_i64(&grand_total.unwrap().values[3]), 3);
+}

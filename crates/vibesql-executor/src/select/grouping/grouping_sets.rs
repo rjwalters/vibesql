@@ -38,6 +38,36 @@ impl GroupingContext {
         // Expression not found in base expressions - return 0
         0
     }
+
+    /// Compute GROUPING_ID for multiple expressions
+    ///
+    /// Returns a bitmap integer where:
+    /// - Leftmost argument = most significant bit
+    /// - 1 = column is rolled up (aggregated)
+    /// - 0 = column is present in grouping
+    ///
+    /// Formula: GROUPING_ID(c1, c2, ..., cn) = GROUPING(c1) * 2^(n-1) + GROUPING(c2) * 2^(n-2) + ... + GROUPING(cn)
+    ///
+    /// Example with 3 columns (d_year, i_category, i_brand):
+    /// - All present: 0 (binary 000)
+    /// - i_brand rolled up: 1 (binary 001)
+    /// - i_category, i_brand rolled up: 3 (binary 011)
+    /// - All rolled up: 7 (binary 111)
+    pub fn grouping_id(&self, exprs: &[Expression]) -> i64 {
+        let n = exprs.len();
+        let mut result: i64 = 0;
+
+        for (i, expr) in exprs.iter().enumerate() {
+            let is_rolled_up = self.is_rolled_up(expr);
+            if is_rolled_up == 1 {
+                // Leftmost argument = most significant bit
+                // Position i (0-based from left) -> bit position (n-1-i)
+                result |= 1i64 << (n - 1 - i);
+            }
+        }
+
+        result
+    }
 }
 
 /// Expand a GROUP BY clause into a list of resolved grouping sets
@@ -287,5 +317,64 @@ mod tests {
         assert_eq!(ctx.is_rolled_up(&col("b")), 1); // Rolled up
         assert_eq!(ctx.is_rolled_up(&col("c")), 1); // Rolled up
         assert_eq!(ctx.is_rolled_up(&col("d")), 0); // Unknown, default to 0
+    }
+
+    #[test]
+    fn test_grouping_id() {
+        // Test GROUPING_ID with 3 columns: a, b, c
+        // Bit mapping: a is MSB, c is LSB
+        let ctx = GroupingContext {
+            base_expressions: vec![col("a"), col("b"), col("c")],
+            rolled_up: vec![false, false, false], // All present
+        };
+        // GROUPING_ID(a, b, c) = 0*4 + 0*2 + 0*1 = 0 (binary 000)
+        assert_eq!(ctx.grouping_id(&[col("a"), col("b"), col("c")]), 0);
+
+        let ctx = GroupingContext {
+            base_expressions: vec![col("a"), col("b"), col("c")],
+            rolled_up: vec![false, false, true], // c rolled up
+        };
+        // GROUPING_ID(a, b, c) = 0*4 + 0*2 + 1*1 = 1 (binary 001)
+        assert_eq!(ctx.grouping_id(&[col("a"), col("b"), col("c")]), 1);
+
+        let ctx = GroupingContext {
+            base_expressions: vec![col("a"), col("b"), col("c")],
+            rolled_up: vec![false, true, true], // b, c rolled up
+        };
+        // GROUPING_ID(a, b, c) = 0*4 + 1*2 + 1*1 = 3 (binary 011)
+        assert_eq!(ctx.grouping_id(&[col("a"), col("b"), col("c")]), 3);
+
+        let ctx = GroupingContext {
+            base_expressions: vec![col("a"), col("b"), col("c")],
+            rolled_up: vec![true, true, true], // All rolled up
+        };
+        // GROUPING_ID(a, b, c) = 1*4 + 1*2 + 1*1 = 7 (binary 111)
+        assert_eq!(ctx.grouping_id(&[col("a"), col("b"), col("c")]), 7);
+
+        // Test with subset of columns
+        let ctx = GroupingContext {
+            base_expressions: vec![col("a"), col("b"), col("c")],
+            rolled_up: vec![true, false, true], // a, c rolled up
+        };
+        // GROUPING_ID(a, c) = 1*2 + 1*1 = 3 (binary 11)
+        assert_eq!(ctx.grouping_id(&[col("a"), col("c")]), 3);
+        // GROUPING_ID(b, c) = 0*2 + 1*1 = 1 (binary 01)
+        assert_eq!(ctx.grouping_id(&[col("b"), col("c")]), 1);
+    }
+
+    #[test]
+    fn test_grouping_id_single_column() {
+        // Single column - should be same as GROUPING()
+        let ctx = GroupingContext {
+            base_expressions: vec![col("a")],
+            rolled_up: vec![false],
+        };
+        assert_eq!(ctx.grouping_id(&[col("a")]), 0);
+
+        let ctx = GroupingContext {
+            base_expressions: vec![col("a")],
+            rolled_up: vec![true],
+        };
+        assert_eq!(ctx.grouping_id(&[col("a")]), 1);
     }
 }
