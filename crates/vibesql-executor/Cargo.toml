@@ -160,5 +160,15 @@ harness = false
 required-features = ["benchmark-comparison"]
 
 [[bench]]
+name = "tpch_deep_profiling"
+harness = false
+required-features = ["benchmark-comparison"]
+
+[[bench]]
+name = "tpch_instrumented"
+harness = false
+required-features = ["benchmark-comparison"]
+
+[[bench]]
 name = "sysbench_oltp"
 harness = false
