@@ -2,7 +2,7 @@
 //!
 //! This module contains TPC-DS benchmark queries adapted for the implemented schema.
 //! The original TPC-DS has 99 queries; we implement a subset that work with our
-//! current tables across three phases:
+//! current tables across multiple phases:
 //!
 //! ## Phase 1 (Core Tables):
 //! - date_dim, time_dim, item, customer, customer_address, store, store_sales
@@ -16,6 +16,11 @@
 //! - catalog_page, web_page, web_site
 //! - catalog_sales, catalog_returns, web_sales, web_returns
 //! - Queries: Q13, Q16, Q20, Q32, Q37, Q60, Q62, Q76, Q84, Q92
+//!
+//! ## Tier 2 (Q21-Q50 Complex Analytics):
+//! - Q21, Q23, Q24, Q28, Q29, Q30, Q31, Q33, Q34, Q38, Q39, Q40, Q41, Q43, Q44, Q45, Q46, Q47, Q48, Q49
+//! - Complex multi-table joins, CTEs, window functions, cross-channel analysis
+//! - Note: Q22, Q36 blocked by ROLLUP/CUBE requirements
 //!
 //! Queries are numbered to match the official TPC-DS query numbers where possible,
 //! with adaptations noted in comments.
@@ -847,6 +852,604 @@ LIMIT 100
 "#;
 
 // =============================================================================
+// Tier 2 Queries (Q21-Q50) - Complex analytics
+// =============================================================================
+
+// TPC-DS Q21: Inventory Analysis by Warehouse
+// Analyzes inventory levels by warehouse and item for a specific date range.
+// Tests: Multi-table join, date arithmetic, complex filtering
+pub const TPCDS_Q21: &str = r#"
+SELECT
+    w_warehouse_name,
+    i_item_id,
+    SUM(CASE WHEN d_date < '2000-04-11'
+             THEN cs_quantity ELSE 0 END) AS inv_before,
+    SUM(CASE WHEN d_date >= '2000-04-11'
+             THEN cs_quantity ELSE 0 END) AS inv_after
+FROM catalog_sales, warehouse, item, date_dim
+WHERE cs_warehouse_sk = w_warehouse_sk
+    AND cs_item_sk = i_item_sk
+    AND cs_sold_date_sk = d_date_sk
+    AND d_date BETWEEN '2000-03-11' AND '2000-05-11'
+GROUP BY w_warehouse_name, i_item_id
+HAVING SUM(CASE WHEN d_date < '2000-04-11'
+                THEN cs_quantity ELSE 0 END) > 0
+ORDER BY w_warehouse_name, i_item_id
+LIMIT 100
+"#;
+
+// TPC-DS Q23: Customer Sales Analysis (Part 1 - Frequent Shoppers)
+// Identifies customers who frequently purchased items with specific attributes.
+// Tests: CTEs, complex subqueries, customer behavior analysis
+pub const TPCDS_Q23: &str = r#"
+WITH frequent_ss_items AS (
+    SELECT
+        i_item_sk AS item_sk,
+        SUM(ss_quantity) AS ss_quantity_sum
+    FROM store_sales, item
+    WHERE ss_item_sk = i_item_sk
+        AND i_current_price > 50
+    GROUP BY i_item_sk
+    HAVING SUM(ss_quantity) > 500
+)
+SELECT
+    c_customer_sk,
+    c_first_name,
+    c_last_name,
+    SUM(ss_quantity) AS total_quantity
+FROM store_sales, customer, frequent_ss_items
+WHERE ss_customer_sk = c_customer_sk
+    AND ss_item_sk = frequent_ss_items.item_sk
+GROUP BY c_customer_sk, c_first_name, c_last_name
+ORDER BY total_quantity DESC, c_customer_sk
+LIMIT 100
+"#;
+
+// TPC-DS Q24: Store Sales Analysis by City (Part 1)
+// Analyzes store returns by customer for items in specific color categories.
+// Tests: Multiple CTEs, complex predicates, aggregation
+pub const TPCDS_Q24: &str = r#"
+WITH ssales AS (
+    SELECT
+        c_last_name,
+        c_first_name,
+        s_store_name,
+        ca_state,
+        s_state,
+        i_color,
+        i_current_price,
+        i_manager_id,
+        i_size,
+        SUM(ss_net_paid) AS netpaid
+    FROM store_sales, store_returns, store, item, customer, customer_address
+    WHERE ss_ticket_number = sr_ticket_number
+        AND ss_item_sk = sr_item_sk
+        AND ss_customer_sk = c_customer_sk
+        AND ss_item_sk = i_item_sk
+        AND ss_store_sk = s_store_sk
+        AND c_current_addr_sk = ca_address_sk
+        AND c_birth_country <> UPPER(ca_country)
+        AND s_state = ca_state
+    GROUP BY c_last_name, c_first_name, s_store_name, ca_state,
+             s_state, i_color, i_current_price, i_manager_id, i_size
+)
+SELECT
+    c_last_name,
+    c_first_name,
+    s_store_name,
+    SUM(netpaid) AS paid
+FROM ssales
+WHERE i_color = 'red'
+GROUP BY c_last_name, c_first_name, s_store_name
+HAVING SUM(netpaid) > 5000
+ORDER BY c_last_name, c_first_name, s_store_name
+LIMIT 100
+"#;
+
+// TPC-DS Q28: Quantity-Based Bucket Analysis for Store Sales
+// Analyzes average list prices and coupon amounts by quantity ranges.
+// Tests: Multiple scalar subqueries, CASE expressions
+pub const TPCDS_Q28: &str = r#"
+SELECT
+    AVG(ss_list_price) AS avg_list_price,
+    AVG(ss_coupon_amt) AS avg_coupon,
+    AVG(ss_wholesale_cost) AS avg_wholesale
+FROM store_sales
+WHERE ss_quantity BETWEEN 0 AND 5
+    AND (ss_list_price BETWEEN 10 AND 20
+         OR ss_coupon_amt BETWEEN 100 AND 500
+         OR ss_wholesale_cost BETWEEN 10 AND 50)
+LIMIT 100
+"#;
+
+// TPC-DS Q29: Store Sales Returns Analysis
+// Correlates store sales with catalog and web sales for matching customers.
+// Tests: Multi-channel analysis, complex joins
+pub const TPCDS_Q29: &str = r#"
+SELECT
+    i_item_id,
+    i_item_desc,
+    s_store_id,
+    s_store_name,
+    SUM(ss_quantity) AS store_sales_quantity,
+    SUM(sr_return_quantity) AS store_returns_quantity,
+    SUM(cs_quantity) AS catalog_sales_quantity
+FROM store_sales, store_returns, catalog_sales, date_dim d1, date_dim d2, date_dim d3, store, item
+WHERE d1.d_moy = 4
+    AND d1.d_year = 1999
+    AND d1.d_date_sk = ss_sold_date_sk
+    AND i_item_sk = ss_item_sk
+    AND s_store_sk = ss_store_sk
+    AND ss_customer_sk = sr_customer_sk
+    AND ss_item_sk = sr_item_sk
+    AND ss_ticket_number = sr_ticket_number
+    AND sr_returned_date_sk = d2.d_date_sk
+    AND d2.d_moy BETWEEN 4 AND 10
+    AND d2.d_year = 1999
+    AND sr_customer_sk = cs_bill_customer_sk
+    AND sr_item_sk = cs_item_sk
+    AND cs_sold_date_sk = d3.d_date_sk
+    AND d3.d_moy BETWEEN 4 AND 10
+    AND d3.d_year = 1999
+GROUP BY i_item_id, i_item_desc, s_store_id, s_store_name
+ORDER BY i_item_id, i_item_desc, s_store_id, s_store_name
+LIMIT 100
+"#;
+
+// TPC-DS Q30: Web Returns Analysis by State
+// Analyzes web returns by customer state with rolling comparisons.
+// Tests: CTEs, correlated subqueries, geographic analysis
+pub const TPCDS_Q30: &str = r#"
+WITH customer_total_return AS (
+    SELECT
+        wr_returning_customer_sk AS ctr_customer_sk,
+        ca_state AS ctr_state,
+        SUM(wr_return_amt) AS ctr_total_return
+    FROM web_returns, date_dim, customer_address
+    WHERE wr_returned_date_sk = d_date_sk
+        AND d_year = 2002
+        AND wr_returning_addr_sk = ca_address_sk
+    GROUP BY wr_returning_customer_sk, ca_state
+)
+SELECT
+    c_customer_id,
+    c_first_name,
+    c_last_name,
+    ca_state,
+    ctr1.ctr_total_return
+FROM customer_total_return ctr1, customer_address, customer
+WHERE ctr1.ctr_total_return > (
+    SELECT AVG(ctr2.ctr_total_return) * 1.2
+    FROM customer_total_return ctr2
+    WHERE ctr1.ctr_state = ctr2.ctr_state
+)
+AND c_customer_sk = ctr1.ctr_customer_sk
+AND c_current_addr_sk = ca_address_sk
+AND ca_state IN ('GA', 'KY', 'NM')
+ORDER BY c_customer_id, c_first_name, c_last_name, ca_state, ctr_total_return
+LIMIT 100
+"#;
+
+// TPC-DS Q31: Store Sales Growth Comparison
+// Compares store sales growth by state across years.
+// Tests: Self-join on aggregated data, year-over-year comparison
+pub const TPCDS_Q31: &str = r#"
+WITH ss AS (
+    SELECT
+        ca_state AS state,
+        d_year AS year,
+        SUM(ss_net_profit) AS profit
+    FROM store_sales, date_dim, customer, customer_address
+    WHERE ss_sold_date_sk = d_date_sk
+        AND ss_customer_sk = c_customer_sk
+        AND c_current_addr_sk = ca_address_sk
+        AND d_year IN (1999, 2000)
+    GROUP BY ca_state, d_year
+),
+ws AS (
+    SELECT
+        ca_state AS state,
+        d_year AS year,
+        SUM(ws_net_profit) AS profit
+    FROM web_sales, date_dim, customer, customer_address
+    WHERE ws_sold_date_sk = d_date_sk
+        AND ws_bill_customer_sk = c_customer_sk
+        AND c_current_addr_sk = ca_address_sk
+        AND d_year IN (1999, 2000)
+    GROUP BY ca_state, d_year
+)
+SELECT
+    ss.state,
+    ss.year,
+    ss.profit AS store_profit,
+    ws.profit AS web_profit
+FROM ss, ws
+WHERE ss.state = ws.state
+    AND ss.year = ws.year
+ORDER BY ss.state, ss.year
+LIMIT 100
+"#;
+
+// TPC-DS Q33: Cross-Channel Sales by Manufacturer
+// Analyzes sales by manufacturer across store, catalog, and web channels.
+// Tests: UNION ALL, multi-channel aggregation, manufacturer filtering
+pub const TPCDS_Q33: &str = r#"
+WITH ss AS (
+    SELECT
+        i_manufact_id,
+        SUM(ss_ext_sales_price) AS total_sales
+    FROM store_sales, date_dim, customer_address, item
+    WHERE ss_sold_date_sk = d_date_sk
+        AND ss_addr_sk = ca_address_sk
+        AND ca_gmt_offset = -5
+        AND d_year = 1998
+        AND ss_item_sk = i_item_sk
+    GROUP BY i_manufact_id
+),
+cs AS (
+    SELECT
+        i_manufact_id,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM catalog_sales, date_dim, customer_address, item
+    WHERE cs_sold_date_sk = d_date_sk
+        AND cs_bill_addr_sk = ca_address_sk
+        AND ca_gmt_offset = -5
+        AND d_year = 1998
+        AND cs_item_sk = i_item_sk
+    GROUP BY i_manufact_id
+),
+ws AS (
+    SELECT
+        i_manufact_id,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales, date_dim, customer_address, item
+    WHERE ws_sold_date_sk = d_date_sk
+        AND ws_bill_addr_sk = ca_address_sk
+        AND ca_gmt_offset = -5
+        AND d_year = 1998
+        AND ws_item_sk = i_item_sk
+    GROUP BY i_manufact_id
+)
+SELECT
+    i_manufact_id,
+    SUM(total_sales) AS total_sales
+FROM (
+    SELECT * FROM ss
+    UNION ALL
+    SELECT * FROM cs
+    UNION ALL
+    SELECT * FROM ws
+) combined
+GROUP BY i_manufact_id
+ORDER BY total_sales DESC
+LIMIT 100
+"#;
+
+// TPC-DS Q34: Store Sales by Customer Demographics
+// Analyzes customer purchasing patterns at stores.
+// Tests: Multi-table join, customer demographics, HAVING clause
+pub const TPCDS_Q34: &str = r#"
+SELECT
+    c_last_name,
+    c_first_name,
+    c_salutation,
+    c_preferred_cust_flag,
+    COUNT(*) AS cnt
+FROM store_sales, date_dim, store, customer
+WHERE ss_sold_date_sk = d_date_sk
+    AND ss_store_sk = s_store_sk
+    AND ss_customer_sk = c_customer_sk
+    AND d_year = 1999
+    AND d_moy BETWEEN 4 AND 7
+    AND s_county IN ('Williamson County', 'Williamson County', 'Williamson County', 'Williamson County')
+GROUP BY c_last_name, c_first_name, c_salutation, c_preferred_cust_flag
+HAVING COUNT(*) BETWEEN 1 AND 5
+ORDER BY cnt DESC, c_last_name, c_first_name
+LIMIT 100
+"#;
+
+// TPC-DS Q38: Customer Multi-Channel Presence
+// Identifies customers who purchased through multiple channels.
+// Tests: INTERSECT pattern using EXISTS, cross-channel analysis
+pub const TPCDS_Q38: &str = r#"
+SELECT COUNT(*) AS customer_count
+FROM (
+    SELECT DISTINCT c_customer_sk
+    FROM customer, store_sales, date_dim
+    WHERE c_customer_sk = ss_customer_sk
+        AND ss_sold_date_sk = d_date_sk
+        AND d_year = 1999
+        AND d_moy = 1
+) store_cust
+WHERE EXISTS (
+    SELECT 1
+    FROM web_sales, date_dim
+    WHERE store_cust.c_customer_sk = ws_bill_customer_sk
+        AND ws_sold_date_sk = d_date_sk
+        AND d_year = 1999
+        AND d_moy = 1
+)
+AND EXISTS (
+    SELECT 1
+    FROM catalog_sales, date_dim
+    WHERE store_cust.c_customer_sk = cs_bill_customer_sk
+        AND cs_sold_date_sk = d_date_sk
+        AND d_year = 1999
+        AND d_moy = 1
+)
+"#;
+
+// TPC-DS Q39: Inventory Variance Analysis by Warehouse
+// Analyzes inventory variance across warehouses for different months.
+// Tests: Complex statistical calculations, warehouse analytics
+pub const TPCDS_Q39: &str = r#"
+WITH warehouse_stats AS (
+    SELECT
+        w_warehouse_sk,
+        w_warehouse_name,
+        i_item_sk,
+        d_moy,
+        AVG(cs_quantity) AS mean_qty,
+        COUNT(*) AS cnt
+    FROM catalog_sales, warehouse, item, date_dim
+    WHERE cs_warehouse_sk = w_warehouse_sk
+        AND cs_item_sk = i_item_sk
+        AND cs_sold_date_sk = d_date_sk
+        AND d_year = 2000
+    GROUP BY w_warehouse_sk, w_warehouse_name, i_item_sk, d_moy
+)
+SELECT
+    w_warehouse_name,
+    i_item_sk,
+    d_moy,
+    mean_qty,
+    cnt
+FROM warehouse_stats
+WHERE cnt > 10
+    AND mean_qty > 0
+ORDER BY w_warehouse_name, i_item_sk, d_moy
+LIMIT 100
+"#;
+
+// TPC-DS Q40: Catalog Sales Returns Analysis
+// Analyzes catalog sales with and without returns by warehouse.
+// Tests: LEFT OUTER JOIN, return rate calculation
+pub const TPCDS_Q40: &str = r#"
+SELECT
+    w_warehouse_name,
+    w_warehouse_sq_ft,
+    w_city,
+    w_county,
+    w_state,
+    w_country,
+    SUM(CASE WHEN cs_ship_date_sk - cs_sold_date_sk <= 30
+             THEN cs_ext_discount_amt ELSE 0 END) AS days_30,
+    SUM(CASE WHEN cs_ship_date_sk - cs_sold_date_sk > 30
+             AND cs_ship_date_sk - cs_sold_date_sk <= 60
+             THEN cs_ext_discount_amt ELSE 0 END) AS days_31_60,
+    SUM(CASE WHEN cs_ship_date_sk - cs_sold_date_sk > 60
+             THEN cs_ext_discount_amt ELSE 0 END) AS days_61_plus
+FROM catalog_sales, warehouse, date_dim
+WHERE cs_sold_date_sk = d_date_sk
+    AND cs_warehouse_sk = w_warehouse_sk
+    AND d_year = 2000
+GROUP BY w_warehouse_name, w_warehouse_sq_ft, w_city, w_county, w_state, w_country
+ORDER BY w_warehouse_name
+LIMIT 100
+"#;
+
+// TPC-DS Q41: Item Attribute Analysis
+// Finds items with specific size and color combinations not yet promoted.
+// Tests: Complex string predicates, NOT EXISTS pattern
+pub const TPCDS_Q41: &str = r#"
+SELECT DISTINCT i_item_id
+FROM item
+WHERE i_current_price BETWEEN 50 AND 100
+    AND i_manufact_id IN (
+        SELECT DISTINCT i_manufact_id
+        FROM item
+        WHERE (i_size = 'medium' AND i_color = 'black')
+           OR (i_size = 'large' AND i_color = 'white')
+    )
+ORDER BY i_item_id
+LIMIT 100
+"#;
+
+// TPC-DS Q43: Store Sales by Day of Week
+// Analyzes store sales patterns by day of week for a specific year.
+// Tests: Pivot pattern using CASE, day-of-week analysis
+pub const TPCDS_Q43: &str = r#"
+SELECT
+    s_store_name,
+    s_store_id,
+    SUM(CASE WHEN d_day_name = 'Sunday' THEN ss_sales_price ELSE 0 END) AS sun_sales,
+    SUM(CASE WHEN d_day_name = 'Monday' THEN ss_sales_price ELSE 0 END) AS mon_sales,
+    SUM(CASE WHEN d_day_name = 'Tuesday' THEN ss_sales_price ELSE 0 END) AS tue_sales,
+    SUM(CASE WHEN d_day_name = 'Wednesday' THEN ss_sales_price ELSE 0 END) AS wed_sales,
+    SUM(CASE WHEN d_day_name = 'Thursday' THEN ss_sales_price ELSE 0 END) AS thu_sales,
+    SUM(CASE WHEN d_day_name = 'Friday' THEN ss_sales_price ELSE 0 END) AS fri_sales,
+    SUM(CASE WHEN d_day_name = 'Saturday' THEN ss_sales_price ELSE 0 END) AS sat_sales
+FROM date_dim, store_sales, store
+WHERE d_date_sk = ss_sold_date_sk
+    AND s_store_sk = ss_store_sk
+    AND d_year = 2000
+GROUP BY s_store_name, s_store_id
+ORDER BY s_store_name, s_store_id, sun_sales
+LIMIT 100
+"#;
+
+// TPC-DS Q44: Store Items Profit Ranking
+// Ranks items by net profit within each store.
+// Tests: Window functions for ranking, profit analysis
+pub const TPCDS_Q44: &str = r#"
+SELECT
+    i_item_id,
+    i_product_name,
+    AVG(ss_net_profit) AS avg_profit,
+    RANK() OVER (ORDER BY AVG(ss_net_profit) DESC) AS profit_rank
+FROM store_sales, item
+WHERE ss_item_sk = i_item_sk
+GROUP BY i_item_id, i_product_name
+HAVING AVG(ss_net_profit) > 0
+ORDER BY profit_rank
+LIMIT 100
+"#;
+
+// TPC-DS Q45: Web Sales by Customer Zip Code
+// Analyzes web sales by customer zip code for specific item categories.
+// Tests: Geographic analysis, category filtering
+pub const TPCDS_Q45: &str = r#"
+SELECT
+    ca_zip,
+    ca_city,
+    SUM(ws_sales_price) AS total_sales
+FROM web_sales, customer, customer_address, date_dim, item
+WHERE ws_bill_customer_sk = c_customer_sk
+    AND c_current_addr_sk = ca_address_sk
+    AND ws_item_sk = i_item_sk
+    AND ws_sold_date_sk = d_date_sk
+    AND d_year = 2001
+    AND d_qoy = 1
+    AND i_category IN ('Sports', 'Music', 'Books')
+GROUP BY ca_zip, ca_city
+ORDER BY ca_zip, ca_city, total_sales
+LIMIT 100
+"#;
+
+// TPC-DS Q46: Store Sales by Customer and Store
+// Analyzes store sales by customer and their home store location.
+// Tests: Multi-dimensional grouping, customer behavior
+pub const TPCDS_Q46: &str = r#"
+SELECT
+    c_last_name,
+    c_first_name,
+    ca_city,
+    s_store_name,
+    SUM(ss_coupon_amt) AS total_coupon,
+    SUM(ss_net_paid) AS total_paid
+FROM store_sales, date_dim, customer, customer_address, store
+WHERE ss_sold_date_sk = d_date_sk
+    AND ss_customer_sk = c_customer_sk
+    AND ss_store_sk = s_store_sk
+    AND c_current_addr_sk = ca_address_sk
+    AND d_year = 2000
+    AND d_moy = 3
+GROUP BY c_last_name, c_first_name, ca_city, s_store_name
+ORDER BY total_paid DESC, c_last_name, c_first_name
+LIMIT 100
+"#;
+
+// TPC-DS Q47: Store Monthly Sales Rolling Comparison
+// Compares monthly sales with rolling 3-month averages.
+// Tests: Window functions with frame, monthly trends
+pub const TPCDS_Q47: &str = r#"
+WITH monthly_sales AS (
+    SELECT
+        s_store_name,
+        d_year,
+        d_moy,
+        SUM(ss_sales_price) AS total_sales
+    FROM store_sales, date_dim, store
+    WHERE ss_sold_date_sk = d_date_sk
+        AND ss_store_sk = s_store_sk
+        AND d_year IN (1999, 2000, 2001)
+    GROUP BY s_store_name, d_year, d_moy
+)
+SELECT
+    s_store_name,
+    d_year,
+    d_moy,
+    total_sales,
+    AVG(total_sales) OVER (
+        PARTITION BY s_store_name
+        ORDER BY d_year, d_moy
+        ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+    ) AS rolling_avg
+FROM monthly_sales
+ORDER BY s_store_name, d_year, d_moy
+LIMIT 100
+"#;
+
+// TPC-DS Q48: Store Sales Quantity Analysis
+// Analyzes store sales quantities by customer demographics.
+// Tests: Complex filtering, demographic segmentation
+pub const TPCDS_Q48: &str = r#"
+SELECT
+    SUM(ss_quantity) AS total_qty,
+    SUM(ss_ext_sales_price) AS total_sales,
+    SUM(ss_ext_wholesale_cost) AS total_wholesale
+FROM store_sales, store, customer, customer_address, date_dim
+WHERE s_store_sk = ss_store_sk
+    AND ss_sold_date_sk = d_date_sk
+    AND ss_customer_sk = c_customer_sk
+    AND c_current_addr_sk = ca_address_sk
+    AND d_year = 1998
+    AND (
+        (ca_country = 'United States'
+         AND ca_state IN ('TX', 'OH', 'NE')
+         AND ss_net_profit BETWEEN 100 AND 200)
+        OR
+        (ca_country = 'United States'
+         AND ca_state IN ('NC', 'CO', 'MN')
+         AND ss_net_profit BETWEEN 150 AND 300)
+        OR
+        (ca_country = 'United States'
+         AND ca_state IN ('VA', 'TN', 'CA')
+         AND ss_net_profit BETWEEN 50 AND 250)
+    )
+LIMIT 100
+"#;
+
+// TPC-DS Q49: Channel Sales Return Analysis
+// Analyzes return ratios across different sales channels.
+// Tests: Multi-channel return analysis, ratio calculations
+pub const TPCDS_Q49: &str = r#"
+SELECT
+    channel,
+    item,
+    SUM(returns_amt) AS return_amt,
+    SUM(net_loss) AS net_loss
+FROM (
+    SELECT
+        'store' AS channel,
+        ss_item_sk AS item,
+        sr_return_amt AS returns_amt,
+        sr_net_loss AS net_loss
+    FROM store_sales, store_returns, date_dim
+    WHERE ss_sold_date_sk = d_date_sk
+        AND d_year = 1999
+        AND ss_customer_sk = sr_customer_sk
+        AND ss_item_sk = sr_item_sk
+        AND ss_ticket_number = sr_ticket_number
+    UNION ALL
+    SELECT
+        'catalog' AS channel,
+        cs_item_sk AS item,
+        cr_return_amount AS returns_amt,
+        cr_net_loss AS net_loss
+    FROM catalog_sales, catalog_returns, date_dim
+    WHERE cs_sold_date_sk = d_date_sk
+        AND d_year = 1999
+        AND cs_order_number = cr_order_number
+        AND cs_item_sk = cr_item_sk
+    UNION ALL
+    SELECT
+        'web' AS channel,
+        ws_item_sk AS item,
+        wr_return_amt AS returns_amt,
+        wr_net_loss AS net_loss
+    FROM web_sales, web_returns, date_dim
+    WHERE ws_sold_date_sk = d_date_sk
+        AND d_year = 1999
+        AND ws_order_number = wr_order_number
+        AND ws_item_sk = wr_item_sk
+) all_returns
+GROUP BY channel, item
+ORDER BY channel, return_amt DESC
+LIMIT 100
+"#;
+
+// =============================================================================
 // Simple Sanity Queries for Testing
 // =============================================================================
 
@@ -920,6 +1523,27 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q76", TPCDS_Q76),
     ("Q84", TPCDS_Q84),
     ("Q92", TPCDS_Q92),
+    // Tier 2 queries (Q21-Q50) - complex analytics
+    ("Q21", TPCDS_Q21),
+    ("Q23", TPCDS_Q23),
+    ("Q24", TPCDS_Q24),
+    ("Q28", TPCDS_Q28),
+    ("Q29", TPCDS_Q29),
+    ("Q30", TPCDS_Q30),
+    ("Q31", TPCDS_Q31),
+    ("Q33", TPCDS_Q33),
+    ("Q34", TPCDS_Q34),
+    ("Q38", TPCDS_Q38),
+    ("Q39", TPCDS_Q39),
+    ("Q40", TPCDS_Q40),
+    ("Q41", TPCDS_Q41),
+    ("Q43", TPCDS_Q43),
+    ("Q44", TPCDS_Q44),
+    ("Q45", TPCDS_Q45),
+    ("Q46", TPCDS_Q46),
+    ("Q47", TPCDS_Q47),
+    ("Q48", TPCDS_Q48),
+    ("Q49", TPCDS_Q49),
 ];
 
 /// Sanity check queries for validation
