@@ -22,11 +22,11 @@ fn run_dialect_test(test_name: &str) {
     let contents = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("Failed to read test file {:?}: {}", path, e));
 
-    let (result, failures) = run_test_file_with_details(&contents, &test_path);
+    let test_result = run_test_file_with_details(&contents, &test_path);
 
-    if let Err(ref e) = result {
+    if let Err(ref e) = test_result.result {
         eprintln!("\n=== {} test failures ===", test_name);
-        for failure in &failures {
+        for failure in &test_result.failures {
             eprintln!("SQL: {}", failure.sql_statement);
             if let Some(ref expected) = failure.expected_result {
                 eprintln!("Expected: {}", expected);
