@@ -15,6 +15,7 @@
 #   - sccache (compilation cache for faster builds)
 #   - coreutils (GNU timeout for benchmarks)
 #   - pnpm (for web-demo, optional)
+#   - Docker Desktop (for MySQL/PostgreSQL compatibility testing)
 #
 # Usage:
 #   ./install.sh           # Install all prerequisites
@@ -200,6 +201,20 @@ else
     # Don't add to missing - it's optional
 fi
 
+# Check Docker (for MySQL/PostgreSQL compatibility testing)
+print_status "Checking Docker..."
+if command_exists docker; then
+    if docker info &> /dev/null; then
+        print_success "Docker is installed and running ($(docker --version | cut -d' ' -f3 | tr -d ','))"
+    else
+        print_warning "Docker is installed but not running"
+        missing+=("docker-running")
+    fi
+else
+    print_warning "Docker is not installed (needed for: MySQL/PostgreSQL compatibility testing)"
+    missing+=("docker")
+fi
+
 echo ""
 
 # If check only mode, exit here
@@ -304,6 +319,22 @@ if [[ " ${missing[*]} " =~ " coreutils " ]]; then
     print_status "Installing coreutils via Homebrew..."
     brew install coreutils
     print_success "coreutils installed (gtimeout now available)"
+fi
+
+# Install Docker if needed
+if [[ " ${missing[*]} " =~ " docker " ]]; then
+    print_status "Installing Docker Desktop via Homebrew..."
+    brew install --cask docker
+    print_success "Docker Desktop installed"
+    echo ""
+    print_warning "Please open Docker Desktop from Applications to complete setup"
+    print_warning "Docker needs to be running for MySQL/PostgreSQL compatibility testing"
+fi
+
+# Remind user to start Docker if it's installed but not running
+if [[ " ${missing[*]} " =~ " docker-running " ]]; then
+    print_warning "Docker is installed but not running"
+    print_warning "Please start Docker Desktop from Applications"
 fi
 
 # Configure sccache as rustc wrapper if needed
