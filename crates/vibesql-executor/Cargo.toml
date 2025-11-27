@@ -149,3 +149,8 @@ harness = false
 [[bench]]
 name = "columnar_execution"
 harness = false
+
+[[bench]]
+name = "sysbench_oltp"
+harness = false
+required-features = ["benchmark-comparison"]
