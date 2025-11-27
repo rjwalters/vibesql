@@ -1,105 +1,10 @@
 #![allow(clippy::doc_lazy_continuation)]
 
-use std::collections::HashMap;
-
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
-use super::FromResult;
+use super::hash_join::build_existence_hash_table_parallel;
+use super::{combine_rows, FromResult};
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
 use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
-
-/// Build hash table sequentially for semi-join (stores only keys, not indices)
-///
-/// For semi-join, we only need to know if a key exists, not track all matching rows.
-/// This saves memory compared to inner join's Vec<usize> storage.
-fn build_hash_table_sequential(
-    build_rows: &[vibesql_storage::Row],
-    build_col_idx: usize,
-    timeout_ctx: &TimeoutContext,
-) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
-    let mut hash_table: HashMap<vibesql_types::SqlValue, ()> = HashMap::new();
-    for (idx, row) in build_rows.iter().enumerate() {
-        // Check timeout periodically during build phase
-        if idx % CHECK_INTERVAL == 0 {
-            timeout_ctx.check()?;
-        }
-        let key = row.values[build_col_idx].clone();
-        // Skip NULL values - they never match in equi-joins
-        if key != vibesql_types::SqlValue::Null {
-            hash_table.insert(key, ());
-        }
-    }
-    Ok(hash_table)
-}
-
-/// Build hash table in parallel for semi-join
-///
-/// Algorithm (when parallel feature enabled):
-/// 1. Divide build_rows into chunks (one per thread)
-/// 2. Each thread builds a local hash table from its chunk (no synchronization)
-/// 3. Merge partial hash tables sequentially (fast because we only store keys)
-///
-/// Performance: 3-6x speedup on large joins (50k+ rows) with 4+ cores
-/// Note: Falls back to sequential when parallel feature is disabled
-fn build_hash_table_parallel(
-    build_rows: &[vibesql_storage::Row],
-    build_col_idx: usize,
-    timeout_ctx: &TimeoutContext,
-) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
-    #[cfg(feature = "parallel")]
-    {
-        let config = ParallelConfig::global();
-
-        // Use sequential fallback for small inputs
-        if !config.should_parallelize_join(build_rows.len()) {
-            return build_hash_table_sequential(build_rows, build_col_idx, timeout_ctx);
-        }
-
-        // Check timeout before parallel execution (can't check mid-parallel easily)
-        timeout_ctx.check()?;
-
-        // Phase 1: Parallel build of partial hash tables
-        // Each thread processes a chunk and builds its own hash table
-        let chunk_size = (build_rows.len() / config.num_threads).max(1000);
-        let partial_tables: Vec<HashMap<_, ()>> = build_rows
-            .par_chunks(chunk_size)
-            .map(|chunk| {
-                let mut local_table: HashMap<vibesql_types::SqlValue, ()> = HashMap::new();
-                for row in chunk.iter() {
-                    let key = row.values[build_col_idx].clone();
-                    if key != vibesql_types::SqlValue::Null {
-                        local_table.insert(key, ());
-                    }
-                }
-                local_table
-            })
-            .collect();
-
-        // Check timeout after parallel build
-        timeout_ctx.check()?;
-
-        // Phase 2: Sequential merge of partial tables
-        // This is fast because we only need to insert keys, not append vectors
-        let result = partial_tables.into_iter().fold(HashMap::new(), |mut acc, partial| {
-            for (key, _) in partial {
-                acc.insert(key, ());
-            }
-            acc
-        });
-        Ok(result)
-    }
-
-    #[cfg(not(feature = "parallel"))]
-    {
-        // Always use sequential build when parallel feature is disabled
-        build_hash_table_sequential(build_rows, build_col_idx, timeout_ctx)
-    }
-}
 
 /// Hash semi-join implementation
 ///
@@ -138,7 +43,7 @@ pub(super) fn hash_semi_join(
     // Key: join column value
     // Value: () (we only need to know if the key exists, not store row indices)
     // Automatically uses parallel build when beneficial (based on row count and hardware)
-    let hash_table = build_hash_table_parallel(right_rows, right_col_idx, &timeout_ctx)?;
+    let hash_table = build_existence_hash_table_parallel(right_rows, right_col_idx, &timeout_ctx)?;
 
     // Probe phase: Check each left row for a match
     // We only emit left rows that have a match in the right table
@@ -260,7 +165,7 @@ pub(super) fn hash_semi_join_with_filter(
                 let right_row = &right_rows[right_idx];
 
                 // Create combined row for filter evaluation
-                let combined_row = create_combined_row(left_row, right_row);
+                let combined_row = combine_rows(left_row, right_row);
 
                 // Clear CSE cache before evaluation
                 evaluator.clear_cse_cache();
@@ -286,16 +191,6 @@ pub(super) fn hash_semi_join_with_filter(
 
     // Return result with left schema only
     Ok(FromResult::from_rows(left.schema.clone(), result_rows))
-}
-
-/// Helper function to create a combined row from left and right rows
-fn create_combined_row(
-    left_row: &vibesql_storage::Row,
-    right_row: &vibesql_storage::Row,
-) -> vibesql_storage::Row {
-    let mut combined_values = left_row.values.clone();
-    combined_values.extend_from_slice(&right_row.values);
-    vibesql_storage::Row::new(combined_values)
 }
 
 #[cfg(test)]
