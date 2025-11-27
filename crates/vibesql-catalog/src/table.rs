@@ -2,6 +2,12 @@ use std::collections::HashMap;
 
 use crate::{column::ColumnSchema, foreign_key::ForeignKeyConstraint};
 
+/// Storage format for tables
+///
+/// Tables can be stored in row-oriented (default) or columnar format.
+/// Re-exported from vibesql_ast for convenience.
+pub use vibesql_ast::StorageFormat;
+
 /// Table schema definition.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableSchema {
@@ -18,6 +24,8 @@ pub struct TableSchema {
     pub check_constraints: Vec<(String, vibesql_ast::Expression)>,
     /// Foreign key constraints
     pub foreign_keys: Vec<ForeignKeyConstraint>,
+    /// Storage format for this table (row-oriented or columnar)
+    pub storage_format: StorageFormat,
 }
 
 impl TableSchema {
@@ -33,6 +41,7 @@ impl TableSchema {
             unique_constraints: Vec::new(),
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
+            storage_format: StorageFormat::default(),
         }
     }
 
@@ -53,6 +62,7 @@ impl TableSchema {
             unique_constraints: Vec::new(),
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
+            storage_format: StorageFormat::default(),
         }
     }
 
@@ -73,6 +83,7 @@ impl TableSchema {
             unique_constraints,
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
+            storage_format: StorageFormat::default(),
         }
     }
 
@@ -93,6 +104,7 @@ impl TableSchema {
             unique_constraints: Vec::new(),
             check_constraints: Vec::new(),
             foreign_keys,
+            storage_format: StorageFormat::default(),
         }
     }
 
@@ -114,6 +126,7 @@ impl TableSchema {
             unique_constraints,
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
+            storage_format: StorageFormat::default(),
         }
     }
 
@@ -137,7 +150,39 @@ impl TableSchema {
             unique_constraints,
             check_constraints,
             foreign_keys,
+            storage_format: StorageFormat::default(),
         }
+    }
+
+    /// Create a table schema with storage format
+    pub fn with_storage_format(
+        name: String,
+        columns: Vec<ColumnSchema>,
+        storage_format: StorageFormat,
+    ) -> Self {
+        let column_index_cache: HashMap<String, usize> =
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+
+        TableSchema {
+            name,
+            columns,
+            column_index_cache,
+            primary_key: None,
+            unique_constraints: Vec::new(),
+            check_constraints: Vec::new(),
+            foreign_keys: Vec::new(),
+            storage_format,
+        }
+    }
+
+    /// Set the storage format for this table
+    pub fn set_storage_format(&mut self, storage_format: StorageFormat) {
+        self.storage_format = storage_format;
+    }
+
+    /// Check if this table uses columnar storage
+    pub fn is_columnar(&self) -> bool {
+        matches!(self.storage_format, StorageFormat::Columnar)
     }
 
     /// Get column by name.

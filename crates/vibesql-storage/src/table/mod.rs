@@ -74,9 +74,33 @@ use crate::{Row, StorageError};
 /// operations to dedicated components:
 ///
 /// - **Row Storage**: Direct Vec storage for sequential access (table scans)
+/// - **Columnar Storage**: Native columnar storage for OLAP-optimized tables
 /// - **Indexing**: `IndexManager` maintains hash indexes for constraint checks
 /// - **Normalization**: `RowNormalizer` handles value transformation and validation
 /// - **Optimization**: Append mode tracking for sequential insert performance
+///
+/// # Storage Formats
+///
+/// Tables support two storage formats:
+/// - **Row-oriented (default)**: Traditional row storage, optimized for OLTP
+/// - **Columnar**: Native column storage, optimized for OLAP with zero conversion overhead
+///
+/// ## Columnar Storage Limitations
+///
+/// **IMPORTANT**: Columnar tables are optimized for read-heavy analytical workloads.
+/// Each INSERT/UPDATE/DELETE operation triggers a full rebuild of the columnar
+/// representation (O(n) cost). This makes columnar tables unsuitable for:
+/// - High-frequency INSERT workloads
+/// - OLTP use cases with frequent writes
+/// - Streaming inserts
+///
+/// **Recommended use cases for columnar tables**:
+/// - Bulk-loaded analytical data (load once, query many times)
+/// - Reporting tables with infrequent updates
+/// - Data warehouse fact tables
+///
+/// For mixed workloads, use row-oriented storage with the columnar cache
+/// (via `scan_columnar()`), which provides SIMD acceleration with caching.
 ///
 /// # Performance Characteristics
 ///
@@ -84,6 +108,7 @@ use crate::{Row, StorageError};
 /// - **UPDATE**: O(1) for row update + O(k) for k affected indexes (selective mode)
 /// - **DELETE**: O(n) for scan + O(m) for m deletes + O(n) for index rebuild
 /// - **SCAN**: O(n) direct vector iteration
+/// - **COLUMNAR SCAN**: O(n) with SIMD acceleration (no conversion overhead for native columnar)
 /// - **PK/UNIQUE lookup**: O(1) via hash indexes
 ///
 /// # Example
@@ -108,8 +133,13 @@ pub struct Table {
     /// Table schema defining structure and constraints
     pub schema: vibesql_catalog::TableSchema,
 
-    /// Row storage - direct vector for sequential access
+    /// Row storage - direct vector for sequential access (row-oriented tables only)
     rows: Vec<Row>,
+
+    /// Native columnar storage - primary storage for columnar tables
+    /// For columnar tables, this is the authoritative data source
+    /// For row tables, this is None (use columnar_cache for converted data)
+    native_columnar: Option<crate::ColumnarTable>,
 
     /// Hash indexes for constraint validation (managed by IndexManager)
     /// Provides O(1) lookups for primary key and unique constraints
@@ -125,9 +155,10 @@ pub struct Table {
     /// Counter for modifications since last statistics update
     modifications_since_stats: usize,
 
-    /// Cached columnar representation for SIMD-accelerated queries
+    /// Cached columnar representation for SIMD-accelerated queries (row tables only)
     /// Invalidated on any table modification (INSERT/UPDATE/DELETE)
     /// Uses RwLock for thread-safe interior mutability since scan_columnar takes &self
+    /// Not used for native columnar tables (they use native_columnar directly)
     columnar_cache: std::sync::RwLock<Option<crate::ColumnarTable>>,
 }
 
@@ -138,6 +169,7 @@ impl Clone for Table {
         Table {
             schema: self.schema.clone(),
             rows: self.rows.clone(),
+            native_columnar: self.native_columnar.clone(),
             indexes: self.indexes.clone(),
             append_tracker: self.append_tracker.clone(),
             statistics: self.statistics.clone(),
@@ -149,12 +181,30 @@ impl Clone for Table {
 
 impl Table {
     /// Create a new empty table with given schema
+    ///
+    /// The storage format is determined by the schema's storage_format field:
+    /// - Row: Traditional row-oriented storage (default)
+    /// - Columnar: Native columnar storage for analytical workloads
     pub fn new(schema: vibesql_catalog::TableSchema) -> Self {
         let indexes = IndexManager::new(&schema);
+        let is_columnar = schema.is_columnar();
+
+        // For columnar tables, initialize empty native columnar storage
+        let native_columnar = if is_columnar {
+            // Create empty columnar table with column names from schema
+            let column_names: Vec<String> = schema.columns.iter()
+                .map(|c| c.name.clone())
+                .collect();
+            Some(crate::ColumnarTable::from_rows(&[], &column_names)
+                .expect("Creating empty columnar table should never fail"))
+        } else {
+            None
+        };
 
         Table {
             schema,
             rows: Vec::new(),
+            native_columnar,
             indexes,
             append_tracker: AppendModeTracker::new(),
             statistics: None,
@@ -163,7 +213,15 @@ impl Table {
         }
     }
 
+    /// Check if this table uses native columnar storage
+    pub fn is_native_columnar(&self) -> bool {
+        self.native_columnar.is_some()
+    }
+
     /// Insert a row into the table
+    ///
+    /// For row-oriented tables, rows are stored directly in a Vec.
+    /// For columnar tables, rows are buffered and the columnar data is rebuilt.
     pub fn insert(&mut self, row: Row) -> Result<(), StorageError> {
         // Normalize and validate row (column count, type checking, NULL checking, value
         // normalization)
@@ -177,7 +235,7 @@ impl Table {
             self.append_tracker.update(&pk_values);
         }
 
-        // Add row to table
+        // Add row to table (always stored for indexing and potential row access)
         let row_index = self.rows.len();
         self.rows.push(normalized_row.clone());
 
@@ -194,9 +252,27 @@ impl Table {
             }
         }
 
-        // Invalidate columnar cache on modification
-        *self.columnar_cache.write().unwrap() = None;
+        // For native columnar tables, rebuild columnar data
+        // For row tables, invalidate the cache
+        if self.native_columnar.is_some() {
+            self.rebuild_native_columnar()?;
+        } else {
+            *self.columnar_cache.write().unwrap() = None;
+        }
 
+        Ok(())
+    }
+
+    /// Rebuild native columnar storage from rows
+    fn rebuild_native_columnar(&mut self) -> Result<(), StorageError> {
+        let column_names: Vec<String> = self.schema.columns.iter()
+            .map(|c| c.name.clone())
+            .collect();
+
+        let columnar = crate::ColumnarTable::from_rows(&self.rows, &column_names)
+            .map_err(|e| StorageError::Other(format!("Columnar rebuild failed: {}", e)))?;
+
+        self.native_columnar = Some(columnar);
         Ok(())
     }
 
@@ -207,9 +283,9 @@ impl Table {
 
     /// Scan table data in columnar format for SIMD-accelerated processing
     ///
-    /// This method converts the table's rows into a columnar format suitable for
-    /// high-performance analytical queries. Unlike `scan()` which returns row-oriented
-    /// data, this method returns column-oriented data that enables:
+    /// This method returns columnar data suitable for high-performance analytical queries.
+    /// Unlike `scan()` which returns row-oriented data, this method returns column-oriented
+    /// data that enables:
     ///
     /// - **SIMD vectorization**: Process 4-8 values per CPU instruction
     /// - **Cache efficiency**: Contiguous column data improves memory access patterns
@@ -217,9 +293,8 @@ impl Table {
     ///
     /// # Performance
     ///
-    /// The conversion has O(n * m) cost where n = rows and m = columns.
-    /// For large analytical queries, this cost is amortized by the speedup
-    /// from SIMD operations on the resulting columnar data.
+    /// For **native columnar tables**: Zero conversion overhead - returns data directly.
+    /// For **row tables**: O(n * m) conversion cost, cached for subsequent queries.
     ///
     /// # Returns
     ///
@@ -236,7 +311,12 @@ impl Table {
     /// }
     /// ```
     pub fn scan_columnar(&self) -> Result<crate::ColumnarTable, StorageError> {
-        // Check cache first (read lock)
+        // For native columnar tables, return data directly (zero conversion overhead)
+        if let Some(ref native) = self.native_columnar {
+            return Ok(native.clone());
+        }
+
+        // For row tables, check cache first (read lock)
         {
             let cache = self.columnar_cache.read().unwrap();
             if let Some(cached) = cache.as_ref() {
@@ -308,8 +388,16 @@ impl Table {
         self.indexes.clear();
         // Reset append mode tracking
         self.append_tracker.reset();
-        // Invalidate columnar cache
-        *self.columnar_cache.write().unwrap() = None;
+        // Clear native columnar if present, or invalidate cache for row tables
+        if self.native_columnar.is_some() {
+            let column_names: Vec<String> = self.schema.columns.iter()
+                .map(|c| c.name.clone())
+                .collect();
+            self.native_columnar = Some(crate::ColumnarTable::from_rows(&[], &column_names)
+                .expect("Creating empty columnar table should never fail"));
+        } else {
+            *self.columnar_cache.write().unwrap() = None;
+        }
     }
 
     /// Update a row at the specified index
@@ -331,8 +419,13 @@ impl Table {
         // Update indexes (delegate to IndexManager)
         self.indexes.update_for_update(&self.schema, &old_row, &normalized_row, index);
 
-        // Invalidate columnar cache
-        *self.columnar_cache.write().unwrap() = None;
+        // For native columnar tables, rebuild columnar data
+        // For row tables, invalidate the cache
+        if self.native_columnar.is_some() {
+            self.rebuild_native_columnar()?;
+        } else {
+            *self.columnar_cache.write().unwrap() = None;
+        }
 
         Ok(())
     }
@@ -382,8 +475,13 @@ impl Table {
             &affected_indexes,
         );
 
-        // Invalidate columnar cache
-        *self.columnar_cache.write().unwrap() = None;
+        // For native columnar tables, rebuild columnar data
+        // For row tables, invalidate the cache
+        if self.native_columnar.is_some() {
+            self.rebuild_native_columnar()?;
+        } else {
+            *self.columnar_cache.write().unwrap() = None;
+        }
 
         Ok(())
     }
@@ -416,9 +514,15 @@ impl Table {
         // IndexManager)
         self.indexes.rebuild(&self.schema, &self.rows);
 
-        // Invalidate columnar cache
+        // For native columnar tables, rebuild columnar data
+        // For row tables, invalidate the cache
         if !indices_and_rows_to_delete.is_empty() {
-            *self.columnar_cache.write().unwrap() = None;
+            if self.native_columnar.is_some() {
+                // Note: Using expect here since delete_where returns usize, not Result
+                let _ = self.rebuild_native_columnar();
+            } else {
+                *self.columnar_cache.write().unwrap() = None;
+            }
         }
 
         indices_and_rows_to_delete.len()
@@ -434,8 +538,13 @@ impl Table {
             self.rows.remove(pos);
             // Rebuild indexes since row indices changed (delegate to IndexManager)
             self.indexes.rebuild(&self.schema, &self.rows);
-            // Invalidate columnar cache
-            *self.columnar_cache.write().unwrap() = None;
+            // For native columnar tables, rebuild columnar data
+            // For row tables, invalidate the cache
+            if self.native_columnar.is_some() {
+                self.rebuild_native_columnar()?;
+            } else {
+                *self.columnar_cache.write().unwrap() = None;
+            }
             Ok(())
         } else {
             Err(StorageError::RowNotFound)
