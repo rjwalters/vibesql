@@ -5,7 +5,8 @@
 //!
 //! Compares indexed spatial queries vs full table scans to demonstrate speedup.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use std::hint::black_box;
 use vibesql_ast::Statement;
 use vibesql_executor::{CreateIndexExecutor, SelectExecutor};
 use vibesql_parser::Parser;

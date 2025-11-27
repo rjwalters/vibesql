@@ -3,7 +3,8 @@
 //! These benchmarks validate the 2-3x speedup claims for parallel sorting
 //! implemented in PR #1594, as part of Phase 1.5 of the PARALLELISM_ROADMAP.md
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;

@@ -8,7 +8,8 @@
 //! - Threshold: parallelization beneficial for 50k+ rows
 //! - Linear scaling up to 4 cores, diminishing returns beyond 8 cores
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
