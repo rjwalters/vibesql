@@ -1,20 +1,21 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all build build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch clean help analyze-tests analyze-benchmarks analyze
+.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch clean help analyze-tests analyze-benchmarks analyze
 
 # Default target - fully qualify and update the state of the repo
-# Runs build, all tests, benchmarks, and records results to database
-all: build test benchmark
+# Runs build-all (including Python), all tests, benchmarks, and records results to database
+all: build-all test benchmark
 
 # Help target
 help:
 	@echo "VibeSQL Makefile - Common development tasks"
 	@echo ""
 	@echo "Build targets:"
-	@echo "  make build              - Build all Rust crates in release mode"
+	@echo "  make build              - Build Rust crates in release mode (excludes Python)"
+	@echo "  make build-all          - Build everything including Python bindings"
 	@echo "  make build-wasm         - Build WebAssembly bindings for web demo"
-	@echo "  make build-python       - Build Python bindings wheel"
+	@echo "  make build-python       - Build Python bindings wheel (via maturin)"
 	@echo ""
 	@echo "Test targets:"
 	@echo "  make test               - Run all tests (workspace + sqllogictest)"
@@ -40,10 +41,10 @@ help:
 # Build Targets
 #
 
-# Build all Rust crates in release mode
+# Build all Rust crates in release mode (excludes Python bindings which require maturin)
 build:
 	@echo "Building VibeSQL (release mode)..."
-	cargo build --release --workspace
+	cargo build --release --workspace --exclude vibesql-python-bindings
 
 # Build WebAssembly bindings for web demo
 build-wasm:
@@ -54,6 +55,9 @@ build-wasm:
 build-python:
 	@echo "Building Python bindings..."
 	./scripts/build-python.sh
+
+# Build everything including Python bindings
+build-all: build build-python
 
 #
 # Test Targets
@@ -76,9 +80,9 @@ test-workspace:
 
 # Run SQLLogicTest suite (parallel mode recommended)
 test-sqllogictest:
-	@echo "Running SQLLogicTest suite (parallel, 8 workers)..."
-	@echo "This runs ~5.9M tests across 628 test files (10-20 minutes)"
-	./scripts/sqllogictest run --parallel --workers 8
+	@echo "Running SQLLogicTest suite (parallel, auto-detected workers)..."
+	@echo "This runs ~5.9M tests across 628 test files"
+	./scripts/sqllogictest run --parallel
 
 #
 # Benchmark Targets

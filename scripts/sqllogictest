@@ -280,6 +280,8 @@ EOF
             # Default to CPU count
             if command -v nproc &> /dev/null; then
                 workers=$(nproc)
+            elif [[ "$(uname)" == "Darwin" ]]; then
+                workers=$(sysctl -n hw.ncpu)
             else
                 workers=8
             fi
