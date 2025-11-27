@@ -11,44 +11,41 @@
 //! ## Test Categories
 //!
 //! **Read Tests:**
-//! - `oltp_point_select` - Single row lookup by primary key
+//! - `sysbench_point_select` - Single row lookup by primary key
+//! - `oltp_read_only` - Full read-only transaction (10 point selects + 4 range queries)
+//! - `select_random_points` - Multiple random point selects (index lookup throughput)
+//! - `select_random_ranges` - Range queries with BETWEEN (range scan performance)
 //!
 //! **Write Tests:**
-//! - `oltp_insert` - Single row inserts
-//! - `oltp_delete` - DELETE by primary key
-//! - `oltp_update_index` - UPDATE indexed column `k` by primary key
-//! - `oltp_update_non_index` - UPDATE non-indexed column `c` by primary key
-//! - `oltp_write_only` - Write-only workload (1 index update, 1 non-index update, 1 delete, 1 insert)
+//! - `sysbench_insert` - Single row inserts
+//! - `sysbench_delete` - Single row delete by primary key
+//! - `sysbench_update_index` - Update indexed column (k = k + 1)
+//! - `sysbench_update_non_index` - Update non-indexed column (c = ?)
+//! - `sysbench_write_only` - Write-only workload (1 index update, 1 non-index update, 1 delete, 1 insert)
 //!
 //! **Mixed Tests:**
-//! - `oltp_read_write` - Mixed read/write workload (10 reads, 4 writes per transaction)
+//! - `sysbench_read_write` - Mixed read/write workload (10 reads, 1 update per transaction)
 //!
 //! ## Usage
 //!
 //! ```bash
-//! # Run all sysbench benchmarks
+//! # Run all sysbench benchmarks (VibeSQL only)
+//! cargo bench --bench sysbench_oltp
+//!
+//! # Run with SQLite/DuckDB comparison
 //! cargo bench --bench sysbench_oltp --features benchmark-comparison
 //!
 //! # Run only point select benchmarks
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- point_select
+//! cargo bench --bench sysbench_oltp -- point_select
 //!
-//! # Run only insert benchmarks
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- insert
-//!
-//! # Run only delete benchmarks
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- delete
-//!
-//! # Run only update_index benchmarks
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- update_index
-//!
-//! # Run only update_non_index benchmarks
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- update_non_index
-//!
-//! # Run only write_only benchmarks
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- write_only
+//! # Run only read-only transaction benchmarks
+//! cargo bench --bench sysbench_oltp -- oltp_read_only
 //!
 //! # Run only VibeSQL benchmarks
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- vibesql
+//! cargo bench --bench sysbench_oltp -- vibesql
+//!
+//! # Run only write_only benchmarks
+//! cargo bench --bench sysbench_oltp -- write_only
 //! ```
 //!
 //! ## Table Size
@@ -83,6 +80,15 @@ use sysbench::schema::{load_duckdb, load_sqlite};
 
 /// Default table size for sysbench tests
 const TABLE_SIZE: usize = 10_000;
+
+/// Range size for range queries (sysbench default is 100)
+const RANGE_SIZE: usize = 100;
+
+/// Number of point selects in oltp_read_only transaction
+const POINT_SELECTS_PER_TXN: usize = 10;
+
+/// Number of random IDs for select_random_points benchmark
+const RANDOM_POINTS_COUNT: usize = 10;
 
 // =============================================================================
 // Helper Functions - VibeSQL
@@ -139,6 +145,67 @@ fn vibesql_delete(db: &mut VibeDB, id: i64) {
     }
 }
 
+/// Execute a simple range query on VibeSQL
+fn vibesql_simple_range(db: &VibeDB, start: i64, end: i64) -> usize {
+    let sql = format!("SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {}", start, end);
+    let stmt = Parser::parse_sql(&sql).unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        let executor = SelectExecutor::new(db);
+        let result = executor.execute(&select).unwrap();
+        result.len()
+    } else {
+        0
+    }
+}
+
+/// Execute a sum range query on VibeSQL
+fn vibesql_sum_range(db: &VibeDB, start: i64, end: i64) -> usize {
+    let sql = format!(
+        "SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN {} AND {}",
+        start, end
+    );
+    let stmt = Parser::parse_sql(&sql).unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        let executor = SelectExecutor::new(db);
+        let result = executor.execute(&select).unwrap();
+        result.len()
+    } else {
+        0
+    }
+}
+
+/// Execute an order range query on VibeSQL
+fn vibesql_order_range(db: &VibeDB, start: i64, end: i64) -> usize {
+    let sql = format!(
+        "SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
+        start, end
+    );
+    let stmt = Parser::parse_sql(&sql).unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        let executor = SelectExecutor::new(db);
+        let result = executor.execute(&select).unwrap();
+        result.len()
+    } else {
+        0
+    }
+}
+
+/// Execute a distinct range query on VibeSQL
+fn vibesql_distinct_range(db: &VibeDB, start: i64, end: i64) -> usize {
+    let sql = format!(
+        "SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
+        start, end
+    );
+    let stmt = Parser::parse_sql(&sql).unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        let executor = SelectExecutor::new(db);
+        let result = executor.execute(&select).unwrap();
+        result.len()
+    } else {
+        0
+    }
+}
+
 // =============================================================================
 // Helper Functions - SQLite
 // =============================================================================
@@ -188,6 +255,58 @@ fn sqlite_delete(conn: &SqliteConn, id: i64) {
     stmt.execute(rusqlite::params![id]).unwrap();
 }
 
+#[cfg(feature = "benchmark-comparison")]
+fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn sqlite_sum_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn sqlite_order_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn sqlite_distinct_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
 // =============================================================================
 // Helper Functions - DuckDB
 // =============================================================================
@@ -235,6 +354,95 @@ fn duckdb_delete(conn: &DuckDBConn, id: i64) {
         .prepare_cached("DELETE FROM sbtest1 WHERE id = ?1")
         .unwrap();
     stmt.execute(duckdb::params![id]).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn duckdb_simple_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn duckdb_sum_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn duckdb_order_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn duckdb_distinct_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
+    let mut stmt = conn
+        .prepare_cached("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
+        .unwrap();
+    let mut rows = stmt.query([start, end]).unwrap();
+    let mut count = 0;
+    while rows.next().unwrap().is_some() {
+        count += 1;
+    }
+    count
+}
+
+// =============================================================================
+// Helper Functions for Data Generation
+// =============================================================================
+
+/// Generate a 120-char 'c' column value
+fn generate_c_string() -> String {
+    let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
+    let mut s = String::with_capacity(120);
+    for i in 0..11 {
+        for _ in 0..10 {
+            s.push((b'0' + rng.random_range(0..10)) as char);
+        }
+        if i < 10 {
+            s.push('-');
+        }
+    }
+    s
+}
+
+/// Generate a 60-char 'pad' column value
+fn generate_pad_string() -> String {
+    let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
+    let mut s = String::with_capacity(60);
+    for i in 0..5 {
+        for _ in 0..10 {
+            s.push((b'0' + rng.random_range(0..10)) as char);
+        }
+        if i < 4 {
+            s.push('-');
+        }
+    }
+    while s.len() < 60 {
+        s.push(' ');
+    }
+    s
 }
 
 // =============================================================================
@@ -840,40 +1048,263 @@ fn benchmark_read_write_duckdb(c: &mut Criterion) {
 }
 
 // =============================================================================
-// Helper Functions for Data Generation
+// oltp_read_only Benchmark
 // =============================================================================
 
-/// Generate a 120-char 'c' column value
-fn generate_c_string() -> String {
-    let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
-    let mut s = String::with_capacity(120);
-    for i in 0..11 {
-        for _ in 0..10 {
-            s.push((b'0' + rng.random_range(0..10)) as char);
-        }
-        if i < 10 {
-            s.push('-');
-        }
-    }
-    s
+/// Standard sysbench read-only transaction:
+/// - 10 point selects
+/// - 1 simple range query
+/// - 1 sum range query
+/// - 1 order range query
+/// - 1 distinct range query
+fn benchmark_oltp_read_only_vibesql(c: &mut Criterion) {
+    let db = load_vibesql(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("oltp_read_only");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let mut total = 0;
+
+            // 10 point selects
+            let ids = data.random_ids(POINT_SELECTS_PER_TXN);
+            for id in ids {
+                total += vibesql_point_select(&db, id);
+            }
+
+            // 1 simple range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += vibesql_simple_range(&db, start, end);
+
+            // 1 sum range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += vibesql_sum_range(&db, start, end);
+
+            // 1 order range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += vibesql_order_range(&db, start, end);
+
+            // 1 distinct range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += vibesql_distinct_range(&db, start, end);
+
+            black_box(total);
+        });
+    });
+
+    group.finish();
 }
 
-/// Generate a 60-char 'pad' column value
-fn generate_pad_string() -> String {
-    let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
-    let mut s = String::with_capacity(60);
-    for i in 0..5 {
-        for _ in 0..10 {
-            s.push((b'0' + rng.random_range(0..10)) as char);
-        }
-        if i < 4 {
-            s.push('-');
-        }
-    }
-    while s.len() < 60 {
-        s.push(' ');
-    }
-    s
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_oltp_read_only_sqlite(c: &mut Criterion) {
+    let conn = load_sqlite(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("oltp_read_only");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let mut total = 0;
+
+            // 10 point selects
+            let ids = data.random_ids(POINT_SELECTS_PER_TXN);
+            for id in ids {
+                total += sqlite_point_select(&conn, id);
+            }
+
+            // 1 simple range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += sqlite_simple_range(&conn, start, end);
+
+            // 1 sum range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += sqlite_sum_range(&conn, start, end);
+
+            // 1 order range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += sqlite_order_range(&conn, start, end);
+
+            // 1 distinct range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += sqlite_distinct_range(&conn, start, end);
+
+            black_box(total);
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_oltp_read_only_duckdb(c: &mut Criterion) {
+    let conn = load_duckdb(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("oltp_read_only");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let mut total = 0;
+
+            // 10 point selects
+            let ids = data.random_ids(POINT_SELECTS_PER_TXN);
+            for id in ids {
+                total += duckdb_point_select(&conn, id);
+            }
+
+            // 1 simple range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += duckdb_simple_range(&conn, start, end);
+
+            // 1 sum range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += duckdb_sum_range(&conn, start, end);
+
+            // 1 order range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += duckdb_order_range(&conn, start, end);
+
+            // 1 distinct range query
+            let (start, end) = data.random_range(RANGE_SIZE);
+            total += duckdb_distinct_range(&conn, start, end);
+
+            black_box(total);
+        });
+    });
+
+    group.finish();
+}
+
+// =============================================================================
+// select_random_points Benchmark (NEW)
+// =============================================================================
+
+/// Multiple random point selects - tests index lookup throughput.
+fn benchmark_select_random_points_vibesql(c: &mut Criterion) {
+    let db = load_vibesql(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("select_random_points");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let ids = data.random_ids(RANDOM_POINTS_COUNT);
+            let mut total = 0;
+            for id in ids {
+                total += vibesql_point_select(&db, id);
+            }
+            black_box(total);
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_select_random_points_sqlite(c: &mut Criterion) {
+    let conn = load_sqlite(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("select_random_points");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let ids = data.random_ids(RANDOM_POINTS_COUNT);
+            let mut total = 0;
+            for id in ids {
+                total += sqlite_point_select(&conn, id);
+            }
+            black_box(total);
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_select_random_points_duckdb(c: &mut Criterion) {
+    let conn = load_duckdb(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("select_random_points");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let ids = data.random_ids(RANDOM_POINTS_COUNT);
+            let mut total = 0;
+            for id in ids {
+                total += duckdb_point_select(&conn, id);
+            }
+            black_box(total);
+        });
+    });
+
+    group.finish();
+}
+
+// =============================================================================
+// select_random_ranges Benchmark (NEW)
+// =============================================================================
+
+/// Range queries with BETWEEN clause - tests range scan performance.
+fn benchmark_select_random_ranges_vibesql(c: &mut Criterion) {
+    let db = load_vibesql(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("select_random_ranges");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let (start, end) = data.random_range(RANGE_SIZE);
+            black_box(vibesql_simple_range(&db, start, end));
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_select_random_ranges_sqlite(c: &mut Criterion) {
+    let conn = load_sqlite(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("select_random_ranges");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let (start, end) = data.random_range(RANGE_SIZE);
+            black_box(sqlite_simple_range(&conn, start, end));
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_select_random_ranges_duckdb(c: &mut Criterion) {
+    let conn = load_duckdb(TABLE_SIZE);
+    let mut data = SysbenchData::new(TABLE_SIZE);
+
+    let mut group = c.benchmark_group("select_random_ranges");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let (start, end) = data.random_range(RANGE_SIZE);
+            black_box(duckdb_simple_range(&conn, start, end));
+        });
+    });
+
+    group.finish();
 }
 
 // =============================================================================
@@ -889,7 +1320,11 @@ criterion_group!(
     benchmark_update_index_vibesql,
     benchmark_update_non_index_vibesql,
     benchmark_write_only_vibesql,
-    benchmark_read_write_vibesql
+    benchmark_read_write_vibesql,
+    // Read-only benchmarks
+    benchmark_oltp_read_only_vibesql,
+    benchmark_select_random_points_vibesql,
+    benchmark_select_random_ranges_vibesql,
 );
 
 #[cfg(feature = "benchmark-comparison")]
@@ -915,7 +1350,17 @@ criterion_group!(
     benchmark_write_only_duckdb,
     benchmark_read_write_vibesql,
     benchmark_read_write_sqlite,
-    benchmark_read_write_duckdb
+    benchmark_read_write_duckdb,
+    // Read-only benchmarks
+    benchmark_oltp_read_only_vibesql,
+    benchmark_oltp_read_only_sqlite,
+    benchmark_oltp_read_only_duckdb,
+    benchmark_select_random_points_vibesql,
+    benchmark_select_random_points_sqlite,
+    benchmark_select_random_points_duckdb,
+    benchmark_select_random_ranges_vibesql,
+    benchmark_select_random_ranges_sqlite,
+    benchmark_select_random_ranges_duckdb,
 );
 
 criterion_main!(benches);

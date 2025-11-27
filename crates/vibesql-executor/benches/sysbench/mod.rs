@@ -3,7 +3,7 @@
 //! This module provides sysbench-compatible OLTP benchmarks including:
 //! - Data generation for sbtest tables
 //! - Schema creation and data loading
-//! - OLTP query workloads (point select, insert, read/write mix)
+//! - OLTP query workloads (point select, insert, read/write mix, range queries)
 //!
 //! The schema matches the standard sysbench OLTP schema:
 //! <https://github.com/akopytov/sysbench>

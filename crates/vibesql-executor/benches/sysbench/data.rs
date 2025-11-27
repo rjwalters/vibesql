@@ -115,6 +115,22 @@ impl SysbenchData {
         self.rng.random_range(1..=self.table_size as i64)
     }
 
+    /// Generate random IDs for point select queries.
+    /// Returns `count` random IDs in the range [1, table_size].
+    pub fn random_ids(&mut self, count: usize) -> Vec<i64> {
+        (0..count)
+            .map(|_| self.rng.random_range(1..=self.table_size as i64))
+            .collect()
+    }
+
+    /// Generate a random range for range queries.
+    /// Returns (start_id, end_id) where end_id = start_id + range_size - 1.
+    pub fn random_range(&mut self, range_size: usize) -> (i64, i64) {
+        let max_start = (self.table_size - range_size + 1).max(1);
+        let start = self.rng.random_range(1..=max_start as i64);
+        (start, start + range_size as i64 - 1)
+    }
+
     /// Reset the generator for re-iteration
     pub fn reset(&mut self) {
         self.rng = ChaCha8Rng::seed_from_u64(42);
@@ -162,5 +178,24 @@ mod tests {
 
         // 11th call should return None
         assert!(data.next_row().is_none());
+    }
+
+    #[test]
+    fn test_random_ids() {
+        let mut data = SysbenchData::new(100);
+        let ids = data.random_ids(5);
+        assert_eq!(ids.len(), 5);
+        for id in ids {
+            assert!(id >= 1 && id <= 100);
+        }
+    }
+
+    #[test]
+    fn test_random_range() {
+        let mut data = SysbenchData::new(100);
+        let (start, end) = data.random_range(10);
+        assert!(start >= 1);
+        assert!(end <= 100);
+        assert_eq!(end - start + 1, 10);
     }
 }
