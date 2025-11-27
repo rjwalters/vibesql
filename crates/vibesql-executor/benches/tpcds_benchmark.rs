@@ -1,11 +1,9 @@
 //! TPC-DS Benchmark Suite - Native Rust Implementation
 //!
-//! This benchmark tests TPC-DS demographic dimension tables:
-//! - income_band (20 rows)
-//! - customer_demographics (~1,920 rows)
-//! - household_demographics (~7,200 rows)
-//! - call_center (~6 rows at SF=1)
-//! - inventory (fact table with dimension-like usage)
+//! This benchmark tests TPC-DS queries across three phases:
+//! - Phase 1: Core tables (date_dim, time_dim, item, customer, store, store_sales)
+//! - Phase 2: Extended tables (promotion, warehouse, ship_mode, reason, store_returns)
+//! - Phase 3: Full e-commerce (catalog_sales/returns, web_sales/returns)
 //!
 //! Usage:
 //!   cargo bench --bench tpcds_benchmark
@@ -25,7 +23,7 @@ use duckdb::Connection as DuckDBConn;
 use rusqlite::Connection as SqliteConn;
 
 use std::time::Duration;
-use tpcds::queries::*;
+use tpcds::queries::{TPCDS_QUERIES, TPCDS_SANITY_QUERIES};
 use tpcds::schema::*;
 
 // =============================================================================
@@ -78,7 +76,7 @@ fn bench_sanity_queries(c: &mut Criterion) {
 
     let db = load_vibesql(0.01);
 
-    for (name, sql) in ALL_SANITY_QUERIES {
+    for (name, sql) in TPCDS_SANITY_QUERIES {
         group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
             b.iter(|| {
                 let count = benchmark_vibesql_query(&db, sql);
@@ -99,7 +97,7 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
     let sqlite_conn = load_sqlite(0.01);
     let duckdb_conn = load_duckdb(0.01);
 
-    for (name, sql) in ALL_SANITY_QUERIES {
+    for (name, sql) in TPCDS_SANITY_QUERIES {
         group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
             b.iter(|| {
                 let count = benchmark_vibesql_query(&vibesql_db, sql);
@@ -126,60 +124,16 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
 }
 
 // =============================================================================
-// Simple Query Benchmarks
+// TPC-DS Query Benchmarks
 // =============================================================================
 
-fn bench_simple_queries(c: &mut Criterion) {
-    let mut group = c.benchmark_group("tpcds_simple");
-    group.measurement_time(Duration::from_secs(5));
-
-    let db = load_vibesql(0.01);
-
-    for (name, sql) in ALL_SIMPLE_QUERIES {
-        group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
-            b.iter(|| {
-                let count = benchmark_vibesql_query(&db, sql);
-                black_box(count);
-            });
-        });
-    }
-
-    group.finish();
-}
-
-// =============================================================================
-// Join Query Benchmarks
-// =============================================================================
-
-fn bench_join_queries(c: &mut Criterion) {
-    let mut group = c.benchmark_group("tpcds_joins");
-    group.measurement_time(Duration::from_secs(5));
-
-    let db = load_vibesql(0.01);
-
-    for (name, sql) in ALL_JOIN_QUERIES {
-        group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
-            b.iter(|| {
-                let count = benchmark_vibesql_query(&db, sql);
-                black_box(count);
-            });
-        });
-    }
-
-    group.finish();
-}
-
-// =============================================================================
-// TPC-DS Style Query Benchmarks
-// =============================================================================
-
-fn bench_tpcds_style_queries(c: &mut Criterion) {
-    let mut group = c.benchmark_group("tpcds_style");
+fn bench_tpcds_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tpcds_queries");
     group.measurement_time(Duration::from_secs(10));
 
     let db = load_vibesql(0.01);
 
-    for (name, sql) in ALL_TPCDS_STYLE_QUERIES {
+    for (name, sql) in TPCDS_QUERIES {
         group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
             b.iter(|| {
                 let count = benchmark_vibesql_query(&db, sql);
@@ -199,9 +153,7 @@ fn bench_tpcds_style_queries(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_sanity_queries,
-    bench_simple_queries,
-    bench_join_queries,
-    bench_tpcds_style_queries,
+    bench_tpcds_queries,
 );
 
 #[cfg(feature = "benchmark-comparison")]
@@ -209,9 +161,7 @@ criterion_group!(
     benches,
     bench_sanity_queries,
     bench_sanity_queries_comparison,
-    bench_simple_queries,
-    bench_join_queries,
-    bench_tpcds_style_queries,
+    bench_tpcds_queries,
 );
 
 criterion_main!(benches);

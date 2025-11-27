@@ -51,12 +51,11 @@ fn test_nested_arithmetic() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    // Default mode is SQLite: integer division returns Integer
-    // (5 + 3) = 8, 8 * 2 = 16, 10 / 2 = 5 (integer division in SQLite), 16 - 5 = 11
-    // In MySQL mode, 10 / 2 would be Numeric(5.0), so result would be Numeric(11.0)
-    assert!(matches!(result[0].values[0], vibesql_types::SqlValue::Integer(_)));
-    if let vibesql_types::SqlValue::Integer(n) = result[0].values[0] {
-        assert_eq!(n, 11); // (8 * 2) - (10 / 2) = 11
+    // Division returns Numeric, so the result is Numeric(11.0)
+    // (8 * 2) = Integer(16), 10 / 2 = Numeric(5.0), 16 - 5.0 = Numeric(11.0)
+    assert!(matches!(result[0].values[0], vibesql_types::SqlValue::Numeric(_)));
+    if let vibesql_types::SqlValue::Numeric(n) = result[0].values[0] {
+        assert!((n - 11.0).abs() < 0.001); // (8 * 2) - (10 / 2) = 11.0
     }
 }
 

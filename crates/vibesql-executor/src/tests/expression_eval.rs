@@ -257,9 +257,8 @@ fn test_eval_division() {
         right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(4))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    // Default mode is SQLite: integer division returns Integer
-    // MySQL mode would return Numeric(5.0) for exact decimal arithmetic
-    assert_eq!(result, vibesql_types::SqlValue::Integer(5));
+    // Division returns Numeric for integer operands in MySQL mode (exact decimal arithmetic)
+    assert_eq!(result, vibesql_types::SqlValue::Numeric(5.0));
 }
 
 #[test]
