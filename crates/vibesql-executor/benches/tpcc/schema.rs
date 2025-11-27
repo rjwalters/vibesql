@@ -20,6 +20,12 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     let mut db = VibeDB::new();
     let mut data = TPCCData::new(scale_factor);
 
+    // Enable case-insensitive identifier lookups for MySQL compatibility.
+    // The TPC-C schema uses lowercase table/column names, but the SQL parser
+    // normalizes unquoted identifiers to uppercase. This setting allows queries
+    // to find tables regardless of case.
+    db.catalog.set_case_sensitive_identifiers(false);
+
     // Create schema
     create_tpcc_schema_vibesql(&mut db);
 
