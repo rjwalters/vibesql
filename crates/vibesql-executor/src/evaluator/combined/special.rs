@@ -68,7 +68,8 @@ impl CombinedExpressionEvaluator<'_> {
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         let value = self.eval(expr, row)?;
-        cast_value(&value, data_type)
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        cast_value(&value, data_type, &sql_mode)
     }
 
     /// Evaluate COALESCE function with lazy evaluation
@@ -160,7 +161,8 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // Call shared scalar function evaluator
-        eval_scalar_function(name, &arg_values, character_unit)
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        eval_scalar_function(name, &arg_values, character_unit, &sql_mode)
     }
 
     /// Evaluate unary operation

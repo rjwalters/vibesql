@@ -207,7 +207,9 @@ fn test_cast_varchar_to_unsigned() {
 
 #[test]
 fn test_cast_float_to_unsigned() {
-    let db = vibesql_storage::Database::new();
+    let mut db = vibesql_storage::Database::new();
+    // Use MySQL mode for rounding behavior
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
     let executor = SelectExecutor::new(&db);
 
     // SELECT CAST(5.7 AS UNSIGNED) - should round to nearest (MySQL behavior)
@@ -312,7 +314,9 @@ fn test_cast_as_signed_negative() {
 
 #[test]
 fn test_cast_as_signed_from_float() {
-    let db = vibesql_storage::Database::new();
+    let mut db = vibesql_storage::Database::new();
+    // Use MySQL mode for rounding behavior
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
     let executor = SelectExecutor::new(&db);
 
     // SELECT CAST(5.7 AS SIGNED) - should round to Bigint (MySQL behavior)
@@ -349,7 +353,9 @@ fn test_cast_as_signed_from_float() {
 
 #[test]
 fn test_cast_negative_float_to_signed_rounds() {
-    let db = vibesql_storage::Database::new();
+    let mut db = vibesql_storage::Database::new();
+    // Use MySQL mode for rounding behavior
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
     let executor = SelectExecutor::new(&db);
 
     // SELECT CAST(-0.7 AS SIGNED) - should round to -1 (MySQL behavior)
@@ -384,7 +390,9 @@ fn test_cast_negative_float_to_signed_rounds() {
 
 #[test]
 fn test_cast_rounding_edge_cases() {
-    let db = vibesql_storage::Database::new();
+    let mut db = vibesql_storage::Database::new();
+    // Use MySQL mode for rounding behavior
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
     let executor = SelectExecutor::new(&db);
 
     // Helper to run CAST and extract result

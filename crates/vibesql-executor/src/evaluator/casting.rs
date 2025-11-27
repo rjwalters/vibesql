@@ -74,11 +74,38 @@ pub(crate) fn boolean_to_i64(value: &vibesql_types::SqlValue) -> Option<i64> {
     }
 }
 
+/// Helper function to convert float to integer based on SQL mode
+/// MySQL mode: rounds to nearest integer
+/// SQLite mode: truncates toward zero
+#[inline]
+fn float_to_int(f: f64, sql_mode: &vibesql_types::SqlMode) -> i64 {
+    match sql_mode {
+        vibesql_types::SqlMode::MySQL { .. } => f.round() as i64,
+        vibesql_types::SqlMode::SQLite => f.trunc() as i64,
+    }
+}
+
+/// Helper function to convert float to unsigned based on SQL mode
+/// MySQL mode: rounds to nearest integer then converts to unsigned
+/// SQLite mode: truncates toward zero then converts to unsigned
+#[inline]
+fn float_to_unsigned(f: f64, sql_mode: &vibesql_types::SqlMode) -> u64 {
+    match sql_mode {
+        vibesql_types::SqlMode::MySQL { .. } => f.round() as u64,
+        vibesql_types::SqlMode::SQLite => f.trunc() as u64,
+    }
+}
+
 /// Cast a value to the target data type
 /// Implements SQL:1999 CAST semantics for explicit type conversion
+///
+/// Float-to-integer conversion behavior varies by SQL mode:
+/// - MySQL mode: rounds to nearest integer (CAST(5.7 AS SIGNED) → 6)
+/// - SQLite mode: truncates toward zero (CAST(5.7 AS INTEGER) → 5)
 pub(crate) fn cast_value(
     value: &vibesql_types::SqlValue,
     target_type: &vibesql_types::DataType,
+    sql_mode: &vibesql_types::SqlMode,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     use vibesql_types::{DataType::*, SqlValue};
 
@@ -94,10 +121,10 @@ pub(crate) fn cast_value(
             SqlValue::Smallint(n) => Ok(SqlValue::Integer(*n as i64)),
             SqlValue::Bigint(n) => Ok(SqlValue::Integer(*n)),
             SqlValue::Unsigned(n) => Ok(SqlValue::Integer(*n as i64)),
-            SqlValue::Numeric(f) => Ok(SqlValue::Integer(f.trunc() as i64)),
-            SqlValue::Float(f) => Ok(SqlValue::Integer(f.trunc() as i64)),
-            SqlValue::Real(f) => Ok(SqlValue::Integer((*f as f64).trunc() as i64)),
-            SqlValue::Double(f) => Ok(SqlValue::Integer(f.trunc() as i64)),
+            SqlValue::Numeric(f) => Ok(SqlValue::Integer(float_to_int(*f, sql_mode))),
+            SqlValue::Float(f) => Ok(SqlValue::Integer(float_to_int(*f as f64, sql_mode))),
+            SqlValue::Real(f) => Ok(SqlValue::Integer(float_to_int(*f as f64, sql_mode))),
+            SqlValue::Double(f) => Ok(SqlValue::Integer(float_to_int(*f, sql_mode))),
             SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) => {
                 s.parse::<i64>().map(SqlValue::Integer).map_err(|_| ExecutorError::CastError {
@@ -117,10 +144,10 @@ pub(crate) fn cast_value(
             SqlValue::Integer(n) => Ok(SqlValue::Smallint(*n as i16)),
             SqlValue::Bigint(n) => Ok(SqlValue::Smallint(*n as i16)),
             SqlValue::Unsigned(n) => Ok(SqlValue::Smallint(*n as i16)),
-            SqlValue::Numeric(f) => Ok(SqlValue::Smallint(f.trunc() as i16)),
-            SqlValue::Float(f) => Ok(SqlValue::Smallint(f.trunc() as i16)),
-            SqlValue::Real(f) => Ok(SqlValue::Smallint((*f as f64).trunc() as i16)),
-            SqlValue::Double(f) => Ok(SqlValue::Smallint(f.trunc() as i16)),
+            SqlValue::Numeric(f) => Ok(SqlValue::Smallint(float_to_int(*f, sql_mode) as i16)),
+            SqlValue::Float(f) => Ok(SqlValue::Smallint(float_to_int(*f as f64, sql_mode) as i16)),
+            SqlValue::Real(f) => Ok(SqlValue::Smallint(float_to_int(*f as f64, sql_mode) as i16)),
+            SqlValue::Double(f) => Ok(SqlValue::Smallint(float_to_int(*f, sql_mode) as i16)),
             SqlValue::Boolean(b) => Ok(SqlValue::Smallint(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) => {
                 s.parse::<i16>().map(SqlValue::Smallint).map_err(|_| ExecutorError::CastError {
@@ -135,17 +162,15 @@ pub(crate) fn cast_value(
         },
 
         // Cast to BIGINT
-        // MySQL rounds to nearest integer when casting float/decimal to SIGNED
-        // See: https://dev.mysql.com/doc/refman/8.4/en/cast-functions.html
         Bigint => match value {
             SqlValue::Bigint(n) => Ok(SqlValue::Bigint(*n)),
             SqlValue::Integer(n) => Ok(SqlValue::Bigint(*n)),
             SqlValue::Smallint(n) => Ok(SqlValue::Bigint(*n as i64)),
             SqlValue::Unsigned(n) => Ok(SqlValue::Bigint(*n as i64)),
-            SqlValue::Numeric(f) => Ok(SqlValue::Bigint(f.round() as i64)),
-            SqlValue::Float(f) => Ok(SqlValue::Bigint(f.round() as i64)),
-            SqlValue::Real(f) => Ok(SqlValue::Bigint((*f as f64).round() as i64)),
-            SqlValue::Double(f) => Ok(SqlValue::Bigint(f.round() as i64)),
+            SqlValue::Numeric(f) => Ok(SqlValue::Bigint(float_to_int(*f, sql_mode))),
+            SqlValue::Float(f) => Ok(SqlValue::Bigint(float_to_int(*f as f64, sql_mode))),
+            SqlValue::Real(f) => Ok(SqlValue::Bigint(float_to_int(*f as f64, sql_mode))),
+            SqlValue::Double(f) => Ok(SqlValue::Bigint(float_to_int(*f, sql_mode))),
             SqlValue::Boolean(b) => Ok(SqlValue::Bigint(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) => {
                 s.parse::<i64>().map(SqlValue::Bigint).map_err(|_| ExecutorError::CastError {
@@ -160,8 +185,6 @@ pub(crate) fn cast_value(
         },
 
         // Cast to UNSIGNED
-        // MySQL rounds to nearest integer when casting float/decimal to UNSIGNED
-        // See: https://dev.mysql.com/doc/refman/8.4/en/cast-functions.html
         Unsigned => match value {
             SqlValue::Unsigned(n) => Ok(SqlValue::Unsigned(*n)),
             SqlValue::Integer(n) => {
@@ -177,20 +200,20 @@ pub(crate) fn cast_value(
                 Ok(SqlValue::Unsigned(*n as u64))
             }
             SqlValue::Numeric(f) => {
-                // Round numeric to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned(f.round() as u64))
+                // Convert numeric to unsigned using sql_mode-aware conversion
+                Ok(SqlValue::Unsigned(float_to_unsigned(*f, sql_mode)))
             }
             SqlValue::Float(f) => {
-                // Round float to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned(f.round() as u64))
+                // Convert float to unsigned using sql_mode-aware conversion
+                Ok(SqlValue::Unsigned(float_to_unsigned(*f as f64, sql_mode)))
             }
             SqlValue::Real(f) => {
-                // Round real to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned((*f as f64).round() as u64))
+                // Convert real to unsigned using sql_mode-aware conversion
+                Ok(SqlValue::Unsigned(float_to_unsigned(*f as f64, sql_mode)))
             }
             SqlValue::Double(f) => {
-                // Round double to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned(f.round() as u64))
+                // Convert double to unsigned using sql_mode-aware conversion
+                Ok(SqlValue::Unsigned(float_to_unsigned(*f, sql_mode)))
             }
             SqlValue::Boolean(b) => {
                 // Boolean to unsigned: true=1, false=0 (SQL standard)
