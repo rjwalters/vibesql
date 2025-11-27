@@ -33,6 +33,7 @@ impl std::fmt::Display for TestError {
 impl std::error::Error for TestError {}
 
 /// Result of running a test file, including dialect statistics
+#[allow(dead_code)]
 pub struct TestFileResult {
     pub result: Result<(), TestError>,
     pub failures: Vec<TestFailure>,
