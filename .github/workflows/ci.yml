@@ -67,7 +67,7 @@ jobs:
           uv pip install --system maturin
           cd crates/vibesql-python-bindings
           maturin build --release
-          uv pip install --system ../../target/wheels/vibesql_python_bindings-*.whl
+          uv pip install --system ../../target/wheels/vibesql-*.whl
 
       - name: Install benchmark dependencies
         run: |
