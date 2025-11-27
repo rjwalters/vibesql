@@ -211,7 +211,8 @@ fi
 # Install wasm-pack if needed
 if [[ " ${missing[*]} " =~ " wasm-pack " ]]; then
     print_status "Installing wasm-pack..."
-    curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+    # Use cargo install instead of the shell installer which has Apple Silicon issues
+    cargo install wasm-pack
     print_success "wasm-pack installed"
 fi
 
