@@ -307,6 +307,53 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
     Ok(records)
 }
 
+/// Parse a sqllogictest file. The included scripts are inserted after the `include` record.
+pub fn parse_file<T: ColumnType>(filename: impl AsRef<Path>) -> Result<Vec<Record<T>>, ParseError> {
+    let filename = filename.as_ref().to_str().unwrap();
+    parse_file_inner(Location::new(filename, 0))
+}
+
+fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, ParseError> {
+    let path = Path::new(loc.file());
+    if !path.exists() {
+        return Err(ParseErrorKind::FileNotFound.at(loc.clone()));
+    }
+    let script = std::fs::read_to_string(path).unwrap();
+    let mut records = vec![];
+    for rec in parse_inner(&loc, &script)? {
+        records.push(rec.clone());
+
+        if let Record::Include { filename, loc } = rec {
+            let complete_filename = {
+                let mut path_buf = path.to_path_buf();
+                path_buf.pop();
+                path_buf.push(filename.clone());
+                path_buf.as_os_str().to_string_lossy().to_string()
+            };
+
+            let mut iter = glob::glob(&complete_filename)
+                .map_err(|e| ParseErrorKind::InvalidIncludeFile(e.to_string()).at(loc.clone()))?
+                .peekable();
+            if iter.peek().is_none() {
+                return Err(ParseErrorKind::EmptyIncludeFile(filename).at(loc.clone()));
+            }
+            for included_file in iter {
+                let included_file = included_file.map_err(|e| {
+                    ParseErrorKind::InvalidIncludeFile(e.to_string()).at(loc.clone())
+                })?;
+                let included_file = included_file.as_os_str().to_string_lossy().to_string();
+
+                records.push(Record::Injected(Injected::BeginInclude(
+                    included_file.clone(),
+                )));
+                records.extend(parse_file_inner(loc.include(&included_file))?);
+                records.push(Record::Injected(Injected::EndInclude(included_file)));
+            }
+        }
+    }
+    Ok(records)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,51 +518,4 @@ SELECT 3
         assert!(dialect_record.is_some());
         assert_eq!(format!("{}", dialect_record.unwrap()), "dialect mysql");
     }
-}
-
-/// Parse a sqllogictest file. The included scripts are inserted after the `include` record.
-pub fn parse_file<T: ColumnType>(filename: impl AsRef<Path>) -> Result<Vec<Record<T>>, ParseError> {
-    let filename = filename.as_ref().to_str().unwrap();
-    parse_file_inner(Location::new(filename, 0))
-}
-
-fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, ParseError> {
-    let path = Path::new(loc.file());
-    if !path.exists() {
-        return Err(ParseErrorKind::FileNotFound.at(loc.clone()));
-    }
-    let script = std::fs::read_to_string(path).unwrap();
-    let mut records = vec![];
-    for rec in parse_inner(&loc, &script)? {
-        records.push(rec.clone());
-
-        if let Record::Include { filename, loc } = rec {
-            let complete_filename = {
-                let mut path_buf = path.to_path_buf();
-                path_buf.pop();
-                path_buf.push(filename.clone());
-                path_buf.as_os_str().to_string_lossy().to_string()
-            };
-
-            let mut iter = glob::glob(&complete_filename)
-                .map_err(|e| ParseErrorKind::InvalidIncludeFile(e.to_string()).at(loc.clone()))?
-                .peekable();
-            if iter.peek().is_none() {
-                return Err(ParseErrorKind::EmptyIncludeFile(filename).at(loc.clone()));
-            }
-            for included_file in iter {
-                let included_file = included_file.map_err(|e| {
-                    ParseErrorKind::InvalidIncludeFile(e.to_string()).at(loc.clone())
-                })?;
-                let included_file = included_file.as_os_str().to_string_lossy().to_string();
-
-                records.push(Record::Injected(Injected::BeginInclude(
-                    included_file.clone(),
-                )));
-                records.extend(parse_file_inner(loc.include(&included_file))?);
-                records.push(Record::Injected(Injected::EndInclude(included_file)));
-            }
-        }
-    }
-    Ok(records)
 }

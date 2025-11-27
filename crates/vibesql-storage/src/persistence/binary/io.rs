@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(read_u32(&mut reader).unwrap(), 12345);
         assert_eq!(read_i64(&mut reader).unwrap(), -9876543210);
         assert!((read_f64(&mut reader).unwrap() - 3.14159).abs() < 1e-10);
-        assert_eq!(read_bool(&mut reader).unwrap(), true);
+        assert!(read_bool(&mut reader).unwrap());
         assert_eq!(read_string(&mut reader).unwrap(), "Hello, VBSQL!");
     }
 }
