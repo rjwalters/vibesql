@@ -151,6 +151,11 @@ name = "columnar_execution"
 harness = false
 
 [[bench]]
+name = "tpcc_benchmark"
+harness = false
+required-features = ["benchmark-comparison"]
+
+[[bench]]
 name = "sysbench_oltp"
 harness = false
 required-features = ["benchmark-comparison"]

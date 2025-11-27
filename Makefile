@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch clean help analyze-tests analyze-benchmarks analyze
+.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc clean help analyze-tests analyze-benchmarks analyze
 
 # Default target - fully qualify and update the state of the repo
 # Runs build-all (including Python), all tests, benchmarks, and records results to database
@@ -24,8 +24,9 @@ help:
 	@echo "  make test-sqllogictest  - Run SQLLogicTest suite (parallel, 8 workers)"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  make benchmark          - Run all benchmarks (TPC-H)"
+	@echo "  make benchmark          - Run all benchmarks (TPC-H + TPC-C)"
 	@echo "  make benchmark-tpch     - Run TPC-H benchmark suite (30s timeout)"
+	@echo "  make benchmark-tpcc     - Run TPC-C benchmark suite (60s duration)"
 	@echo ""
 	@echo "Analysis targets:"
 	@echo "  make analyze            - Show test and benchmark analysis"
@@ -89,7 +90,7 @@ test-sqllogictest:
 #
 
 # Run all benchmarks with analysis
-benchmark: benchmark-tpch analyze-benchmarks
+benchmark: benchmark-tpch benchmark-tpcc analyze-benchmarks
 
 # Run TPC-H benchmarks with 30s timeout per query and store results in database
 benchmark-tpch:
@@ -102,6 +103,16 @@ benchmark-tpch:
 	@echo "Query results:"
 	@echo "  ./scripts/query_benchmark_results.py --latest"
 	@echo "  ./scripts/query_benchmark_results.py --trend"
+
+# Run TPC-C benchmarks (OLTP workload)
+benchmark-tpcc:
+	@echo "Running TPC-C benchmarks..."
+	@echo "Building TPC-C benchmark..."
+	cargo bench --package vibesql-executor --bench tpcc_benchmark --features benchmark-comparison --no-run
+	@echo ""
+	@echo "Running TPC-C benchmark (60s duration, 10s warmup)..."
+	TPCC_DURATION_SECS=60 TPCC_WARMUP_SECS=10 TPCC_SCALE_FACTOR=1 \
+		$$(find ./target/release/deps -maxdepth 1 -name "tpcc_benchmark-*" -type f ! -name "*.d" | head -1)
 
 #
 # Analysis Targets
