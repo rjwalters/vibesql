@@ -123,10 +123,17 @@ impl Parser {
                 Ok(vibesql_ast::Statement::Delete(delete_stmt))
             }
             Token::Keyword(Keyword::Create) => {
-                // Check for CREATE OR REPLACE VIEW
-                if self.peek_next_keyword(Keyword::Or) && matches!(self.peek_at_offset(2), Token::Keyword(Keyword::Replace)) && matches!(self.peek_at_offset(3), Token::Keyword(Keyword::View)) {
-                    Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
-                } else if self.peek_next_keyword(Keyword::Table) {
+                // Check for CREATE OR REPLACE VIEW and CREATE OR REPLACE TEMP/TEMPORARY VIEW
+                if self.peek_next_keyword(Keyword::Or) && matches!(self.peek_at_offset(2), Token::Keyword(Keyword::Replace)) {
+                    // Could be CREATE OR REPLACE VIEW or CREATE OR REPLACE TEMP/TEMPORARY VIEW
+                    if matches!(self.peek_at_offset(3), Token::Keyword(Keyword::View))
+                        || matches!(self.peek_at_offset(3), Token::Keyword(Keyword::Temp))
+                        || matches!(self.peek_at_offset(3), Token::Keyword(Keyword::Temporary))
+                    {
+                        return Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?));
+                    }
+                }
+                if self.peek_next_keyword(Keyword::Table) {
                     Ok(vibesql_ast::Statement::CreateTable(self.parse_create_table_statement()?))
                 } else if self.peek_next_keyword(Keyword::Schema) {
                     Ok(vibesql_ast::Statement::CreateSchema(self.parse_create_schema_statement()?))
@@ -149,6 +156,9 @@ impl Parser {
                         self.parse_create_translation_statement()?,
                     ))
                 } else if self.peek_next_keyword(Keyword::View) {
+                    Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
+                } else if self.peek_next_keyword(Keyword::Temp) || self.peek_next_keyword(Keyword::Temporary) {
+                    // CREATE TEMP VIEW or CREATE TEMPORARY VIEW
                     Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
                 } else if self.peek_next_keyword(Keyword::Trigger) {
                     Ok(vibesql_ast::Statement::CreateTrigger(self.parse_create_trigger_statement()?))

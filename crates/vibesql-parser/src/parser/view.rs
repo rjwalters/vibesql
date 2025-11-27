@@ -7,7 +7,8 @@ impl Parser {
     /// Parse CREATE VIEW statement
     ///
     /// Syntax:
-    ///   CREATE [OR REPLACE] VIEW view_name [(column_list)] AS select_statement [WITH CHECK OPTION]
+    ///   CREATE [OR REPLACE] [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS select_statement [WITH CHECK OPTION]
+    ///   CREATE [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS select_statement [WITH CHECK OPTION]
     pub(super) fn parse_create_view_statement(
         &mut self,
     ) -> Result<vibesql_ast::CreateViewStmt, ParseError> {
@@ -18,6 +19,17 @@ impl Parser {
         let or_replace = if self.peek_keyword(Keyword::Or) {
             self.consume_keyword(Keyword::Or)?;
             self.expect_keyword(Keyword::Replace)?;
+            true
+        } else {
+            false
+        };
+
+        // Check for optional TEMP or TEMPORARY
+        let temporary = if self.peek_keyword(Keyword::Temp) {
+            self.consume_keyword(Keyword::Temp)?;
+            true
+        } else if self.peek_keyword(Keyword::Temporary) {
+            self.consume_keyword(Keyword::Temporary)?;
             true
         } else {
             false
@@ -81,7 +93,7 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::CreateViewStmt { view_name, columns, query, with_check_option, or_replace })
+        Ok(vibesql_ast::CreateViewStmt { view_name, columns, query, with_check_option, or_replace, temporary })
     }
 
     /// Parse DROP VIEW statement

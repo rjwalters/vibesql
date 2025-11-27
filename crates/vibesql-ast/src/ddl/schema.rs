@@ -101,6 +101,8 @@ pub struct CreateViewStmt {
     pub query: Box<crate::SelectStmt>,
     pub with_check_option: bool,
     pub or_replace: bool,
+    /// Whether this is a temporary view (CREATE TEMP VIEW or CREATE TEMPORARY VIEW)
+    pub temporary: bool,
 }
 
 /// DROP VIEW statement

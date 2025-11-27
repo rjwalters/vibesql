@@ -291,6 +291,9 @@ pub enum Keyword {
     Keys,
     // Auto-increment keywords (MySQL and SQLite)
     AutoIncrement,
+    // Temporary object keywords (SQLite)
+    Temp,
+    Temporary,
 }
 
 impl Keyword {
@@ -573,6 +576,9 @@ impl fmt::Display for Keyword {
             Keyword::Keys => "KEYS",
             // Auto-increment keywords
             Keyword::AutoIncrement => "AUTO_INCREMENT",
+            // Temporary object keywords
+            Keyword::Temp => "TEMP",
+            Keyword::Temporary => "TEMPORARY",
         };
         write!(f, "{}", keyword_str)
     }
