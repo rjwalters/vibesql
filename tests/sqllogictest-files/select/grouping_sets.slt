@@ -1,0 +1,377 @@
+# ROLLUP, CUBE, and GROUPING SETS tests (SQL:1999 OLAP Extensions)
+# Tests multi-dimensional aggregation for data warehousing queries
+
+# Create sales table for testing
+statement ok
+CREATE TABLE sales (
+    year INTEGER,
+    quarter INTEGER,
+    region TEXT,
+    product TEXT,
+    amount INTEGER
+)
+
+# Insert test data
+statement ok
+INSERT INTO sales VALUES (2023, 1, 'East', 'Widget', 100)
+
+statement ok
+INSERT INTO sales VALUES (2023, 1, 'West', 'Widget', 150)
+
+statement ok
+INSERT INTO sales VALUES (2023, 2, 'East', 'Widget', 120)
+
+statement ok
+INSERT INTO sales VALUES (2023, 2, 'West', 'Gadget', 200)
+
+statement ok
+INSERT INTO sales VALUES (2024, 1, 'East', 'Gadget', 180)
+
+statement ok
+INSERT INTO sales VALUES (2024, 1, 'West', 'Widget', 140)
+
+# ============================================================================
+# ROLLUP Tests
+# ============================================================================
+
+# ROLLUP with single column
+# ROLLUP(year) produces: (year), ()
+query II rowsort
+SELECT year, SUM(amount) FROM sales GROUP BY ROLLUP(year)
+----
+2023
+570
+2024
+320
+NULL
+890
+
+# ROLLUP with two columns
+# ROLLUP(year, quarter) produces: (year, quarter), (year), ()
+query III rowsort
+SELECT year, quarter, SUM(amount) FROM sales GROUP BY ROLLUP(year, quarter)
+----
+2023
+1
+250
+2023
+2
+320
+2023
+NULL
+570
+2024
+1
+320
+2024
+NULL
+320
+NULL
+NULL
+890
+
+# ROLLUP with three columns
+# ROLLUP(year, quarter, region) produces:
+# (year, quarter, region), (year, quarter), (year), ()
+query IITI rowsort
+SELECT year, quarter, region, SUM(amount) FROM sales GROUP BY ROLLUP(year, quarter, region)
+----
+2023
+1
+East
+100
+2023
+1
+NULL
+250
+2023
+1
+West
+150
+2023
+2
+East
+120
+2023
+2
+NULL
+320
+2023
+2
+West
+200
+2023
+NULL
+NULL
+570
+2024
+1
+East
+180
+2024
+1
+NULL
+320
+2024
+1
+West
+140
+2024
+NULL
+NULL
+320
+NULL
+NULL
+NULL
+890
+
+# ============================================================================
+# CUBE Tests
+# ============================================================================
+
+# CUBE with single column (same as ROLLUP for single column)
+query II rowsort
+SELECT year, SUM(amount) FROM sales GROUP BY CUBE(year)
+----
+2023
+570
+2024
+320
+NULL
+890
+
+# CUBE with two columns
+# CUBE(year, quarter) produces: (year, quarter), (year), (quarter), ()
+query III rowsort
+SELECT year, quarter, SUM(amount) FROM sales GROUP BY CUBE(year, quarter)
+----
+2023
+1
+250
+2023
+2
+320
+2023
+NULL
+570
+2024
+1
+320
+2024
+NULL
+320
+NULL
+1
+570
+NULL
+2
+320
+NULL
+NULL
+890
+
+# CUBE with region and product (all combinations)
+query TTI rowsort
+SELECT region, product, SUM(amount) FROM sales GROUP BY CUBE(region, product)
+----
+East
+Gadget
+180
+East
+NULL
+400
+East
+Widget
+220
+NULL
+Gadget
+380
+NULL
+NULL
+890
+NULL
+Widget
+510
+West
+Gadget
+200
+West
+NULL
+490
+West
+Widget
+290
+
+# ============================================================================
+# GROUPING SETS Tests
+# ============================================================================
+
+# Simple GROUPING SETS
+query III rowsort
+SELECT year, quarter, SUM(amount) FROM sales GROUP BY GROUPING SETS((year, quarter), (year), ())
+----
+2023
+1
+250
+2023
+2
+320
+2023
+NULL
+570
+2024
+1
+320
+2024
+NULL
+320
+NULL
+NULL
+890
+
+# GROUPING SETS with different combinations
+query TII rowsort
+SELECT region, year, SUM(amount) FROM sales GROUP BY GROUPING SETS((region), (year))
+----
+East
+NULL
+400
+NULL
+2023
+570
+NULL
+2024
+320
+West
+NULL
+490
+
+# GROUPING SETS with just grand total
+query I
+SELECT SUM(amount) FROM sales GROUP BY GROUPING SETS(())
+----
+890
+
+# ============================================================================
+# GROUPING() Function Tests
+# ============================================================================
+
+# GROUPING() with ROLLUP - shows which columns are rolled up
+query IIII rowsort
+SELECT year, GROUPING(year), SUM(amount), COUNT(*) FROM sales GROUP BY ROLLUP(year)
+----
+2023
+0
+570
+4
+2024
+0
+320
+2
+NULL
+1
+890
+6
+
+# GROUPING() with multiple columns in ROLLUP
+query IIIIII rowsort
+SELECT year, quarter, GROUPING(year), GROUPING(quarter), SUM(amount), COUNT(*) FROM sales GROUP BY ROLLUP(year, quarter)
+----
+2023
+1
+0
+0
+250
+2
+2023
+2
+0
+0
+320
+2
+2023
+NULL
+0
+1
+570
+4
+2024
+1
+0
+0
+320
+2
+2024
+NULL
+0
+1
+320
+2
+NULL
+NULL
+1
+1
+890
+6
+
+# ============================================================================
+# Edge Cases
+# ============================================================================
+
+# ROLLUP with HAVING clause
+query III rowsort
+SELECT year, quarter, SUM(amount) FROM sales GROUP BY ROLLUP(year, quarter) HAVING SUM(amount) > 300
+----
+2023
+2
+320
+2023
+NULL
+570
+2024
+1
+320
+2024
+NULL
+320
+NULL
+NULL
+890
+
+# ROLLUP with ORDER BY
+query III
+SELECT year, quarter, SUM(amount) AS total FROM sales GROUP BY ROLLUP(year, quarter) ORDER BY total DESC
+----
+NULL
+NULL
+890
+2023
+NULL
+570
+2024
+1
+320
+2024
+NULL
+320
+2023
+2
+320
+2023
+1
+250
+
+# CUBE with DISTINCT aggregate
+query TI rowsort
+SELECT region, COUNT(DISTINCT product) FROM sales GROUP BY CUBE(region)
+----
+East
+2
+NULL
+2
+West
+2
+
+# Cleanup
+statement ok
+DROP TABLE sales

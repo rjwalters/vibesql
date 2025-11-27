@@ -81,7 +81,7 @@ fn is_select_stmt_correlated_impl(
 
     // Check GROUP BY
     if let Some(group_by) = &stmt.group_by {
-        for expr in group_by {
+        for expr in group_by.all_expressions() {
             if is_expression_correlated(expr, outer_schema, subquery_tables) {
                 return true;
             }

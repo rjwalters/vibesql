@@ -584,7 +584,7 @@ impl QueryPattern for TpchQ1PatternMatcher {
 
         // Must have GROUP BY with l_returnflag and l_linestatus
         if let Some(ref group_by) = stmt.group_by {
-            let has_returnflag = group_by.iter().any(|expr| {
+            let has_returnflag = group_by.all_expressions().iter().any(|expr| {
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
                     column.eq_ignore_ascii_case("l_returnflag")
                 } else {
@@ -592,7 +592,7 @@ impl QueryPattern for TpchQ1PatternMatcher {
                 }
             });
 
-            let has_linestatus = group_by.iter().any(|expr| {
+            let has_linestatus = group_by.all_expressions().iter().any(|expr| {
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
                     column.eq_ignore_ascii_case("l_linestatus")
                 } else {
@@ -914,7 +914,7 @@ impl QueryPattern for TpchQ3PatternMatcher {
 
         // Check for GROUP BY l_orderkey, o_orderdate, o_shippriority
         if let Some(ref group_by) = stmt.group_by {
-            let has_orderkey = group_by.iter().any(|expr| {
+            let has_orderkey = group_by.all_expressions().iter().any(|expr| {
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
                     column.eq_ignore_ascii_case("l_orderkey")
                 } else {
@@ -922,7 +922,7 @@ impl QueryPattern for TpchQ3PatternMatcher {
                 }
             });
 
-            let has_orderdate = group_by.iter().any(|expr| {
+            let has_orderdate = group_by.all_expressions().iter().any(|expr| {
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
                     column.eq_ignore_ascii_case("o_orderdate")
                 } else {
@@ -930,7 +930,7 @@ impl QueryPattern for TpchQ3PatternMatcher {
                 }
             });
 
-            let has_shippriority = group_by.iter().any(|expr| {
+            let has_shippriority = group_by.all_expressions().iter().any(|expr| {
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
                     column.eq_ignore_ascii_case("o_shippriority")
                 } else {

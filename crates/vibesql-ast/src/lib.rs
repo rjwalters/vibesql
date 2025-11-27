@@ -50,7 +50,7 @@ pub use introspection::{
 pub use operators::{BinaryOperator, UnaryOperator};
 pub use revoke::{CascadeOption, RevokeStmt};
 pub use select::{
-    CommonTableExpr, FromClause, JoinType, OrderByItem, OrderDirection, SelectItem, SelectStmt,
-    SetOperation, SetOperator,
+    CommonTableExpr, FromClause, GroupByClause, GroupingElement, GroupingSet, JoinType,
+    OrderByItem, OrderDirection, SelectItem, SelectStmt, SetOperation, SetOperator,
 };
 pub use statement::Statement;

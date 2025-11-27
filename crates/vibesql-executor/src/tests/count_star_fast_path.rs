@@ -210,10 +210,10 @@ fn test_count_star_with_group_by_no_fast_path() {
         ],
         from: Some(vibesql_ast::FromClause::Table { name: "test_table".to_string(), alias: None }),
         where_clause: None,
-        group_by: Some(vec![vibesql_ast::Expression::ColumnRef {
+        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: None,
             column: "category".to_string(),
-        }]),
+        }])),
         having: None,
         order_by: None,
         limit: None,

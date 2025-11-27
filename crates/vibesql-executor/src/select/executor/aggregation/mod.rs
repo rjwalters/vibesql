@@ -15,7 +15,7 @@ use crate::{
     select::{
         cte::CteResult,
         filter::apply_where_filter_combined_auto,
-        grouping::group_rows,
+        grouping::{expand_group_by_clause, get_base_expressions, group_rows, GroupingContext},
         helpers::{apply_distinct, apply_limit_offset},
     },
 };
@@ -153,98 +153,157 @@ impl SelectExecutor<'_> {
             }
         };
 
-        // Group rows
-        let groups = if let Some(group_by_exprs) = &stmt.group_by {
-            group_rows(&filtered_rows, group_by_exprs, &evaluator, self)?
-        } else {
-            // No GROUP BY - treat all rows as one group
-            vec![(Vec::new(), filtered_rows)]
-        };
-
         // Expand wildcards in SELECT list to explicit column references
         // This allows SELECT * and SELECT table.* to work with GROUP BY/aggregates
         let expanded_select_list = self.expand_wildcards_for_aggregation(&stmt.select_list, &schema)?;
 
-        // Compute aggregates for each group and apply HAVING
+        // Process GROUP BY clause (handles ROLLUP, CUBE, GROUPING SETS)
         let mut result_rows = Vec::new();
-        for (group_key, group_rows) in groups {
-            // Clear aggregate cache for new group
-            self.clear_aggregate_cache();
 
-            // Clear CSE cache for new group to prevent cross-group contamination
-            evaluator.clear_cse_cache();
+        if let Some(group_by_clause) = &stmt.group_by {
+            // Expand GROUP BY clause into list of grouping sets
+            let grouping_sets = expand_group_by_clause(group_by_clause);
+            let base_expressions = get_base_expressions(group_by_clause);
 
-            // Check timeout during aggregation
-            self.check_timeout()?;
+            // For each grouping set, group rows and compute aggregates
+            for resolved_set in grouping_sets {
+                let grouping_context = GroupingContext {
+                    base_expressions: base_expressions.clone(),
+                    rolled_up: resolved_set.rolled_up.clone(),
+                };
 
-            // Compute aggregates for this group
-            let mut aggregate_results = Vec::new();
-            for item in &expanded_select_list {
-                match item {
-                    vibesql_ast::SelectItem::Expression { expr, .. } => {
-                        let value = self.evaluate_with_aggregates(
-                            expr,
+                // Group rows by this grouping set's expressions
+                let groups = if resolved_set.group_by_exprs.is_empty() {
+                    // Empty grouping set (grand total) - all rows in one group
+                    vec![(Vec::new(), filtered_rows.clone())]
+                } else {
+                    group_rows(&filtered_rows, &resolved_set.group_by_exprs, &evaluator, self)?
+                };
+
+                // Process each group
+                for (group_key, group_rows) in groups {
+                    // Clear aggregate cache for new group
+                    self.clear_aggregate_cache();
+
+                    // Clear CSE cache for new group to prevent cross-group contamination
+                    evaluator.clear_cse_cache();
+
+                    // Check timeout during aggregation
+                    self.check_timeout()?;
+
+                    // Compute aggregates for this group
+                    let mut aggregate_results = Vec::new();
+                    for item in &expanded_select_list {
+                        match item {
+                            vibesql_ast::SelectItem::Expression { expr, .. } => {
+                                let value = self.evaluate_with_aggregates_and_grouping(
+                                    expr,
+                                    &group_rows,
+                                    &group_key,
+                                    &evaluator,
+                                    &grouping_context,
+                                )?;
+                                aggregate_results.push(value);
+                            }
+                            vibesql_ast::SelectItem::Wildcard { .. }
+                            | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                                return Err(ExecutorError::UnsupportedFeature(
+                                    "SELECT * and qualified wildcards not supported with aggregates"
+                                        .to_string(),
+                                ))
+                            }
+                        }
+                    }
+
+                    // Apply HAVING filter
+                    let include_group = if let Some(having_expr) = &stmt.having {
+                        let having_result = self.evaluate_with_aggregates_and_grouping(
+                            having_expr,
                             &group_rows,
                             &group_key,
                             &evaluator,
+                            &grouping_context,
                         )?;
-                        aggregate_results.push(value);
-                    }
-                    vibesql_ast::SelectItem::Wildcard { .. }
-                    | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
-                        // This should not happen after expansion, but keep for safety
-                        return Err(ExecutorError::UnsupportedFeature(
-                            "SELECT * and qualified wildcards not supported with aggregates"
-                                .to_string(),
-                        ))
+                        self.is_truthy(&having_result)?
+                    } else {
+                        true
+                    };
+
+                    if include_group {
+                        let row = vibesql_storage::Row::new(aggregate_results);
+
+                        // Track memory for aggregation result row
+                        let row_memory = std::mem::size_of::<vibesql_storage::Row>()
+                            + std::mem::size_of_val(row.values.as_slice());
+                        self.track_memory_allocation(row_memory)?;
+
+                        result_rows.push(row);
                     }
                 }
             }
+        } else {
+            // No GROUP BY - treat all rows as one group
+            let groups = vec![(Vec::new(), filtered_rows)];
+            let grouping_context = GroupingContext::default();
 
-            // Apply HAVING filter
-            let include_group = if let Some(having_expr) = &stmt.having {
-                let having_result = self.evaluate_with_aggregates(
-                    having_expr,
-                    &group_rows,
-                    &group_key,
-                    &evaluator,
-                )?;
-                match having_result {
-                    vibesql_types::SqlValue::Boolean(true) => true,
-                    vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
-                    // SQLLogicTest compatibility: treat integers as truthy/falsy (C-like behavior)
-                    vibesql_types::SqlValue::Integer(0) => false,
-                    vibesql_types::SqlValue::Integer(_) => true,
-                    vibesql_types::SqlValue::Smallint(0) => false,
-                    vibesql_types::SqlValue::Smallint(_) => true,
-                    vibesql_types::SqlValue::Bigint(0) => false,
-                    vibesql_types::SqlValue::Bigint(_) => true,
-                    vibesql_types::SqlValue::Float(0.0) => false,
-                    vibesql_types::SqlValue::Float(_) => true,
-                    vibesql_types::SqlValue::Real(0.0) => false,
-                    vibesql_types::SqlValue::Real(_) => true,
-                    vibesql_types::SqlValue::Double(0.0) => false,
-                    vibesql_types::SqlValue::Double(_) => true,
-                    other => {
-                        return Err(ExecutorError::InvalidWhereClause(format!(
-                            "HAVING must evaluate to boolean, got: {:?}",
-                            other
-                        )))
+            for (group_key, group_rows) in groups {
+                // Clear aggregate cache for new group
+                self.clear_aggregate_cache();
+
+                // Clear CSE cache for new group to prevent cross-group contamination
+                evaluator.clear_cse_cache();
+
+                // Check timeout during aggregation
+                self.check_timeout()?;
+
+                // Compute aggregates for this group
+                let mut aggregate_results = Vec::new();
+                for item in &expanded_select_list {
+                    match item {
+                        vibesql_ast::SelectItem::Expression { expr, .. } => {
+                            let value = self.evaluate_with_aggregates_and_grouping(
+                                expr,
+                                &group_rows,
+                                &group_key,
+                                &evaluator,
+                                &grouping_context,
+                            )?;
+                            aggregate_results.push(value);
+                        }
+                        vibesql_ast::SelectItem::Wildcard { .. }
+                        | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                            return Err(ExecutorError::UnsupportedFeature(
+                                "SELECT * and qualified wildcards not supported with aggregates"
+                                    .to_string(),
+                            ))
+                        }
                     }
                 }
-            } else {
-                true
-            };
 
-            if include_group {
-                let row = vibesql_storage::Row::new(aggregate_results);
+                // Apply HAVING filter
+                let include_group = if let Some(having_expr) = &stmt.having {
+                    let having_result = self.evaluate_with_aggregates_and_grouping(
+                        having_expr,
+                        &group_rows,
+                        &group_key,
+                        &evaluator,
+                        &grouping_context,
+                    )?;
+                    self.is_truthy(&having_result)?
+                } else {
+                    true
+                };
 
-                // Track memory for aggregation result row
-                let row_memory = std::mem::size_of::<vibesql_storage::Row>()
-                    + std::mem::size_of_val(row.values.as_slice());
-                self.track_memory_allocation(row_memory)?;
+                if include_group {
+                    let row = vibesql_storage::Row::new(aggregate_results);
 
-                result_rows.push(row);
+                    // Track memory for aggregation result row
+                    let row_memory = std::mem::size_of::<vibesql_storage::Row>()
+                        + std::mem::size_of_val(row.values.as_slice());
+                    self.track_memory_allocation(row_memory)?;
+
+                    result_rows.push(row);
+                }
             }
         }
 
@@ -265,16 +324,18 @@ impl SelectExecutor<'_> {
         let result_rows = if result_rows.is_empty() && stmt.group_by.is_none() {
             // Recompute aggregates for empty input
             // This should not happen if the logic above is correct, but acts as a failsafe
+            let grouping_context = GroupingContext::default();
             let mut aggregate_results = Vec::new();
             for item in &expanded_select_list {
                 match item {
                     vibesql_ast::SelectItem::Expression { expr, .. } => {
                         // For aggregates on empty input: COUNT returns 0, others return NULL
-                        let value = self.evaluate_with_aggregates(
+                        let value = self.evaluate_with_aggregates_and_grouping(
                             expr,
                             &[],  // Empty group_rows
                             &[],  // Empty group_key
                             &evaluator,
+                            &grouping_context,
                         )?;
                         aggregate_results.push(value);
                     }

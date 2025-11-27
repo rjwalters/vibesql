@@ -40,6 +40,8 @@
 //! ```
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
+#[cfg(test)]
+use vibesql_ast::GroupByClause;
 
 /// Transform a SELECT statement by converting IN/NOT IN subqueries to semi/anti-joins
 ///
@@ -712,7 +714,7 @@ mod tests {
         let mut stmt = simple_select("orders", "o_orderkey");
         let mut subquery = simple_select("lineitem", "l_orderkey");
         // Add GROUP BY to make it complex
-        subquery.group_by = Some(vec![column_ref("l_orderkey")]);
+        subquery.group_by = Some(GroupByClause::Simple(vec![column_ref("l_orderkey")]));
 
         stmt.where_clause = Some(Expression::In {
             expr: Box::new(column_ref("o_orderkey")),

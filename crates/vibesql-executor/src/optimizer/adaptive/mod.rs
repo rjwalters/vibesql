@@ -118,7 +118,7 @@ pub fn choose_execution_model(query: &SelectStmt) -> ExecutionModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
+    use vibesql_ast::{BinaryOperator, Expression, FromClause, GroupByClause, JoinType, SelectItem, SelectStmt};
     use vibesql_types::SqlValue;
 
     #[test]
@@ -195,10 +195,10 @@ mod tests {
                 alias: None,
             }),
             where_clause: None,
-            group_by: Some(vec![Expression::ColumnRef {
+            group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
                 table: None,
                 column: "region".to_string(),
-            }]),
+            }])),
             having: None,
             order_by: None,
             limit: None,

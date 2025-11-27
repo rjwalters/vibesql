@@ -202,7 +202,7 @@ pub(super) fn validate_select_column_references_with_context(
     // Validate GROUP BY column references (allowing aliases and procedure variables)
     if let Some(group_by) = &stmt.group_by {
         let combined: std::collections::HashSet<String> = select_aliases.union(&proc_vars).cloned().collect();
-        for group_expr in group_by {
+        for group_expr in group_by.all_expressions() {
             validate_expression_column_refs(group_expr, schema, outer_schema, &combined)?;
         }
     }

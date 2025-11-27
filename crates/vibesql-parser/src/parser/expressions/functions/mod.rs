@@ -27,12 +27,13 @@ impl Parser {
                 }
                 name
             }
-            // Allow LEFT, RIGHT, REPLACE, and SCHEMA keywords as function names
+            // Allow LEFT, RIGHT, REPLACE, SCHEMA, and GROUPING keywords as function names
             // These are reserved keywords but can also be functions
             Token::Keyword(Keyword::Left)
             | Token::Keyword(Keyword::Right)
             | Token::Keyword(Keyword::Replace)
-            | Token::Keyword(Keyword::Schema) => {
+            | Token::Keyword(Keyword::Schema)
+            | Token::Keyword(Keyword::Grouping) => {
                 // Peek ahead to see if this is followed by '('
                 // Don't consume the keyword unless we're sure it's a function
                 let keyword_name = match self.peek() {
@@ -40,6 +41,7 @@ impl Parser {
                     Token::Keyword(Keyword::Right) => "RIGHT",
                     Token::Keyword(Keyword::Replace) => "REPLACE",
                     Token::Keyword(Keyword::Schema) => "SCHEMA",
+                    Token::Keyword(Keyword::Grouping) => "GROUPING",
                     _ => unreachable!(),
                 };
 

@@ -11,7 +11,11 @@ mod simple;
 mod subquery;
 
 use super::super::builder::SelectExecutor;
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
+use crate::{
+    errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
+    select::grouping::GroupingContext,
+};
 
 impl SelectExecutor<'_> {
     /// Evaluate an expression in the context of aggregation
@@ -195,5 +199,73 @@ impl SelectExecutor<'_> {
 
         // Extract rows without sort keys
         Ok(rows_with_keys.into_iter().map(|(row, _)| row).collect())
+    }
+
+    /// Evaluate an expression in the context of aggregation with grouping context
+    ///
+    /// This is used for ROLLUP/CUBE/GROUPING SETS to support the GROUPING() function
+    /// and to return NULL for columns that are rolled up in the current grouping set.
+    #[allow(clippy::only_used_in_recursion)]
+    pub(in crate::select::executor) fn evaluate_with_aggregates_and_grouping(
+        &self,
+        expr: &vibesql_ast::Expression,
+        group_rows: &[vibesql_storage::Row],
+        group_key: &[vibesql_types::SqlValue],
+        evaluator: &CombinedExpressionEvaluator,
+        grouping_context: &GroupingContext,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        // Check for GROUPING() function call
+        if let vibesql_ast::Expression::Function { name, args, .. } = expr {
+            if name.eq_ignore_ascii_case("GROUPING") {
+                // GROUPING() function - returns 1 if the column is rolled up, 0 otherwise
+                if args.len() != 1 {
+                    return Err(ExecutorError::UnsupportedExpression(format!(
+                        "GROUPING() requires exactly 1 argument, got {}",
+                        args.len()
+                    )));
+                }
+                let result = grouping_context.is_rolled_up(&args[0]);
+                return Ok(vibesql_types::SqlValue::Integer(result as i64));
+            }
+        }
+
+        // For column references, check if the column is rolled up
+        // If rolled up, return NULL instead of the actual value
+        if let vibesql_ast::Expression::ColumnRef { .. } = expr {
+            if grouping_context.is_rolled_up(expr) == 1 {
+                return Ok(vibesql_types::SqlValue::Null);
+            }
+        }
+
+        // For other expressions, delegate to the existing evaluation
+        self.evaluate_with_aggregates(expr, group_rows, group_key, evaluator)
+    }
+
+    /// Check if a SQL value is truthy (for HAVING clause evaluation)
+    pub(in crate::select::executor) fn is_truthy(
+        &self,
+        value: &vibesql_types::SqlValue,
+    ) -> Result<bool, ExecutorError> {
+        match value {
+            vibesql_types::SqlValue::Boolean(true) => Ok(true),
+            vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => Ok(false),
+            // SQLLogicTest compatibility: treat integers as truthy/falsy (C-like behavior)
+            vibesql_types::SqlValue::Integer(0) => Ok(false),
+            vibesql_types::SqlValue::Integer(_) => Ok(true),
+            vibesql_types::SqlValue::Smallint(0) => Ok(false),
+            vibesql_types::SqlValue::Smallint(_) => Ok(true),
+            vibesql_types::SqlValue::Bigint(0) => Ok(false),
+            vibesql_types::SqlValue::Bigint(_) => Ok(true),
+            vibesql_types::SqlValue::Float(0.0) => Ok(false),
+            vibesql_types::SqlValue::Float(_) => Ok(true),
+            vibesql_types::SqlValue::Real(0.0) => Ok(false),
+            vibesql_types::SqlValue::Real(_) => Ok(true),
+            vibesql_types::SqlValue::Double(0.0) => Ok(false),
+            vibesql_types::SqlValue::Double(_) => Ok(true),
+            other => Err(ExecutorError::InvalidWhereClause(format!(
+                "HAVING must evaluate to boolean, got: {:?}",
+                other
+            ))),
+        }
     }
 }

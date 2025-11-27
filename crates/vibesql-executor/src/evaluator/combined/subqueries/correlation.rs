@@ -118,7 +118,7 @@ fn collect_correlation_refs(
 
     // Check GROUP BY
     if let Some(group_by) = &subquery.group_by {
-        for expr in group_by {
+        for expr in group_by.all_expressions() {
             collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
         }
     }
