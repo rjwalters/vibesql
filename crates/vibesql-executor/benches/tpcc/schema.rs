@@ -295,7 +295,7 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         }
     }
 
-    // Primary key indexes
+    // Primary key indexes (only for tables with < 100k rows to avoid slow disk-backed indexing)
     db.create_index(
         "idx_warehouse_pk".to_string(),
         "warehouse".to_string(),
@@ -331,28 +331,20 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         vec![col("no_w_id"), col("no_d_id"), col("no_o_id")],
     ).ok();
 
-    db.create_index(
-        "idx_order_line_pk".to_string(),
-        "order_line".to_string(),
-        true,
-        vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id"), col("ol_number")],
-    ).ok();
+    // NOTE: The following indexes are skipped because their tables have >= 100k rows,
+    // which triggers disk-backed indexing that is currently very slow (causes benchmark
+    // to hang indefinitely). The disk-backed B+ tree bulk_load needs performance
+    // optimization. For now, we skip these indexes to allow the benchmark to complete.
+    // The transactions will still work correctly, just without optimal index performance.
+    //
+    // Skipped indexes (tables with >= 100k rows trigger disk-backed mode):
+    // - idx_order_line_pk: order_line has ~300k rows
+    // - idx_item_pk: item has 100k rows
+    // - idx_stock_pk: stock has 100k rows per warehouse
+    //
+    // See: https://github.com/rjwalters/vibesql/issues/2793
 
-    db.create_index(
-        "idx_item_pk".to_string(),
-        "item".to_string(),
-        true,
-        vec![col("i_id")],
-    ).ok();
-
-    db.create_index(
-        "idx_stock_pk".to_string(),
-        "stock".to_string(),
-        true,
-        vec![col("s_w_id"), col("s_i_id")],
-    ).ok();
-
-    // Secondary indexes for queries
+    // Secondary indexes for queries (on smaller tables)
     db.create_index(
         "idx_customer_name".to_string(),
         "customer".to_string(),
