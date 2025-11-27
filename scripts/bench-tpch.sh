@@ -16,6 +16,17 @@ MODE=${2:-full}
 OUTPUT_FILE="/tmp/tpch_results.txt"
 BENCH_NAME="tpch_profiling"
 
+# Find timeout command (GNU coreutils timeout or gtimeout on macOS)
+if command -v timeout &> /dev/null; then
+    TIMEOUT_CMD="timeout"
+elif command -v gtimeout &> /dev/null; then
+    TIMEOUT_CMD="gtimeout"
+else
+    echo "Error: 'timeout' command not found."
+    echo "On macOS, install with: brew install coreutils"
+    exit 1
+fi
+
 # Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -36,7 +47,7 @@ echo ""
 
 # Run benchmark
 echo -e "${YELLOW}Running benchmark...${NC}"
-QUERY_TIMEOUT_SECS=${TIMEOUT_SECS} timeout 300 ./target/release/deps/${BENCH_NAME}-* > ${OUTPUT_FILE} 2>&1
+QUERY_TIMEOUT_SECS=${TIMEOUT_SECS} ${TIMEOUT_CMD} 300 ./target/release/deps/${BENCH_NAME}-* > ${OUTPUT_FILE} 2>&1
 echo -e "${GREEN}✓ Benchmark complete${NC}"
 echo ""
 

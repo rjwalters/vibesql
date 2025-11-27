@@ -13,6 +13,7 @@
 #   - jq (JSON processing for test analysis)
 #   - gh (GitHub CLI for issue/PR management)
 #   - sccache (compilation cache for faster builds)
+#   - coreutils (GNU timeout for benchmarks)
 #   - pnpm (for web-demo, optional)
 #
 # Usage:
@@ -170,6 +171,17 @@ else
     missing+=("sccache")
 fi
 
+# Check coreutils (provides GNU timeout for benchmarks)
+print_status "Checking coreutils (GNU timeout)..."
+if command_exists gtimeout; then
+    print_success "coreutils is installed (gtimeout available)"
+elif command_exists timeout; then
+    print_success "timeout is available"
+else
+    print_warning "coreutils is not installed (needed for: make benchmark)"
+    missing+=("coreutils")
+fi
+
 # Check git submodules
 print_status "Checking git submodules..."
 if [[ -d "third_party/sqllogictest/test" ]] && [[ -n "$(ls -A third_party/sqllogictest/test 2>/dev/null)" ]]; then
@@ -285,6 +297,13 @@ if [[ " ${missing[*]} " =~ " sccache " ]]; then
     print_status "Installing sccache via Homebrew..."
     brew install sccache
     print_success "sccache installed"
+fi
+
+# Install coreutils if needed
+if [[ " ${missing[*]} " =~ " coreutils " ]]; then
+    print_status "Installing coreutils via Homebrew..."
+    brew install coreutils
+    print_success "coreutils installed (gtimeout now available)"
 fi
 
 # Configure sccache as rustc wrapper if needed
