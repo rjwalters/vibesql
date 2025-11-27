@@ -18,6 +18,7 @@
 //!
 //! **Write Tests:**
 //! - `sysbench_insert` - Single row inserts
+//! - `sysbench_write_only` - Write-only workload (1 index update, 1 non-index update, 1 delete, 1 insert)
 //!
 //! **Mixed Tests:**
 //! - `sysbench_read_write` - Mixed read/write workload (10 reads, 1 update per transaction)
@@ -39,6 +40,9 @@
 //!
 //! # Run only VibeSQL benchmarks
 //! cargo bench --bench sysbench_oltp -- vibesql
+//!
+//! # Run only write_only benchmarks
+//! cargo bench --bench sysbench_oltp -- write_only
 //! ```
 //!
 //! ## Table Size
@@ -117,6 +121,24 @@ fn vibesql_update_non_index(db: &mut VibeDB, id: i64, c: &str) {
     let stmt = Parser::parse_sql(&sql).unwrap();
     if let vibesql_ast::Statement::Update(update) = stmt {
         vibesql_executor::UpdateExecutor::execute(&update, db).unwrap();
+    }
+}
+
+/// Execute an update query on VibeSQL (update indexed column k)
+fn vibesql_update_index(db: &mut VibeDB, id: i64) {
+    let sql = format!("UPDATE sbtest1 SET k = k + 1 WHERE id = {}", id);
+    let stmt = Parser::parse_sql(&sql).unwrap();
+    if let vibesql_ast::Statement::Update(update) = stmt {
+        vibesql_executor::UpdateExecutor::execute(&update, db).unwrap();
+    }
+}
+
+/// Execute a delete query on VibeSQL
+fn vibesql_delete(db: &mut VibeDB, id: i64) {
+    let sql = format!("DELETE FROM sbtest1 WHERE id = {}", id);
+    let stmt = Parser::parse_sql(&sql).unwrap();
+    if let vibesql_ast::Statement::Delete(delete) = stmt {
+        vibesql_executor::DeleteExecutor::execute(&delete, db).unwrap();
     }
 }
 
@@ -215,6 +237,22 @@ fn sqlite_update_non_index(conn: &SqliteConn, id: i64, c: &str) {
 }
 
 #[cfg(feature = "benchmark-comparison")]
+fn sqlite_update_index(conn: &SqliteConn, id: i64) {
+    let mut stmt = conn
+        .prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1")
+        .unwrap();
+    stmt.execute(rusqlite::params![id]).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn sqlite_delete(conn: &SqliteConn, id: i64) {
+    let mut stmt = conn
+        .prepare_cached("DELETE FROM sbtest1 WHERE id = ?1")
+        .unwrap();
+    stmt.execute(rusqlite::params![id]).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
 fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt = conn
         .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
@@ -297,6 +335,22 @@ fn duckdb_update_non_index(conn: &DuckDBConn, id: i64, c: &str) {
         .prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2")
         .unwrap();
     stmt.execute(duckdb::params![c, id]).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn duckdb_update_index(conn: &DuckDBConn, id: i64) {
+    let mut stmt = conn
+        .prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1")
+        .unwrap();
+    stmt.execute(duckdb::params![id]).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn duckdb_delete(conn: &DuckDBConn, id: i64) {
+    let mut stmt = conn
+        .prepare_cached("DELETE FROM sbtest1 WHERE id = ?1")
+        .unwrap();
+    stmt.execute(duckdb::params![id]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -527,6 +581,145 @@ fn benchmark_insert_duckdb(c: &mut Criterion) {
                 let c = generate_c_string();
                 let pad = generate_pad_string();
                 duckdb_insert(&conn, next_id, k, &c, &pad);
+                next_id += 1;
+            }
+            start.elapsed()
+        })
+    });
+
+    group.finish();
+}
+
+// =============================================================================
+// Write-Only Benchmarks
+// =============================================================================
+
+/// Benchmark oltp_write_only on VibeSQL
+///
+/// This test simulates a write-heavy OLTP workload per transaction:
+/// - 1 index update (UPDATE sbtest1 SET k = k + 1 WHERE id = ?)
+/// - 1 non-index update (UPDATE sbtest1 SET c = ? WHERE id = ?)
+/// - 1 delete (DELETE FROM sbtest1 WHERE id = ?)
+/// - 1 insert (INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?))
+///
+/// The delete uses a random existing ID, the insert uses a new ID.
+/// This measures write throughput without read operations.
+fn benchmark_write_only_vibesql(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_write_only");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
+        b.iter_custom(|iters| {
+            let mut db = load_vibesql(TABLE_SIZE);
+            let mut rng = ChaCha8Rng::seed_from_u64(42);
+            let mut data_gen = SysbenchData::new(TABLE_SIZE);
+            let mut next_id = (TABLE_SIZE + 1) as i64;
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                // Pick a random ID for updates
+                let update_id = rng.random_range(1..=TABLE_SIZE as i64);
+
+                // 1 index update (SET k = k + 1)
+                vibesql_update_index(&mut db, update_id);
+
+                // 1 non-index update (SET c = ?)
+                let c = generate_c_string();
+                vibesql_update_non_index(&mut db, update_id, &c);
+
+                // 1 delete (random existing row)
+                let delete_id = rng.random_range(1..=next_id - 1);
+                vibesql_delete(&mut db, delete_id);
+
+                // 1 insert (new row with new ID)
+                let k = data_gen.random_k();
+                let new_c = generate_c_string();
+                let pad = generate_pad_string();
+                vibesql_insert(&mut db, next_id, k, &new_c, &pad);
+                next_id += 1;
+            }
+            start.elapsed()
+        })
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_write_only_sqlite(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_write_only");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
+        b.iter_custom(|iters| {
+            let conn = load_sqlite(TABLE_SIZE);
+            let mut rng = ChaCha8Rng::seed_from_u64(42);
+            let mut data_gen = SysbenchData::new(TABLE_SIZE);
+            let mut next_id = (TABLE_SIZE + 1) as i64;
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                // Pick a random ID for updates
+                let update_id = rng.random_range(1..=TABLE_SIZE as i64);
+
+                // 1 index update (SET k = k + 1)
+                sqlite_update_index(&conn, update_id);
+
+                // 1 non-index update (SET c = ?)
+                let c = generate_c_string();
+                sqlite_update_non_index(&conn, update_id, &c);
+
+                // 1 delete (random existing row)
+                let delete_id = rng.random_range(1..=next_id - 1);
+                sqlite_delete(&conn, delete_id);
+
+                // 1 insert (new row with new ID)
+                let k = data_gen.random_k();
+                let new_c = generate_c_string();
+                let pad = generate_pad_string();
+                sqlite_insert(&conn, next_id, k, &new_c, &pad);
+                next_id += 1;
+            }
+            start.elapsed()
+        })
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_write_only_duckdb(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_write_only");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
+        b.iter_custom(|iters| {
+            let conn = load_duckdb(TABLE_SIZE);
+            let mut rng = ChaCha8Rng::seed_from_u64(42);
+            let mut data_gen = SysbenchData::new(TABLE_SIZE);
+            let mut next_id = (TABLE_SIZE + 1) as i64;
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                // Pick a random ID for updates
+                let update_id = rng.random_range(1..=TABLE_SIZE as i64);
+
+                // 1 index update (SET k = k + 1)
+                duckdb_update_index(&conn, update_id);
+
+                // 1 non-index update (SET c = ?)
+                let c = generate_c_string();
+                duckdb_update_non_index(&conn, update_id, &c);
+
+                // 1 delete (random existing row)
+                let delete_id = rng.random_range(1..=next_id - 1);
+                duckdb_delete(&conn, delete_id);
+
+                // 1 insert (new row with new ID)
+                let k = data_gen.random_k();
+                let new_c = generate_c_string();
+                let pad = generate_pad_string();
+                duckdb_insert(&conn, next_id, k, &new_c, &pad);
                 next_id += 1;
             }
             start.elapsed()
@@ -906,6 +1099,7 @@ criterion_group!(
     // Original benchmarks
     benchmark_point_select_vibesql,
     benchmark_insert_vibesql,
+    benchmark_write_only_vibesql,
     benchmark_read_write_vibesql,
     // New read-only benchmarks
     benchmark_oltp_read_only_vibesql,
@@ -923,6 +1117,9 @@ criterion_group!(
     benchmark_insert_vibesql,
     benchmark_insert_sqlite,
     benchmark_insert_duckdb,
+    benchmark_write_only_vibesql,
+    benchmark_write_only_sqlite,
+    benchmark_write_only_duckdb,
     benchmark_read_write_vibesql,
     benchmark_read_write_sqlite,
     benchmark_read_write_duckdb,
