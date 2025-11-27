@@ -61,6 +61,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 locals,
                 auto_switch_dialect: self.auto_switch_dialect,
                 current_dialect: self.current_dialect.clone(),
+                dialect_stats: Default::default(),
             };
 
             tasks.push(async move {
