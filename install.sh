@@ -14,7 +14,8 @@
 #   - gh (GitHub CLI for issue/PR management)
 #   - sccache (compilation cache for faster builds)
 #   - coreutils (GNU timeout for benchmarks)
-#   - pnpm (for web-demo, optional)
+#   - node (for web-demo)
+#   - pnpm (for web-demo)
 #   - Docker Desktop (for MySQL/PostgreSQL compatibility testing)
 #
 # Usage:
@@ -192,13 +193,22 @@ else
     missing+=("submodules")
 fi
 
-# Optional: Check pnpm (for web-demo)
-print_status "Checking pnpm (optional, for web-demo)..."
+# Check Node.js (for web-demo)
+print_status "Checking Node.js..."
+if command_exists node; then
+    print_success "Node.js is installed ($(node --version))"
+else
+    print_warning "Node.js is not installed (needed for: web-demo)"
+    missing+=("node")
+fi
+
+# Check pnpm (for web-demo)
+print_status "Checking pnpm..."
 if command_exists pnpm; then
     print_success "pnpm is installed ($(pnpm --version))"
 else
-    print_warning "pnpm is not installed (optional, for web-demo)"
-    # Don't add to missing - it's optional
+    print_warning "pnpm is not installed (needed for: web-demo)"
+    missing+=("pnpm")
 fi
 
 # Check Docker (for MySQL/PostgreSQL compatibility testing)
@@ -319,6 +329,20 @@ if [[ " ${missing[*]} " =~ " coreutils " ]]; then
     print_status "Installing coreutils via Homebrew..."
     brew install coreutils
     print_success "coreutils installed (gtimeout now available)"
+fi
+
+# Install Node.js if needed
+if [[ " ${missing[*]} " =~ " node " ]]; then
+    print_status "Installing Node.js via Homebrew..."
+    brew install node
+    print_success "Node.js installed"
+fi
+
+# Install pnpm if needed
+if [[ " ${missing[*]} " =~ " pnpm " ]]; then
+    print_status "Installing pnpm via Homebrew..."
+    brew install pnpm
+    print_success "pnpm installed"
 fi
 
 # Install Docker if needed
