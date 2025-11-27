@@ -1464,36 +1464,6 @@ LIMIT 100
 "#;
 
 // =============================================================================
-// Simple Sanity Queries for Testing
-// =============================================================================
-
-/// Simple date_dim count
-pub const TPCDS_SANITY_DATE: &str = r#"
-SELECT COUNT(*) as cnt, MIN(d_year) as min_year, MAX(d_year) as max_year
-FROM date_dim
-"#;
-
-/// Simple store_sales aggregation
-pub const TPCDS_SANITY_SALES: &str = r#"
-SELECT
-    COUNT(*) as num_sales,
-    SUM(ss_ext_sales_price) as total_sales,
-    AVG(ss_quantity) as avg_qty
-FROM store_sales
-"#;
-
-/// Simple join test
-pub const TPCDS_SANITY_JOIN: &str = r#"
-SELECT
-    d_year,
-    COUNT(*) as cnt
-FROM store_sales, date_dim
-WHERE ss_sold_date_sk = d_date_sk
-GROUP BY d_year
-ORDER BY d_year
-"#;
-
-// =============================================================================
 // Tier 3 Queries (Q51-Q99) - Advanced analytics with ROLLUP/CUBE
 // =============================================================================
 
