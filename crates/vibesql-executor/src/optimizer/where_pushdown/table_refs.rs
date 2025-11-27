@@ -114,8 +114,18 @@ fn extract_tables_recursive_branch(
             // Quantified comparisons (ANY/ALL/SOME) may be correlated, treat as complex
             false
         }
+        vibesql_ast::Expression::Like { expr, pattern, .. } => {
+            // LIKE predicate: extract table references from both the expression and pattern
+            // Example: p_name LIKE '%green%' references the table containing p_name
+            extract_tables_recursive_branch(expr, schema, tables)
+                && extract_tables_recursive_branch(pattern, schema, tables)
+        }
+        vibesql_ast::Expression::IsNull { expr, .. } => {
+            // IS NULL / IS NOT NULL: extract table references from the expression
+            extract_tables_recursive_branch(expr, schema, tables)
+        }
         _ => {
-            // Other expression types: Literal, Wildcard, IsNull, Like, etc.
+            // Other expression types: Literal, Wildcard, etc.
             true
         }
     }
