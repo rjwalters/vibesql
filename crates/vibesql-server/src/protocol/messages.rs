@@ -350,7 +350,7 @@ fn read_cstring(buf: &mut BytesMut) -> Result<String, ProtocolError> {
 fn encode_notice_or_error(buf: &mut BytesMut, fields: &HashMap<u8, String>) {
     // Calculate length
     let mut len = 4 + 1; // length field + terminator
-    for (_, value) in fields {
+    for value in fields.values() {
         len += 1 + value.len() + 1; // field type + value + null
     }
 

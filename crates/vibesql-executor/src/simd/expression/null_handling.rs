@@ -53,7 +53,7 @@ pub fn has_null_values(
     for row in rows.iter().take(sample_size) {
         for col_ref in &column_refs {
             match evaluator.eval(col_ref, row) {
-                Ok(value) if value == SqlValue::Null => return true,
+                Ok(SqlValue::Null) => return true,
                 Err(_) => return true,
                 _ => {}
             }
@@ -64,7 +64,7 @@ pub fn has_null_values(
         for row in rows.iter().skip(sample_size) {
             for col_ref in &column_refs {
                 match evaluator.eval(col_ref, row) {
-                    Ok(value) if value == SqlValue::Null => return true,
+                    Ok(SqlValue::Null) => return true,
                     Err(_) => return true,
                     _ => {}
                 }
