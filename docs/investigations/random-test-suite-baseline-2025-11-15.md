@@ -241,8 +241,8 @@ Based on patterns found, create focused issues like:
 # Test single file
 ./scripts/sqllogictest test random/aggregates/slt_good_0.test
 
-# Run all random tests (parallel)
-./scripts/sqllogictest run --parallel --workers 8 --time 900
+# Run all random tests (parallel, uses all available CPU cores by default)
+./scripts/sqllogictest run --parallel --time 900
 
 # Query results
 ./scripts/sqllogictest query --query "
