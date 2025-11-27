@@ -996,14 +996,15 @@ mod tests {
                     join_type
                 );
 
-                // Check that the right side preserves the subquery's alias
+                // Check that the right side has the unique subquery alias
+                // Self-joins use __subquery_<original_alias> to avoid conflicts
                 match right.as_ref() {
                     FromClause::Table { name, alias } => {
                         assert_eq!(name, "lineitem", "Table name should be lineitem");
                         assert_eq!(
                             alias.as_deref(),
-                            Some("l2"),
-                            "Alias should be preserved as l2"
+                            Some("__subquery_l2"),
+                            "Alias should be __subquery_l2 for self-join"
                         );
                     }
                     _ => panic!("Expected Table on right side of join"),
@@ -1099,14 +1100,15 @@ mod tests {
                     join_type
                 );
 
-                // Check that the right side preserves the subquery's alias
+                // Check that the right side has the unique subquery alias
+                // Self-joins use __subquery_<original_alias> to avoid conflicts
                 match right.as_ref() {
                     FromClause::Table { name, alias } => {
                         assert_eq!(name, "lineitem", "Table name should be lineitem");
                         assert_eq!(
                             alias.as_deref(),
-                            Some("l3"),
-                            "Alias should be preserved as l3"
+                            Some("__subquery_l3"),
+                            "Alias should be __subquery_l3 for self-join"
                         );
                     }
                     _ => panic!("Expected Table on right side of join"),
@@ -1116,22 +1118,23 @@ mod tests {
                 assert!(condition.is_some(), "Join should have a condition");
 
                 // Verify the condition contains both correlation and filter predicates
+                // Column references should use the rewritten __subquery_l3 alias
                 if let Some(cond) = condition {
-                    fn contains_l3_ref(expr: &Expression) -> bool {
+                    fn contains_subquery_l3_ref(expr: &Expression) -> bool {
                         match expr {
                             Expression::ColumnRef { table: Some(t), .. } => {
-                                t.eq_ignore_ascii_case("l3")
+                                t.eq_ignore_ascii_case("__subquery_l3")
                             }
                             Expression::BinaryOp { left, right, .. } => {
-                                contains_l3_ref(left) || contains_l3_ref(right)
+                                contains_subquery_l3_ref(left) || contains_subquery_l3_ref(right)
                             }
                             _ => false,
                         }
                     }
 
                     assert!(
-                        contains_l3_ref(cond),
-                        "Join condition should contain references to l3 alias. Condition: {:?}",
+                        contains_subquery_l3_ref(cond),
+                        "Join condition should contain references to __subquery_l3 alias. Condition: {:?}",
                         cond
                     );
                 }
