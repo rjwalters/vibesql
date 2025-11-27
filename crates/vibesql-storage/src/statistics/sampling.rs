@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(sample.len(), 10);
         // All sampled values should be in range
         for val in sample {
-            assert!(val >= 0 && val < 100);
+            assert!((0..100).contains(&val));
         }
     }
 
@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(sample.len(), 10);
         // All sampled values should be valid
         for val in sample {
-            assert!(val >= 0 && val < 100);
+            assert!((0..100).contains(&val));
         }
     }
 

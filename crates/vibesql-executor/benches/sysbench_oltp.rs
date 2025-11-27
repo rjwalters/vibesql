@@ -1048,7 +1048,7 @@ fn benchmark_read_write_duckdb(c: &mut Criterion) {
 }
 
 // =============================================================================
-// oltp_read_only Benchmark (NEW)
+// oltp_read_only Benchmark
 // =============================================================================
 
 /// Standard sysbench read-only transaction:
@@ -1314,7 +1314,6 @@ fn benchmark_select_random_ranges_duckdb(c: &mut Criterion) {
 #[cfg(not(feature = "benchmark-comparison"))]
 criterion_group!(
     benches,
-    // Original benchmarks
     benchmark_point_select_vibesql,
     benchmark_insert_vibesql,
     benchmark_delete_vibesql,
@@ -1322,7 +1321,7 @@ criterion_group!(
     benchmark_update_non_index_vibesql,
     benchmark_write_only_vibesql,
     benchmark_read_write_vibesql,
-    // New read-only benchmarks
+    // Read-only benchmarks
     benchmark_oltp_read_only_vibesql,
     benchmark_select_random_points_vibesql,
     benchmark_select_random_ranges_vibesql,
@@ -1331,7 +1330,6 @@ criterion_group!(
 #[cfg(feature = "benchmark-comparison")]
 criterion_group!(
     benches,
-    // Original benchmarks
     benchmark_point_select_vibesql,
     benchmark_point_select_sqlite,
     benchmark_point_select_duckdb,
@@ -1353,7 +1351,7 @@ criterion_group!(
     benchmark_read_write_vibesql,
     benchmark_read_write_sqlite,
     benchmark_read_write_duckdb,
-    // New read-only benchmarks
+    // Read-only benchmarks
     benchmark_oltp_read_only_vibesql,
     benchmark_oltp_read_only_sqlite,
     benchmark_oltp_read_only_duckdb,

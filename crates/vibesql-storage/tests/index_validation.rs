@@ -1,13 +1,13 @@
-/// Comprehensive validation tests for index architecture (Phase 4)
-///
-/// This test suite validates the index architecture refactoring using
-/// the actual available APIs (not SQL, which is at a higher layer).
-///
-/// Tests cover:
-/// 1. Adaptive backend selection (InMemory vs DiskBacked)
-/// 2. Resource budget configuration
-/// 3. Index correctness (NULL handling, duplicates, multi-column)
-/// 4. Persistence and recovery
+// Comprehensive validation tests for index architecture (Phase 4)
+//
+// This test suite validates the index architecture refactoring using
+// the actual available APIs (not SQL, which is at a higher layer).
+//
+// Tests cover:
+// 1. Adaptive backend selection (InMemory vs DiskBacked)
+// 2. Resource budget configuration
+// 3. Index correctness (NULL handling, duplicates, multi-column)
+// 4. Persistence and recovery
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::{Database, DatabaseConfig, Row, SpillPolicy};

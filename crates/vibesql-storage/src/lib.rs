@@ -2,6 +2,9 @@
 //!
 //! This crate provides in-memory storage for database tables and rows.
 
+// Allow approximate constants in tests (e.g., 3.14 for PI) as they are test data values
+#![cfg_attr(test, allow(clippy::approx_constant))]
+
 pub mod backend;
 pub mod btree;
 pub mod buffer;

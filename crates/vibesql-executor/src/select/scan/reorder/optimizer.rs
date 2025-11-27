@@ -104,8 +104,9 @@ where
     join_conditions.extend(where_equijoins);
 
     // Step 6.5: Extract table-local predicates for cardinality estimation
+    // Use schema-based column resolution to handle unqualified columns like `p_name LIKE '%green%'`
     let mut table_local_predicates = if let Some(where_expr) = where_clause {
-        predicates::extract_table_local_predicates(where_expr, &table_set)
+        predicates::extract_table_local_predicates_with_schema(where_expr, &table_set, &column_to_table)
     } else {
         HashMap::new()
     };

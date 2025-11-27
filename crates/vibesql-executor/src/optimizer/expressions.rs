@@ -255,7 +255,9 @@ pub fn optimize_expression(
 
             // If the operand is a literal, we can evaluate the cast at plan time
             if let Expression::Literal(val) = &expr_opt {
-                match cast_value(val, data_type) {
+                // Get sql_mode from the evaluator's database if available
+                let sql_mode = evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
+                match cast_value(val, data_type, &sql_mode) {
                     Ok(result) => Ok(Expression::Literal(result)),
                     Err(_) => {
                         // If cast fails, keep the CAST expression to fail at runtime with proper error

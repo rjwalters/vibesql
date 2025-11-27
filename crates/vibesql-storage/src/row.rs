@@ -237,7 +237,7 @@ mod tests {
             assert_eq!(row.get_f64_unchecked(0), 3.14);
             assert_eq!(row.get_i64_unchecked(1), 42);
             assert_eq!(row.get_date_unchecked(2), Date::from_str("2024-01-01").unwrap());
-            assert_eq!(row.get_bool_unchecked(3), true);
+            assert!(row.get_bool_unchecked(3));
             assert_eq!(row.get_string_unchecked(4), "hello");
         }
     }

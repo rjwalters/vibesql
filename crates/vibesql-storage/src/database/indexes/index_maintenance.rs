@@ -88,6 +88,8 @@ impl IndexManager {
         self.indexes.insert(normalized_name.clone(), metadata);
 
         // Choose backend based on table size
+        // In test builds, DISK_BACKED_THRESHOLD is usize::MAX to disable disk-backed indexes
+        #[allow(clippy::absurd_extreme_comparisons)]
         let use_disk_backed = table_rows.len() >= DISK_BACKED_THRESHOLD;
 
         let (index_data, memory_bytes, disk_bytes, backend) = if use_disk_backed {

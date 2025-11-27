@@ -157,6 +157,7 @@ impl ExpressionEvaluator<'_> {
             arg_values.push(self.eval(arg, row)?);
         }
 
-        eval_scalar_function(name, &arg_values, character_unit)
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        eval_scalar_function(name, &arg_values, character_unit, &sql_mode)
     }
 }

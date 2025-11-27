@@ -236,7 +236,7 @@ fn test_json_roundtrip_temporal_types() {
             SqlValue::Integer(1),
             SqlValue::Date(Date::new(2025, 1, 15).unwrap()),
             SqlValue::Time(Time::new(14, 30, 45, 0).unwrap()),
-            SqlValue::Timestamp(timestamp.clone()),
+            SqlValue::Timestamp(timestamp),
             SqlValue::Timestamp(timestamp),
         ]))
         .unwrap();
@@ -330,7 +330,7 @@ fn test_json_datetime_alias_behavior() {
     table
         .insert(crate::Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Timestamp(timestamp.clone()),
+            SqlValue::Timestamp(timestamp),
             SqlValue::Timestamp(timestamp),
         ]))
         .unwrap();

@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_interval_ordering_total() {
-        let mut intervals = vec![
+        let mut intervals = [
             Interval::new("2 YEAR".to_string()),
             Interval::new("1 MONTH".to_string()),
             Interval::new("1 DAY".to_string()),

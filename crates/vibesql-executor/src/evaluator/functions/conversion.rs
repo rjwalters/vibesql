@@ -211,7 +211,7 @@ pub(super) fn to_char(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types:
 /// SQL:1999 Section 6.10: CAST specification
 /// Note: CAST syntax is handled specially by the parser
 /// This function receives [value, DataType] as arguments
-pub(super) fn cast(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn cast(args: &[vibesql_types::SqlValue], sql_mode: &vibesql_types::SqlMode) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "CAST requires exactly 2 arguments (value, target_type), got {}",
@@ -252,5 +252,5 @@ pub(super) fn cast(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::Sq
     };
 
     // Use the existing cast_value function from casting module
-    super::super::casting::cast_value(&args[0], &target_type)
+    super::super::casting::cast_value(&args[0], &target_type, sql_mode)
 }

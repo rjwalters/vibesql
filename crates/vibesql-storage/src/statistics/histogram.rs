@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_histogram_range_selectivity() {
-        let values: Vec<SqlValue> = (1..=100).map(|i| SqlValue::Integer(i)).collect();
+        let values: Vec<SqlValue> = (1..=100).map(SqlValue::Integer).collect();
 
         let histogram = Histogram::create(&values, 10, BucketStrategy::EqualDepth);
 
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_histogram_between_selectivity() {
-        let values: Vec<SqlValue> = (1..=100).map(|i| SqlValue::Integer(i)).collect();
+        let values: Vec<SqlValue> = (1..=100).map(SqlValue::Integer).collect();
 
         let histogram = Histogram::create(&values, 10, BucketStrategy::EqualDepth);
 

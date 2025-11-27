@@ -397,9 +397,10 @@ fn test_cast_integer_to_double() {
 
 #[test]
 fn test_cast_double_to_integer() {
-    // MySQL rounds to nearest integer when casting to INTEGER (not truncate)
+    // Default mode is SQLite which truncates toward zero when casting to INTEGER
+    // MySQL mode would round 42.9 to 43, but SQLite truncates to 42
     let result = eval_function("CAST", vec![double_lit(42.9), varchar_lit("INTEGER")]);
-    assert_eq!(result, vibesql_types::SqlValue::Integer(43));
+    assert_eq!(result, vibesql_types::SqlValue::Integer(42));
 }
 
 #[test]

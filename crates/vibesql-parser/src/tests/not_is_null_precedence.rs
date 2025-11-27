@@ -33,7 +33,7 @@ fn test_not_is_null_precedence() {
             // Inner expression should be IS NULL
             match &**expr {
                 Expression::IsNull { expr: inner_expr, negated } => {
-                    assert_eq!(*negated, false, "IS NULL should not be negated");
+                    assert!(!*negated, "IS NULL should not be negated");
 
                     // Innermost expression should be column reference
                     match &**inner_expr {
@@ -75,7 +75,7 @@ fn test_is_not_null_parsing() {
     // This should parse as: IsNull(col0, negated: true)
     match &where_clause {
         Expression::IsNull { expr, negated } => {
-            assert_eq!(*negated, true, "IS NOT NULL should have negated=true");
+            assert!(*negated, "IS NOT NULL should have negated=true");
 
             match &**expr {
                 Expression::ColumnRef { table, column } => {
@@ -110,7 +110,7 @@ fn test_not_null_is_null_parsing() {
 
             match &**expr {
                 Expression::IsNull { expr: inner_expr, negated } => {
-                    assert_eq!(*negated, false);
+                    assert!(!*negated);
 
                     match &**inner_expr {
                         Expression::Literal(vibesql_types::SqlValue::Null) => {

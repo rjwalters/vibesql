@@ -665,7 +665,7 @@ fn test_thread_local_pool_pattern() {
     use crate::Row;
 
     thread_local! {
-        static TEST_DB_POOL: RefCell<Option<Database>> = RefCell::new(None);
+        static TEST_DB_POOL: RefCell<Option<Database>> = const { RefCell::new(None) };
     }
 
     fn get_pooled_database() -> Database {

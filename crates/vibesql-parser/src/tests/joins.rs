@@ -17,7 +17,7 @@ fn test_parse_simple_join() {
                 vibesql_ast::FromClause::Join { join_type, left, right, condition, natural } => {
                     // Default JOIN is INNER JOIN
                     assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
-                    assert_eq!(*natural, false);
+                    assert!(!*natural);
 
                     // Left should be users table
                     match **left {
@@ -72,7 +72,7 @@ fn test_parse_comma_separated_from() {
                 vibesql_ast::FromClause::Join { join_type, left, right, condition, natural } => {
                     // Comma should be parsed as CROSS JOIN
                     assert_eq!(*join_type, vibesql_ast::JoinType::Cross);
-                    assert_eq!(*natural, false);
+                    assert!(!*natural);
 
                     // Left should be tab0 table
                     match **left {

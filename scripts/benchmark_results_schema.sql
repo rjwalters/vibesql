@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
     timestamp TEXT NOT NULL,
     git_commit TEXT,
     git_branch TEXT,
-    benchmark_suite TEXT NOT NULL CHECK (benchmark_suite IN ('tpch', 'sqllogictest_suite', 'custom')),
+    benchmark_suite TEXT NOT NULL CHECK (benchmark_suite IN ('tpch', 'tpcc', 'tpcds', 'sysbench', 'sqllogictest_suite', 'custom')),
     scale_factor TEXT,
     timeout_secs INTEGER,
     total_queries INTEGER,
@@ -15,6 +15,35 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
     failed_queries INTEGER,
     timeout_queries INTEGER,
     notes TEXT
+);
+
+-- TPC-C Results: Transaction-specific metrics for OLTP workloads
+CREATE TABLE IF NOT EXISTS tpcc_results (
+    result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    database_engine TEXT NOT NULL,  -- 'vibesql', 'sqlite', 'duckdb'
+    transaction_type TEXT NOT NULL, -- 'new_order', 'payment', 'order_status', 'delivery', 'stock_level', 'mixed'
+    transaction_count INTEGER NOT NULL,
+    avg_latency_us REAL,
+    total_duration_ms INTEGER,
+    transactions_per_second REAL,
+    successful_transactions INTEGER,
+    failed_transactions INTEGER,
+    FOREIGN KEY (run_id) REFERENCES benchmark_runs(run_id)
+);
+
+-- Sysbench Results: OLTP latency metrics
+CREATE TABLE IF NOT EXISTS sysbench_results (
+    result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    database_engine TEXT NOT NULL,  -- 'vibesql', 'sqlite', 'duckdb'
+    test_name TEXT NOT NULL,        -- 'point_select', 'insert', 'read_write'
+    table_size INTEGER,
+    mean_time_ns REAL,
+    std_dev_ns REAL,
+    median_time_ns REAL,
+    iterations INTEGER,
+    FOREIGN KEY (run_id) REFERENCES benchmark_runs(run_id)
 );
 
 -- Benchmark Results: Individual query/test performance measurements
@@ -162,3 +191,78 @@ WHERE latest_br.run_id = (SELECT run_id FROM latest)
   AND latest_br.status = 'passed'
   AND baseline_br.status = 'passed'
 ORDER BY pct_change DESC;
+
+-- Indexes for TPC-C results
+CREATE INDEX IF NOT EXISTS idx_tpcc_results_run ON tpcc_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_tpcc_results_engine ON tpcc_results(database_engine);
+CREATE INDEX IF NOT EXISTS idx_tpcc_results_txn_type ON tpcc_results(transaction_type);
+
+-- Indexes for Sysbench results
+CREATE INDEX IF NOT EXISTS idx_sysbench_results_run ON sysbench_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_sysbench_results_engine ON sysbench_results(database_engine);
+CREATE INDEX IF NOT EXISTS idx_sysbench_results_test ON sysbench_results(test_name);
+
+-- View: Latest TPC-C benchmark summary
+CREATE VIEW IF NOT EXISTS latest_tpcc_summary AS
+SELECT
+    tr.database_engine,
+    tr.transaction_type,
+    tr.transaction_count,
+    tr.transactions_per_second,
+    ROUND(tr.avg_latency_us, 2) as avg_latency_us,
+    tr.successful_transactions,
+    tr.failed_transactions,
+    br.timestamp,
+    br.git_commit
+FROM tpcc_results tr
+JOIN benchmark_runs br ON tr.run_id = br.run_id
+WHERE br.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'tpcc')
+ORDER BY tr.database_engine, tr.transaction_type;
+
+-- View: TPC-C performance comparison across engines
+CREATE VIEW IF NOT EXISTS tpcc_engine_comparison AS
+SELECT
+    tr.transaction_type,
+    MAX(CASE WHEN tr.database_engine = 'vibesql' THEN tr.transactions_per_second END) as vibesql_tps,
+    MAX(CASE WHEN tr.database_engine = 'sqlite' THEN tr.transactions_per_second END) as sqlite_tps,
+    MAX(CASE WHEN tr.database_engine = 'duckdb' THEN tr.transactions_per_second END) as duckdb_tps,
+    MAX(CASE WHEN tr.database_engine = 'vibesql' THEN tr.avg_latency_us END) as vibesql_latency_us,
+    MAX(CASE WHEN tr.database_engine = 'sqlite' THEN tr.avg_latency_us END) as sqlite_latency_us,
+    MAX(CASE WHEN tr.database_engine = 'duckdb' THEN tr.avg_latency_us END) as duckdb_latency_us
+FROM tpcc_results tr
+JOIN benchmark_runs br ON tr.run_id = br.run_id
+WHERE br.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'tpcc')
+GROUP BY tr.transaction_type
+ORDER BY tr.transaction_type;
+
+-- View: Latest Sysbench benchmark summary
+CREATE VIEW IF NOT EXISTS latest_sysbench_summary AS
+SELECT
+    sr.database_engine,
+    sr.test_name,
+    sr.table_size,
+    ROUND(sr.mean_time_ns / 1000.0, 2) as mean_time_us,
+    ROUND(sr.std_dev_ns / 1000.0, 2) as std_dev_us,
+    sr.iterations,
+    br.timestamp,
+    br.git_commit
+FROM sysbench_results sr
+JOIN benchmark_runs br ON sr.run_id = br.run_id
+WHERE br.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'sysbench')
+ORDER BY sr.database_engine, sr.test_name;
+
+-- View: Sysbench performance comparison across engines
+CREATE VIEW IF NOT EXISTS sysbench_engine_comparison AS
+SELECT
+    sr.test_name,
+    sr.table_size,
+    MAX(CASE WHEN sr.database_engine = 'vibesql' THEN sr.mean_time_ns / 1000.0 END) as vibesql_us,
+    MAX(CASE WHEN sr.database_engine = 'sqlite' THEN sr.mean_time_ns / 1000.0 END) as sqlite_us,
+    MAX(CASE WHEN sr.database_engine = 'duckdb' THEN sr.mean_time_ns / 1000.0 END) as duckdb_us,
+    ROUND(MAX(CASE WHEN sr.database_engine = 'vibesql' THEN sr.mean_time_ns END) * 1.0 /
+          NULLIF(MAX(CASE WHEN sr.database_engine = 'sqlite' THEN sr.mean_time_ns END), 0), 2) as vibesql_vs_sqlite
+FROM sysbench_results sr
+JOIN benchmark_runs br ON sr.run_id = br.run_id
+WHERE br.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'sysbench')
+GROUP BY sr.test_name, sr.table_size
+ORDER BY sr.test_name;
