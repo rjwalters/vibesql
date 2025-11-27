@@ -3,7 +3,8 @@
 //! These benchmarks demonstrate the performance benefits of lazy iterator execution
 //! for queries that can avoid full materialization (no ORDER BY, DISTINCT, or window functions).
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;

@@ -5,7 +5,8 @@
 //! 2. Performance of different SIMD implementations
 //! 3. Comparison between direct and dispatched calls
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 
 #[cfg(feature = "simd")]
 use vibesql_executor::simd::{dispatched, simd_add_f64, CpuFeatures};
