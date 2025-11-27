@@ -432,11 +432,8 @@ fn expressions_equal(a: &Expression, b: &Expression) -> bool {
         // ScalarSubquery: use reference equality (subqueries are unlikely to be semantically equal)
         (Expression::ScalarSubquery(_), Expression::ScalarSubquery(_)) => false,
 
-        // In subquery: recurse into expression, subqueries compare as false
-        (
-            Expression::In { expr: e1, negated: n1, .. },
-            Expression::In { expr: e2, negated: n2, .. },
-        ) => n1 == n2 && expressions_equal(e1, e2) && false, // subqueries don't match
+        // In subquery: subqueries are not comparable for GROUPING() purposes
+        (Expression::In { .. }, Expression::In { .. }) => false,
 
         // InList: recurse into expression and values
         (
@@ -492,16 +489,11 @@ fn expressions_equal(a: &Expression, b: &Expression) -> bool {
             Expression::Like { expr: e2, pattern: p2, negated: n2 },
         ) => n1 == n2 && expressions_equal(e1, e2) && expressions_equal(p1, p2),
 
-        // Exists: subqueries compare as false
-        (Expression::Exists { negated: n1, .. }, Expression::Exists { negated: n2, .. }) => {
-            n1 == n2 && false // subqueries don't match
-        }
+        // Exists: subqueries are not comparable for GROUPING() purposes
+        (Expression::Exists { .. }, Expression::Exists { .. }) => false,
 
-        // QuantifiedComparison: subqueries compare as false
-        (
-            Expression::QuantifiedComparison { expr: e1, op: op1, quantifier: q1, .. },
-            Expression::QuantifiedComparison { expr: e2, op: op2, quantifier: q2, .. },
-        ) => op1 == op2 && q1 == q2 && expressions_equal(e1, e2) && false, // subqueries don't match
+        // QuantifiedComparison: subqueries are not comparable for GROUPING() purposes
+        (Expression::QuantifiedComparison { .. }, Expression::QuantifiedComparison { .. }) => false,
 
         // Current date/time functions
         (Expression::CurrentDate, Expression::CurrentDate) => true,
