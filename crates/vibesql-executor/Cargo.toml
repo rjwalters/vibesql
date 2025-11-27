@@ -149,3 +149,7 @@ harness = false
 [[bench]]
 name = "columnar_execution"
 harness = false
+
+[[bench]]
+name = "tpcds_benchmark"
+harness = false
