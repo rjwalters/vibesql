@@ -1,0 +1,242 @@
+//! Column builder for constructing typed column data.
+//!
+//! This module provides the `ColumnBuilder` struct for efficiently building
+//! column data with pre-allocated capacity.
+
+use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
+
+use super::data::ColumnData;
+use super::types::ColumnTypeClass;
+
+/// Builder for constructing column data with pre-allocated capacity
+///
+/// The builder pre-allocates storage based on the expected column type,
+/// avoiding reallocation during row processing.
+pub(crate) struct ColumnBuilder {
+    type_class: ColumnTypeClass,
+    int64_values: Vec<i64>,
+    float64_values: Vec<f64>,
+    string_values: Vec<String>,
+    bool_values: Vec<bool>,
+    date_values: Vec<Date>,
+    time_values: Vec<Time>,
+    timestamp_values: Vec<Timestamp>,
+    interval_values: Vec<Interval>,
+    nulls: Vec<bool>,
+}
+
+impl ColumnBuilder {
+    /// Create a new column builder with pre-allocated capacity
+    ///
+    /// # Arguments
+    /// * `type_class` - The column type to build
+    /// * `capacity` - Expected number of rows
+    pub fn new(type_class: ColumnTypeClass, capacity: usize) -> Self {
+        let mut builder = ColumnBuilder {
+            type_class,
+            int64_values: Vec::new(),
+            float64_values: Vec::new(),
+            string_values: Vec::new(),
+            bool_values: Vec::new(),
+            date_values: Vec::new(),
+            time_values: Vec::new(),
+            timestamp_values: Vec::new(),
+            interval_values: Vec::new(),
+            nulls: Vec::with_capacity(capacity),
+        };
+
+        // Pre-allocate the appropriate vector based on type
+        match type_class {
+            ColumnTypeClass::Int64 | ColumnTypeClass::Null => {
+                builder.int64_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Float64 => {
+                builder.float64_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::String => {
+                builder.string_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Bool => {
+                builder.bool_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Date => {
+                builder.date_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Time => {
+                builder.time_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Timestamp => {
+                builder.timestamp_values = Vec::with_capacity(capacity);
+            }
+            ColumnTypeClass::Interval => {
+                builder.interval_values = Vec::with_capacity(capacity);
+            }
+        }
+
+        builder
+    }
+
+    /// Push a value into the column builder
+    ///
+    /// # Arguments
+    /// * `value` - The SQL value to push
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if the value type doesn't match the column type
+    pub fn push(&mut self, value: &SqlValue) -> Result<(), String> {
+        match (self.type_class, value) {
+            // Int64 handling
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Integer(v)) => {
+                self.int64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Bigint(v)) => {
+                self.int64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Smallint(v)) => {
+                self.int64_values.push(*v as i64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Int64 | ColumnTypeClass::Null, SqlValue::Null) => {
+                self.int64_values.push(0);
+                self.nulls.push(true);
+            }
+
+            // Float64 handling
+            (ColumnTypeClass::Float64, SqlValue::Float(v)) => {
+                self.float64_values.push(*v as f64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Double(v)) => {
+                self.float64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Real(v)) => {
+                self.float64_values.push(*v as f64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Numeric(v)) => {
+                self.float64_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Unsigned(v)) => {
+                self.float64_values.push(*v as f64);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Float64, SqlValue::Null) => {
+                self.float64_values.push(0.0);
+                self.nulls.push(true);
+            }
+
+            // String handling
+            (ColumnTypeClass::String, SqlValue::Varchar(v)) => {
+                self.string_values.push(v.clone());
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::String, SqlValue::Character(v)) => {
+                self.string_values.push(v.clone());
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::String, SqlValue::Null) => {
+                self.string_values.push(String::new());
+                self.nulls.push(true);
+            }
+
+            // Bool handling
+            (ColumnTypeClass::Bool, SqlValue::Boolean(v)) => {
+                self.bool_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Bool, SqlValue::Null) => {
+                self.bool_values.push(false);
+                self.nulls.push(true);
+            }
+
+            // Date handling
+            (ColumnTypeClass::Date, SqlValue::Date(v)) => {
+                self.date_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Date, SqlValue::Null) => {
+                self.date_values.push(Date::new(1970, 1, 1).unwrap());
+                self.nulls.push(true);
+            }
+
+            // Time handling
+            (ColumnTypeClass::Time, SqlValue::Time(v)) => {
+                self.time_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Time, SqlValue::Null) => {
+                self.time_values.push(Time::new(0, 0, 0, 0).unwrap());
+                self.nulls.push(true);
+            }
+
+            // Timestamp handling
+            (ColumnTypeClass::Timestamp, SqlValue::Timestamp(v)) => {
+                self.timestamp_values.push(*v);
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Timestamp, SqlValue::Null) => {
+                let date = Date::new(1970, 1, 1).unwrap();
+                let time = Time::new(0, 0, 0, 0).unwrap();
+                self.timestamp_values.push(Timestamp::new(date, time));
+                self.nulls.push(true);
+            }
+
+            // Interval handling
+            (ColumnTypeClass::Interval, SqlValue::Interval(v)) => {
+                self.interval_values.push(v.clone());
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Interval, SqlValue::Null) => {
+                self.interval_values.push(Interval::new("0".to_string()));
+                self.nulls.push(true);
+            }
+
+            // Type mismatch
+            (expected, got) => {
+                return Err(format!(
+                    "Column has mixed types: expected {:?}, got {}",
+                    expected,
+                    got.type_name()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Build the final column data from accumulated values
+    ///
+    /// Consumes the builder and returns the typed column data.
+    pub fn build(self) -> ColumnData {
+        match self.type_class {
+            ColumnTypeClass::Int64 | ColumnTypeClass::Null => {
+                ColumnData::Int64 { values: self.int64_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Float64 => {
+                ColumnData::Float64 { values: self.float64_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::String => {
+                ColumnData::String { values: self.string_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Bool => {
+                ColumnData::Bool { values: self.bool_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Date => {
+                ColumnData::Date { values: self.date_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Time => {
+                ColumnData::Time { values: self.time_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Timestamp => {
+                ColumnData::Timestamp { values: self.timestamp_values, nulls: self.nulls }
+            }
+            ColumnTypeClass::Interval => {
+                ColumnData::Interval { values: self.interval_values, nulls: self.nulls }
+            }
+        }
+    }
+}
