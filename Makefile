@@ -24,10 +24,10 @@ help:
 	@echo "  make test-sqllogictest  - Run SQLLogicTest suite (parallel, 8 workers)"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  make benchmark          - Run all benchmarks (TPC-H, TPC-C, sysbench)"
+	@echo "  make benchmark          - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
 	@echo "  make benchmark-tpch     - Run TPC-H benchmark suite (30s timeout)"
 	@echo "  make benchmark-tpcc     - Run TPC-C benchmark suite (60s duration)"
-	@echo "  make benchmark-tpcds    - Run TPC-DS benchmark suite (when available)"
+	@echo "  make benchmark-tpcds    - Run TPC-DS benchmark suite (99 queries)"
 	@echo "  make benchmark-sysbench - Run Sysbench OLTP benchmarks"
 	@echo ""
 	@echo "Analysis targets:"
@@ -92,7 +92,7 @@ test-sqllogictest:
 #
 
 # Run all benchmarks with analysis
-benchmark: benchmark-tpch benchmark-tpcc benchmark-sysbench analyze-benchmarks
+benchmark: benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-sysbench analyze-benchmarks
 
 # Run TPC-H benchmarks with 30s timeout per query and store results in database
 benchmark-tpch:
@@ -120,14 +120,14 @@ benchmark-tpcc:
 	@echo "Processing TPC-C results into database..."
 	./scripts/process_tpcc_results.py --input /tmp/tpcc_results.txt --scale-factor 1 --duration 60
 
-# Run TPC-DS benchmarks (when available)
+# Run TPC-DS benchmarks with database tracking
 benchmark-tpcds:
 	@echo "Running TPC-DS benchmarks..."
-	@if [ -f crates/vibesql-executor/benches/tpcds_benchmark.rs ]; then \
-		cargo bench --package vibesql-executor --bench tpcds_benchmark --features benchmark-comparison -- --noplot; \
-	else \
-		echo "TPC-DS benchmark not yet available. See issue #2746."; \
-	fi
+	cargo bench --package vibesql-executor --bench tpcds_benchmark --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/tpcds_results.txt
+	@echo ""
+	@echo "Processing TPC-DS results into database..."
+	./scripts/process_tpcds_results.py --stdin < /tmp/tpcds_results.txt || \
+		./scripts/process_tpcds_results.py --criterion-dir target/criterion
 
 # Run Sysbench OLTP benchmarks with database tracking
 benchmark-sysbench:
@@ -168,6 +168,11 @@ analyze-benchmarks:
 	@echo "TPC-C Benchmark Analysis"
 	@echo "=========================================="
 	@./scripts/query_benchmark_results.py --tpcc 2>/dev/null || echo "Run 'make benchmark-tpcc' first to generate benchmark data"
+	@echo ""
+	@echo "=========================================="
+	@echo "TPC-DS Benchmark Analysis"
+	@echo "=========================================="
+	@./scripts/query_benchmark_results.py --tpcds 2>/dev/null || echo "Run 'make benchmark-tpcds' first to generate benchmark data"
 	@echo ""
 	@echo "=========================================="
 	@echo "Sysbench OLTP Analysis"

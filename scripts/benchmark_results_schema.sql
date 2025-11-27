@@ -266,3 +266,60 @@ JOIN benchmark_runs br ON sr.run_id = br.run_id
 WHERE br.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'sysbench')
 GROUP BY sr.test_name, sr.table_size
 ORDER BY sr.test_name;
+
+-- View: Latest TPC-DS benchmark summary
+CREATE VIEW IF NOT EXISTS latest_tpcds_summary AS
+SELECT
+    br.query_name,
+    br.status,
+    ROUND(br.execution_time_ms, 2) as execution_time_ms,
+    ROUND(br.total_time_ms, 2) as total_time_ms,
+    brun.timestamp,
+    brun.git_commit
+FROM benchmark_results br
+JOIN benchmark_runs brun ON br.run_id = brun.run_id
+WHERE brun.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'tpcds')
+ORDER BY br.query_name;
+
+-- View: TPC-DS query statistics across all runs
+CREATE VIEW IF NOT EXISTS tpcds_query_stats AS
+SELECT
+    br.query_name,
+    COUNT(*) as total_runs,
+    SUM(CASE WHEN br.status = 'passed' THEN 1 ELSE 0 END) as passed_runs,
+    SUM(CASE WHEN br.status = 'timeout' THEN 1 ELSE 0 END) as timeout_runs,
+    SUM(CASE WHEN br.status IN ('failed', 'error') THEN 1 ELSE 0 END) as failed_runs,
+    ROUND(AVG(CASE WHEN br.status = 'passed' THEN br.execution_time_ms ELSE NULL END), 2) as avg_execution_ms,
+    ROUND(MIN(CASE WHEN br.status = 'passed' THEN br.execution_time_ms ELSE NULL END), 2) as min_execution_ms,
+    ROUND(MAX(CASE WHEN br.status = 'passed' THEN br.execution_time_ms ELSE NULL END), 2) as max_execution_ms,
+    ROUND(
+        (MAX(CASE WHEN br.status = 'passed' THEN br.execution_time_ms ELSE NULL END) -
+         MIN(CASE WHEN br.status = 'passed' THEN br.execution_time_ms ELSE NULL END)) * 100.0 /
+        NULLIF(MIN(CASE WHEN br.status = 'passed' THEN br.execution_time_ms ELSE NULL END), 0),
+        2
+    ) as variability_pct
+FROM benchmark_results br
+JOIN benchmark_runs brun ON br.run_id = brun.run_id
+WHERE brun.benchmark_suite = 'tpcds'
+GROUP BY br.query_name
+ORDER BY br.query_name;
+
+-- View: TPC-DS performance trend
+CREATE VIEW IF NOT EXISTS tpcds_performance_trend AS
+SELECT
+    br.query_name,
+    br.run_id,
+    brun.timestamp,
+    brun.git_commit,
+    br.execution_time_ms,
+    br.status,
+    LAG(br.execution_time_ms) OVER (PARTITION BY br.query_name ORDER BY brun.timestamp) as prev_execution_time_ms,
+    CASE
+        WHEN LAG(br.execution_time_ms) OVER (PARTITION BY br.query_name ORDER BY brun.timestamp) IS NULL THEN NULL
+        ELSE ROUND((br.execution_time_ms - LAG(br.execution_time_ms) OVER (PARTITION BY br.query_name ORDER BY brun.timestamp)) * 100.0 /
+                   LAG(br.execution_time_ms) OVER (PARTITION BY br.query_name ORDER BY brun.timestamp), 2)
+    END as pct_change
+FROM benchmark_results br
+JOIN benchmark_runs brun ON br.run_id = brun.run_id
+WHERE brun.benchmark_suite = 'tpcds' AND br.status = 'passed'
+ORDER BY br.query_name, brun.timestamp;

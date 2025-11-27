@@ -253,6 +253,41 @@ def query_sysbench(db_path: Path):
         pass
 
 
+def query_tpcds(db_path: Path):
+    """Show latest TPC-DS benchmark results."""
+    print("=== Latest TPC-DS Benchmark Results ===\n")
+
+    query = """
+        SELECT query_name, status, execution_time_ms, total_time_ms
+        FROM latest_tpcds_summary
+    """
+    try:
+        results = execute_query(db_path, query)
+        if not results:
+            print("No TPC-DS results found. Run 'make benchmark-tpcds' first.")
+            return
+        headers = ["Query", "Status", "Exec (ms)", "Total (ms)"]
+        format_table(headers, results)
+    except:
+        print("No TPC-DS results found. Run 'make benchmark-tpcds' first.")
+        return
+
+    print("\n=== TPC-DS Query Statistics (All Runs) ===\n")
+    query = """
+        SELECT query_name, total_runs, passed_runs, timeout_runs, failed_runs,
+               avg_execution_ms, min_execution_ms, max_execution_ms, variability_pct
+        FROM tpcds_query_stats
+        ORDER BY query_name
+    """
+    try:
+        results = execute_query(db_path, query)
+        if results:
+            headers = ["Query", "Runs", "Passed", "Timeout", "Failed", "Avg (ms)", "Min (ms)", "Max (ms)", "Var %"]
+            format_table(headers, results)
+    except:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Query benchmark results from dogfooding database"
@@ -304,6 +339,11 @@ def main():
         action="store_true",
         help="Show Sysbench OLTP benchmark results"
     )
+    parser.add_argument(
+        "--tpcds",
+        action="store_true",
+        help="Show TPC-DS benchmark results"
+    )
 
     args = parser.parse_args()
 
@@ -330,6 +370,8 @@ def main():
         query_tpcc(db_path)
     elif args.sysbench:
         query_sysbench(db_path)
+    elif args.tpcds:
+        query_tpcds(db_path)
     else:
         # Default: show latest TPC-H
         query_latest(db_path)
