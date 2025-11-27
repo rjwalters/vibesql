@@ -205,3 +205,48 @@ fn test_drop_view_qualified_name() {
         panic!("Expected DropView statement");
     }
 }
+
+#[test]
+fn test_create_temp_view() {
+    let sql = "CREATE TEMP VIEW view2 AS SELECT x FROM t1 WHERE x>0";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "VIEW2");
+        assert!(stmt.temporary);
+        assert!(!stmt.or_replace);
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_temporary_view() {
+    let sql = "CREATE TEMPORARY VIEW view3 AS SELECT x FROM t1 WHERE x>0";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "VIEW3");
+        assert!(stmt.temporary);
+        assert!(!stmt.or_replace);
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_or_replace_temp_view() {
+    let sql = "CREATE OR REPLACE TEMP VIEW my_view AS SELECT * FROM users";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert!(stmt.temporary);
+        assert!(stmt.or_replace);
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}

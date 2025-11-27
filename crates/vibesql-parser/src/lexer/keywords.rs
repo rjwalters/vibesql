@@ -289,6 +289,9 @@ pub(super) fn map_keyword(upper_text: String) -> Token {
         // Auto-increment keywords (MySQL and SQLite)
         "AUTO_INCREMENT" => Token::Keyword(Keyword::AutoIncrement),
         "AUTOINCREMENT" => Token::Keyword(Keyword::AutoIncrement),
+        // Temporary object keywords (SQLite)
+        "TEMP" => Token::Keyword(Keyword::Temp),
+        "TEMPORARY" => Token::Keyword(Keyword::Temporary),
         _ => Token::Identifier(upper_text), // Regular identifiers are normalized to uppercase
     }
 }
