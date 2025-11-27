@@ -175,6 +175,25 @@ jobs:
             echo "No existing benchmark history found"
           fi
 
+      - name: Download historical dashboard data
+        continue-on-error: true
+        run: |
+          echo "Downloading historical dashboard data..."
+          mkdir -p historical
+
+          if curl -sL https://rjwalters.github.io/vibesql/data/dashboard.json \
+            -o historical/dashboard.json 2>/dev/null; then
+            if jq empty historical/dashboard.json 2>/dev/null; then
+              echo "✓ Downloaded existing dashboard data"
+              jq -r '.generated_at // "unknown"' historical/dashboard.json || echo "unknown"
+            else
+              echo "Invalid JSON - will start fresh"
+              rm -f historical/dashboard.json
+            fi
+          else
+            echo "No existing dashboard data - will generate fresh"
+          fi
+
       # ============================================================================
       # Merge Data (if we have new test results)
       # ============================================================================
@@ -224,6 +243,36 @@ jobs:
               ${{ github.sha }} || echo "Benchmark history update failed"
           else
             echo "No benchmark results in artifacts"
+          fi
+
+      - name: Generate dashboard data
+        continue-on-error: true
+        run: |
+          echo "Generating performance dashboard data..."
+          mkdir -p merged
+
+          # Find benchmark database in artifacts
+          BENCHMARK_DB=$(find artifacts -name "*.vbsql" | head -1)
+
+          if [ -n "$BENCHMARK_DB" ] && [ -f "$BENCHMARK_DB" ]; then
+            echo "Using benchmark database from artifacts: $BENCHMARK_DB"
+            python3 scripts/generate_web_dashboard.py \
+              --db "$BENCHMARK_DB" \
+              --previous https://rjwalters.github.io/vibesql/data/dashboard.json \
+              --output merged/dashboard.json \
+              --verbose || echo "Dashboard generation failed"
+          elif [ -f historical/dashboard.json ]; then
+            echo "No new benchmark data - using historical dashboard"
+            cp historical/dashboard.json merged/dashboard.json
+          else
+            echo "No benchmark data available - skipping dashboard generation"
+          fi
+
+          # Show summary if generated
+          if [ -f merged/dashboard.json ]; then
+            echo "Dashboard generated successfully:"
+            jq -r '"  Timestamp: \(.generated_at // \"unknown\")"' merged/dashboard.json || true
+            jq -r '"  Data points: \(.timeline | length // 0)"' merged/dashboard.json 2>/dev/null || true
           fi
 
       # ============================================================================
@@ -296,6 +345,15 @@ jobs:
             echo "✓ Copied SQLLogicTest summary data"
           fi
 
+          # Copy dashboard data for performance trends
+          if [ -f merged/dashboard.json ]; then
+            cp merged/dashboard.json deploy/data/
+            echo "✓ Copied dashboard data"
+          elif [ -f historical/dashboard.json ]; then
+            cp historical/dashboard.json deploy/data/
+            echo "✓ Copied historical dashboard data (no new data)"
+          fi
+
       # ============================================================================
       # Deploy to GitHub Pages
       # ============================================================================
@@ -325,4 +383,13 @@ jobs:
             echo '```json' >> $GITHUB_STEP_SUMMARY
             jq '.summary' deploy/badges/sqllogictest_punchlist.json >> $GITHUB_STEP_SUMMARY || echo "{}"
             echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f deploy/data/dashboard.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Performance Dashboard" >> $GITHUB_STEP_SUMMARY
+            echo "- **Timestamp:** $(jq -r '.generated_at // "unknown"' deploy/data/dashboard.json)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Data points:** $(jq -r '.timeline | length // 0' deploy/data/dashboard.json 2>/dev/null || echo 0)" >> $GITHUB_STEP_SUMMARY
+            echo "- **TPC-H queries:** $(jq -r '.summary.tpch.queries_passing // 0' deploy/data/dashboard.json)/$(jq -r '.summary.tpch.queries_total // 0' deploy/data/dashboard.json)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Dashboard URL:** https://rjwalters.github.io/vibesql/dashboard" >> $GITHUB_STEP_SUMMARY
           fi
