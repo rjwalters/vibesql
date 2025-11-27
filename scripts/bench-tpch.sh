@@ -47,7 +47,13 @@ echo ""
 
 # Run benchmark
 echo -e "${YELLOW}Running benchmark...${NC}"
-QUERY_TIMEOUT_SECS=${TIMEOUT_SECS} ${TIMEOUT_CMD} 300 ./target/release/deps/${BENCH_NAME}-* > ${OUTPUT_FILE} 2>&1
+# Find the benchmark binary (exclude .d files)
+BENCH_BIN=$(find ./target/release/deps -maxdepth 1 -name "${BENCH_NAME}-*" -type f ! -name "*.d" | head -1)
+if [ -z "$BENCH_BIN" ]; then
+    echo -e "${RED}Error: Benchmark binary not found${NC}"
+    exit 1
+fi
+QUERY_TIMEOUT_SECS=${TIMEOUT_SECS} ${TIMEOUT_CMD} 300 ${BENCH_BIN} > ${OUTPUT_FILE} 2>&1 || true
 echo -e "${GREEN}✓ Benchmark complete${NC}"
 echo ""
 
