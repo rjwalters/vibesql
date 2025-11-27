@@ -1,0 +1,347 @@
+{
+  "generated_at": "2025-11-27T15:30:00Z",
+  "version": "2.0",
+
+  "summary": {
+    "conformance": {
+      "pass_rate": 99.98,
+      "tests_passing": 5891234,
+      "tests_total": 5892000,
+      "files_passing": 628,
+      "files_total": 628
+    },
+    "tpch": {
+      "queries_passing": 20,
+      "queries_total": 22,
+      "geo_mean_ms": 42.5,
+      "trend_7d_pct": -5.2
+    }
+  },
+
+  "timeline": [
+    {
+      "date": "2025-11-27",
+      "commit": "abc123",
+      "conformance_pass_rate": 99.98,
+      "tpch_geo_mean_ms": 42.5,
+      "tpch_passing": 20,
+      "tpcc_tps": 1250,
+      "events": ["Q18 optimization (+15%)"]
+    },
+    {
+      "date": "2025-11-26",
+      "commit": "def456",
+      "conformance_pass_rate": 99.98,
+      "tpch_geo_mean_ms": 44.8,
+      "tpch_passing": 20,
+      "tpcc_tps": 1200,
+      "events": []
+    },
+    {
+      "date": "2025-11-25",
+      "commit": "ghi789",
+      "conformance_pass_rate": 99.98,
+      "tpch_geo_mean_ms": 45.2,
+      "tpch_passing": 20,
+      "tpcc_tps": 1180,
+      "events": ["Index improvements"]
+    },
+    {
+      "date": "2025-11-24",
+      "commit": "jkl012",
+      "conformance_pass_rate": 99.97,
+      "tpch_geo_mean_ms": 46.1,
+      "tpch_passing": 20,
+      "tpcc_tps": 1150,
+      "events": []
+    },
+    {
+      "date": "2025-11-23",
+      "commit": "mno345",
+      "conformance_pass_rate": 99.97,
+      "tpch_geo_mean_ms": 47.3,
+      "tpch_passing": 19,
+      "tpcc_tps": 1100,
+      "events": []
+    },
+    {
+      "date": "2025-11-22",
+      "commit": "pqr678",
+      "conformance_pass_rate": 99.96,
+      "tpch_geo_mean_ms": 48.0,
+      "tpch_passing": 19,
+      "tpcc_tps": 1080,
+      "events": []
+    },
+    {
+      "date": "2025-11-21",
+      "commit": "stu901",
+      "conformance_pass_rate": 99.96,
+      "tpch_geo_mean_ms": 49.2,
+      "tpch_passing": 19,
+      "tpcc_tps": 1050,
+      "events": []
+    },
+    {
+      "date": "2025-11-20",
+      "commit": "vwx234",
+      "conformance_pass_rate": 99.95,
+      "tpch_geo_mean_ms": 50.5,
+      "tpch_passing": 18,
+      "tpcc_tps": 1020,
+      "events": ["Hash join optimization"]
+    },
+    {
+      "date": "2025-11-19",
+      "commit": "yza567",
+      "conformance_pass_rate": 99.95,
+      "tpch_geo_mean_ms": 51.2,
+      "tpch_passing": 18,
+      "tpcc_tps": 1000,
+      "events": []
+    },
+    {
+      "date": "2025-11-18",
+      "commit": "bcd890",
+      "conformance_pass_rate": 99.94,
+      "tpch_geo_mean_ms": 52.0,
+      "tpch_passing": 18,
+      "tpcc_tps": 980,
+      "events": []
+    }
+  ],
+
+  "benchmarks": {
+    "tpch": {
+      "description": "TPC-H Decision Support - 22 analytical queries against 8 tables",
+      "scale_factor": 0.01,
+      "queries": {
+        "q1": {
+          "name": "Pricing Summary Report",
+          "description": "Aggregate pricing with GROUP BY and ORDER BY",
+          "latest": {
+            "vibesql_ms": 424,
+            "sqlite_ms": 892,
+            "duckdb_ms": 12,
+            "status": "passing",
+            "timestamp": "2025-11-27T10:00:00Z"
+          },
+          "history": [
+            {"date": "2025-11-27", "ms": 424},
+            {"date": "2025-11-26", "ms": 445},
+            {"date": "2025-11-25", "ms": 448},
+            {"date": "2025-11-24", "ms": 450},
+            {"date": "2025-11-23", "ms": 455},
+            {"date": "2025-11-22", "ms": 460},
+            {"date": "2025-11-21", "ms": 468}
+          ],
+          "stats": {
+            "avg_7d_ms": 450,
+            "avg_30d_ms": 465,
+            "best_ms": 420,
+            "trend": "improving",
+            "trend_pct": -3.4
+          }
+        },
+        "q2": {
+          "name": "Minimum Cost Supplier",
+          "description": "3-table JOIN with ORDER BY and LIMIT",
+          "latest": {
+            "vibesql_ms": 15,
+            "sqlite_ms": 18,
+            "duckdb_ms": 5,
+            "status": "passing",
+            "timestamp": "2025-11-27T10:00:00Z"
+          },
+          "history": [
+            {"date": "2025-11-27", "ms": 15},
+            {"date": "2025-11-26", "ms": 16},
+            {"date": "2025-11-25", "ms": 16},
+            {"date": "2025-11-24", "ms": 17},
+            {"date": "2025-11-23", "ms": 17}
+          ],
+          "stats": {
+            "avg_7d_ms": 16,
+            "avg_30d_ms": 17,
+            "best_ms": 14,
+            "trend": "improving",
+            "trend_pct": -6.2
+          }
+        },
+        "q3": {
+          "name": "Shipping Priority",
+          "description": "3-table JOIN with aggregation",
+          "latest": {
+            "vibesql_ms": 512,
+            "sqlite_ms": 480,
+            "duckdb_ms": 8,
+            "status": "passing",
+            "timestamp": "2025-11-27T10:00:00Z"
+          },
+          "history": [
+            {"date": "2025-11-27", "ms": 512},
+            {"date": "2025-11-26", "ms": 480},
+            {"date": "2025-11-25", "ms": 465},
+            {"date": "2025-11-24", "ms": 455},
+            {"date": "2025-11-23", "ms": 445}
+          ],
+          "stats": {
+            "avg_7d_ms": 471,
+            "avg_30d_ms": 460,
+            "best_ms": 440,
+            "trend": "regressing",
+            "trend_pct": 15.0
+          }
+        },
+        "q6": {
+          "name": "Forecasting Revenue Change",
+          "description": "WHERE filters with BETWEEN and SUM",
+          "latest": {
+            "vibesql_ms": 8,
+            "sqlite_ms": 12,
+            "duckdb_ms": 2,
+            "status": "passing",
+            "timestamp": "2025-11-27T10:00:00Z"
+          },
+          "history": [
+            {"date": "2025-11-27", "ms": 8},
+            {"date": "2025-11-26", "ms": 8},
+            {"date": "2025-11-25", "ms": 9},
+            {"date": "2025-11-24", "ms": 9},
+            {"date": "2025-11-23", "ms": 10}
+          ],
+          "stats": {
+            "avg_7d_ms": 9,
+            "avg_30d_ms": 10,
+            "best_ms": 7,
+            "trend": "improving",
+            "trend_pct": -11.1
+          }
+        },
+        "q18": {
+          "name": "Large Volume Customer",
+          "description": "GROUP BY with HAVING",
+          "latest": {
+            "vibesql_ms": null,
+            "sqlite_ms": 1200,
+            "duckdb_ms": 45,
+            "status": "timeout",
+            "error": "Exceeded 30s timeout",
+            "timestamp": "2025-11-27T10:00:00Z"
+          },
+          "history": [],
+          "stats": null
+        },
+        "q21": {
+          "name": "Suppliers Who Kept Orders Waiting",
+          "description": "Multi-table EXISTS",
+          "latest": {
+            "vibesql_ms": null,
+            "sqlite_ms": 2500,
+            "duckdb_ms": 120,
+            "status": "memory",
+            "error": "Out of memory",
+            "timestamp": "2025-11-27T10:00:00Z"
+          },
+          "history": [],
+          "stats": null
+        }
+      }
+    },
+    "tpcc": {
+      "description": "TPC-C OLTP - Mixed read/write transactions",
+      "scale_factor": 1,
+      "latest": {
+        "vibesql_tps": 1250,
+        "sqlite_tps": 980,
+        "duckdb_tps": 2100,
+        "mixed_latency_us": 800
+      },
+      "history": [
+        {"date": "2025-11-27", "tps": 1250},
+        {"date": "2025-11-26", "tps": 1200},
+        {"date": "2025-11-25", "tps": 1180}
+      ]
+    },
+    "tpcds": {
+      "description": "TPC-DS Decision Support - 99 complex queries",
+      "queries": {}
+    },
+    "sysbench": {
+      "description": "Sysbench OLTP - Point operations",
+      "tests": {}
+    }
+  },
+
+  "conformance": {
+    "summary": {
+      "total_tests": 5892000,
+      "passing": 5891234,
+      "failing": 766,
+      "pass_rate": 99.98
+    },
+    "categories": {
+      "select": {"total": 500000, "passing": 500000, "pass_rate": 100},
+      "aggregates": {"total": 130000, "passing": 130000, "pass_rate": 100},
+      "joins": {"total": 200000, "passing": 200000, "pass_rate": 100},
+      "expressions": {"total": 150000, "passing": 150000, "pass_rate": 100},
+      "subqueries": {"total": 100000, "passing": 100000, "pass_rate": 100}
+    },
+    "history": [
+      {"date": "2025-11-27", "pass_rate": 99.98, "passing": 5891234}
+    ]
+  },
+
+  "changes": [
+    {
+      "date": "2025-11-27",
+      "type": "improvement",
+      "category": "tpch",
+      "query": "Q1",
+      "description": "Q1 improved 5%",
+      "before_ms": 445,
+      "after_ms": 424,
+      "commit": "abc1234567890",
+      "pr": 2801
+    },
+    {
+      "date": "2025-11-26",
+      "type": "regression",
+      "category": "tpch",
+      "query": "Q3",
+      "description": "Q3 regressed 15% - hash join overhead",
+      "before_ms": 445,
+      "after_ms": 512,
+      "commit": "def4567890123"
+    },
+    {
+      "date": "2025-11-25",
+      "type": "fix",
+      "category": "conformance",
+      "description": "Fixed 3 SQLLogicTest edge cases",
+      "pr": 2798
+    },
+    {
+      "date": "2025-11-24",
+      "type": "new",
+      "category": "tpcds",
+      "description": "TPC-DS coverage complete (99 queries)",
+      "pr": 2803
+    },
+    {
+      "date": "2025-11-23",
+      "type": "improvement",
+      "category": "tpch",
+      "query": "Q5, Q7",
+      "description": "New index optimization for Q5, Q7",
+      "commit": "ghi7890123456"
+    }
+  ],
+
+  "machine_info": {
+    "system": "GitHub Actions Ubuntu 22.04",
+    "cpu": "AMD EPYC 7763",
+    "memory": "16GB",
+    "notes": "Standard GH Actions runner"
+  }
+}
