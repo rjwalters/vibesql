@@ -18,9 +18,9 @@
 //! - Queries: Q13, Q16, Q20, Q32, Q37, Q60, Q62, Q76, Q84, Q92
 //!
 //! ## Tier 2 (Q21-Q50 Complex Analytics):
-//! - Q21, Q23, Q24, Q28, Q29, Q30, Q31, Q33, Q34, Q38, Q39, Q40, Q41, Q43, Q44, Q45, Q46, Q47, Q48, Q49
+//! - Q21, Q22, Q23, Q24, Q28, Q29, Q30, Q31, Q33, Q34, Q36, Q38, Q39, Q40, Q41, Q43, Q44, Q45, Q46, Q47, Q48, Q49
 //! - Complex multi-table joins, CTEs, window functions, cross-channel analysis
-//! - Note: Q22, Q36 blocked by ROLLUP/CUBE requirements
+//! - Q22 uses ROLLUP for hierarchical inventory subtotals, Q36 uses CUBE for multi-dimensional analysis
 //!
 //! Queries are numbered to match the official TPC-DS query numbers where possible,
 //! with adaptations noted in comments.
@@ -878,6 +878,26 @@ ORDER BY w_warehouse_name, i_item_id
 LIMIT 100
 "#;
 
+// TPC-DS Q22: Inventory by Warehouse with ROLLUP
+// Analyzes inventory levels with hierarchical subtotals by warehouse, item, quarter.
+// Tests: ROLLUP grouping, multi-table join, hierarchical aggregation
+pub const TPCDS_Q22: &str = r#"
+SELECT
+    i_product_name,
+    i_brand,
+    i_class,
+    i_category,
+    AVG(cs_quantity) AS qoh
+FROM catalog_sales, warehouse, item, date_dim
+WHERE cs_warehouse_sk = w_warehouse_sk
+    AND cs_item_sk = i_item_sk
+    AND cs_sold_date_sk = d_date_sk
+    AND d_month_seq BETWEEN 1200 AND 1211
+GROUP BY ROLLUP(i_product_name, i_brand, i_class, i_category)
+ORDER BY qoh, i_product_name, i_brand, i_class, i_category
+LIMIT 100
+"#;
+
 // TPC-DS Q23: Customer Sales Analysis (Part 1 - Frequent Shoppers)
 // Identifies customers who frequently purchased items with specific attributes.
 // Tests: CTEs, complex subqueries, customer behavior analysis
@@ -1145,6 +1165,31 @@ WHERE ss_sold_date_sk = d_date_sk
 GROUP BY c_last_name, c_first_name, c_salutation, c_preferred_cust_flag
 HAVING COUNT(*) BETWEEN 1 AND 5
 ORDER BY cnt DESC, c_last_name, c_first_name
+LIMIT 100
+"#;
+
+// TPC-DS Q36: Store Sales Gross Margin Analysis with CUBE
+// Multi-dimensional analysis of gross margin across store and item dimensions.
+// Tests: CUBE grouping, GROUPING() function, window function with PARTITION BY
+pub const TPCDS_Q36: &str = r#"
+SELECT
+    SUM(ss_net_profit) / SUM(ss_ext_sales_price) AS gross_margin,
+    i_category,
+    i_class,
+    GROUPING(i_category) + GROUPING(i_class) AS lochierarchy,
+    RANK() OVER (
+        PARTITION BY GROUPING(i_category) + GROUPING(i_class),
+                     CASE WHEN GROUPING(i_class) = 0 THEN i_category END
+        ORDER BY SUM(ss_net_profit) / SUM(ss_ext_sales_price) ASC
+    ) AS rank_within_parent
+FROM store_sales, date_dim, item, store
+WHERE ss_sold_date_sk = d_date_sk
+    AND ss_item_sk = i_item_sk
+    AND ss_store_sk = s_store_sk
+    AND s_state IN ('TN', 'TX', 'OH')
+    AND d_year = 2001
+GROUP BY CUBE(i_category, i_class)
+ORDER BY lochierarchy DESC, gross_margin
 LIMIT 100
 "#;
 
@@ -1525,6 +1570,7 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q92", TPCDS_Q92),
     // Tier 2 queries (Q21-Q50) - complex analytics
     ("Q21", TPCDS_Q21),
+    ("Q22", TPCDS_Q22),
     ("Q23", TPCDS_Q23),
     ("Q24", TPCDS_Q24),
     ("Q28", TPCDS_Q28),
@@ -1533,6 +1579,7 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q31", TPCDS_Q31),
     ("Q33", TPCDS_Q33),
     ("Q34", TPCDS_Q34),
+    ("Q36", TPCDS_Q36),
     ("Q38", TPCDS_Q38),
     ("Q39", TPCDS_Q39),
     ("Q40", TPCDS_Q40),
