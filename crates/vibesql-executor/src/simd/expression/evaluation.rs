@@ -1,176 +1,14 @@
-//! SIMD-accelerated expression evaluation for general arithmetic expressions
+//! Core SIMD expression evaluation
 //!
-//! This module extends SIMD support beyond aggregates to general expression evaluation
-//! in WHERE clauses, SELECT projections, ORDER BY, and other query contexts.
-//!
-//! # Overview
-//!
-//! Evaluates expressions in batch mode using SIMD operations when beneficial:
-//! - Collects values from multiple rows into columnar buffers
-//! - Applies SIMD arithmetic operations
-//! - Converts results back to row-based format
-//!
-//! # When SIMD is Used
-//!
-//! SIMD path is chosen when:
-//! 1. Row count >= SIMD_THRESHOLD (100 rows)
-//! 2. Expression is simple arithmetic (+, -, *, /)
-//! 3. All operands are numeric (Int64 or Float64)
-//! 4. No complex sub-expressions (subqueries, aggregates, etc.)
-//!
-//! # Performance
-//!
-//! Expected improvements:
-//! - 2-4x for expression-heavy queries (conservative)
-//! - 5-10x for computation-dominated queries (optimistic)
-//!
-//! Overhead considerations:
-//! - Row → columnar → row conversion has cost
-//! - Only beneficial when computation cost exceeds conversion cost
-//! - Threshold tuned to break-even point (~100-1000 rows)
+//! This module contains the main SIMD evaluation logic for expressions,
+//! including type conversion, buffer management, and SIMD arithmetic dispatch.
 
 use crate::errors::ExecutorError;
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
-/// Threshold for using SIMD expression evaluation
-/// Below this, scalar evaluation is more efficient due to conversion overhead
-pub const SIMD_THRESHOLD: usize = 100;
-
-/// Maximum recursion depth for nested expressions
-/// Prevents stack overflow on deeply nested binary operations
-const MAX_RECURSION_DEPTH: usize = 32;
-
-/// Check if an expression can benefit from SIMD evaluation
-///
-/// Returns true if:
-/// - Row count >= SIMD_THRESHOLD (enough rows to amortize conversion overhead)
-/// - Expression is simple binary arithmetic (+, -, *, /)
-/// - Operands are column references or literals (no complex sub-expressions)
-/// - No subqueries, aggregates, or other complex operations
-/// - No NULL values present (graceful fallback to scalar evaluation)
-#[cfg(feature = "simd")]
-pub fn can_use_simd_for_expression(
-    expr: &Expression,
-    rows: &[vibesql_storage::Row],
-    evaluator: &crate::evaluator::CombinedExpressionEvaluator,
-) -> bool {
-    // Must have enough rows to amortize conversion overhead
-    if rows.len() < SIMD_THRESHOLD {
-        return false;
-    }
-
-    match expr {
-        Expression::BinaryOp { left, op, right } => {
-            // Check if operator is SIMD-compatible
-            let is_simd_op = matches!(
-                op,
-                BinaryOperator::Plus
-                    | BinaryOperator::Minus
-                    | BinaryOperator::Multiply
-                    | BinaryOperator::Divide
-            );
-
-            if !is_simd_op {
-                return false;
-            }
-
-            // Check if operands are simple (column refs or literals)
-            if !is_simple_operand(left) || !is_simple_operand(right) {
-                return false;
-            }
-
-            // Check for NULL values - if present, fall back to scalar evaluation
-            // This enables true graceful fallback instead of throwing errors
-            !has_null_values(expr, rows, evaluator)
-        }
-        _ => false,
-    }
-}
-
-/// Check if an expression is a simple operand (column reference or literal)
-#[cfg(feature = "simd")]
-fn is_simple_operand(expr: &Expression) -> bool {
-    match expr {
-        // Column references are simple
-        Expression::ColumnRef { .. } => true,
-
-        // Literals are simple
-        Expression::Literal(_) => true,
-
-        // Nested binary ops are simple if their operands are simple
-        Expression::BinaryOp { left, op, right } => {
-            matches!(
-                op,
-                BinaryOperator::Plus
-                    | BinaryOperator::Minus
-                    | BinaryOperator::Multiply
-                    | BinaryOperator::Divide
-            ) && is_simple_operand(left)
-                && is_simple_operand(right)
-        }
-
-        // Everything else is complex (subqueries, aggregates, functions, etc.)
-        _ => false,
-    }
-}
-
-/// Extract all column references from an expression tree
-#[cfg(feature = "simd")]
-fn extract_column_refs(expr: &Expression) -> Vec<Expression> {
-    let mut columns = Vec::new();
-    match expr {
-        Expression::ColumnRef { .. } => {
-            columns.push(expr.clone());
-        }
-        Expression::BinaryOp { left, right, .. } => {
-            columns.extend(extract_column_refs(left));
-            columns.extend(extract_column_refs(right));
-        }
-        // Other expression types (literals, etc.) don't contain column refs
-        _ => {}
-    }
-    columns
-}
-
-/// Check if an expression contains NULL values by checking source columns only
-#[cfg(feature = "simd")]
-fn has_null_values(
-    expr: &Expression,
-    rows: &[vibesql_storage::Row],
-    evaluator: &crate::evaluator::CombinedExpressionEvaluator,
-) -> bool {
-    let column_refs = extract_column_refs(expr);
-    if column_refs.is_empty() {
-        return false;
-    }
-
-    let sample_size = rows.len().min(100);
-
-    for row in rows.iter().take(sample_size) {
-        for col_ref in &column_refs {
-            match evaluator.eval(col_ref, row) {
-                Ok(value) if value == SqlValue::Null => return true,
-                Err(_) => return true,
-                _ => {}
-            }
-        }
-    }
-
-    if sample_size < rows.len() {
-        for row in rows.iter().skip(sample_size) {
-            for col_ref in &column_refs {
-                match evaluator.eval(col_ref, row) {
-                    Ok(value) if value == SqlValue::Null => return true,
-                    Err(_) => return true,
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    false
-}
+use super::analysis::can_use_simd_for_expression;
+use super::MAX_RECURSION_DEPTH;
 
 /// Evaluate an expression in batch mode using SIMD
 ///
@@ -287,7 +125,7 @@ fn eval_operand_to_buffer(
 /// Returns an error if NULL values are present, which indicates a bug in the
 /// NULL detection logic (NULLs should be caught by can_use_simd_for_expression).
 #[cfg(feature = "simd")]
-fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, ExecutorError> {
+pub fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, ExecutorError> {
     // Determine if we can use Int64 or need Float64
     let has_float = values.iter().any(|v| matches!(v, NumericValue::Float64(_)));
 
@@ -326,12 +164,12 @@ fn convert_to_buffer(values: Vec<NumericValue>) -> Result<NumericBuffer, Executo
 
 /// Apply SIMD arithmetic operation to two buffers
 #[cfg(feature = "simd")]
-fn apply_simd_operation(
+pub fn apply_simd_operation(
     left: &NumericBuffer,
     op: BinaryOperator,
     right: &NumericBuffer,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
-    use super::arithmetic::*;
+    use crate::simd::arithmetic::*;
 
     match (left, right) {
         // Both i64 - use integer SIMD
@@ -396,7 +234,7 @@ fn apply_simd_operation(
 
 /// Scalar fallback for expressions that can't use SIMD
 #[cfg(feature = "simd")]
-fn eval_expression_scalar(
+pub fn eval_expression_scalar(
     expr: &Expression,
     rows: &[vibesql_storage::Row],
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,
@@ -407,7 +245,7 @@ fn eval_expression_scalar(
 /// Numeric value that can be used in SIMD operations
 #[cfg(feature = "simd")]
 #[derive(Debug, Clone)]
-enum NumericValue {
+pub enum NumericValue {
     Int64(i64),
     Float64(f64),
     Null,
@@ -415,7 +253,7 @@ enum NumericValue {
 
 #[cfg(feature = "simd")]
 impl NumericValue {
-    fn from_sql_value(value: &SqlValue) -> Result<Self, ExecutorError> {
+    pub fn from_sql_value(value: &SqlValue) -> Result<Self, ExecutorError> {
         match value {
             SqlValue::Integer(n) => Ok(NumericValue::Int64(*n)),
             SqlValue::Bigint(n) => Ok(NumericValue::Int64(*n)),
@@ -436,7 +274,7 @@ impl NumericValue {
 /// Buffer of numeric values for SIMD operations
 #[cfg(feature = "simd")]
 #[derive(Debug)]
-enum NumericBuffer {
+pub enum NumericBuffer {
     Int64(Vec<i64>),
     Float64(Vec<f64>),
 }
@@ -444,7 +282,7 @@ enum NumericBuffer {
 #[cfg(feature = "simd")]
 impl NumericBuffer {
     /// Convert buffer to f64 (promoting integers if necessary)
-    fn to_f64(&self) -> Vec<f64> {
+    pub fn to_f64(&self) -> Vec<f64> {
         match self {
             NumericBuffer::Int64(v) => v.iter().map(|&x| x as f64).collect(),
             NumericBuffer::Float64(v) => v.clone(),
@@ -455,7 +293,7 @@ impl NumericBuffer {
 #[cfg(all(test, feature = "simd"))]
 mod tests {
     use super::*;
-    use vibesql_ast::{BinaryOperator, Expression};
+    use vibesql_ast::BinaryOperator;
     use vibesql_storage::Row;
     use vibesql_types::{DataType, SqlValue};
 
@@ -464,7 +302,6 @@ mod tests {
         use crate::schema::CombinedSchema;
         use vibesql_catalog::{ColumnSchema, TableSchema};
 
-        // Create a minimal schema for testing
         let columns = vec![
             ColumnSchema::new("a".to_string(), DataType::Bigint, false),
             ColumnSchema::new("b".to_string(), DataType::Bigint, false),
@@ -472,315 +309,24 @@ mod tests {
         ];
         let table_schema = TableSchema::new("test".to_string(), columns);
 
-        let schema = Box::leak(Box::new(CombinedSchema::from_table("test".to_string(), table_schema)));
+        let schema = Box::leak(Box::new(CombinedSchema::from_table(
+            "test".to_string(),
+            table_schema,
+        )));
         crate::evaluator::CombinedExpressionEvaluator::new(schema)
     }
 
     // Helper to create test rows with numeric values
     fn create_test_rows(count: usize) -> Vec<Row> {
         (0..count)
-            .map(|i| Row::new(vec![
-                SqlValue::Bigint(i as i64),
-                SqlValue::Bigint((i * 2) as i64),
-                SqlValue::Bigint((i * 3) as i64),
-            ]))
+            .map(|i| {
+                Row::new(vec![
+                    SqlValue::Bigint(i as i64),
+                    SqlValue::Bigint((i * 2) as i64),
+                    SqlValue::Bigint((i * 3) as i64),
+                ])
+            })
             .collect()
-    }
-
-    // ===== Expression Detection Tests =====
-
-    #[test]
-    fn test_can_use_simd_returns_false_for_small_row_count() {
-        let evaluator = create_test_evaluator();
-        let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
-            op: BinaryOperator::Plus,
-            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-        };
-
-        // Below threshold
-        let rows_99 = create_test_rows(99);
-        let rows_50 = create_test_rows(50);
-        let rows_0 = create_test_rows(0);
-        assert!(!can_use_simd_for_expression(&expr, &rows_99, &evaluator));
-        assert!(!can_use_simd_for_expression(&expr, &rows_50, &evaluator));
-        assert!(!can_use_simd_for_expression(&expr, &rows_0, &evaluator));
-
-        // At threshold
-        let rows_100 = create_test_rows(100);
-        assert!(can_use_simd_for_expression(&expr, &rows_100, &evaluator));
-
-        // Above threshold
-        let rows_101 = create_test_rows(101);
-        let rows_1000 = create_test_rows(1000);
-        assert!(can_use_simd_for_expression(&expr, &rows_101, &evaluator));
-        assert!(can_use_simd_for_expression(&expr, &rows_1000, &evaluator));
-    }
-
-    #[test]
-    fn test_can_use_simd_returns_true_for_simple_arithmetic() {
-        let evaluator = create_test_evaluator();
-        let rows = create_test_rows(100);
-
-        // Test each arithmetic operator
-        let operators = vec![
-            BinaryOperator::Plus,
-            BinaryOperator::Minus,
-            BinaryOperator::Multiply,
-            BinaryOperator::Divide,
-        ];
-
-        for op in operators {
-            let expr = Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "a".to_string(),
-                }),
-                op,
-                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
-            };
-
-            assert!(
-                can_use_simd_for_expression(&expr, &rows, &evaluator),
-                "Should support SIMD for operator: {:?}",
-                op
-            );
-        }
-    }
-
-    #[test]
-    fn test_can_use_simd_returns_false_for_unsupported_operators() {
-        let evaluator = create_test_evaluator();
-        let rows = create_test_rows(100);
-
-        let unsupported_ops = vec![
-            BinaryOperator::Modulo,
-            BinaryOperator::Concat,
-            BinaryOperator::And,
-            BinaryOperator::Or,
-            BinaryOperator::Equal,
-            BinaryOperator::NotEqual,
-            BinaryOperator::LessThan,
-            BinaryOperator::LessThanOrEqual,
-            BinaryOperator::GreaterThan,
-            BinaryOperator::GreaterThanOrEqual,
-        ];
-
-        for op in unsupported_ops {
-            let expr = Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "a".to_string(),
-                }),
-                op,
-                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
-            };
-
-            assert!(
-                !can_use_simd_for_expression(&expr, &rows, &evaluator),
-                "Should NOT support SIMD for operator: {:?}",
-                op
-            );
-        }
-    }
-
-    #[test]
-    fn test_can_use_simd_returns_false_for_complex_operands() {
-        let evaluator = create_test_evaluator();
-        let rows = create_test_rows(100);
-
-        // ScalarSubquery
-        let expr_subquery = Expression::BinaryOp {
-            left: Box::new(Expression::ScalarSubquery(Box::new(
-                vibesql_ast::SelectStmt {
-                    with_clause: None,
-                    distinct: false,
-                    select_list: vec![],
-                    into_table: None,
-                    into_variables: None,
-                    from: None,
-                    where_clause: None,
-                    group_by: None,
-                    having: None,
-                    order_by: None,
-                    limit: None,
-                    offset: None,
-                    set_operation: None,
-                },
-            ))),
-            op: BinaryOperator::Plus,
-            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-        };
-        assert!(!can_use_simd_for_expression(&expr_subquery, &rows, &evaluator));
-
-        // AggregateFunction
-        let expr_aggregate = Expression::BinaryOp {
-            left: Box::new(Expression::AggregateFunction {
-                name: "SUM".to_string(),
-                args: vec![Expression::ColumnRef {
-                    table: None,
-                    column: "x".to_string(),
-                }],
-                distinct: false,
-            }),
-            op: BinaryOperator::Plus,
-            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-        };
-        assert!(!can_use_simd_for_expression(&expr_aggregate, &rows, &evaluator));
-
-        // Function
-        let expr_function = Expression::BinaryOp {
-            left: Box::new(Expression::Function {
-                name: "ABS".to_string(),
-                args: vec![Expression::ColumnRef {
-                    table: None,
-                    column: "x".to_string(),
-                }],
-                character_unit: None,
-            }),
-            op: BinaryOperator::Plus,
-            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-        };
-        assert!(!can_use_simd_for_expression(&expr_function, &rows, &evaluator));
-
-        // CASE
-        let expr_case = Expression::BinaryOp {
-            left: Box::new(Expression::Case {
-                operand: None,
-                when_clauses: vec![],
-                else_result: None,
-            }),
-            op: BinaryOperator::Plus,
-            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-        };
-        assert!(!can_use_simd_for_expression(&expr_case, &rows, &evaluator));
-    }
-
-    #[test]
-    fn test_can_use_simd_returns_true_for_nested_binary_operations() {
-        let evaluator = create_test_evaluator();
-        let rows = create_test_rows(100);
-
-        // (a + b) * c
-        let expr = Expression::BinaryOp {
-            left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "a".to_string(),
-                }),
-                op: BinaryOperator::Plus,
-                right: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "b".to_string(),
-                }),
-            }),
-            op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c".to_string(),
-            }),
-        };
-
-        assert!(can_use_simd_for_expression(&expr, &rows, &evaluator));
-    }
-
-    // ===== Operand Simplicity Tests =====
-
-    #[test]
-    fn test_is_simple_operand_for_column_refs() {
-        let expr = Expression::ColumnRef {
-            table: None,
-            column: "x".to_string(),
-        };
-        assert!(is_simple_operand(&expr));
-
-        let expr_qualified = Expression::ColumnRef {
-            table: Some("t".to_string()),
-            column: "x".to_string(),
-        };
-        assert!(is_simple_operand(&expr_qualified));
-    }
-
-    #[test]
-    fn test_is_simple_operand_for_literals() {
-        assert!(is_simple_operand(&Expression::Literal(SqlValue::Integer(42))));
-        assert!(is_simple_operand(&Expression::Literal(SqlValue::Double(3.14))));
-        assert!(is_simple_operand(&Expression::Literal(SqlValue::Varchar("test".to_string()))));
-        assert!(is_simple_operand(&Expression::Literal(SqlValue::Boolean(true))));
-        assert!(is_simple_operand(&Expression::Literal(SqlValue::Null)));
-    }
-
-    #[test]
-    fn test_is_simple_operand_for_nested_arithmetic() {
-        // a + b is simple
-        let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
-            op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
-        };
-        assert!(is_simple_operand(&expr));
-
-        // (a + b) * 2 is simple
-        let nested = Expression::BinaryOp {
-            left: Box::new(expr),
-            op: BinaryOperator::Multiply,
-            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
-        };
-        assert!(is_simple_operand(&nested));
-    }
-
-    #[test]
-    fn test_is_simple_operand_returns_false_for_complex_expressions() {
-        // ScalarSubquery is not simple
-        let subquery = Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
-            with_clause: None,
-            distinct: false,
-            select_list: vec![],
-            into_table: None,
-            into_variables: None,
-            from: None,
-            where_clause: None,
-            group_by: None,
-            having: None,
-            order_by: None,
-            limit: None,
-            offset: None,
-            set_operation: None,
-        }));
-        assert!(!is_simple_operand(&subquery));
-
-        // AggregateFunction is not simple
-        let aggregate = Expression::AggregateFunction {
-            name: "SUM".to_string(),
-            args: vec![],
-            distinct: false,
-        };
-        assert!(!is_simple_operand(&aggregate));
-
-        // Function is not simple
-        let function = Expression::Function {
-            name: "ABS".to_string(),
-            args: vec![],
-            character_unit: None,
-        };
-        assert!(!is_simple_operand(&function));
-
-        // CASE is not simple
-        let case_expr = Expression::Case {
-            operand: None,
-            when_clauses: vec![],
-            else_result: None,
-        };
-        assert!(!is_simple_operand(&case_expr));
     }
 
     // ===== Batch Expression Evaluation Tests =====
@@ -1009,8 +555,6 @@ mod tests {
 
     #[test]
     fn test_integer_division_by_zero_returns_null() {
-        use super::apply_simd_operation;
-
         let a = NumericBuffer::Int64(vec![10, 20, 30]);
         let b = NumericBuffer::Int64(vec![2, 0, 5]);
 
@@ -1025,8 +569,6 @@ mod tests {
 
     #[test]
     fn test_integer_division_non_zero() {
-        use super::apply_simd_operation;
-
         let a = NumericBuffer::Int64(vec![10, 20, 30, 40]);
         let b = NumericBuffer::Int64(vec![2, 4, 3, 8]);
 
@@ -1042,8 +584,6 @@ mod tests {
 
     #[test]
     fn test_float_division_handles_zero() {
-        use super::apply_simd_operation;
-
         let a = NumericBuffer::Float64(vec![10.0, 20.0, 30.0]);
         let b = NumericBuffer::Float64(vec![2.0, 0.0, 5.0]);
 
@@ -1064,8 +604,6 @@ mod tests {
 
     #[test]
     fn test_apply_simd_operation_int64_addition() {
-        use super::apply_simd_operation;
-
         let a = NumericBuffer::Int64(vec![1, 2, 3, 4]);
         let b = NumericBuffer::Int64(vec![10, 20, 30, 40]);
 
@@ -1081,8 +619,6 @@ mod tests {
 
     #[test]
     fn test_apply_simd_operation_float64_multiplication() {
-        use super::apply_simd_operation;
-
         let a = NumericBuffer::Float64(vec![1.5, 2.0, 3.5, 4.0]);
         let b = NumericBuffer::Float64(vec![2.0, 3.0, 2.0, 5.0]);
 
@@ -1098,8 +634,6 @@ mod tests {
 
     #[test]
     fn test_apply_simd_operation_type_promotion() {
-        use super::apply_simd_operation;
-
         // Int64 + Float64 should promote to Float64
         let a = NumericBuffer::Int64(vec![1, 2, 3]);
         let b = NumericBuffer::Float64(vec![1.5, 2.5, 3.5]);
@@ -1115,8 +649,6 @@ mod tests {
 
     #[test]
     fn test_apply_simd_operation_unsupported_operator() {
-        use super::apply_simd_operation;
-
         let a = NumericBuffer::Int64(vec![1, 2, 3]);
         let b = NumericBuffer::Int64(vec![1, 2, 3]);
 
