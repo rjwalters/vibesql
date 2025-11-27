@@ -71,10 +71,15 @@ pub use simd_filter::simd_filter_batch;
 #[cfg(feature = "simd")]
 pub use simd_join::columnar_hash_join_inner;
 
+#[cfg(feature = "simd")]
 use crate::errors::ExecutorError;
+#[cfg(feature = "simd")]
 use crate::schema::CombinedSchema;
+#[cfg(feature = "simd")]
 use vibesql_storage::Row;
+#[cfg(feature = "simd")]
 use vibesql_types::SqlValue;
+#[cfg(feature = "simd")]
 use log;
 
 /// Execute a columnar aggregate query with filtering
@@ -109,6 +114,10 @@ use log;
 ///
 /// let result = execute_columnar_aggregate(&rows, &predicates, &aggregates)?;
 /// ```
+///
+/// Note: This function requires the `simd` feature to be enabled for SIMD-accelerated
+/// filtering and aggregation. Without SIMD, callers should use the row-oriented path.
+#[cfg(feature = "simd")]
 pub fn execute_columnar_aggregate(
     rows: &[Row],
     predicates: &[ColumnPredicate],
@@ -143,11 +152,6 @@ pub fn execute_columnar_aggregate(
     // Phase 2: Apply SIMD-accelerated filtering
     #[cfg(feature = "profile-q6")]
     let filter_start = std::time::Instant::now();
-
-    // Columnar batch filtering requires SIMD for vectorized operations
-    // Without SIMD, fall back to row-oriented execution (handled by caller)
-    #[cfg(not(feature = "simd"))]
-    compile_error!("Columnar batch filtering requires the 'simd' feature to be enabled");
 
     let filtered_batch = if predicates.is_empty() {
         batch.clone()
@@ -196,6 +200,9 @@ pub fn execute_columnar_aggregate(
 ///
 /// Some(Result) if the query can be optimized using columnar execution,
 /// None if the expressions are too complex for columnar optimization.
+///
+/// Note: This function requires the `simd` feature for vectorized execution.
+#[cfg(feature = "simd")]
 pub fn execute_columnar(
     rows: &[Row],
     filter: Option<&vibesql_ast::Expression>,
@@ -244,7 +251,7 @@ pub fn execute_columnar(
     Some(execute_columnar_aggregate(rows, &predicates, &agg_specs, schema_ref))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "simd"))]
 mod tests {
     use super::*;
     use vibesql_types::Date;
