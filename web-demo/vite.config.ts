@@ -56,6 +56,38 @@ export default defineConfig({
         } catch (err) {
           console.error('Failed to copy benchmark data:', err)
         }
+
+        // Copy dashboard data for performance page
+        const dashboardSources = [
+          resolve(__dirname, 'public/data/dashboard.json'),
+          resolve(__dirname, '../data/dashboard.json'),
+        ]
+        const dashboardDest = resolve(__dirname, 'dist/data/dashboard.json')
+
+        try {
+          // Create data directory if it doesn't exist
+          const dataDir = resolve(__dirname, 'dist/data')
+          if (!existsSync(dataDir)) {
+            mkdirSync(dataDir, { recursive: true })
+          }
+
+          // Try each source location
+          let copied = false
+          for (const dashboardSrc of dashboardSources) {
+            if (existsSync(dashboardSrc)) {
+              copyFileSync(dashboardSrc, dashboardDest)
+              console.log('✓ Copied dashboard.json from:', dashboardSrc)
+              copied = true
+              break
+            }
+          }
+
+          if (!copied) {
+            console.warn('⚠️  dashboard.json not found in:', dashboardSources.join(', '))
+          }
+        } catch (err) {
+          console.error('Failed to copy dashboard data:', err)
+        }
       },
     },
   ],
@@ -67,6 +99,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         conformance: resolve(__dirname, 'conformance.html'),
         benchmarks: resolve(__dirname, 'benchmarks.html'),
+        performance: resolve(__dirname, 'performance.html'),
       },
     },
     // Increase chunk size warning limit for Monaco

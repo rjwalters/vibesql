@@ -173,7 +173,7 @@ impl CompiledWhereClause {
 
     /// Reorder predicates by selectivity (most selective first)
     /// This improves performance by evaluating cheap, selective predicates early
-    fn reorder_by_selectivity(predicates: &mut Vec<CompiledPredicate>) {
+    fn reorder_by_selectivity(predicates: &mut [CompiledPredicate]) {
         // Sort by selectivity (ascending = most selective first)
         predicates.sort_by(|a, b| {
             a.estimate_selectivity()

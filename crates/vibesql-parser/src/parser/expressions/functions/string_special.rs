@@ -5,6 +5,7 @@
 //! - POSITION(substring IN string [USING unit])
 //! - TRIM([position] [removal_char FROM] string)
 //! - SUBSTRING(string FROM start [FOR length] [USING unit])
+//! - EXTRACT(field FROM expr)
 
 use super::super::*;
 
@@ -37,6 +38,33 @@ impl Parser {
             substring: Box::new(substring),
             string: Box::new(string),
             character_unit,
+        })
+    }
+
+    /// Parse EXTRACT(field FROM expr)
+    /// SQL:1999 standard syntax for extracting date/time components
+    ///
+    /// Forms:
+    /// - EXTRACT(YEAR FROM date_column)
+    /// - EXTRACT(MONTH FROM timestamp_column)
+    /// - EXTRACT(DAY FROM '2024-01-15')
+    /// - EXTRACT(HOUR FROM current_timestamp)
+    pub(super) fn parse_extract_function(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
+        // Parse the field (date/time unit) - reuse the interval unit parser
+        let field = self.parse_interval_unit()?;
+
+        // Expect FROM keyword
+        self.expect_keyword(Keyword::From)?;
+
+        // Parse the expression at primary level to avoid operator conflicts
+        let expr = self.parse_primary_expression()?;
+
+        // Expect closing parenthesis
+        self.expect_token(Token::RParen)?;
+
+        Ok(vibesql_ast::Expression::Extract {
+            field,
+            expr: Box::new(expr),
         })
     }
 

@@ -270,7 +270,7 @@ pub fn optimize_expression(
         }
 
         // String functions - cannot optimize generally
-        Expression::Position { .. } | Expression::Trim { .. } => Ok(expr.clone()),
+        Expression::Position { .. } | Expression::Trim { .. } | Expression::Extract { .. } => Ok(expr.clone()),
 
         // LIKE - cannot optimize generally
         Expression::Like { .. } => Ok(expr.clone()),

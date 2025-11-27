@@ -184,6 +184,8 @@ pub(super) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
                 || has_external_column_refs(string, subquery)
         }
 
+        Expression::Extract { expr, .. } => has_external_column_refs(expr, subquery),
+
         Expression::Like { expr, pattern, .. } => {
             has_external_column_refs(expr, subquery) || has_external_column_refs(pattern, subquery)
         }

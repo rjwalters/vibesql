@@ -105,6 +105,12 @@ impl Parser {
             return Ok(Some(self.parse_substring_function(first)?));
         }
 
+        // Special case for EXTRACT(field FROM expr)
+        // SQL:1999 standard syntax for date/time extraction
+        if first.to_uppercase() == "EXTRACT" {
+            return Ok(Some(self.parse_extract_function()?));
+        }
+
         // Check if this is an aggregate function
         let function_name_upper = first.to_uppercase();
         let is_aggregate =

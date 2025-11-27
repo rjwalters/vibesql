@@ -47,6 +47,8 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
                 || expression_references_column(string)
         }
 
+        vibesql_ast::Expression::Extract { expr, .. } => expression_references_column(expr),
+
         vibesql_ast::Expression::Like { expr, pattern, .. } => {
             expression_references_column(expr) || expression_references_column(pattern)
         }

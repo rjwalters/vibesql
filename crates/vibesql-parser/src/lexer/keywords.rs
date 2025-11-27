@@ -298,6 +298,9 @@ pub(super) fn map_keyword(upper_text: String) -> Token {
         // Temporary object keywords (SQLite)
         "TEMP" => Token::Keyword(Keyword::Temp),
         "TEMPORARY" => Token::Keyword(Keyword::Temporary),
+        // VibeSQL storage format keywords
+        "STORAGE" => Token::Keyword(Keyword::Storage),
+        "COLUMNAR" => Token::Keyword(Keyword::Columnar),
         _ => Token::Identifier(upper_text), // Regular identifiers are normalized to uppercase
     }
 }

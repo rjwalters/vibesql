@@ -3466,16 +3466,16 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         "Saturday",
     ];
 
-    // Generate dates from 1998-01-01 to 2003-12-31 (~2191 days)
-    // Using a reduced set for benchmarking
-    let num_dates = 2191.min(data.date_dim_count);
+    // Use configured date range
+    let start_year = data.config.date_start_year;
+    let num_dates = data.date_dim_count;
     let mut rows = Vec::with_capacity(BATCH_SIZE.min(num_dates));
 
     for d_date_sk in 1..=num_dates {
         let days_since_base = d_date_sk as i64 - 1;
 
         // Calculate date components (simplified, ignoring leap years for benchmark)
-        let year = 1998 + (days_since_base / 365) as i32;
+        let year = start_year + (days_since_base / 365) as i32;
         let day_of_year = (days_since_base % 365) as i32;
         let month = (day_of_year / 30).min(11) + 1;
         let day = (day_of_year % 30) + 1;
@@ -3485,8 +3485,8 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let d_dow = (days_since_base % 7) as i32;
         let d_week_seq = (days_since_base / 7) as i32 + 1;
-        let d_month_seq = (year - 1998) * 12 + month;
-        let d_quarter_seq = (year - 1998) * 4 + ((month - 1) / 3) + 1;
+        let d_month_seq = (year - start_year) * 12 + month;
+        let d_quarter_seq = (year - start_year) * 4 + ((month - 1) / 3) + 1;
         let d_qoy = ((month - 1) / 3) + 1;
         let quarter_name = format!("{}Q{}", year, d_qoy);
 
@@ -3543,13 +3543,18 @@ fn load_time_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    // Generate time dimension for every hour (24 entries for benchmark, full would be 86400)
-    let num_times = 24.min(data.time_dim_count / 3600).max(24);
+    // Use configured time granularity
+    let seconds_per_row = data.config.time_granularity.seconds_per_row();
+    let num_times = data.time_dim_count;
     let mut rows = Vec::with_capacity(num_times);
 
-    for hour in 0..num_times {
-        let t_time_sk = hour * 3600; // Seconds since midnight
+    for i in 0..num_times {
+        let t_time_sk = i * seconds_per_row; // Seconds since midnight
         let t_time_id = format!("AAAAAA{:010}", t_time_sk);
+
+        let hour = t_time_sk / 3600;
+        let minute = (t_time_sk % 3600) / 60;
+        let second = t_time_sk % 60;
 
         let am_pm = if hour < 12 { "AM" } else { "PM" };
         let shift = if hour < 8 {
@@ -3575,8 +3580,8 @@ fn load_time_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(t_time_id),
             SqlValue::Integer(t_time_sk as i64),
             SqlValue::Integer(hour as i64),
-            SqlValue::Integer(0),  // t_minute
-            SqlValue::Integer(0),  // t_second
+            SqlValue::Integer(minute as i64),
+            SqlValue::Integer(second as i64),
             SqlValue::Varchar(am_pm.to_string()),
             SqlValue::Varchar(shift.to_string()),
             SqlValue::Varchar(sub_shift.to_string()),
@@ -4937,7 +4942,8 @@ fn create_tpcds_schema_sqlite(conn: &SqliteConn) {
 #[cfg(feature = "benchmark-comparison")]
 fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    let num_dates = 2191.min(data.date_dim_count);
+    let start_year = data.config.date_start_year;
+    let num_dates = data.date_dim_count;
 
     let mut stmt = conn.prepare(
         "INSERT INTO date_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -4945,7 +4951,7 @@ fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 
     for d_date_sk in 1..=num_dates {
         let days_since_base = d_date_sk as i64 - 1;
-        let year = 1998 + (days_since_base / 365) as i32;
+        let year = start_year + (days_since_base / 365) as i32;
         let day_of_year = (days_since_base % 365) as i32;
         let month = (day_of_year / 30).min(11) + 1;
         let day = (day_of_year % 30) + 1;
@@ -4953,8 +4959,8 @@ fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let d_date_id = format!("AAAAAA{:010}", d_date_sk);
         let d_dow = (days_since_base % 7) as i32;
         let d_week_seq = (days_since_base / 7) as i32 + 1;
-        let d_month_seq = (year - 1998) * 12 + month;
-        let d_quarter_seq = (year - 1998) * 4 + ((month - 1) / 3) + 1;
+        let d_month_seq = (year - start_year) * 12 + month;
+        let d_quarter_seq = (year - start_year) * 4 + ((month - 1) / 3) + 1;
         let d_qoy = ((month - 1) / 3) + 1;
         let quarter_name = format!("{}Q{}", year, d_qoy);
         let is_weekend = d_dow == 0 || d_dow == 6;
@@ -4990,15 +4996,19 @@ fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
-    let num_times = 24.min(data.time_dim_count / 3600).max(24);
+    let seconds_per_row = data.config.time_granularity.seconds_per_row();
+    let num_times = data.time_dim_count;
 
     let mut stmt = conn.prepare(
         "INSERT INTO time_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for hour in 0..num_times {
-        let t_time_sk = hour * 3600;
+    for i in 0..num_times {
+        let t_time_sk = i * seconds_per_row;
         let t_time_id = format!("AAAAAA{:010}", t_time_sk);
+        let hour = t_time_sk / 3600;
+        let minute = (t_time_sk % 3600) / 60;
+        let second = t_time_sk % 60;
         let am_pm = if hour < 12 { "AM" } else { "PM" };
         let shift = if hour < 8 { "third" } else if hour < 16 { "first" } else { "second" };
         let sub_shift = if hour % 8 < 4 { "night" } else { "day" };
@@ -5008,7 +5018,7 @@ fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             else { "" };
 
         stmt.execute(rusqlite::params![
-            t_time_sk, t_time_id, t_time_sk, hour, 0, 0, am_pm, shift, sub_shift, meal_time
+            t_time_sk, t_time_id, t_time_sk, hour, minute, second, am_pm, shift, sub_shift, meal_time
         ]).unwrap();
     }
 }
@@ -5409,7 +5419,8 @@ fn create_tpcds_schema_duckdb(conn: &DuckDBConn) {
 #[cfg(feature = "benchmark-comparison")]
 fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    let num_dates = 2191.min(data.date_dim_count);
+    let start_year = data.config.date_start_year;
+    let num_dates = data.date_dim_count;
 
     let mut stmt = conn.prepare(
         "INSERT INTO date_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -5417,7 +5428,7 @@ fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 
     for d_date_sk in 1..=num_dates {
         let days_since_base = d_date_sk as i64 - 1;
-        let year = 1998 + (days_since_base / 365) as i32;
+        let year = start_year + (days_since_base / 365) as i32;
         let day_of_year = (days_since_base % 365) as i32;
         let month = (day_of_year / 30).min(11) + 1;
         let day = (day_of_year % 30) + 1;
@@ -5425,8 +5436,8 @@ fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
         let d_date_id = format!("AAAAAA{:010}", d_date_sk);
         let d_dow = (days_since_base % 7) as i32;
         let d_week_seq = (days_since_base / 7) as i32 + 1;
-        let d_month_seq = (year - 1998) * 12 + month;
-        let d_quarter_seq = (year - 1998) * 4 + ((month - 1) / 3) + 1;
+        let d_month_seq = (year - start_year) * 12 + month;
+        let d_quarter_seq = (year - start_year) * 4 + ((month - 1) / 3) + 1;
         let d_qoy = ((month - 1) / 3) + 1;
         let quarter_name = format!("{}Q{}", year, d_qoy);
         let is_weekend = d_dow == 0 || d_dow == 6;
@@ -5462,15 +5473,19 @@ fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_time_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
-    let num_times = 24.min(data.time_dim_count / 3600).max(24);
+    let seconds_per_row = data.config.time_granularity.seconds_per_row();
+    let num_times = data.time_dim_count;
 
     let mut stmt = conn.prepare(
         "INSERT INTO time_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for hour in 0..num_times {
-        let t_time_sk = hour * 3600;
+    for i in 0..num_times {
+        let t_time_sk = i * seconds_per_row;
         let t_time_id = format!("AAAAAA{:010}", t_time_sk);
+        let hour = t_time_sk / 3600;
+        let minute = (t_time_sk % 3600) / 60;
+        let second = t_time_sk % 60;
         let am_pm = if hour < 12 { "AM" } else { "PM" };
         let shift = if hour < 8 { "third" } else if hour < 16 { "first" } else { "second" };
         let sub_shift = if hour % 8 < 4 { "night" } else { "day" };
@@ -5480,7 +5495,7 @@ fn load_time_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             else { "" };
 
         stmt.execute(duckdb::params![
-            t_time_sk, t_time_id, t_time_sk, hour, 0, 0, am_pm, shift, sub_shift, meal_time
+            t_time_sk, t_time_id, t_time_sk, hour, minute, second, am_pm, shift, sub_shift, meal_time
         ]).unwrap();
     }
 }

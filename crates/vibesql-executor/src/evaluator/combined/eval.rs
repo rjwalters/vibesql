@@ -214,6 +214,12 @@ impl CombinedExpressionEvaluator<'_> {
             vibesql_ast::Expression::Trim { position, removal_char, string } => {
                 self.eval_trim(position, removal_char, string, row)
             }
+
+            // EXTRACT expression: EXTRACT(field FROM expr)
+            vibesql_ast::Expression::Extract { field, expr } => {
+                self.eval_extract(field, expr, row)
+            }
+
             // LIKE pattern matching: expr LIKE pattern
             vibesql_ast::Expression::Like { expr, pattern, negated } => {
                 self.eval_like(expr, pattern, *negated, row)

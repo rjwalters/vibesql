@@ -44,7 +44,7 @@ impl ParallelSearchConfig {
         let time_budget_ms = std::env::var("JOIN_REORDER_TIME_BUDGET_MS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| {
+            .unwrap_or({
                 // Adaptive budget based on table count
                 match num_tables {
                     0..=3 => 500,   // Simple queries

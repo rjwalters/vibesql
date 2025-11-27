@@ -144,6 +144,13 @@ impl CreateTableExecutor {
         // Apply constraint results to schema (sets PK, unique, and check constraints)
         ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);
 
+        // Check for STORAGE table option and apply storage format
+        for option in &stmt.table_options {
+            if let vibesql_ast::TableOption::Storage(format) = option {
+                table_schema.set_storage_format(*format);
+            }
+        }
+
         // Process foreign key constraints from table_constraints
         for constraint in &stmt.table_constraints {
             if let vibesql_ast::TableConstraintKind::ForeignKey {

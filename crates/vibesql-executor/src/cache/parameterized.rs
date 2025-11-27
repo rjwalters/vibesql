@@ -400,6 +400,10 @@ impl LiteralExtractor {
                 Self::extract_from_expression(string, literals);
             }
 
+            Expression::Extract { expr, .. } => {
+                Self::extract_from_expression(expr, literals);
+            }
+
             Expression::Like { expr, pattern, .. } => {
                 Self::extract_from_expression(expr, literals);
                 Self::extract_from_expression(pattern, literals);

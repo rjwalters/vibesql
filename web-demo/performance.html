@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Performance Dashboard - VibeSQL</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <!-- Prevent flash of unstyled content by applying theme before page renders -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = savedTheme ?? (prefersDark ? 'dark' : 'light');
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+</head>
+<body>
+  <div id="app" class="min-h-screen bg-surface-light dark:bg-surface-dark">
+    <!-- Header -->
+    <header class="bg-background shadow-md border-b border-border">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center flex-wrap gap-4">
+        <h1 class="text-3xl font-bold text-primary-light dark:text-primary-dark">
+          VibeSQL - Performance Dashboard
+        </h1>
+        <div id="nav-container"></div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-8">
+      <!-- Hero Cards -->
+      <section id="hero-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Populated by JavaScript -->
+        <div class="bg-background rounded-lg shadow-lg p-6 border border-border animate-pulse">
+          <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2 mb-4"></div>
+          <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
+        </div>
+        <div class="bg-background rounded-lg shadow-lg p-6 border border-border animate-pulse">
+          <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2 mb-4"></div>
+          <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
+        </div>
+        <div class="bg-background rounded-lg shadow-lg p-6 border border-border animate-pulse">
+          <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2 mb-4"></div>
+          <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
+        </div>
+        <div class="bg-background rounded-lg shadow-lg p-6 border border-border animate-pulse">
+          <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2 mb-4"></div>
+          <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
+        </div>
+      </section>
+
+      <!-- Timeline Chart -->
+      <section class="bg-background rounded-lg shadow-lg p-6 border border-border">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+          <h2 class="text-2xl font-semibold text-foreground">
+            Performance Trend
+          </h2>
+          <div id="timeline-period-buttons" class="flex gap-2">
+            <button data-period="7" class="px-3 py-1 text-sm rounded border border-border bg-card hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">7d</button>
+            <button data-period="30" class="px-3 py-1 text-sm rounded border border-border bg-primary-light dark:bg-primary-dark text-white">30d</button>
+            <button data-period="90" class="px-3 py-1 text-sm rounded border border-border bg-card hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">90d</button>
+          </div>
+        </div>
+        <div class="relative" style="height: 300px;">
+          <canvas id="timeline-chart"></canvas>
+        </div>
+        <div id="timeline-events" class="mt-4 text-sm text-muted hidden">
+          <!-- Key events populated by JavaScript -->
+        </div>
+      </section>
+
+      <!-- Benchmark Suite Tabs -->
+      <section class="bg-background rounded-lg shadow-lg border border-border">
+        <div class="border-b border-border">
+          <nav id="benchmark-tabs" class="flex overflow-x-auto" role="tablist">
+            <button role="tab" data-suite="tpch" aria-selected="true" class="px-6 py-3 text-sm font-medium border-b-2 border-primary-light dark:border-primary-dark text-primary-light dark:text-primary-dark whitespace-nowrap">
+              TPC-H
+            </button>
+            <button role="tab" data-suite="tpcc" aria-selected="false" class="px-6 py-3 text-sm font-medium border-b-2 border-transparent text-muted hover:text-foreground hover:border-gray-300 dark:hover:border-gray-600 whitespace-nowrap">
+              TPC-C
+            </button>
+            <button role="tab" data-suite="tpcds" aria-selected="false" class="px-6 py-3 text-sm font-medium border-b-2 border-transparent text-muted hover:text-foreground hover:border-gray-300 dark:hover:border-gray-600 whitespace-nowrap">
+              TPC-DS
+            </button>
+            <button role="tab" data-suite="sysbench" aria-selected="false" class="px-6 py-3 text-sm font-medium border-b-2 border-transparent text-muted hover:text-foreground hover:border-gray-300 dark:hover:border-gray-600 whitespace-nowrap">
+              Sysbench
+            </button>
+          </nav>
+        </div>
+        <div id="benchmark-content" class="p-6">
+          <!-- Suite content populated by JavaScript -->
+          <div class="animate-pulse">
+            <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-4"></div>
+            <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-2/3 mb-6"></div>
+            <div class="space-y-3">
+              <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded"></div>
+              <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded"></div>
+              <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent Changes Feed -->
+      <section class="bg-background rounded-lg shadow-lg p-6 border border-border">
+        <h2 class="text-2xl font-semibold text-foreground mb-4">
+          Recent Changes
+        </h2>
+        <div id="changes-feed" class="space-y-3">
+          <!-- Changes populated by JavaScript -->
+          <div class="animate-pulse space-y-3">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+              <div class="flex-1 h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+              <div class="flex-1 h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+              <div class="flex-1 h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Machine Info -->
+      <section id="machine-info" class="text-center text-sm text-muted">
+        <!-- Populated by JavaScript -->
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-12 text-center text-sm text-muted pb-6">
+      <p>VibeSQL - SQL:1999 Database in WebAssembly</p>
+      <p class="text-xs mt-1">Performance data updated automatically via CI</p>
+    </footer>
+  </div>
+
+  <script type="module" src="/src/performance.ts"></script>
+</body>
+</html>

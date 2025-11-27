@@ -427,6 +427,11 @@ fn validate_expression_column_refs(
             validate_expression_column_refs(string, schema, outer_schema, allowed_aliases)
         }
 
+        // EXTRACT - extract field from expression
+        Expression::Extract { expr, .. } => {
+            validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)
+        }
+
         // MATCH AGAINST - column names are strings, not expressions
         Expression::MatchAgainst { search_modifier, .. } => {
             validate_expression_column_refs(search_modifier, schema, outer_schema, allowed_aliases)

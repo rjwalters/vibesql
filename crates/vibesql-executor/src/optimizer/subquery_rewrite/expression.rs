@@ -224,6 +224,11 @@ pub(super) fn rewrite_expression_with_context(
             string: Box::new(rewrite_expression_with_context(string, rewrite_subquery_fn, outer_tables)),
         },
 
+        Expression::Extract { field, expr } => Expression::Extract {
+            field: field.clone(),
+            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
+        },
+
         Expression::Like {
             expr,
             pattern,

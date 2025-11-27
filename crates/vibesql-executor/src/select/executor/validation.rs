@@ -101,6 +101,9 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
             }
             extract_column_refs(string, refs);
         }
+        Expression::Extract { expr, .. } => {
+            extract_column_refs(expr, refs);
+        }
         Expression::ScalarSubquery(_) => {
             // Scalar subquery columns are validated when executing the subquery
         }
