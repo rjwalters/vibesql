@@ -214,12 +214,39 @@ impl QuerySignature {
             }
             vibesql_ast::GroupByClause::GroupingSets(sets) => {
                 "GROUPING_SETS".hash(hasher);
-                for set in sets {
-                    "SET".hash(hasher);
-                    for expr in &set.columns {
-                        Self::hash_expression(expr, hasher);
+                Self::hash_grouping_sets(sets, hasher);
+            }
+            vibesql_ast::GroupByClause::Mixed(items) => {
+                "MIXED".hash(hasher);
+                for item in items {
+                    match item {
+                        vibesql_ast::MixedGroupingItem::Simple(expr) => {
+                            "SIMPLE".hash(hasher);
+                            Self::hash_expression(expr, hasher);
+                        }
+                        vibesql_ast::MixedGroupingItem::Rollup(elements) => {
+                            "ROLLUP".hash(hasher);
+                            Self::hash_grouping_elements(elements, hasher);
+                        }
+                        vibesql_ast::MixedGroupingItem::Cube(elements) => {
+                            "CUBE".hash(hasher);
+                            Self::hash_grouping_elements(elements, hasher);
+                        }
+                        vibesql_ast::MixedGroupingItem::GroupingSets(sets) => {
+                            "GROUPING_SETS".hash(hasher);
+                            Self::hash_grouping_sets(sets, hasher);
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    fn hash_grouping_sets(sets: &[vibesql_ast::GroupingSet], hasher: &mut DefaultHasher) {
+        for set in sets {
+            "SET".hash(hasher);
+            for expr in &set.columns {
+                Self::hash_expression(expr, hasher);
             }
         }
     }
