@@ -1,10 +1,221 @@
 //! SIMD arithmetic operations for columnar data
+//!
+//! This module provides SIMD-accelerated arithmetic operations (add, sub, mul, div)
+//! for f64 and i64 column types. It automatically dispatches to the best available
+//! SIMD implementation based on CPU capabilities:
+//!
+//! - **AVX-512**: 8 elements per operation (2x throughput) on supported CPUs
+//! - **AVX2/SSE**: 4 elements per operation (fallback)
+//!
+//! # Architecture
+//!
+//! The code is organized using macros to reduce duplication:
+//! - `simd_binary_op_f64_avx2!` / `simd_binary_op_i64_avx2!`: Generate AVX2/SSE implementations
+//! - `simd_binary_op_f64_avx512!` / `simd_binary_op_i64_avx512!`: Generate AVX-512 implementations
+//!
+//! # Example
+//!
+//! ```ignore
+//! use vibesql_executor::simd::arithmetic::*;
+//!
+//! let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+//! let b = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+//! let result = simd_add_f64(&a, &b);
+//! ```
 
 #[cfg(feature = "simd")]
 use wide::*;
 
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 use std::arch::x86_64::*;
+
+// =============================================================================
+// Macros for AVX2/SSE Operations (4 elements at a time)
+// =============================================================================
+
+/// Generate an AVX2/SSE SIMD binary operation for f64 type.
+///
+/// This macro creates a function that processes arrays of f64 values
+/// using SIMD operations (4 elements at a time with f64x4).
+macro_rules! simd_binary_op_f64_avx2 {
+    ($fn_name:ident, $op:tt) => {
+        #[cfg(feature = "simd")]
+        fn $fn_name(a: &[f64], b: &[f64]) -> Vec<f64> {
+            let mut result = Vec::with_capacity(a.len());
+
+            // Process chunks of 4 elements with SIMD (f64x4)
+            let chunks = a.len() / 4;
+            for i in 0..chunks {
+                let offset = i * 4;
+                let a_vec = f64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
+                let b_vec = f64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
+                let res = a_vec $op b_vec;
+
+                let arr: [f64; 4] = res.into();
+                result.extend_from_slice(&arr);
+            }
+
+            // Handle remainder elements with scalar fallback
+            let remainder_start = chunks * 4;
+            for i in remainder_start..a.len() {
+                result.push(a[i] $op b[i]);
+            }
+
+            result
+        }
+    };
+}
+
+/// Generate an AVX2/SSE SIMD binary operation for i64 type.
+///
+/// This macro creates a function that processes arrays of i64 values
+/// using SIMD operations (4 elements at a time with i64x4).
+macro_rules! simd_binary_op_i64_avx2 {
+    ($fn_name:ident, $op:tt) => {
+        #[cfg(feature = "simd")]
+        fn $fn_name(a: &[i64], b: &[i64]) -> Vec<i64> {
+            let mut result = Vec::with_capacity(a.len());
+
+            // Process chunks of 4 elements with SIMD
+            let chunks = a.len() / 4;
+            for i in 0..chunks {
+                let offset = i * 4;
+                let a_vec = i64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
+                let b_vec = i64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
+                let res = a_vec $op b_vec;
+
+                let arr: [i64; 4] = res.into();
+                result.extend_from_slice(&arr);
+            }
+
+            // Handle remainder elements with scalar fallback
+            let remainder_start = chunks * 4;
+            for i in remainder_start..a.len() {
+                result.push(a[i] $op b[i]);
+            }
+
+            result
+        }
+    };
+}
+
+// =============================================================================
+// Macros for AVX-512 Operations (8 elements at a time)
+// =============================================================================
+
+/// Generate an AVX-512 SIMD binary operation for f64 type.
+///
+/// Creates an unsafe function that processes 8 f64 values at a time.
+/// Requires AVX-512F CPU support.
+macro_rules! simd_binary_op_f64_avx512 {
+    ($fn_name:ident, $intrinsic:ident, $scalar_op:tt) => {
+        /// # Safety
+        ///
+        /// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
+        #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn $fn_name(a: &[f64], b: &[f64]) -> Vec<f64> {
+            let mut result = Vec::with_capacity(a.len());
+
+            // Process chunks of 8 elements with AVX-512
+            let chunks = a.len() / 8;
+            for i in 0..chunks {
+                let offset = i * 8;
+
+                let a_vec = _mm512_loadu_pd(a.as_ptr().add(offset));
+                let b_vec = _mm512_loadu_pd(b.as_ptr().add(offset));
+                let res = $intrinsic(a_vec, b_vec);
+
+                let mut temp = [0.0; 8];
+                _mm512_storeu_pd(temp.as_mut_ptr(), res);
+                result.extend_from_slice(&temp);
+            }
+
+            // Handle remainder elements with scalar fallback
+            let remainder_start = chunks * 8;
+            for i in remainder_start..a.len() {
+                result.push(a[i] $scalar_op b[i]);
+            }
+
+            result
+        }
+    };
+}
+
+/// Generate an AVX-512 SIMD binary operation for i64 type.
+///
+/// Creates an unsafe function that processes 8 i64 values at a time.
+/// Requires AVX-512F CPU support.
+macro_rules! simd_binary_op_i64_avx512 {
+    ($fn_name:ident, $intrinsic:ident, $scalar_op:tt) => {
+        /// # Safety
+        ///
+        /// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
+        #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn $fn_name(a: &[i64], b: &[i64]) -> Vec<i64> {
+            let mut result = Vec::with_capacity(a.len());
+
+            // Process chunks of 8 elements with AVX-512
+            let chunks = a.len() / 8;
+            for i in 0..chunks {
+                let offset = i * 8;
+
+                let a_vec = _mm512_loadu_epi64(a.as_ptr().add(offset) as *const i64);
+                let b_vec = _mm512_loadu_epi64(b.as_ptr().add(offset) as *const i64);
+                let res = $intrinsic(a_vec, b_vec);
+
+                let mut temp = [0i64; 8];
+                _mm512_storeu_epi64(temp.as_mut_ptr() as *mut i64, res);
+                result.extend_from_slice(&temp);
+            }
+
+            // Handle remainder elements with scalar fallback
+            let remainder_start = chunks * 8;
+            for i in remainder_start..a.len() {
+                result.push(a[i] $scalar_op b[i]);
+            }
+
+            result
+        }
+    };
+}
+
+// =============================================================================
+// Generate AVX2/SSE Implementations
+// =============================================================================
+
+// f64 operations (AVX2/SSE - 4 elements at a time)
+simd_binary_op_f64_avx2!(simd_add_f64_avx2, +);
+simd_binary_op_f64_avx2!(simd_sub_f64_avx2, -);
+simd_binary_op_f64_avx2!(simd_mul_f64_avx2, *);
+simd_binary_op_f64_avx2!(simd_div_f64_avx2, /);
+
+// i64 operations (AVX2/SSE - 4 elements at a time)
+simd_binary_op_i64_avx2!(simd_add_i64_avx2, +);
+simd_binary_op_i64_avx2!(simd_sub_i64_avx2, -);
+simd_binary_op_i64_avx2!(simd_mul_i64_avx2, *);
+// Note: i64 division requires special handling (see below)
+
+// =============================================================================
+// Generate AVX-512 Implementations
+// =============================================================================
+
+// f64 operations (AVX-512 - 8 elements at a time)
+simd_binary_op_f64_avx512!(simd_add_f64_avx512, _mm512_add_pd, +);
+simd_binary_op_f64_avx512!(simd_sub_f64_avx512, _mm512_sub_pd, -);
+simd_binary_op_f64_avx512!(simd_mul_f64_avx512, _mm512_mul_pd, *);
+simd_binary_op_f64_avx512!(simd_div_f64_avx512, _mm512_div_pd, /);
+
+// i64 operations (AVX-512 - 8 elements at a time)
+simd_binary_op_i64_avx512!(simd_add_i64_avx512, _mm512_add_epi64, +);
+simd_binary_op_i64_avx512!(simd_sub_i64_avx512, _mm512_sub_epi64, -);
+simd_binary_op_i64_avx512!(simd_mul_i64_avx512, _mm512_mullo_epi64, *);
+// Note: i64 division requires special handling (see below)
+
+// =============================================================================
+// Public API: f64 Operations
+// =============================================================================
 
 /// SIMD addition for f64 columns with automatic dispatch
 ///
@@ -32,187 +243,54 @@ pub fn simd_add_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
     simd_add_f64_avx2(a, b)
 }
 
-/// AVX2/SSE SIMD addition for f64 columns (4 elements at a time)
-#[cfg(feature = "simd")]
-fn simd_add_f64_avx2(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 4 elements with SIMD (f64x4)
-    let chunks = a.len() / 4;
-    for i in 0..chunks {
-        let offset = i * 4;
-        let a_vec = f64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = f64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let sum = a_vec + b_vec;
-
-        let arr: [f64; 4] = sum.into();
-        result.extend_from_slice(&arr);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 4;
-    for i in remainder_start..a.len() {
-        result.push(a[i] + b[i]);
-    }
-
-    result
-}
-
 /// SIMD subtraction for f64 columns
 #[cfg(feature = "simd")]
 pub fn simd_sub_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 4 elements with SIMD
-    let chunks = a.len() / 4;
-    for i in 0..chunks {
-        let offset = i * 4;
-        let a_vec = f64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = f64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let diff = a_vec - b_vec;
-
-        let arr: [f64; 4] = diff.into();
-        result.extend_from_slice(&arr);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 4;
-    for i in remainder_start..a.len() {
-        result.push(a[i] - b[i]);
-    }
-
-    result
+    simd_sub_f64_avx2(a, b)
 }
 
 /// SIMD multiplication for f64 columns
 #[cfg(feature = "simd")]
 pub fn simd_mul_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 4 elements with SIMD
-    let chunks = a.len() / 4;
-    for i in 0..chunks {
-        let offset = i * 4;
-        let a_vec = f64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = f64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let product = a_vec * b_vec;
-
-        let arr: [f64; 4] = product.into();
-        result.extend_from_slice(&arr);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 4;
-    for i in remainder_start..a.len() {
-        result.push(a[i] * b[i]);
-    }
-
-    result
+    simd_mul_f64_avx2(a, b)
 }
 
 /// SIMD division for f64 columns
 #[cfg(feature = "simd")]
 pub fn simd_div_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 4 elements with SIMD
-    let chunks = a.len() / 4;
-    for i in 0..chunks {
-        let offset = i * 4;
-        let a_vec = f64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = f64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let quotient = a_vec / b_vec;
-
-        let arr: [f64; 4] = quotient.into();
-        result.extend_from_slice(&arr);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 4;
-    for i in remainder_start..a.len() {
-        result.push(a[i] / b[i]);
-    }
-
-    result
+    simd_div_f64_avx2(a, b)
 }
+
+// =============================================================================
+// Public API: i64 Operations
+// =============================================================================
 
 /// SIMD addition for i64 columns
 #[cfg(feature = "simd")]
 pub fn simd_add_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 4 elements with SIMD
-    let chunks = a.len() / 4;
-    for i in 0..chunks {
-        let offset = i * 4;
-        let a_vec = i64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = i64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let sum = a_vec + b_vec;
-
-        let arr: [i64; 4] = sum.into();
-        result.extend_from_slice(&arr);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 4;
-    for i in remainder_start..a.len() {
-        result.push(a[i] + b[i]);
-    }
-
-    result
+    simd_add_i64_avx2(a, b)
 }
 
 /// SIMD subtraction for i64 columns
 #[cfg(feature = "simd")]
 pub fn simd_sub_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 4 elements with SIMD
-    let chunks = a.len() / 4;
-    for i in 0..chunks {
-        let offset = i * 4;
-        let a_vec = i64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = i64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let diff = a_vec - b_vec;
-
-        let arr: [i64; 4] = diff.into();
-        result.extend_from_slice(&arr);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 4;
-    for i in remainder_start..a.len() {
-        result.push(a[i] - b[i]);
-    }
-
-    result
+    simd_sub_i64_avx2(a, b)
 }
 
 /// SIMD multiplication for i64 columns
 #[cfg(feature = "simd")]
 pub fn simd_mul_i64(a: &[i64], b: &[i64]) -> Vec<i64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 4 elements with SIMD
-    let chunks = a.len() / 4;
-    for i in 0..chunks {
-        let offset = i * 4;
-        let a_vec = i64x4::from([a[offset], a[offset + 1], a[offset + 2], a[offset + 3]]);
-        let b_vec = i64x4::from([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
-        let product = a_vec * b_vec;
-
-        let arr: [i64; 4] = product.into();
-        result.extend_from_slice(&arr);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 4;
-    for i in remainder_start..a.len() {
-        result.push(a[i] * b[i]);
-    }
-
-    result
+    simd_mul_i64_avx2(a, b)
 }
+
+// =============================================================================
+// Special Handling: i64 Division
+// =============================================================================
+//
+// Integer division requires special handling because:
+// 1. The `wide` crate's i64x4 doesn't support division
+// 2. We need to convert to f64, divide, and convert back
+// 3. Division by zero needs to be handled (returns 0, caller handles NULL)
 
 /// SIMD division for i64 columns with automatic dispatch
 ///
@@ -289,260 +367,6 @@ fn simd_div_i64_avx2(a: &[i64], b: &[i64]) -> Vec<i64> {
     let remainder_start = chunks * 4;
     for i in remainder_start..a.len() {
         result.push(a[i].checked_div(b[i]).unwrap_or(0));
-    }
-
-    result
-}
-
-// AVX-512 implementations (8 elements at a time)
-// These provide 2x throughput on AVX-512 capable CPUs
-
-/// AVX-512 addition for f64 columns (8 elements at a time)
-///
-/// # Safety
-///
-/// This function requires AVX-512F CPU support. The caller MUST verify CPU capabilities
-/// using `is_x86_feature_detected!("avx512f")` before calling. Calling this function
-/// on a CPU without AVX-512F support results in undefined behavior (illegal instruction).
-///
-/// # Example
-///
-/// ```ignore
-/// #[cfg(target_arch = "x86_64")]
-/// {
-///     if is_x86_feature_detected!("avx512f") {
-///         let result = unsafe { simd_add_f64_avx512(&a, &b) };
-///     } else {
-///         // Fallback to AVX2/SSE
-///         let result = simd_add_f64(&a, &b);
-///     }
-/// }
-/// ```
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[target_feature(enable = "avx512f")]
-pub unsafe fn simd_add_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 8 elements with AVX-512
-    let chunks = a.len() / 8;
-    for i in 0..chunks {
-        let offset = i * 8;
-
-        // Load 8 f64 values from a and b
-        let a_vec = _mm512_loadu_pd(a.as_ptr().add(offset));
-        let b_vec = _mm512_loadu_pd(b.as_ptr().add(offset));
-
-        // Perform SIMD addition
-        let sum = _mm512_add_pd(a_vec, b_vec);
-
-        // Store result
-        let mut temp = [0.0; 8];
-        _mm512_storeu_pd(temp.as_mut_ptr(), sum);
-        result.extend_from_slice(&temp);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 8;
-    for i in remainder_start..a.len() {
-        result.push(a[i] + b[i]);
-    }
-
-    result
-}
-
-/// AVX-512 subtraction for f64 columns (8 elements at a time)
-///
-/// # Safety
-///
-/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[target_feature(enable = "avx512f")]
-pub unsafe fn simd_sub_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 8 elements with AVX-512
-    let chunks = a.len() / 8;
-    for i in 0..chunks {
-        let offset = i * 8;
-
-        let a_vec = _mm512_loadu_pd(a.as_ptr().add(offset));
-        let b_vec = _mm512_loadu_pd(b.as_ptr().add(offset));
-        let diff = _mm512_sub_pd(a_vec, b_vec);
-
-        let mut temp = [0.0; 8];
-        _mm512_storeu_pd(temp.as_mut_ptr(), diff);
-        result.extend_from_slice(&temp);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 8;
-    for i in remainder_start..a.len() {
-        result.push(a[i] - b[i]);
-    }
-
-    result
-}
-
-/// AVX-512 multiplication for f64 columns (8 elements at a time)
-///
-/// # Safety
-///
-/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[target_feature(enable = "avx512f")]
-pub unsafe fn simd_mul_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 8 elements with AVX-512
-    let chunks = a.len() / 8;
-    for i in 0..chunks {
-        let offset = i * 8;
-
-        let a_vec = _mm512_loadu_pd(a.as_ptr().add(offset));
-        let b_vec = _mm512_loadu_pd(b.as_ptr().add(offset));
-        let product = _mm512_mul_pd(a_vec, b_vec);
-
-        let mut temp = [0.0; 8];
-        _mm512_storeu_pd(temp.as_mut_ptr(), product);
-        result.extend_from_slice(&temp);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 8;
-    for i in remainder_start..a.len() {
-        result.push(a[i] * b[i]);
-    }
-
-    result
-}
-
-/// AVX-512 division for f64 columns (8 elements at a time)
-///
-/// # Safety
-///
-/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[target_feature(enable = "avx512f")]
-pub unsafe fn simd_div_f64_avx512(a: &[f64], b: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 8 elements with AVX-512
-    let chunks = a.len() / 8;
-    for i in 0..chunks {
-        let offset = i * 8;
-
-        let a_vec = _mm512_loadu_pd(a.as_ptr().add(offset));
-        let b_vec = _mm512_loadu_pd(b.as_ptr().add(offset));
-        let quotient = _mm512_div_pd(a_vec, b_vec);
-
-        let mut temp = [0.0; 8];
-        _mm512_storeu_pd(temp.as_mut_ptr(), quotient);
-        result.extend_from_slice(&temp);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 8;
-    for i in remainder_start..a.len() {
-        result.push(a[i] / b[i]);
-    }
-
-    result
-}
-
-/// AVX-512 addition for i64 columns (8 elements at a time)
-///
-/// # Safety
-///
-/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[target_feature(enable = "avx512f")]
-pub unsafe fn simd_add_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 8 elements with AVX-512
-    let chunks = a.len() / 8;
-    for i in 0..chunks {
-        let offset = i * 8;
-
-        let a_vec = _mm512_loadu_epi64(a.as_ptr().add(offset) as *const i64);
-        let b_vec = _mm512_loadu_epi64(b.as_ptr().add(offset) as *const i64);
-        let sum = _mm512_add_epi64(a_vec, b_vec);
-
-        let mut temp = [0i64; 8];
-        _mm512_storeu_epi64(temp.as_mut_ptr() as *mut i64, sum);
-        result.extend_from_slice(&temp);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 8;
-    for i in remainder_start..a.len() {
-        result.push(a[i] + b[i]);
-    }
-
-    result
-}
-
-/// AVX-512 subtraction for i64 columns (8 elements at a time)
-///
-/// # Safety
-///
-/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[target_feature(enable = "avx512f")]
-pub unsafe fn simd_sub_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 8 elements with AVX-512
-    let chunks = a.len() / 8;
-    for i in 0..chunks {
-        let offset = i * 8;
-
-        let a_vec = _mm512_loadu_epi64(a.as_ptr().add(offset) as *const i64);
-        let b_vec = _mm512_loadu_epi64(b.as_ptr().add(offset) as *const i64);
-        let diff = _mm512_sub_epi64(a_vec, b_vec);
-
-        let mut temp = [0i64; 8];
-        _mm512_storeu_epi64(temp.as_mut_ptr() as *mut i64, diff);
-        result.extend_from_slice(&temp);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 8;
-    for i in remainder_start..a.len() {
-        result.push(a[i] - b[i]);
-    }
-
-    result
-}
-
-/// AVX-512 multiplication for i64 columns (8 elements at a time)
-///
-/// # Safety
-///
-/// Requires AVX-512F support. Caller must verify with `is_x86_feature_detected!("avx512f")`.
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[target_feature(enable = "avx512f")]
-pub unsafe fn simd_mul_i64_avx512(a: &[i64], b: &[i64]) -> Vec<i64> {
-    let mut result = Vec::with_capacity(a.len());
-
-    // Process chunks of 8 elements with AVX-512
-    let chunks = a.len() / 8;
-    for i in 0..chunks {
-        let offset = i * 8;
-
-        let a_vec = _mm512_loadu_epi64(a.as_ptr().add(offset) as *const i64);
-        let b_vec = _mm512_loadu_epi64(b.as_ptr().add(offset) as *const i64);
-        let product = _mm512_mullo_epi64(a_vec, b_vec);
-
-        let mut temp = [0i64; 8];
-        _mm512_storeu_epi64(temp.as_mut_ptr() as *mut i64, product);
-        result.extend_from_slice(&temp);
-    }
-
-    // Handle remainder elements with scalar fallback
-    let remainder_start = chunks * 8;
-    for i in remainder_start..a.len() {
-        result.push(a[i] * b[i]);
     }
 
     result
