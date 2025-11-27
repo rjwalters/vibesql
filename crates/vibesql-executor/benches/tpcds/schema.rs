@@ -3449,6 +3449,9 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
 // Data Loading - DATE_DIM
 // =============================================================================
 
+/// Batch size for bulk inserts - balances memory usage with insert efficiency
+const BATCH_SIZE: usize = 5000;
+
 fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
@@ -3466,6 +3469,7 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     // Use configured date range
     let start_year = data.config.date_start_year;
     let num_dates = data.date_dim_count;
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(num_dates));
 
     for d_date_sk in 1..=num_dates {
         let days_since_base = d_date_sk as i64 - 1;
@@ -3518,7 +3522,16 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar("N".to_string()),  // d_current_quarter
             SqlValue::Varchar("N".to_string()),  // d_current_year
         ]);
-        db.insert_row("date_dim", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("date_dim", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("date_dim", rows).unwrap();
     }
 }
 
@@ -3533,6 +3546,7 @@ fn load_time_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     // Use configured time granularity
     let seconds_per_row = data.config.time_granularity.seconds_per_row();
     let num_times = data.time_dim_count;
+    let mut rows = Vec::with_capacity(num_times);
 
     for i in 0..num_times {
         let t_time_sk = i * seconds_per_row; // Seconds since midnight
@@ -3573,7 +3587,11 @@ fn load_time_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(sub_shift.to_string()),
             SqlValue::Varchar(meal_time.to_string()),
         ]);
-        db.insert_row("time_dim", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("time_dim", rows).unwrap();
     }
 }
 
@@ -3584,6 +3602,8 @@ fn load_time_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.item_count));
 
     for i in 1..=data.item_count {
         let i_item_id = format!("AAAAAA{:010}", i);
@@ -3620,7 +3640,16 @@ fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(((i % 100) + 1) as i64),
             SqlValue::Varchar(format!("Product#{}", i)),
         ]);
-        db.insert_row("item", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("item", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("item", rows).unwrap();
     }
 }
 
@@ -3631,6 +3660,8 @@ fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 fn load_customer_address_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.customer_address_count));
 
     for i in 1..=data.customer_address_count {
         let ca_address_id = format!("AAAAAA{:010}", i);
@@ -3651,7 +3682,16 @@ fn load_customer_address_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),  // ca_gmt_offset
             SqlValue::Varchar("residential".to_string()),
         ]);
-        db.insert_row("customer_address", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("customer_address", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("customer_address", rows).unwrap();
     }
 }
 
@@ -3664,6 +3704,7 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_types::SqlValue;
 
     let salutations = ["Mr.", "Mrs.", "Ms.", "Dr.", ""];
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.customer_count));
 
     for i in 1..=data.customer_count {
         let c_customer_id = format!("AAAAAA{:010}", i);
@@ -3698,7 +3739,16 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(data.random_email()),
             SqlValue::Integer(data.random_i32(1, 2191) as i64),
         ]);
-        db.insert_row("customer", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("customer", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("customer", rows).unwrap();
     }
 }
 
@@ -3709,6 +3759,8 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 fn load_store_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(data.store_count);
 
     for i in 1..=data.store_count {
         let s_store_id = format!("AAAAAA{:010}", i);
@@ -3745,7 +3797,11 @@ fn load_store_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),
             SqlValue::Numeric(data.random_f64(0.0, 0.11)),
         ]);
-        db.insert_row("store", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("store", rows).unwrap();
     }
 }
 
@@ -3758,6 +3814,7 @@ fn load_store_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_types::SqlValue;
 
     let num_dates = 2191.min(data.date_dim_count);
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.store_sales_count));
 
     for i in 0..data.store_sales_count {
         let ss_sold_date_sk = (i % num_dates) + 1;
@@ -3810,7 +3867,16 @@ fn load_store_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(net_paid_inc_tax),
             SqlValue::Numeric(net_profit),
         ]);
-        db.insert_row("store_sales", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("store_sales", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("store_sales", rows).unwrap();
     }
 }
 
@@ -3822,6 +3888,8 @@ fn load_promotion_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use super::data::PROMO_PURPOSES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(data.promotion_count);
 
     for i in 1..=data.promotion_count {
         let p_promo_id = format!("AAAAAA{:010}", i);
@@ -3848,13 +3916,19 @@ fn load_promotion_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(PROMO_PURPOSES[purpose_idx].to_string()),
             SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
         ]);
-        db.insert_row("promotion", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("promotion", rows).unwrap();
     }
 }
 
 fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(data.warehouse_count);
 
     for i in 1..=data.warehouse_count {
         let w_warehouse_id = format!("AAAAAA{:010}", i);
@@ -3876,7 +3950,11 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar("United States".to_string()),
             SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),
         ]);
-        db.insert_row("warehouse", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("warehouse", rows).unwrap();
     }
 }
 
@@ -3887,8 +3965,10 @@ fn load_ship_mode_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
     let carriers = ["FedEx", "UPS", "USPS", "DHL", "Freight"];
     let types = ["EXPRESS", "REGULAR", "OVERNIGHT", "LIBRARY", "TWO DAY"];
+    let count = data.ship_mode_count.min(20);
+    let mut rows = Vec::with_capacity(count);
 
-    for i in 1..=data.ship_mode_count.min(20) {
+    for i in 1..=count {
         let sm_ship_mode_id = format!("AAAAAA{:010}", i);
         let mode_idx = i % SHIP_MODES.len();
         let carrier_idx = i % carriers.len();
@@ -3902,7 +3982,11 @@ fn load_ship_mode_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(carriers[carrier_idx].to_string()),
             SqlValue::Varchar(format!("Contract{}", i)),
         ]);
-        db.insert_row("ship_mode", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("ship_mode", rows).unwrap();
     }
 }
 
@@ -3911,7 +3995,10 @@ fn load_reason_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    for i in 1..=data.reason_count.min(REASONS.len()) {
+    let count = data.reason_count.min(REASONS.len());
+    let mut rows = Vec::with_capacity(count);
+
+    for i in 1..=count {
         let r_reason_id = format!("AAAAAA{:010}", i);
 
         let row = Row::new(vec![
@@ -3919,7 +4006,11 @@ fn load_reason_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(r_reason_id),
             SqlValue::Varchar(REASONS[i - 1].to_string()),
         ]);
-        db.insert_row("reason", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("reason", rows).unwrap();
     }
 }
 
@@ -3928,6 +4019,7 @@ fn load_store_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_types::SqlValue;
 
     let num_dates = 2191.min(data.date_dim_count);
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.store_returns_count));
 
     for i in 0..data.store_returns_count {
         let sr_returned_date_sk = (i % num_dates) + 1;
@@ -3971,7 +4063,16 @@ fn load_store_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(store_credit),
             SqlValue::Numeric(net_loss),
         ]);
-        db.insert_row("store_returns", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("store_returns", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("store_returns", rows).unwrap();
     }
 }
 
@@ -3983,6 +4084,8 @@ fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use super::data::CATALOG_PAGE_TYPES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.catalog_page_count));
 
     for i in 1..=data.catalog_page_count {
         let cp_catalog_page_id = format!("AAAAAA{:010}", i);
@@ -4001,7 +4104,16 @@ fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(format!("Catalog page {}", i)),  // cp_description
             SqlValue::Varchar(CATALOG_PAGE_TYPES[type_idx].to_string()),
         ]);
-        db.insert_row("catalog_page", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("catalog_page", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("catalog_page", rows).unwrap();
     }
 }
 
@@ -4009,6 +4121,8 @@ fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use super::data::WEB_PAGE_TYPES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(data.web_page_count);
 
     for i in 1..=data.web_page_count {
         let wp_web_page_id = format!("AAAAAA{:010}", i);
@@ -4030,7 +4144,11 @@ fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(data.random_i32(1, 20) as i64),  // wp_image_count
             SqlValue::Integer(data.random_i32(5, 100) as i64),  // wp_max_ad_count
         ]);
-        db.insert_row("web_page", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("web_page", rows).unwrap();
     }
 }
 
@@ -4038,6 +4156,8 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use super::data::WEB_SITE_CLASSES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(data.web_site_count);
 
     for i in 1..=data.web_site_count {
         let web_site_id = format!("AAAAAA{:010}", i);
@@ -4072,7 +4192,11 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),  // web_gmt_offset
             SqlValue::Numeric(data.random_f64(0.0, 0.12)),  // web_tax_percentage
         ]);
-        db.insert_row("web_site", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("web_site", rows).unwrap();
     }
 }
 
@@ -4085,6 +4209,7 @@ fn load_catalog_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_types::SqlValue;
 
     let num_dates = 2191.min(data.date_dim_count);
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.catalog_sales_count));
 
     for i in 0..data.catalog_sales_count {
         let cs_sold_date_sk = (i % num_dates) + 1;
@@ -4152,7 +4277,16 @@ fn load_catalog_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(net_paid_inc_ship_tax),
             SqlValue::Numeric(net_profit),
         ]);
-        db.insert_row("catalog_sales", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("catalog_sales", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("catalog_sales", rows).unwrap();
     }
 }
 
@@ -4161,6 +4295,7 @@ fn load_catalog_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_types::SqlValue;
 
     let num_dates = 2191.min(data.date_dim_count);
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.catalog_returns_count));
 
     for i in 0..data.catalog_returns_count {
         let cr_returned_date_sk = (i % num_dates) + 1;
@@ -4214,7 +4349,16 @@ fn load_catalog_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(store_credit),
             SqlValue::Numeric(net_loss),
         ]);
-        db.insert_row("catalog_returns", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("catalog_returns", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("catalog_returns", rows).unwrap();
     }
 }
 
@@ -4223,6 +4367,7 @@ fn load_web_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_types::SqlValue;
 
     let num_dates = 2191.min(data.date_dim_count);
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.web_sales_count));
 
     for i in 0..data.web_sales_count {
         let ws_sold_date_sk = (i % num_dates) + 1;
@@ -4291,7 +4436,16 @@ fn load_web_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(net_paid_inc_ship_tax),
             SqlValue::Numeric(net_profit),
         ]);
-        db.insert_row("web_sales", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("web_sales", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("web_sales", rows).unwrap();
     }
 }
 
@@ -4300,6 +4454,7 @@ fn load_web_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_types::SqlValue;
 
     let num_dates = 2191.min(data.date_dim_count);
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.web_returns_count));
 
     for i in 0..data.web_returns_count {
         let wr_returned_date_sk = (i % num_dates) + 1;
@@ -4348,7 +4503,16 @@ fn load_web_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(account_credit),
             SqlValue::Numeric(net_loss),
         ]);
-        db.insert_row("web_returns", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("web_returns", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("web_returns", rows).unwrap();
     }
 }
 
@@ -4362,8 +4526,10 @@ fn load_customer_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
     // Generate all combinations of demographic attributes
     // TPC-DS spec: 1920 combinations (2 genders * 5 marital * 7 education * ~28 other combos)
+    let mut rows = Vec::with_capacity(data.customer_demographics_count);
     let mut sk = 0;
-    for gender in GENDERS.iter() {
+
+    'outer: for gender in GENDERS.iter() {
         for marital in MARITAL_STATUS.iter() {
             for education in EDUCATION_STATUS.iter() {
                 for &credit in CREDIT_RATINGS.iter() {
@@ -4371,7 +4537,7 @@ fn load_customer_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
                         // Limit combinations
                         sk += 1;
                         if sk > data.customer_demographics_count {
-                            return;
+                            break 'outer;
                         }
 
                         let purchase_estimate = data.random_i32(500, 10000);
@@ -4389,11 +4555,15 @@ fn load_customer_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
                             SqlValue::Integer(dep_employed as i64),
                             SqlValue::Integer(dep_college as i64),
                         ]);
-                        db.insert_row("customer_demographics", row).unwrap();
+                        rows.push(row);
                     }
                 }
             }
         }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("customer_demographics", rows).unwrap();
     }
 }
 
@@ -4407,14 +4577,16 @@ fn load_household_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
     // Generate combinations: income_band * buy_potential * dep_count * vehicle_count
     // TPC-DS spec: 7200 combinations
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.household_demographics_count));
     let mut sk = 0;
-    for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
+
+    'outer: for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
         for &buy_potential in BUY_POTENTIALS.iter() {
             for &dep_count in DEP_COUNTS.iter() {
                 for &vehicle_count in VEHICLE_COUNTS.iter() {
                     sk += 1;
                     if sk > data.household_demographics_count {
-                        return;
+                        break 'outer;
                     }
 
                     let row = Row::new(vec![
@@ -4424,10 +4596,19 @@ fn load_household_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
                         SqlValue::Integer(dep_count as i64),
                         SqlValue::Integer(vehicle_count as i64),
                     ]);
-                    db.insert_row("household_demographics", row).unwrap();
+                    rows.push(row);
+
+                    if rows.len() >= BATCH_SIZE {
+                        db.insert_rows_batch("household_demographics", std::mem::take(&mut rows)).unwrap();
+                        rows = Vec::with_capacity(BATCH_SIZE);
+                    }
                 }
             }
         }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("household_demographics", rows).unwrap();
     }
 }
 
@@ -4439,7 +4620,10 @@ fn load_income_band_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    for i in 0..data.income_band_count.min(INCOME_BANDS.len()) {
+    let count = data.income_band_count.min(INCOME_BANDS.len());
+    let mut rows = Vec::with_capacity(count);
+
+    for i in 0..count {
         let (lower, upper) = INCOME_BANDS[i];
 
         let row = Row::new(vec![
@@ -4447,7 +4631,11 @@ fn load_income_band_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(lower as i64),
             SqlValue::Integer(upper as i64),
         ]);
-        db.insert_row("income_band", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("income_band", rows).unwrap();
     }
 }
 
@@ -4461,6 +4649,7 @@ fn load_call_center_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
     let classes = ["small", "medium", "large", "unknown"];
     let hours = ["8AM-4PM", "8AM-8PM", "8AM-12AM"];
+    let mut rows = Vec::with_capacity(data.call_center_count);
 
     for i in 1..=data.call_center_count {
         let cc_call_center_id = format!("AAAAAA{:010}", i);
@@ -4506,7 +4695,11 @@ fn load_call_center_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(gmt_offset),
             SqlValue::Numeric(data.random_f64(0.0, 0.11)),
         ]);
-        db.insert_row("call_center", row).unwrap();
+        rows.push(row);
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("call_center", rows).unwrap();
     }
 }
 
@@ -4523,9 +4716,10 @@ fn load_inventory_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     let num_dates = 52.min(data.date_dim_count); // Weekly snapshots for 1 year
     let num_items = data.item_count;
     let num_warehouses = data.warehouse_count;
+    let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.inventory_count));
 
     let mut count = 0;
-    for week in 0..num_dates {
+    'outer: for week in 0..num_dates {
         let date_sk = week * 7 + 1; // Weekly snapshots
 
         // Sample items and warehouses to control data size
@@ -4538,7 +4732,7 @@ fn load_inventory_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             for warehouse_sk in 1..=num_warehouses {
                 count += 1;
                 if count > data.inventory_count {
-                    return;
+                    break 'outer;
                 }
 
                 let quantity = data.random_i32(0, 1000);
@@ -4549,9 +4743,18 @@ fn load_inventory_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
                     SqlValue::Integer(warehouse_sk as i64),
                     SqlValue::Integer(quantity as i64),
                 ]);
-                db.insert_row("inventory", row).unwrap();
+                rows.push(row);
+
+                if rows.len() >= BATCH_SIZE {
+                    db.insert_rows_batch("inventory", std::mem::take(&mut rows)).unwrap();
+                    rows = Vec::with_capacity(BATCH_SIZE);
+                }
             }
         }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("inventory", rows).unwrap();
     }
 }
 
