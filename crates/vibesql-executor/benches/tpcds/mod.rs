@@ -20,7 +20,7 @@ pub mod queries;
 pub mod schema;
 
 // Re-export commonly used items for convenience
-pub use data::TPCDSData;
+pub use data::{TPCDSConfig, TPCDSData, TimeGranularity};
 pub use queries::*;
 pub use schema::load_vibesql;
 
