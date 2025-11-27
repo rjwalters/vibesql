@@ -8,6 +8,8 @@
 //! - Pre-compute column indices to avoid schema lookups
 //! - Flatten AND chains into a vector of predicates
 //! - Use type-specific comparison functions to skip type coercion
+
+#![allow(clippy::redundant_guards)]
 //! - Direct memory access to column values
 
 use crate::{

@@ -5,6 +5,8 @@
 //! - Aggregate pushdown before joins (when beneficial)
 //! - Early filtering on aggregate results
 
+#![allow(clippy::redundant_closure, clippy::unnecessary_map_or)]
+
 use std::collections::HashSet;
 use vibesql_ast::{Expression, SelectStmt};
 

@@ -3,6 +3,8 @@
 //! This module contains the core implementations of aggregate functions
 //! (SUM, COUNT, AVG, MIN, MAX) that operate on columnar data.
 
+#![allow(clippy::collapsible_else_if)]
+
 use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
 

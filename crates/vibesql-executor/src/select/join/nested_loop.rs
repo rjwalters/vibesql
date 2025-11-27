@@ -86,6 +86,7 @@ fn analyze_join_condition(
 }
 
 /// Execute optimized equijoin by comparing values before allocating combined_row
+#[allow(clippy::too_many_arguments)]
 fn execute_optimized_equijoin(
     left_rows: &[vibesql_storage::Row],
     right_rows: &[vibesql_storage::Row],

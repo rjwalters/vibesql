@@ -319,7 +319,9 @@ impl Database {
         self.metadata.clear_routine_cache();
     }
 
-    // Columnar cache methods moved to cache.rs
+    // NOTE: Columnar cache methods (get_columnar, invalidate_columnar_cache, clear_columnar_cache,
+    // columnar_cache_stats, etc.) are defined in cache.rs to keep cache concerns separated from core
+    // database logic.
 }
 
 #[cfg(test)]

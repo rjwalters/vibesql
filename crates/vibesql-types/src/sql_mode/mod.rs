@@ -1,3 +1,7 @@
+//! SQL mode configuration for dialect-specific behavior.
+
+#![allow(clippy::derivable_impls)]
+
 mod config;
 pub mod types;
 mod strings;

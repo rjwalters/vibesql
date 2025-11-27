@@ -1,3 +1,5 @@
+#![allow(clippy::doc_lazy_continuation)]
+
 use super::{build, combine_rows, FromResult};
 
 #[cfg(all(feature = "parallel", not(feature = "simd")))]
