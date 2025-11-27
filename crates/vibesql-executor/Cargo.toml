@@ -172,3 +172,7 @@ required-features = ["benchmark-comparison"]
 [[bench]]
 name = "sysbench_oltp"
 harness = false
+
+[[bench]]
+name = "columnar_storage_benchmark"
+harness = false
