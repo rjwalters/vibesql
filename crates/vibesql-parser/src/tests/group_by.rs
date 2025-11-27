@@ -1,5 +1,5 @@
 use super::*;
-use vibesql_ast::{GroupByClause, GroupingElement, GroupingSet};
+use vibesql_ast::{GroupByClause, GroupingElement, MixedGroupingItem};
 
 // ========================================================================
 // GROUP BY and HAVING Tests
@@ -355,4 +355,232 @@ fn test_group_by_clause_is_simple() {
 
     let grouping_sets = GroupByClause::GroupingSets(vec![]);
     assert!(!grouping_sets.is_simple());
+}
+
+// ========================================================================
+// Mixed GROUP BY Tests (SQL:1999 - combining simple columns with ROLLUP/CUBE)
+// ========================================================================
+
+#[test]
+fn test_parse_group_by_mixed_simple_with_rollup() {
+    // GROUP BY region, ROLLUP(year, quarter)
+    let result = Parser::parse_sql(
+        "SELECT region, year, quarter, SUM(sales) FROM data GROUP BY region, ROLLUP(year, quarter);",
+    );
+    assert!(result.is_ok(), "Failed to parse mixed GROUP BY: {:?}", result);
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.group_by.is_some());
+            let group_by = select.group_by.unwrap();
+            match group_by {
+                GroupByClause::Mixed(items) => {
+                    assert_eq!(items.len(), 2);
+                    // First item should be simple expression 'region'
+                    match &items[0] {
+                        MixedGroupingItem::Simple(vibesql_ast::Expression::ColumnRef {
+                            column,
+                            ..
+                        }) => assert_eq!(column, "REGION"),
+                        _ => panic!("Expected simple column 'region'"),
+                    }
+                    // Second item should be ROLLUP(year, quarter)
+                    match &items[1] {
+                        MixedGroupingItem::Rollup(elements) => {
+                            assert_eq!(elements.len(), 2);
+                        }
+                        _ => panic!("Expected ROLLUP item"),
+                    }
+                }
+                _ => panic!("Expected Mixed GROUP BY clause, got {:?}", group_by),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_group_by_mixed_simple_with_cube() {
+    // GROUP BY department, CUBE(category, brand)
+    let result = Parser::parse_sql(
+        "SELECT department, category, brand, SUM(sales) FROM products GROUP BY department, CUBE(category, brand);",
+    );
+    assert!(result.is_ok(), "Failed to parse mixed GROUP BY with CUBE: {:?}", result);
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.group_by.is_some());
+            let group_by = select.group_by.unwrap();
+            match group_by {
+                GroupByClause::Mixed(items) => {
+                    assert_eq!(items.len(), 2);
+                    // First item should be simple expression 'department'
+                    match &items[0] {
+                        MixedGroupingItem::Simple(_) => {}
+                        _ => panic!("Expected simple column"),
+                    }
+                    // Second item should be CUBE
+                    match &items[1] {
+                        MixedGroupingItem::Cube(elements) => {
+                            assert_eq!(elements.len(), 2);
+                        }
+                        _ => panic!("Expected CUBE item"),
+                    }
+                }
+                _ => panic!("Expected Mixed GROUP BY clause"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_group_by_mixed_simple_with_grouping_sets() {
+    // GROUP BY region, GROUPING SETS((year), (quarter))
+    let result = Parser::parse_sql(
+        "SELECT region, year, quarter, SUM(sales) FROM data GROUP BY region, GROUPING SETS((year), (quarter));",
+    );
+    assert!(result.is_ok(), "Failed to parse mixed GROUP BY with GROUPING SETS: {:?}", result);
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.group_by.is_some());
+            let group_by = select.group_by.unwrap();
+            match group_by {
+                GroupByClause::Mixed(items) => {
+                    assert_eq!(items.len(), 2);
+                    // First item should be simple expression 'region'
+                    match &items[0] {
+                        MixedGroupingItem::Simple(_) => {}
+                        _ => panic!("Expected simple column"),
+                    }
+                    // Second item should be GROUPING SETS
+                    match &items[1] {
+                        MixedGroupingItem::GroupingSets(sets) => {
+                            assert_eq!(sets.len(), 2);
+                        }
+                        _ => panic!("Expected GROUPING SETS item"),
+                    }
+                }
+                _ => panic!("Expected Mixed GROUP BY clause"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_group_by_mixed_multiple_simple_with_rollup() {
+    // GROUP BY a, b, ROLLUP(c, d)
+    let result = Parser::parse_sql(
+        "SELECT a, b, c, d, SUM(e) FROM data GROUP BY a, b, ROLLUP(c, d);",
+    );
+    assert!(result.is_ok(), "Failed to parse mixed GROUP BY with multiple simple: {:?}", result);
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.group_by.is_some());
+            let group_by = select.group_by.unwrap();
+            match group_by {
+                GroupByClause::Mixed(items) => {
+                    assert_eq!(items.len(), 3); // a, b, ROLLUP(c, d)
+                    // First two should be simple
+                    assert!(matches!(&items[0], MixedGroupingItem::Simple(_)));
+                    assert!(matches!(&items[1], MixedGroupingItem::Simple(_)));
+                    // Third should be ROLLUP
+                    assert!(matches!(&items[2], MixedGroupingItem::Rollup(_)));
+                }
+                _ => panic!("Expected Mixed GROUP BY clause"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_group_by_rollup_then_simple() {
+    // ROLLUP at the beginning, then simple columns
+    // GROUP BY ROLLUP(a), b
+    let result = Parser::parse_sql(
+        "SELECT a, b, SUM(c) FROM data GROUP BY ROLLUP(a), b;",
+    );
+    assert!(result.is_ok(), "Failed to parse ROLLUP then simple: {:?}", result);
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.group_by.is_some());
+            let group_by = select.group_by.unwrap();
+            match group_by {
+                GroupByClause::Mixed(items) => {
+                    assert_eq!(items.len(), 2);
+                    // First should be ROLLUP
+                    assert!(matches!(&items[0], MixedGroupingItem::Rollup(_)));
+                    // Second should be simple
+                    assert!(matches!(&items[1], MixedGroupingItem::Simple(_)));
+                }
+                _ => panic!("Expected Mixed GROUP BY clause"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_group_by_multiple_rollup() {
+    // Multiple ROLLUP in one GROUP BY
+    // GROUP BY ROLLUP(a), ROLLUP(b)
+    let result = Parser::parse_sql(
+        "SELECT a, b, SUM(c) FROM data GROUP BY ROLLUP(a), ROLLUP(b);",
+    );
+    assert!(result.is_ok(), "Failed to parse multiple ROLLUP: {:?}", result);
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.group_by.is_some());
+            let group_by = select.group_by.unwrap();
+            match group_by {
+                GroupByClause::Mixed(items) => {
+                    assert_eq!(items.len(), 2);
+                    assert!(matches!(&items[0], MixedGroupingItem::Rollup(_)));
+                    assert!(matches!(&items[1], MixedGroupingItem::Rollup(_)));
+                }
+                _ => panic!("Expected Mixed GROUP BY clause"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_group_by_mixed_rollup_and_cube() {
+    // Mix of ROLLUP and CUBE
+    // GROUP BY a, ROLLUP(b), CUBE(c)
+    let result = Parser::parse_sql(
+        "SELECT a, b, c, SUM(d) FROM data GROUP BY a, ROLLUP(b), CUBE(c);",
+    );
+    assert!(result.is_ok(), "Failed to parse mixed ROLLUP and CUBE: {:?}", result);
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.group_by.is_some());
+            let group_by = select.group_by.unwrap();
+            match group_by {
+                GroupByClause::Mixed(items) => {
+                    assert_eq!(items.len(), 3);
+                    assert!(matches!(&items[0], MixedGroupingItem::Simple(_)));
+                    assert!(matches!(&items[1], MixedGroupingItem::Rollup(_)));
+                    assert!(matches!(&items[2], MixedGroupingItem::Cube(_)));
+                }
+                _ => panic!("Expected Mixed GROUP BY clause"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
 }

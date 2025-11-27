@@ -263,25 +263,55 @@ impl LiteralExtractor {
             }
             vibesql_ast::GroupByClause::Rollup(elements)
             | vibesql_ast::GroupByClause::Cube(elements) => {
-                for element in elements {
-                    match element {
-                        vibesql_ast::GroupingElement::Single(expr) => {
+                Self::extract_from_grouping_elements(elements, literals);
+            }
+            vibesql_ast::GroupByClause::GroupingSets(sets) => {
+                Self::extract_from_grouping_sets(sets, literals);
+            }
+            vibesql_ast::GroupByClause::Mixed(items) => {
+                for item in items {
+                    match item {
+                        vibesql_ast::MixedGroupingItem::Simple(expr) => {
                             Self::extract_from_expression(expr, literals);
                         }
-                        vibesql_ast::GroupingElement::Composite(exprs) => {
-                            for expr in exprs {
-                                Self::extract_from_expression(expr, literals);
-                            }
+                        vibesql_ast::MixedGroupingItem::Rollup(elements)
+                        | vibesql_ast::MixedGroupingItem::Cube(elements) => {
+                            Self::extract_from_grouping_elements(elements, literals);
+                        }
+                        vibesql_ast::MixedGroupingItem::GroupingSets(sets) => {
+                            Self::extract_from_grouping_sets(sets, literals);
                         }
                     }
                 }
             }
-            vibesql_ast::GroupByClause::GroupingSets(sets) => {
-                for set in sets {
-                    for expr in &set.columns {
+        }
+    }
+
+    fn extract_from_grouping_elements(
+        elements: &[vibesql_ast::GroupingElement],
+        literals: &mut Vec<LiteralValue>,
+    ) {
+        for element in elements {
+            match element {
+                vibesql_ast::GroupingElement::Single(expr) => {
+                    Self::extract_from_expression(expr, literals);
+                }
+                vibesql_ast::GroupingElement::Composite(exprs) => {
+                    for expr in exprs {
                         Self::extract_from_expression(expr, literals);
                     }
                 }
+            }
+        }
+    }
+
+    fn extract_from_grouping_sets(
+        sets: &[vibesql_ast::GroupingSet],
+        literals: &mut Vec<LiteralValue>,
+    ) {
+        for set in sets {
+            for expr in &set.columns {
+                Self::extract_from_expression(expr, literals);
             }
         }
     }
