@@ -76,9 +76,16 @@ impl std::str::FromStr for SqlMode {
             "mysql" => Ok(SqlMode::MySQL {
                 flags: MySqlModeFlags::default(),
             }),
+            // MySQL mode with SQLite division semantics
+            // This is used by SQLLogicTest where MySQL syntax is needed (e.g., CAST...AS SIGNED)
+            // but division should behave like SQLite (INTEGER / INTEGER → INTEGER)
+            // because the expected results were generated using SQLite.
+            "mysql_slt" => Ok(SqlMode::MySQL {
+                flags: MySqlModeFlags::with_sqlite_division_semantics(),
+            }),
             "sqlite" => Ok(SqlMode::SQLite),
             _ => Err(format!(
-                "Unknown SQL mode: '{}'. Valid modes: mysql, sqlite",
+                "Unknown SQL mode: '{}'. Valid modes: mysql, mysql_slt, sqlite",
                 s
             )),
         }
@@ -415,6 +422,21 @@ mod tests {
 
         let mode3: SqlMode = "MySql".parse().unwrap();
         assert!(matches!(mode3, SqlMode::MySQL { .. }));
+    }
+
+    #[test]
+    fn test_from_str_mysql_slt() {
+        // mysql_slt mode: MySQL syntax with SQLite division semantics
+        let mode: SqlMode = "mysql_slt".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.sqlite_division_semantics);
+                assert!(!flags.pipes_as_concat);
+                assert!(!flags.ansi_quotes);
+                assert!(!flags.strict_mode);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
     }
 
     #[test]

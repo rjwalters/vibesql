@@ -158,9 +158,16 @@ pub enum SqlDialect {
 
 impl SqlDialect {
     /// Get the SQL mode string for SET SQL_MODE command.
+    ///
+    /// For MySQL mode, returns "mysql_slt" which enables MySQL syntax
+    /// (e.g., `CAST...AS SIGNED`) but uses SQLite division semantics
+    /// (INTEGER / INTEGER → INTEGER). This is because SQLLogicTest expected
+    /// results were generated using SQLite, so all tests expect SQLite
+    /// division behavior regardless of the `onlyif mysql` directive.
     pub fn as_sql_mode_str(&self) -> &'static str {
         match self {
-            SqlDialect::MySQL => "mysql",
+            // Use mysql_slt for SQLLogicTest context - MySQL syntax with SQLite division
+            SqlDialect::MySQL => "mysql_slt",
             SqlDialect::SQLite => "sqlite",
         }
     }
@@ -516,7 +523,8 @@ mod tests {
 
     #[test]
     fn test_sql_dialect_as_sql_mode_str() {
-        assert_eq!(SqlDialect::MySQL.as_sql_mode_str(), "mysql");
+        // MySQL uses mysql_slt for SQLLogicTest - MySQL syntax with SQLite division semantics
+        assert_eq!(SqlDialect::MySQL.as_sql_mode_str(), "mysql_slt");
         assert_eq!(SqlDialect::SQLite.as_sql_mode_str(), "sqlite");
     }
 

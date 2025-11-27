@@ -26,7 +26,10 @@ use sqllogictest::{
 };
 
 /// Run SQLLogicTest files from the submodule - all files, no sampling
-fn run_test_suite() -> (HashMap<String, TestStats>, usize) {
+///
+/// If `name_filter` is Some, only run tests whose relative path contains the filter string.
+/// This matches cargo's test filtering behavior: `cargo test foo` runs tests containing "foo".
+fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usize) {
     let test_dir = PathBuf::from("third_party/sqllogictest/test");
     let mut results = HashMap::new();
 
@@ -95,6 +98,18 @@ fn run_test_suite() -> (HashMap<String, TestStats>, usize) {
                 .to_string_lossy()
                 .to_string();
             filter.contains(&relative_path)
+        });
+    }
+
+    // Apply name filter (cargo-style substring matching)
+    if let Some(pattern) = name_filter {
+        all_test_files.retain(|test_file| {
+            let relative_path = test_file
+                .strip_prefix(&test_dir)
+                .unwrap_or(test_file)
+                .to_string_lossy()
+                .to_string();
+            relative_path.contains(pattern)
         });
     }
 
@@ -200,6 +215,20 @@ fn run_test_suite() -> (HashMap<String, TestStats>, usize) {
 }
 
 fn main() {
+    // Parse command line arguments for name filtering
+    // Cargo passes test filters after "--", e.g.: cargo test -- slt_good_52
+    // We accept any non-option argument as a filter pattern
+    let args: Vec<String> = env::args().collect();
+    let name_filter: Option<String> = args
+        .iter()
+        .skip(1) // Skip program name
+        .find(|arg| !arg.starts_with('-'))
+        .cloned();
+
+    if let Some(ref filter) = name_filter {
+        println!("Filtering tests matching: {}", filter);
+    }
+
     // If SELECT1_ONLY is set, run only select1.test
     if env::var("SELECT1_ONLY").is_ok() {
         let test_file = PathBuf::from("third_party/sqllogictest/test/select1.test");
@@ -234,7 +263,7 @@ fn main() {
         );
     }
 
-    let (results, total_available_files) = run_test_suite();
+    let (results, total_available_files) = run_test_suite(name_filter.as_deref());
 
     // Print summary
     println!("\n=== Test Results Summary ===");

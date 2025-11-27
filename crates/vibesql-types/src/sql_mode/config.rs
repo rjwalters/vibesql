@@ -32,7 +32,19 @@ pub struct MySqlModeFlags {
     /// - `false` (default): Permissive mode with warnings
     pub strict_mode: bool,
 
-    // Future flags can be added here as needed
+    /// Use SQLite division semantics (INTEGER / INTEGER → INTEGER)
+    ///
+    /// This flag is used when MySQL syntax is needed (e.g., `CAST...AS SIGNED`)
+    /// but SQLite division semantics are required for compatibility with test
+    /// suites that were generated using SQLite.
+    ///
+    /// - `true`: `5 / 2 = 2` (truncated integer division, SQLite behavior)
+    /// - `false` (default): `5 / 2 = 2.5` (exact decimal division, MySQL behavior)
+    ///
+    /// This is particularly useful for SQLLogicTest compatibility where tests
+    /// are tagged `onlyif mysql` for syntax reasons but expect SQLite division
+    /// results.
+    pub sqlite_division_semantics: bool,
 }
 
 
@@ -71,6 +83,17 @@ impl MySqlModeFlags {
         Self {
             pipes_as_concat: true,
             ansi_quotes: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create MySqlModeFlags with SQLite division semantics enabled
+    ///
+    /// This is useful for SQLLogicTest compatibility where MySQL syntax is needed
+    /// but division should behave like SQLite (INTEGER / INTEGER → INTEGER).
+    pub fn with_sqlite_division_semantics() -> Self {
+        Self {
+            sqlite_division_semantics: true,
             ..Default::default()
         }
     }
@@ -131,9 +154,20 @@ mod tests {
             pipes_as_concat: true,
             ansi_quotes: true,
             strict_mode: true,
+            sqlite_division_semantics: false,
         };
         assert!(flags.pipes_as_concat);
         assert!(flags.ansi_quotes);
         assert!(flags.strict_mode);
+        assert!(!flags.sqlite_division_semantics);
+    }
+
+    #[test]
+    fn test_with_sqlite_division_semantics() {
+        let flags = MySqlModeFlags::with_sqlite_division_semantics();
+        assert!(!flags.pipes_as_concat);
+        assert!(!flags.ansi_quotes);
+        assert!(!flags.strict_mode);
+        assert!(flags.sqlite_division_semantics);
     }
 }

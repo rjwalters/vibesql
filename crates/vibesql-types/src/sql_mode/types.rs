@@ -94,11 +94,16 @@ pub trait TypeBehavior {
     ///
     /// # MySQL Behavior
     ///
-    /// MySQL always returns Numeric (exact decimal) for division to preserve
+    /// By default, MySQL returns Numeric (exact decimal) for division to preserve
     /// precision:
     /// - `INTEGER / INTEGER → Numeric` (e.g., 5 / 2 = 2.5000)
     /// - `FLOAT / INTEGER → Numeric`
     /// - Any division → Numeric (unless NULL)
+    ///
+    /// When `sqlite_division_semantics` flag is set in `MySqlModeFlags`,
+    /// MySQL mode will use SQLite's integer-preserving division instead.
+    /// This is useful for compatibility with test suites that use MySQL
+    /// syntax but expect SQLite division results.
     ///
     /// # SQLite Behavior
     ///
@@ -151,10 +156,22 @@ impl TypeBehavior for super::SqlMode {
         }
 
         match self {
-            super::SqlMode::MySQL { .. } => {
-                // MySQL always returns Numeric (exact decimal) for division
-                // to preserve precision regardless of operand types
-                ValueType::Numeric
+            super::SqlMode::MySQL { flags } => {
+                // Check if SQLite division semantics are requested
+                // This is used when MySQL syntax is needed (e.g., CAST...AS SIGNED)
+                // but SQLite division behavior is required for compatibility
+                if flags.sqlite_division_semantics {
+                    // Use SQLite's integer-preserving division
+                    if is_float_value(left) || is_float_value(right) {
+                        ValueType::Float
+                    } else {
+                        ValueType::Integer
+                    }
+                } else {
+                    // Standard MySQL: always returns Numeric (exact decimal) for division
+                    // to preserve precision regardless of operand types
+                    ValueType::Numeric
+                }
             }
             super::SqlMode::SQLite => {
                 // SQLite uses type affinity:
@@ -246,6 +263,46 @@ mod tests {
 
         assert_eq!(
             mode.division_result_type(&SqlValue::Integer(5), &SqlValue::Null),
+            ValueType::Null
+        );
+    }
+
+    #[test]
+    fn test_mysql_with_sqlite_division_semantics() {
+        use crate::MySqlModeFlags;
+
+        // MySQL with sqlite_division_semantics flag uses SQLite's integer division
+        let flags = MySqlModeFlags {
+            sqlite_division_semantics: true,
+            ..Default::default()
+        };
+        let mode = SqlMode::MySQL { flags };
+
+        // int / int → Integer (truncated, like SQLite)
+        assert_eq!(
+            mode.division_result_type(&SqlValue::Integer(5), &SqlValue::Integer(2)),
+            ValueType::Integer
+        );
+
+        assert_eq!(
+            mode.division_result_type(&SqlValue::Bigint(10), &SqlValue::Bigint(3)),
+            ValueType::Integer
+        );
+
+        // any real operand → Float (like SQLite)
+        assert_eq!(
+            mode.division_result_type(&SqlValue::Float(5.0), &SqlValue::Integer(2)),
+            ValueType::Float
+        );
+
+        assert_eq!(
+            mode.division_result_type(&SqlValue::Integer(10), &SqlValue::Float(2.0)),
+            ValueType::Float
+        );
+
+        // NULL handling still works
+        assert_eq!(
+            mode.division_result_type(&SqlValue::Null, &SqlValue::Integer(2)),
             ValueType::Null
         );
     }
