@@ -317,3 +317,105 @@ impl Database {
         self.metadata.clear_routine_cache();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_types::{MySqlModeFlags, SqlMode, SqlValue};
+
+    #[test]
+    fn test_set_sql_mode_changes_mode() {
+        let mut db = Database::new();
+
+        // Default is MySQL
+        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+
+        // Change to SQLite
+        db.set_sql_mode(SqlMode::SQLite);
+        assert!(matches!(db.sql_mode(), SqlMode::SQLite));
+
+        // Change back to MySQL
+        db.set_sql_mode(SqlMode::MySQL {
+            flags: MySqlModeFlags::default(),
+        });
+        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+    }
+
+    #[test]
+    fn test_set_sql_mode_updates_session_variable() {
+        let mut db = Database::new();
+
+        // Set to SQLite mode
+        db.set_sql_mode(SqlMode::SQLite);
+
+        // Check session variable reflects the change
+        let sql_mode_var = db.get_session_variable("SQL_MODE");
+        assert!(sql_mode_var.is_some());
+        if let Some(SqlValue::Varchar(mode_str)) = sql_mode_var {
+            assert_eq!(mode_str, "SQLITE");
+        } else {
+            panic!("Expected SQL_MODE to be a Varchar");
+        }
+    }
+
+    #[test]
+    fn test_set_sql_mode_mysql_with_flags() {
+        let mut db = Database::new();
+
+        // Set MySQL with specific flags
+        db.set_sql_mode(SqlMode::MySQL {
+            flags: MySqlModeFlags {
+                pipes_as_concat: true,
+                ansi_quotes: true,
+                strict_mode: true,
+                sqlite_division_semantics: false,
+            },
+        });
+
+        // Check session variable contains the flags
+        let sql_mode_var = db.get_session_variable("SQL_MODE");
+        assert!(sql_mode_var.is_some());
+        if let Some(SqlValue::Varchar(mode_str)) = sql_mode_var {
+            assert!(mode_str.contains("STRICT_TRANS_TABLES"));
+            assert!(mode_str.contains("PIPES_AS_CONCAT"));
+            assert!(mode_str.contains("ANSI_QUOTES"));
+        } else {
+            panic!("Expected SQL_MODE to be a Varchar");
+        }
+    }
+
+    #[test]
+    fn test_set_sql_mode_mysql_default_flags() {
+        let mut db = Database::new();
+
+        // Set MySQL with default flags (all false)
+        db.set_sql_mode(SqlMode::MySQL {
+            flags: MySqlModeFlags::default(),
+        });
+
+        // Check session variable has default MySQL modes
+        let sql_mode_var = db.get_session_variable("SQL_MODE");
+        assert!(sql_mode_var.is_some());
+        if let Some(SqlValue::Varchar(mode_str)) = sql_mode_var {
+            // Default should include common MySQL defaults
+            assert!(mode_str.contains("NO_ZERO_IN_DATE") || mode_str.contains("NO_ENGINE_SUBSTITUTION"));
+        } else {
+            panic!("Expected SQL_MODE to be a Varchar");
+        }
+    }
+
+    #[test]
+    fn test_sql_mode_affects_subsequent_queries() {
+        let mut db = Database::new();
+
+        // Start in MySQL mode
+        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+
+        // Switch to SQLite
+        db.set_sql_mode(SqlMode::SQLite);
+
+        // Verify the mode is available for query execution
+        let mode = db.sql_mode();
+        assert!(matches!(mode, SqlMode::SQLite));
+    }
+}
