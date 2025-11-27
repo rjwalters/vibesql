@@ -117,8 +117,8 @@ def parse_tpch_output(output_file: Path) -> Tuple[List[Dict], Dict]:
             })
             continue
 
-        # Executor creation: Create executor: 0.456ms
-        executor_match = re.match(r'^\s*Create executor:\s+([\d.]+)(ms|s|µs)', line)
+        # Executor creation: Executor: 0.456ms (timeout: 30s)
+        executor_match = re.match(r'^\s*Executor:\s+([\d.]+)(ms|s|µs)', line)
         if executor_match and results and results[-1]['query_name'] == current_query:
             exec_time = float(executor_match.group(1))
             unit = executor_match.group(2)
@@ -173,6 +173,12 @@ def parse_tpch_output(output_file: Path) -> Tuple[List[Dict], Dict]:
         if 'TIMEOUT' in line and results and results[-1]['query_name'] == current_query:
             results[-1]['status'] = 'timeout'
             continue
+
+    # Mark incomplete queries (have parse time but no status) as 'incomplete'
+    for result in results:
+        if result['status'] is None:
+            result['status'] = 'incomplete'
+            result['error_message'] = 'Query output was truncated or incomplete'
 
     # Calculate summary stats
     total_queries = len(results)

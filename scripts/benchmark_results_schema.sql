@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
     result_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL,
     query_name TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('passed', 'failed', 'timeout', 'error')),
+    status TEXT NOT NULL CHECK (status IN ('passed', 'failed', 'timeout', 'error', 'incomplete')),
     parse_time_ms REAL,
     executor_creation_time_ms REAL,
     execution_time_ms REAL,
