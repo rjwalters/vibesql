@@ -168,16 +168,89 @@ def query_history(db_path: Path):
     print("=== Benchmark Run History ===\n")
 
     query = """
-        SELECT run_id, timestamp, git_commit, git_branch,
+        SELECT run_id, timestamp, benchmark_suite, git_commit, git_branch,
                total_queries, passed_queries, failed_queries, timeout_queries,
-               ROUND(passed_queries * 100.0 / total_queries, 1) as pass_rate
+               ROUND(passed_queries * 100.0 / NULLIF(total_queries, 0), 1) as pass_rate
         FROM benchmark_runs
         ORDER BY run_id DESC
+        LIMIT 20
     """
     results = execute_query(db_path, query)
 
-    headers = ["Run ID", "Timestamp", "Commit", "Branch", "Total", "Passed", "Failed", "Timeout", "Pass %"]
+    headers = ["Run ID", "Timestamp", "Suite", "Commit", "Branch", "Total", "Passed", "Failed", "Timeout", "Pass %"]
     format_table(headers, results)
+
+
+def query_tpcc(db_path: Path):
+    """Show latest TPC-C benchmark results."""
+    print("=== Latest TPC-C Benchmark Results ===\n")
+
+    query = """
+        SELECT database_engine, transaction_type, transaction_count,
+               ROUND(transactions_per_second, 2) as tps,
+               ROUND(avg_latency_us, 2) as avg_latency_us,
+               successful_transactions, failed_transactions
+        FROM latest_tpcc_summary
+    """
+    try:
+        results = execute_query(db_path, query)
+        headers = ["Engine", "Txn Type", "Count", "TPS", "Avg Latency (us)", "Success", "Failed"]
+        format_table(headers, results)
+    except:
+        print("No TPC-C results found. Run 'make benchmark-tpcc' first.")
+        return
+
+    print("\n=== TPC-C Engine Comparison ===\n")
+    query = """
+        SELECT transaction_type,
+               ROUND(vibesql_tps, 2) as vibesql_tps,
+               ROUND(sqlite_tps, 2) as sqlite_tps,
+               ROUND(duckdb_tps, 2) as duckdb_tps,
+               ROUND(vibesql_latency_us, 2) as vibesql_us,
+               ROUND(sqlite_latency_us, 2) as sqlite_us,
+               ROUND(duckdb_latency_us, 2) as duckdb_us
+        FROM tpcc_engine_comparison
+    """
+    try:
+        results = execute_query(db_path, query)
+        headers = ["Txn Type", "VibeSQL TPS", "SQLite TPS", "DuckDB TPS", "VibeSQL us", "SQLite us", "DuckDB us"]
+        format_table(headers, results)
+    except:
+        pass
+
+
+def query_sysbench(db_path: Path):
+    """Show latest Sysbench OLTP benchmark results."""
+    print("=== Latest Sysbench OLTP Results ===\n")
+
+    query = """
+        SELECT database_engine, test_name, table_size,
+               mean_time_us, std_dev_us, iterations
+        FROM latest_sysbench_summary
+    """
+    try:
+        results = execute_query(db_path, query)
+        headers = ["Engine", "Test", "Table Size", "Mean (us)", "Std Dev (us)", "Iterations"]
+        format_table(headers, results)
+    except:
+        print("No Sysbench results found. Run 'make benchmark-sysbench' first.")
+        return
+
+    print("\n=== Sysbench Engine Comparison ===\n")
+    query = """
+        SELECT test_name, table_size,
+               ROUND(vibesql_us, 2) as vibesql_us,
+               ROUND(sqlite_us, 2) as sqlite_us,
+               ROUND(duckdb_us, 2) as duckdb_us,
+               vibesql_vs_sqlite
+        FROM sysbench_engine_comparison
+    """
+    try:
+        results = execute_query(db_path, query)
+        headers = ["Test", "Table Size", "VibeSQL (us)", "SQLite (us)", "DuckDB (us)", "VibeSQL/SQLite"]
+        format_table(headers, results)
+    except:
+        pass
 
 
 def main():
@@ -187,7 +260,7 @@ def main():
     parser.add_argument(
         "--latest",
         action="store_true",
-        help="Show latest benchmark run summary"
+        help="Show latest TPC-H benchmark run summary"
     )
     parser.add_argument(
         "--trend",
@@ -209,7 +282,7 @@ def main():
     parser.add_argument(
         "--stats",
         action="store_true",
-        help="Show statistics for all queries across all runs"
+        help="Show statistics for all TPC-H queries across all runs"
     )
     parser.add_argument(
         "--comparison",
@@ -220,6 +293,16 @@ def main():
         "--history",
         action="store_true",
         help="Show all benchmark runs"
+    )
+    parser.add_argument(
+        "--tpcc",
+        action="store_true",
+        help="Show TPC-C OLTP benchmark results"
+    )
+    parser.add_argument(
+        "--sysbench",
+        action="store_true",
+        help="Show Sysbench OLTP benchmark results"
     )
 
     args = parser.parse_args()
@@ -243,8 +326,12 @@ def main():
         query_comparison(db_path)
     elif args.history:
         query_history(db_path)
+    elif args.tpcc:
+        query_tpcc(db_path)
+    elif args.sysbench:
+        query_sysbench(db_path)
     else:
-        # Default: show latest
+        # Default: show latest TPC-H
         query_latest(db_path)
         print("\n")
         query_stats(db_path)

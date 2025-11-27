@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc clean help analyze-tests analyze-benchmarks analyze
+.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze
 
 # Default target - fully qualify and update the state of the repo
 # Runs build-all (including Python), all tests, benchmarks, and records results to database
@@ -24,9 +24,11 @@ help:
 	@echo "  make test-sqllogictest  - Run SQLLogicTest suite (parallel, 8 workers)"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  make benchmark          - Run all benchmarks (TPC-H + TPC-C)"
+	@echo "  make benchmark          - Run all benchmarks (TPC-H, TPC-C, sysbench)"
 	@echo "  make benchmark-tpch     - Run TPC-H benchmark suite (30s timeout)"
 	@echo "  make benchmark-tpcc     - Run TPC-C benchmark suite (60s duration)"
+	@echo "  make benchmark-tpcds    - Run TPC-DS benchmark suite (when available)"
+	@echo "  make benchmark-sysbench - Run Sysbench OLTP benchmarks"
 	@echo ""
 	@echo "Analysis targets:"
 	@echo "  make analyze            - Show test and benchmark analysis"
@@ -90,7 +92,7 @@ test-sqllogictest:
 #
 
 # Run all benchmarks with analysis
-benchmark: benchmark-tpch benchmark-tpcc analyze-benchmarks
+benchmark: benchmark-tpch benchmark-tpcc benchmark-sysbench analyze-benchmarks
 
 # Run TPC-H benchmarks with 30s timeout per query and store results in database
 benchmark-tpch:
@@ -104,7 +106,7 @@ benchmark-tpch:
 	@echo "  ./scripts/query_benchmark_results.py --latest"
 	@echo "  ./scripts/query_benchmark_results.py --trend"
 
-# Run TPC-C benchmarks (OLTP workload)
+# Run TPC-C benchmarks (OLTP workload) with database tracking
 benchmark-tpcc:
 	@echo "Running TPC-C benchmarks..."
 	@echo "Building TPC-C benchmark..."
@@ -112,7 +114,29 @@ benchmark-tpcc:
 	@echo ""
 	@echo "Running TPC-C benchmark (60s duration, 10s warmup)..."
 	TPCC_DURATION_SECS=60 TPCC_WARMUP_SECS=10 TPCC_SCALE_FACTOR=1 \
-		$$(find ./target/release/deps -maxdepth 1 -name "tpcc_benchmark-*" -type f ! -name "*.d" | head -1)
+		$$(find ./target/release/deps -maxdepth 1 -name "tpcc_benchmark-*" -type f ! -name "*.d" | head -1) \
+		2>&1 | tee /tmp/tpcc_results.txt
+	@echo ""
+	@echo "Processing TPC-C results into database..."
+	./scripts/process_tpcc_results.py --input /tmp/tpcc_results.txt --scale-factor 1 --duration 60
+
+# Run TPC-DS benchmarks (when available)
+benchmark-tpcds:
+	@echo "Running TPC-DS benchmarks..."
+	@if [ -f crates/vibesql-executor/benches/tpcds_benchmark.rs ]; then \
+		cargo bench --package vibesql-executor --bench tpcds_benchmark --features benchmark-comparison -- --noplot; \
+	else \
+		echo "TPC-DS benchmark not yet available. See issue #2746."; \
+	fi
+
+# Run Sysbench OLTP benchmarks with database tracking
+benchmark-sysbench:
+	@echo "Running Sysbench OLTP benchmarks..."
+	cargo bench --package vibesql-executor --bench sysbench_oltp --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/sysbench_results.txt
+	@echo ""
+	@echo "Processing Sysbench results into database..."
+	./scripts/process_sysbench_results.py --stdin < /tmp/sysbench_results.txt || \
+		./scripts/process_sysbench_results.py --criterion-dir target/criterion
 
 #
 # Analysis Targets
@@ -130,7 +154,7 @@ analyze-tests:
 	@./scripts/sqllogictest analyze --top-fixes 2>/dev/null || echo "Run 'make test-sqllogictest' first to generate test data"
 	@echo ""
 
-# Show TPC-H benchmark analysis from database
+# Show all benchmark analysis from database
 analyze-benchmarks:
 	@echo ""
 	@echo "=========================================="
@@ -139,6 +163,16 @@ analyze-benchmarks:
 	@./scripts/query_benchmark_results.py --latest 2>/dev/null || echo "Run 'make benchmark-tpch' first to generate benchmark data"
 	@echo ""
 	@./scripts/query_benchmark_results.py --stats 2>/dev/null || true
+	@echo ""
+	@echo "=========================================="
+	@echo "TPC-C Benchmark Analysis"
+	@echo "=========================================="
+	@./scripts/query_benchmark_results.py --tpcc 2>/dev/null || echo "Run 'make benchmark-tpcc' first to generate benchmark data"
+	@echo ""
+	@echo "=========================================="
+	@echo "Sysbench OLTP Analysis"
+	@echo "=========================================="
+	@./scripts/query_benchmark_results.py --sysbench 2>/dev/null || echo "Run 'make benchmark-sysbench' first to generate benchmark data"
 	@echo ""
 
 #
