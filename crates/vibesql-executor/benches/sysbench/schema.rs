@@ -79,7 +79,8 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
     use vibesql_types::DataType;
 
     // sbtest1 table (standard sysbench OLTP table)
-    // Using Character instead of Char (Character is the correct enum variant)
+    // Using Varchar for string columns for compatibility with SQL UPDATE statements
+    // (the SQL parser produces SqlValue::Varchar for string literals)
     // Note: default values are handled at insert time, not schema level
     db.create_table(TableSchema::new(
         "SBTEST1".to_string(),
@@ -98,13 +99,13 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
             },
             ColumnSchema {
                 name: "c".to_string(),
-                data_type: DataType::Character { length: 120 },
+                data_type: DataType::Varchar { max_length: Some(120) },
                 nullable: false,
                 default_value: None,
             },
             ColumnSchema {
                 name: "pad".to_string(),
-                data_type: DataType::Character { length: 60 },
+                data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: false,
                 default_value: None,
             },
@@ -151,8 +152,8 @@ fn load_sbtest_vibesql(db: &mut VibeDB, data: &mut SysbenchData) {
         let row = Row::new(vec![
             SqlValue::Integer(id),
             SqlValue::Integer(k),
-            SqlValue::Character(c),
-            SqlValue::Character(pad),
+            SqlValue::Varchar(c),
+            SqlValue::Varchar(pad),
         ]);
         db.insert_row("SBTEST1", row).unwrap();
     }

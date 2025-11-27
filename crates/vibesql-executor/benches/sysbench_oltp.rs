@@ -53,9 +53,10 @@ use std::hint::black_box;
 use std::time::Duration;
 use sysbench::schema::load_vibesql;
 use sysbench::SysbenchData;
-use vibesql_executor::{InsertExecutor, SelectExecutor, UpdateExecutor};
+use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-use vibesql_storage::Database as VibeDB;
+use vibesql_storage::{Database as VibeDB, Row};
+use vibesql_types::SqlValue;
 
 #[cfg(feature = "benchmark-comparison")]
 use duckdb::Connection as DuckDBConn;
@@ -84,16 +85,15 @@ fn vibesql_point_select(db: &VibeDB, id: i64) -> usize {
     }
 }
 
-/// Execute an insert query on VibeSQL
+/// Execute an insert on VibeSQL using direct API (avoids SQL parsing overhead)
 fn vibesql_insert(db: &mut VibeDB, id: i64, k: i64, c: &str, pad: &str) {
-    let sql = format!(
-        "INSERT INTO sbtest1 (id, k, c, pad) VALUES ({}, {}, '{}', '{}')",
-        id, k, c, pad
-    );
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Insert(insert) = stmt {
-        InsertExecutor::execute(db, &insert).unwrap();
-    }
+    let row = Row::new(vec![
+        SqlValue::Integer(id),
+        SqlValue::Integer(k),
+        SqlValue::Varchar(c.to_string()),
+        SqlValue::Varchar(pad.to_string()),
+    ]);
+    db.insert_row("SBTEST1", row).unwrap();
 }
 
 /// Execute an update query on VibeSQL (update non-indexed column)
@@ -101,7 +101,7 @@ fn vibesql_update_non_index(db: &mut VibeDB, id: i64, c: &str) {
     let sql = format!("UPDATE sbtest1 SET c = '{}' WHERE id = {}", c, id);
     let stmt = Parser::parse_sql(&sql).unwrap();
     if let vibesql_ast::Statement::Update(update) = stmt {
-        UpdateExecutor::execute(&update, db).unwrap();
+        vibesql_executor::UpdateExecutor::execute(&update, db).unwrap();
     }
 }
 
