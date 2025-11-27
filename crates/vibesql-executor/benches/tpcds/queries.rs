@@ -1,40 +1,38 @@
 //! TPC-DS Query Definitions
 //!
-//! This module contains TPC-DS benchmark queries adapted for the implemented schema.
-//! The original TPC-DS has 99 queries; we implement a comprehensive subset that work
-//! with our current tables across multiple tiers:
+//! This module contains the complete TPC-DS benchmark query suite (all 99 queries)
+//! adapted for the implemented schema. Queries span multiple complexity tiers:
 //!
-//! ## Phase 1 (Core Tables):
+//! ## Phase 1 (Core Tables - Q1-Q19):
 //! - date_dim, time_dim, item, customer, customer_address, store, store_sales
-//! - Queries: Q1, Q2, Q3, Q6, Q7, Q9, Q10, Q12, Q15, Q19, Q42, Q52, Q55, Q68, Q73, Q89, Q96
+//! - Queries: Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8, Q9, Q10, Q11, Q12, Q14, Q15, Q17, Q18, Q19
+//! - Features: Basic joins, aggregations, CTEs, UNION ALL, INTERSECT, ROLLUP
 //!
-//! ## Phase 2 (Extended Tables):
+//! ## Phase 2 (Extended Tables - Q20-Q50):
 //! - promotion, warehouse, ship_mode, reason, store_returns
-//! - Queries: Q25, Q26, Q27, Q35, Q50, Q81, Q82, Q83
+//! - Queries: Q20-Q50 (complex analytics tier)
+//! - Features: Window functions, advanced CTEs, CUBE, year-over-year comparisons
 //!
-//! ## Phase 3 (Full E-Commerce):
-//! - catalog_page, web_page, web_site
+//! ## Phase 3 (Full E-Commerce - Multi-channel):
+//! - catalog_page, web_page, web_site, call_center
 //! - catalog_sales, catalog_returns, web_sales, web_returns
-//! - Queries: Q13, Q16, Q20, Q32, Q37, Q60, Q62, Q76, Q84, Q92
-//!
-//! ## Tier 2 (Q21-Q50 Complex Analytics):
-//! - Q21, Q22, Q23, Q24, Q28, Q29, Q30, Q31, Q33, Q34, Q36, Q38, Q39, Q40, Q41, Q43, Q44, Q45, Q46, Q47, Q48, Q49
-//! - Complex multi-table joins, CTEs, window functions, cross-channel analysis
-//! - Q22 uses ROLLUP for hierarchical inventory subtotals, Q36 uses CUBE for multi-dimensional analysis
+//! - Queries: Q13, Q16, Q20, Q32, Q37, Q57, Q60, Q62, Q76, Q84, Q91, Q92, Q99
 //!
 //! ## Tier 3 (Advanced Analytics - Q51-Q99):
 //! - Advanced window functions, ROLLUP/CUBE, complex CTEs
-//! - ROLLUP queries: Q67, Q70, Q77, Q80, Q86 (require GROUPING function)
+//! - ROLLUP queries: Q5, Q14, Q18, Q67, Q70, Q77, Q80, Q86 (hierarchical grouping)
 //! - Window function queries: Q51, Q53, Q58, Q74, Q75, Q78, Q98
-//! - Multi-channel analysis: Q58, Q71, Q74, Q75, Q87, Q97
-//! - Queries: Q51, Q53, Q54, Q56, Q58, Q59, Q61, Q63, Q64, Q65, Q66, Q67, Q69,
-//!            Q70, Q71, Q72, Q74, Q75, Q77, Q78, Q79, Q80, Q85, Q86, Q87, Q88, Q90,
-//!            Q93, Q94, Q95, Q97, Q98
+//! - Multi-channel analysis: Q4, Q11, Q58, Q71, Q74, Q75, Q87, Q97
+//! - Call center queries: Q57, Q91, Q99
 //!
-//! ## Queries Blocked by Missing Schema Tables:
-//! - Q57, Q91, Q99: Require call_center table (not implemented)
+//! ## Key SQL Features Tested:
+//! - ROLLUP/CUBE: Q5, Q14, Q18, Q22, Q36, Q67, Q70, Q77, Q80, Q86
+//! - INTERSECT: Q8, Q14, Q38, Q87
+//! - Window Functions: Q12, Q47, Q51, Q53, Q57, Q58, Q74, Q75, Q78, Q98
+//! - Complex CTEs: Q4, Q5, Q11, Q14, Q23, Q24, Q58, Q59, Q64
+//! - Statistical Functions: Q17 (STDDEV_SAMP)
 //!
-//! Total implemented: 67 queries (from original 99)
+//! Total implemented: 99 queries (100% TPC-DS coverage)
 //!
 //! Queries are numbered to match the official TPC-DS query numbers where possible,
 //! with adaptations noted in comments.
@@ -155,6 +153,260 @@ LIMIT 100
 "#;
 
 // =============================================================================
+// TPC-DS Q4: Customer Catalog Sales Growth vs Store/Web
+// =============================================================================
+// Identifies customers whose catalog sales growth between consecutive years
+// exceeds both their store and web sales growth rates.
+// Tests: Complex CTE with UNION ALL, 6-way self-join, year-over-year comparison
+pub const TPCDS_Q4: &str = r#"
+WITH year_total AS (
+    SELECT
+        c_customer_id customer_id,
+        c_first_name customer_first_name,
+        c_last_name customer_last_name,
+        c_preferred_cust_flag customer_preferred_cust_flag,
+        c_birth_country customer_birth_country,
+        c_login customer_login,
+        c_email_address customer_email_address,
+        d_year dyear,
+        SUM(((ss_ext_list_price - ss_ext_wholesale_cost - ss_ext_discount_amt) + ss_ext_sales_price) / 2) year_total,
+        's' sale_type
+    FROM customer, store_sales, date_dim
+    WHERE c_customer_sk = ss_customer_sk
+        AND ss_sold_date_sk = d_date_sk
+    GROUP BY c_customer_id, c_first_name, c_last_name, c_preferred_cust_flag,
+             c_birth_country, c_login, c_email_address, d_year
+    UNION ALL
+    SELECT
+        c_customer_id customer_id,
+        c_first_name customer_first_name,
+        c_last_name customer_last_name,
+        c_preferred_cust_flag customer_preferred_cust_flag,
+        c_birth_country customer_birth_country,
+        c_login customer_login,
+        c_email_address customer_email_address,
+        d_year dyear,
+        SUM(((cs_ext_list_price - cs_ext_wholesale_cost - cs_ext_discount_amt) + cs_ext_sales_price) / 2) year_total,
+        'c' sale_type
+    FROM customer, catalog_sales, date_dim
+    WHERE c_customer_sk = cs_bill_customer_sk
+        AND cs_sold_date_sk = d_date_sk
+    GROUP BY c_customer_id, c_first_name, c_last_name, c_preferred_cust_flag,
+             c_birth_country, c_login, c_email_address, d_year
+    UNION ALL
+    SELECT
+        c_customer_id customer_id,
+        c_first_name customer_first_name,
+        c_last_name customer_last_name,
+        c_preferred_cust_flag customer_preferred_cust_flag,
+        c_birth_country customer_birth_country,
+        c_login customer_login,
+        c_email_address customer_email_address,
+        d_year dyear,
+        SUM(((ws_ext_list_price - ws_ext_wholesale_cost - ws_ext_discount_amt) + ws_ext_sales_price) / 2) year_total,
+        'w' sale_type
+    FROM customer, web_sales, date_dim
+    WHERE c_customer_sk = ws_bill_customer_sk
+        AND ws_sold_date_sk = d_date_sk
+    GROUP BY c_customer_id, c_first_name, c_last_name, c_preferred_cust_flag,
+             c_birth_country, c_login, c_email_address, d_year
+)
+SELECT
+    t_s_secyear.customer_id,
+    t_s_secyear.customer_first_name,
+    t_s_secyear.customer_last_name,
+    t_s_secyear.customer_preferred_cust_flag
+FROM year_total t_s_firstyear,
+     year_total t_s_secyear,
+     year_total t_c_firstyear,
+     year_total t_c_secyear,
+     year_total t_w_firstyear,
+     year_total t_w_secyear
+WHERE t_s_secyear.customer_id = t_s_firstyear.customer_id
+    AND t_s_firstyear.customer_id = t_c_secyear.customer_id
+    AND t_s_firstyear.customer_id = t_c_firstyear.customer_id
+    AND t_s_firstyear.customer_id = t_w_firstyear.customer_id
+    AND t_s_firstyear.customer_id = t_w_secyear.customer_id
+    AND t_s_firstyear.sale_type = 's'
+    AND t_c_firstyear.sale_type = 'c'
+    AND t_w_firstyear.sale_type = 'w'
+    AND t_s_secyear.sale_type = 's'
+    AND t_c_secyear.sale_type = 'c'
+    AND t_w_secyear.sale_type = 'w'
+    AND t_s_firstyear.dyear = 2001
+    AND t_s_secyear.dyear = 2001 + 1
+    AND t_c_firstyear.dyear = 2001
+    AND t_c_secyear.dyear = 2001 + 1
+    AND t_w_firstyear.dyear = 2001
+    AND t_w_secyear.dyear = 2001 + 1
+    AND t_s_firstyear.year_total > 0
+    AND t_c_firstyear.year_total > 0
+    AND t_w_firstyear.year_total > 0
+    AND CASE
+          WHEN t_c_firstyear.year_total > 0 THEN t_c_secyear.year_total / t_c_firstyear.year_total
+          ELSE NULL
+        END > CASE
+                WHEN t_s_firstyear.year_total > 0 THEN t_s_secyear.year_total / t_s_firstyear.year_total
+                ELSE NULL
+              END
+    AND CASE
+          WHEN t_c_firstyear.year_total > 0 THEN t_c_secyear.year_total / t_c_firstyear.year_total
+          ELSE NULL
+        END > CASE
+                WHEN t_w_firstyear.year_total > 0 THEN t_w_secyear.year_total / t_w_firstyear.year_total
+                ELSE NULL
+              END
+ORDER BY t_s_secyear.customer_id,
+         t_s_secyear.customer_first_name,
+         t_s_secyear.customer_last_name,
+         t_s_secyear.customer_preferred_cust_flag
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q5: Multi-Channel Sales and Returns Analysis with ROLLUP
+// =============================================================================
+// Analyzes sales and returns across store, catalog, and web channels
+// with hierarchical subtotals using ROLLUP.
+// Tests: Complex CTEs, UNION ALL, ROLLUP grouping
+pub const TPCDS_Q5: &str = r#"
+WITH ssr AS (
+    SELECT
+        s_store_id,
+        SUM(sales_price) AS sales,
+        SUM(profit) AS profit,
+        SUM(return_amt) AS returns1,
+        SUM(net_loss) AS profit_loss
+    FROM (
+        SELECT
+            ss_store_sk AS store_sk,
+            ss_sold_date_sk AS date_sk,
+            ss_ext_sales_price AS sales_price,
+            ss_net_profit AS profit,
+            CAST(0 AS DECIMAL(7,2)) AS return_amt,
+            CAST(0 AS DECIMAL(7,2)) AS net_loss
+        FROM store_sales
+        UNION ALL
+        SELECT
+            sr_store_sk AS store_sk,
+            sr_returned_date_sk AS date_sk,
+            CAST(0 AS DECIMAL(7,2)) AS sales_price,
+            CAST(0 AS DECIMAL(7,2)) AS profit,
+            sr_return_amt AS return_amt,
+            sr_net_loss AS net_loss
+        FROM store_returns
+    ) salesreturns,
+    date_dim,
+    store
+    WHERE date_sk = d_date_sk
+        AND d_date BETWEEN CAST('2002-08-22' AS DATE) AND CAST('2002-09-05' AS DATE)
+        AND store_sk = s_store_sk
+    GROUP BY s_store_id
+),
+csr AS (
+    SELECT
+        cp_catalog_page_id,
+        SUM(sales_price) AS sales,
+        SUM(profit) AS profit,
+        SUM(return_amt) AS returns1,
+        SUM(net_loss) AS profit_loss
+    FROM (
+        SELECT
+            cs_catalog_page_sk AS page_sk,
+            cs_sold_date_sk AS date_sk,
+            cs_ext_sales_price AS sales_price,
+            cs_net_profit AS profit,
+            CAST(0 AS DECIMAL(7,2)) AS return_amt,
+            CAST(0 AS DECIMAL(7,2)) AS net_loss
+        FROM catalog_sales
+        UNION ALL
+        SELECT
+            cr_catalog_page_sk AS page_sk,
+            cr_returned_date_sk AS date_sk,
+            CAST(0 AS DECIMAL(7,2)) AS sales_price,
+            CAST(0 AS DECIMAL(7,2)) AS profit,
+            cr_return_amount AS return_amt,
+            cr_net_loss AS net_loss
+        FROM catalog_returns
+    ) salesreturns,
+    date_dim,
+    catalog_page
+    WHERE date_sk = d_date_sk
+        AND d_date BETWEEN CAST('2002-08-22' AS DATE) AND CAST('2002-09-05' AS DATE)
+        AND page_sk = cp_catalog_page_sk
+    GROUP BY cp_catalog_page_id
+),
+wsr AS (
+    SELECT
+        web_site_id,
+        SUM(sales_price) AS sales,
+        SUM(profit) AS profit,
+        SUM(return_amt) AS returns1,
+        SUM(net_loss) AS profit_loss
+    FROM (
+        SELECT
+            ws_web_site_sk AS wsr_web_site_sk,
+            ws_sold_date_sk AS date_sk,
+            ws_ext_sales_price AS sales_price,
+            ws_net_profit AS profit,
+            CAST(0 AS DECIMAL(7,2)) AS return_amt,
+            CAST(0 AS DECIMAL(7,2)) AS net_loss
+        FROM web_sales
+        UNION ALL
+        SELECT
+            ws_web_site_sk AS wsr_web_site_sk,
+            wr_returned_date_sk AS date_sk,
+            CAST(0 AS DECIMAL(7,2)) AS sales_price,
+            CAST(0 AS DECIMAL(7,2)) AS profit,
+            wr_return_amt AS return_amt,
+            wr_net_loss AS net_loss
+        FROM web_returns
+        LEFT OUTER JOIN web_sales ON (wr_item_sk = ws_item_sk AND wr_order_number = ws_order_number)
+    ) salesreturns,
+    date_dim,
+    web_site
+    WHERE date_sk = d_date_sk
+        AND d_date BETWEEN CAST('2002-08-22' AS DATE) AND CAST('2002-09-05' AS DATE)
+        AND wsr_web_site_sk = web_site_sk
+    GROUP BY web_site_id
+)
+SELECT
+    channel,
+    id,
+    SUM(sales) AS sales,
+    SUM(returns1) AS returns1,
+    SUM(profit) AS profit
+FROM (
+    SELECT
+        'store channel' AS channel,
+        'store' || s_store_id AS id,
+        sales,
+        returns1,
+        (profit - profit_loss) AS profit
+    FROM ssr
+    UNION ALL
+    SELECT
+        'catalog channel' AS channel,
+        'catalog_page' || cp_catalog_page_id AS id,
+        sales,
+        returns1,
+        (profit - profit_loss) AS profit
+    FROM csr
+    UNION ALL
+    SELECT
+        'web channel' AS channel,
+        'web_site' || web_site_id AS id,
+        sales,
+        returns1,
+        (profit - profit_loss) AS profit
+    FROM wsr
+) x
+GROUP BY ROLLUP (channel, id)
+ORDER BY channel, id
+LIMIT 100
+"#;
+
+// =============================================================================
 // TPC-DS Q6: State Sales Analysis
 // =============================================================================
 // Analyzes store sales by state for items priced above 120% of their
@@ -205,6 +457,47 @@ WHERE ss_sold_date_sk = d_date_sk
     AND d_year = 2000
 GROUP BY i_item_id
 ORDER BY i_item_id
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q8: Store Sales by ZIP Code Analysis
+// =============================================================================
+// Retrieves store names and total net profits for Q2 2000, filtered by
+// specific geographic criteria using ZIP code intersection.
+// Tests: Complex subquery with INTERSECT, ZIP code prefix matching, aggregation
+pub const TPCDS_Q8: &str = r#"
+SELECT s_store_name, SUM(ss_net_profit)
+FROM store_sales, date_dim, store,
+    (SELECT ca_zip
+     FROM (
+         SELECT SUBSTR(ca_zip, 1, 5) ca_zip
+         FROM customer_address
+         WHERE SUBSTR(ca_zip, 1, 5) IN (
+             '67436', '26121', '38443', '63157', '68856', '19485', '86425', '26741',
+             '70991', '60899', '63573', '47556', '56193', '93314', '87827', '62017',
+             '85067', '95390', '48091', '10261', '81845', '41790', '42853', '24675',
+             '12840', '60065', '84430', '57451', '24021', '91735', '75335', '71935'
+         )
+         INTERSECT
+         SELECT ca_zip
+         FROM (
+             SELECT SUBSTR(ca_zip, 1, 5) ca_zip, COUNT(*) cnt
+             FROM customer_address, customer
+             WHERE ca_address_sk = c_current_addr_sk
+                 AND c_preferred_cust_flag = 'Y'
+             GROUP BY ca_zip
+             HAVING COUNT(*) > 10
+         ) A1
+     ) A2
+    ) V1
+WHERE ss_store_sk = s_store_sk
+    AND ss_sold_date_sk = d_date_sk
+    AND d_qoy = 2
+    AND d_year = 2000
+    AND SUBSTR(s_zip, 1, 2) = SUBSTR(V1.ca_zip, 1, 2)
+GROUP BY s_store_name
+ORDER BY s_store_name
 LIMIT 100
 "#;
 
@@ -290,6 +583,84 @@ LIMIT 100
 "#;
 
 // =============================================================================
+// TPC-DS Q11: Customer Web vs Store Sales Growth Comparison
+// =============================================================================
+// Identifies customers whose web sales growth rate exceeded their store sales
+// growth rate between consecutive years.
+// Tests: CTE with UNION ALL, 4-way self-join, year-over-year comparison
+pub const TPCDS_Q11: &str = r#"
+WITH year_total AS (
+    SELECT
+        c_customer_id customer_id,
+        c_first_name customer_first_name,
+        c_last_name customer_last_name,
+        c_preferred_cust_flag customer_preferred_cust_flag,
+        c_birth_country customer_birth_country,
+        c_login customer_login,
+        c_email_address customer_email_address,
+        d_year dyear,
+        SUM(ss_ext_list_price - ss_ext_discount_amt) year_total,
+        's' sale_type
+    FROM customer, store_sales, date_dim
+    WHERE c_customer_sk = ss_customer_sk
+        AND ss_sold_date_sk = d_date_sk
+    GROUP BY c_customer_id, c_first_name, c_last_name, c_preferred_cust_flag,
+             c_birth_country, c_login, c_email_address, d_year
+    UNION ALL
+    SELECT
+        c_customer_id customer_id,
+        c_first_name customer_first_name,
+        c_last_name customer_last_name,
+        c_preferred_cust_flag customer_preferred_cust_flag,
+        c_birth_country customer_birth_country,
+        c_login customer_login,
+        c_email_address customer_email_address,
+        d_year dyear,
+        SUM(ws_ext_list_price - ws_ext_discount_amt) year_total,
+        'w' sale_type
+    FROM customer, web_sales, date_dim
+    WHERE c_customer_sk = ws_bill_customer_sk
+        AND ws_sold_date_sk = d_date_sk
+    GROUP BY c_customer_id, c_first_name, c_last_name, c_preferred_cust_flag,
+             c_birth_country, c_login, c_email_address, d_year
+)
+SELECT
+    t_s_secyear.customer_id,
+    t_s_secyear.customer_first_name,
+    t_s_secyear.customer_last_name,
+    t_s_secyear.customer_birth_country
+FROM year_total t_s_firstyear,
+     year_total t_s_secyear,
+     year_total t_w_firstyear,
+     year_total t_w_secyear
+WHERE t_s_secyear.customer_id = t_s_firstyear.customer_id
+    AND t_s_firstyear.customer_id = t_w_secyear.customer_id
+    AND t_s_firstyear.customer_id = t_w_firstyear.customer_id
+    AND t_s_firstyear.sale_type = 's'
+    AND t_w_firstyear.sale_type = 'w'
+    AND t_s_secyear.sale_type = 's'
+    AND t_w_secyear.sale_type = 'w'
+    AND t_s_firstyear.dyear = 2001
+    AND t_s_secyear.dyear = 2001 + 1
+    AND t_w_firstyear.dyear = 2001
+    AND t_w_secyear.dyear = 2001 + 1
+    AND t_s_firstyear.year_total > 0
+    AND t_w_firstyear.year_total > 0
+    AND CASE
+          WHEN t_w_firstyear.year_total > 0 THEN t_w_secyear.year_total / t_w_firstyear.year_total
+          ELSE 0.0
+        END > CASE
+                WHEN t_s_firstyear.year_total > 0 THEN t_s_secyear.year_total / t_s_firstyear.year_total
+                ELSE 0.0
+              END
+ORDER BY t_s_secyear.customer_id,
+         t_s_secyear.customer_first_name,
+         t_s_secyear.customer_last_name,
+         t_s_secyear.customer_birth_country
+LIMIT 100
+"#;
+
+// =============================================================================
 // TPC-DS Q12: Web Sales Revenue by Category (Window Function)
 // =============================================================================
 // Calculates web sales revenue and revenue ratio within item classes
@@ -316,6 +687,92 @@ LIMIT 100
 "#;
 
 // =============================================================================
+// TPC-DS Q14: Cross-Channel Item Sales Analysis with ROLLUP
+// =============================================================================
+// Identifies items sold across all three channels (store, catalog, web) and
+// aggregates their sales by channel using ROLLUP for hierarchical subtotals.
+// Tests: Complex CTEs, triple INTERSECT, ROLLUP grouping, HAVING with subquery
+pub const TPCDS_Q14: &str = r#"
+WITH cross_items AS (
+    SELECT i_item_sk ss_item_sk
+    FROM item,
+    (SELECT iss.i_brand_id brand_id, iss.i_class_id class_id, iss.i_category_id category_id
+     FROM store_sales, item iss, date_dim d1
+     WHERE ss_item_sk = iss.i_item_sk
+         AND ss_sold_date_sk = d1.d_date_sk
+         AND d1.d_year BETWEEN 1999 AND 1999 + 2
+     INTERSECT
+     SELECT ics.i_brand_id, ics.i_class_id, ics.i_category_id
+     FROM catalog_sales, item ics, date_dim d2
+     WHERE cs_item_sk = ics.i_item_sk
+         AND cs_sold_date_sk = d2.d_date_sk
+         AND d2.d_year BETWEEN 1999 AND 1999 + 2
+     INTERSECT
+     SELECT iws.i_brand_id, iws.i_class_id, iws.i_category_id
+     FROM web_sales, item iws, date_dim d3
+     WHERE ws_item_sk = iws.i_item_sk
+         AND ws_sold_date_sk = d3.d_date_sk
+         AND d3.d_year BETWEEN 1999 AND 1999 + 2
+    ) x
+    WHERE i_brand_id = brand_id
+        AND i_class_id = class_id
+        AND i_category_id = category_id
+),
+avg_sales AS (
+    SELECT AVG(quantity * list_price) average_sales
+    FROM (
+        SELECT ss_quantity quantity, ss_list_price list_price
+        FROM store_sales, date_dim
+        WHERE ss_sold_date_sk = d_date_sk AND d_year BETWEEN 1999 AND 1999 + 2
+        UNION ALL
+        SELECT cs_quantity quantity, cs_list_price list_price
+        FROM catalog_sales, date_dim
+        WHERE cs_sold_date_sk = d_date_sk AND d_year BETWEEN 1999 AND 1999 + 2
+        UNION ALL
+        SELECT ws_quantity quantity, ws_list_price list_price
+        FROM web_sales, date_dim
+        WHERE ws_sold_date_sk = d_date_sk AND d_year BETWEEN 1999 AND 1999 + 2
+    ) x
+)
+SELECT channel, i_brand_id, i_class_id, i_category_id,
+       SUM(sales), SUM(number_sales)
+FROM (
+    SELECT 'store' channel, i_brand_id, i_class_id, i_category_id,
+           SUM(ss_quantity * ss_list_price) sales, COUNT(*) number_sales
+    FROM store_sales, item, date_dim
+    WHERE ss_item_sk IN (SELECT ss_item_sk FROM cross_items)
+        AND ss_item_sk = i_item_sk
+        AND ss_sold_date_sk = d_date_sk
+        AND d_year = 1999 + 2 AND d_moy = 11
+    GROUP BY i_brand_id, i_class_id, i_category_id
+    HAVING SUM(ss_quantity * ss_list_price) > (SELECT average_sales FROM avg_sales)
+    UNION ALL
+    SELECT 'catalog' channel, i_brand_id, i_class_id, i_category_id,
+           SUM(cs_quantity * cs_list_price) sales, COUNT(*) number_sales
+    FROM catalog_sales, item, date_dim
+    WHERE cs_item_sk IN (SELECT ss_item_sk FROM cross_items)
+        AND cs_item_sk = i_item_sk
+        AND cs_sold_date_sk = d_date_sk
+        AND d_year = 1999 + 2 AND d_moy = 11
+    GROUP BY i_brand_id, i_class_id, i_category_id
+    HAVING SUM(cs_quantity * cs_list_price) > (SELECT average_sales FROM avg_sales)
+    UNION ALL
+    SELECT 'web' channel, i_brand_id, i_class_id, i_category_id,
+           SUM(ws_quantity * ws_list_price) sales, COUNT(*) number_sales
+    FROM web_sales, item, date_dim
+    WHERE ws_item_sk IN (SELECT ss_item_sk FROM cross_items)
+        AND ws_item_sk = i_item_sk
+        AND ws_sold_date_sk = d_date_sk
+        AND d_year = 1999 + 2 AND d_moy = 11
+    GROUP BY i_brand_id, i_class_id, i_category_id
+    HAVING SUM(ws_quantity * ws_list_price) > (SELECT average_sales FROM avg_sales)
+) y
+GROUP BY ROLLUP (channel, i_brand_id, i_class_id, i_category_id)
+ORDER BY channel, i_brand_id, i_class_id, i_category_id
+LIMIT 100
+"#;
+
+// =============================================================================
 // TPC-DS Q15: Catalog Sales by Zip Code
 // =============================================================================
 // Aggregates catalog sales totals by zip code for Q2 2001, filtered by
@@ -337,6 +794,92 @@ WHERE cs_bill_customer_sk = c_customer_sk
     AND d_year = 2001
 GROUP BY ca_zip
 ORDER BY ca_zip
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q17: Store Sales to Returns to Catalog Analysis
+// =============================================================================
+// Analyzes the relationship between store sales, returns, and subsequent
+// catalog sales for items and states in Q1 1999.
+// Tests: 8-way join, statistical functions (STDDEV_SAMP), date-based filtering
+pub const TPCDS_Q17: &str = r#"
+SELECT
+    i_item_id,
+    i_item_desc,
+    s_state,
+    COUNT(ss_quantity) AS store_sales_quantitycount,
+    AVG(ss_quantity) AS store_sales_quantityave,
+    STDDEV_SAMP(ss_quantity) AS store_sales_quantitystdev,
+    STDDEV_SAMP(ss_quantity) / AVG(ss_quantity) AS store_sales_quantitycov,
+    COUNT(sr_return_quantity) AS store_returns_quantitycount,
+    AVG(sr_return_quantity) AS store_returns_quantityave,
+    STDDEV_SAMP(sr_return_quantity) AS store_returns_quantitystdev,
+    STDDEV_SAMP(sr_return_quantity) / AVG(sr_return_quantity) AS store_returns_quantitycov,
+    COUNT(cs_quantity) AS catalog_sales_quantitycount,
+    AVG(cs_quantity) AS catalog_sales_quantityave,
+    STDDEV_SAMP(cs_quantity) AS catalog_sales_quantitystdev,
+    STDDEV_SAMP(cs_quantity) / AVG(cs_quantity) AS catalog_sales_quantitycov
+FROM store_sales, store_returns, catalog_sales,
+     date_dim d1, date_dim d2, date_dim d3,
+     store, item
+WHERE d1.d_quarter_name = '1999Q1'
+    AND d1.d_date_sk = ss_sold_date_sk
+    AND i_item_sk = ss_item_sk
+    AND s_store_sk = ss_store_sk
+    AND ss_customer_sk = sr_customer_sk
+    AND ss_item_sk = sr_item_sk
+    AND ss_ticket_number = sr_ticket_number
+    AND sr_returned_date_sk = d2.d_date_sk
+    AND d2.d_quarter_name IN ('1999Q1', '1999Q2', '1999Q3')
+    AND sr_customer_sk = cs_bill_customer_sk
+    AND sr_item_sk = cs_item_sk
+    AND cs_sold_date_sk = d3.d_date_sk
+    AND d3.d_quarter_name IN ('1999Q1', '1999Q2', '1999Q3')
+GROUP BY i_item_id, i_item_desc, s_state
+ORDER BY i_item_id, i_item_desc, s_state
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q18: Catalog Sales Demographics Analysis with ROLLUP
+// =============================================================================
+// Analyzes catalog sales with customer demographics using hierarchical
+// grouping by item, country, state, and county.
+// Tests: 7-way join, self-join on customer_demographics, ROLLUP grouping
+pub const TPCDS_Q18: &str = r#"
+SELECT
+    i_item_id,
+    ca_country,
+    ca_state,
+    ca_county,
+    AVG(CAST(cs_quantity AS DECIMAL(12,2))) agg1,
+    AVG(CAST(cs_list_price AS DECIMAL(12,2))) agg2,
+    AVG(CAST(cs_coupon_amt AS DECIMAL(12,2))) agg3,
+    AVG(CAST(cs_sales_price AS DECIMAL(12,2))) agg4,
+    AVG(CAST(cs_net_profit AS DECIMAL(12,2))) agg5,
+    AVG(CAST(c_birth_year AS DECIMAL(12,2))) agg6,
+    AVG(CAST(cd1.cd_dep_count AS DECIMAL(12,2))) agg7
+FROM catalog_sales,
+     customer_demographics cd1,
+     customer_demographics cd2,
+     customer,
+     customer_address,
+     date_dim,
+     item
+WHERE cs_sold_date_sk = d_date_sk
+    AND cs_item_sk = i_item_sk
+    AND cs_bill_cdemo_sk = cd1.cd_demo_sk
+    AND cs_bill_customer_sk = c_customer_sk
+    AND cd1.cd_gender = 'F'
+    AND cd1.cd_education_status = 'Secondary'
+    AND c_current_cdemo_sk = cd2.cd_demo_sk
+    AND c_current_addr_sk = ca_address_sk
+    AND c_birth_month IN (8, 4, 2, 5, 11, 9)
+    AND d_year = 2001
+    AND ca_state IN ('KS', 'IA', 'AL', 'UT', 'VA', 'NC', 'TX')
+GROUP BY ROLLUP (i_item_id, ca_country, ca_state, ca_county)
+ORDER BY ca_country, ca_state, ca_county, i_item_id
 LIMIT 100
 "#;
 
@@ -2646,12 +3189,19 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q1", TPCDS_Q1),
     ("Q2", TPCDS_Q2),
     ("Q3", TPCDS_Q3),
+    ("Q4", TPCDS_Q4),   // Cross-channel customer growth comparison
+    ("Q5", TPCDS_Q5),   // Multi-channel sales/returns with ROLLUP
     ("Q6", TPCDS_Q6),
     ("Q7", TPCDS_Q7),
+    ("Q8", TPCDS_Q8),   // Store sales by ZIP code with INTERSECT
     ("Q9", TPCDS_Q9),
     ("Q10", TPCDS_Q10),
+    ("Q11", TPCDS_Q11), // Customer web vs store sales growth
     ("Q12", TPCDS_Q12),
+    ("Q14", TPCDS_Q14), // Cross-channel items with ROLLUP
     ("Q15", TPCDS_Q15),
+    ("Q17", TPCDS_Q17), // Store sales-returns-catalog analysis
+    ("Q18", TPCDS_Q18), // Catalog demographics with ROLLUP
     ("Q19", TPCDS_Q19),
     ("Q42", TPCDS_Q42),
     ("Q52", TPCDS_Q52),
@@ -2708,7 +3258,7 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q53", TPCDS_Q53),
     ("Q54", TPCDS_Q54),
     ("Q56", TPCDS_Q56),
-    // Q57 excluded: requires call_center table (not in schema)
+    ("Q57", TPCDS_Q57), // Call center performance analysis
     ("Q58", TPCDS_Q58),
     ("Q59", TPCDS_Q59),
     ("Q61", TPCDS_Q61),
@@ -2732,13 +3282,13 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q87", TPCDS_Q87),
     ("Q88", TPCDS_Q88),
     ("Q90", TPCDS_Q90),
-    // Q91 excluded: requires call_center table (not in schema)
+    ("Q91", TPCDS_Q91), // Call center customer analysis
     ("Q93", TPCDS_Q93),
     ("Q94", TPCDS_Q94),
     ("Q95", TPCDS_Q95),
     ("Q97", TPCDS_Q97),
     ("Q98", TPCDS_Q98),
-    // Q99 excluded: requires call_center table (not in schema)
+    ("Q99", TPCDS_Q99), // Call center ship mode analysis
 ];
 
 /// Sanity check queries for validation
