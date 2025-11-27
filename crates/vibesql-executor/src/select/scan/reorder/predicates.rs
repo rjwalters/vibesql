@@ -4,21 +4,6 @@ use std::collections::{HashMap, HashSet};
 use vibesql_ast::{BinaryOperator, Expression};
 use super::utils::resolve_column_with_fallback;
 
-/// Extract table-local predicates from a WHERE clause expression
-///
-/// A table-local predicate is one that references only a single table,
-/// e.g., `c_mktsegment = 'BUILDING'` references only `customer`.
-///
-/// Uses schema-based column resolution to handle unqualified column names like
-/// `p_name LIKE '%green%'` which should be recognized as a `part` table predicate.
-pub(super) fn extract_table_local_predicates(
-    where_expr: &Expression,
-    table_set: &HashSet<String>,
-) -> HashMap<String, Vec<Expression>> {
-    // Use default empty column map for backward compatibility
-    extract_table_local_predicates_with_schema(where_expr, table_set, &HashMap::new())
-}
-
 /// Extract table-local predicates using schema-based column resolution
 ///
 /// This version accepts a column_to_table map for resolving unqualified column names.

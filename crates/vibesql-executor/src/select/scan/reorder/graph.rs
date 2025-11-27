@@ -90,28 +90,6 @@ pub(super) fn extract_conditions_with_types(from: &FromClause, conditions: &mut 
     }
 }
 
-/// Extract all table names referenced in an expression
-///
-/// This function recursively walks an expression tree and collects all table names
-/// mentioned in column references. Used to determine which tables a join condition connects.
-///
-/// Uses schema-based column resolution via the column_to_table map.
-///
-/// # Parameters
-/// - `expr`: The expression to analyze
-/// - `output`: HashSet to populate with referenced table names
-/// - `available_tables`: Set of FROM clause tables
-/// - `column_to_table`: Optional schema-based column-to-table mapping
-pub(super) fn extract_referenced_tables(
-    expr: &Expression,
-    output: &mut HashSet<String>,
-    available_tables: &HashSet<String>,
-) {
-    // Use empty map for legacy compatibility - new code should use extract_referenced_tables_with_schema
-    let empty_map = HashMap::new();
-    extract_referenced_tables_with_schema(expr, output, available_tables, &empty_map);
-}
-
 /// Extract all table names referenced in an expression using schema-based column resolution
 ///
 /// This method uses actual database schema to resolve unqualified columns.
