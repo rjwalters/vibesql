@@ -6,17 +6,18 @@ VibeSQL now stores its own test results in a VibeSQL database! This is **dogfood
 
 ## ⚡ Quick Start (2 minutes)
 
-### 1. Run tests (all 622 files, ~2 minutes on 8 CPUs)
+### 1. Run tests (all 622 files)
 
 ```bash
-./scripts/sqllogictest run --parallel --workers 8
+# Uses all available CPU cores by default
+./scripts/sqllogictest run --parallel
 ```
 
 Output:
 ```
 ✓ Test binary compiled
 ✓ Work queue initialized: 622 files
-All 8 workers started! Waiting for completion...
+All workers started! Waiting for completion...
 
 === All Workers Complete ===
 Total time: 105.8s

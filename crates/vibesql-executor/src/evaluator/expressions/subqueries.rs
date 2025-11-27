@@ -1,18 +1,8 @@
 //! Subquery evaluation methods
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use super::super::core::ExpressionEvaluator;
+use super::super::caching::compute_subquery_hash;
 use crate::errors::ExecutorError;
-
-/// Compute a hash for a subquery to use as a cache key
-fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    // Use the debug format as a stable representation
-    format!("{:?}", subquery).hash(&mut hasher);
-    hasher.finish()
-}
 
 impl ExpressionEvaluator<'_> {
     /// Evaluate IN subquery predicate
@@ -53,7 +43,8 @@ impl ExpressionEvaluator<'_> {
             // Non-correlated subquery - try cache first
             let cache_key = compute_subquery_hash(subquery);
 
-            // Check cache (use peek() for readonly access)
+            // Check cache (explicitly scope the borrow to avoid holding it during execution)
+            // Use peek() for readonly access (get() requires &mut for LRU tracking)
             let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
 
             if let Some(cached_rows) = cached_result {
@@ -61,12 +52,13 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
+                // IMPORTANT: Propagate depth to prevent bypassing MAX_EXPRESSION_DEPTH
                 let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
-                let executed_rows = select_executor.execute(subquery)?;
+                let rows = select_executor.execute(subquery)?;
 
                 // Cache the result
-                self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
-                executed_rows
+                self.subquery_cache.borrow_mut().put(cache_key, rows.clone());
+                rows
             }
         } else {
             // Correlated subquery - execute with outer context (can't cache)

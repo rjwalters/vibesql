@@ -17,8 +17,8 @@ As of 2025-11-08:
 We use parallel testing for comprehensive coverage:
 
 ```bash
-# Run full suite with parallel workers
-./scripts/sqllogictest run --parallel --workers 8 --time 300
+# Run full suite with parallel workers (uses all available CPU cores by default)
+./scripts/sqllogictest run --parallel --time 300
 
 # Check status of most recent test run
 ./scripts/sqllogictest status

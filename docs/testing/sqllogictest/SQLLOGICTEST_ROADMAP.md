@@ -113,11 +113,11 @@ Top failure categories:
 
 ### Running Tests
 
-With work queue parallelization, the full test suite runs in **~2 minutes on localhost (8 CPUs)**:
+With work queue parallelization, the full test suite runs quickly using all available CPU cores:
 
 ```bash
-# Full suite (all 622 files, ~2 minutes)
-./scripts/sqllogictest run --parallel --workers 8
+# Full suite (all 622 files, uses all available CPU cores by default)
+./scripts/sqllogictest run --parallel
 
 # View results
 ./scripts/sqllogictest status
