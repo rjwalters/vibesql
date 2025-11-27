@@ -1,10 +1,23 @@
 //! Subquery evaluation methods
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use super::super::core::ExpressionEvaluator;
 use crate::errors::ExecutorError;
 
+/// Compute a hash for a subquery to use as a cache key
+fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Use the debug format as a stable representation
+    format!("{:?}", subquery).hash(&mut hasher);
+    hasher.finish()
+}
+
 impl ExpressionEvaluator<'_> {
     /// Evaluate IN subquery predicate
+    ///
+    /// **Optimization**: Caches non-correlated subquery results to avoid redundant execution.
     pub(super) fn eval_in_subquery(
         &self,
         expr: &vibesql_ast::Expression,
@@ -31,13 +44,40 @@ impl ExpressionEvaluator<'_> {
             self.schema.name.clone(),
             self.schema.clone(),
         );
-        let select_executor = crate::select::SelectExecutor::new_with_outer_context_and_depth(
-            database,
-            row,
-            &outer_combined,
-            self.depth,
-        );
-        let rows = select_executor.execute(subquery)?;
+
+        // Check if this is a non-correlated subquery that can be cached
+        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+
+        // Execute or retrieve from cache
+        let rows = if !is_correlated {
+            // Non-correlated subquery - try cache first
+            let cache_key = compute_subquery_hash(subquery);
+
+            // Check cache (use peek() for readonly access)
+            let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+
+            if let Some(cached_rows) = cached_result {
+                // Cache hit - use cached result
+                cached_rows
+            } else {
+                // Cache miss - execute and cache
+                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let executed_rows = select_executor.execute(subquery)?;
+
+                // Cache the result
+                self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
+                executed_rows
+            }
+        } else {
+            // Correlated subquery - execute with outer context (can't cache)
+            let select_executor = crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                database,
+                row,
+                &outer_combined,
+                self.depth,
+            );
+            select_executor.execute(subquery)?
+        };
 
         // SQL standard (R-35033-20570): The subquery must be a scalar subquery
         // (single column) when the left expression is not a row value expression.
@@ -100,6 +140,8 @@ impl ExpressionEvaluator<'_> {
     }
 
     /// Evaluate scalar subquery
+    ///
+    /// **Optimization**: Caches non-correlated subquery results to avoid redundant execution.
     pub(super) fn eval_scalar_subquery(
         &self,
         subquery: &vibesql_ast::SelectStmt,
@@ -123,24 +165,51 @@ impl ExpressionEvaluator<'_> {
             self.schema.clone(),
         );
 
-        // Execute the subquery with outer context for correlated subqueries
-        let select_executor = if !outer_combined.table_schemas.is_empty() {
-            crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                database,
-                row,
-                &outer_combined,
-                self.depth,
-            )
+        // Check if this is a non-correlated subquery that can be cached
+        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+
+        // Execute or retrieve from cache
+        let rows = if !is_correlated {
+            // Non-correlated subquery - try cache first
+            let cache_key = compute_subquery_hash(subquery);
+
+            // Check cache (use peek() for readonly access)
+            let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+
+            if let Some(cached_rows) = cached_result {
+                // Cache hit - use cached result
+                cached_rows
+            } else {
+                // Cache miss - execute and cache
+                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let executed_rows = select_executor.execute(subquery)?;
+
+                // Cache the result
+                self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
+                executed_rows
+            }
         } else {
-            crate::select::SelectExecutor::new(database)
+            // Correlated subquery - execute with outer context (can't cache)
+            let select_executor = if !outer_combined.table_schemas.is_empty() {
+                crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                    database,
+                    row,
+                    &outer_combined,
+                    self.depth,
+                )
+            } else {
+                crate::select::SelectExecutor::new(database)
+            };
+            select_executor.execute(subquery)?
         };
-        let rows = select_executor.execute(subquery)?;
 
         // Delegate to shared logic
         super::super::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len())
     }
 
     /// Evaluate EXISTS predicate
+    ///
+    /// **Optimization**: Caches non-correlated subquery results to avoid redundant execution.
     pub(super) fn eval_exists(
         &self,
         subquery: &vibesql_ast::SelectStmt,
@@ -165,24 +234,51 @@ impl ExpressionEvaluator<'_> {
             self.schema.clone(),
         );
 
-        // Execute the subquery with outer context and propagate depth
-        let select_executor = if !outer_combined.table_schemas.is_empty() {
-            crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                database,
-                row,
-                &outer_combined,
-                self.depth,
-            )
+        // Check if this is a non-correlated subquery that can be cached
+        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+
+        // Execute or retrieve from cache
+        let rows = if !is_correlated {
+            // Non-correlated subquery - try cache first
+            let cache_key = compute_subquery_hash(subquery);
+
+            // Check cache (use peek() for readonly access)
+            let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+
+            if let Some(cached_rows) = cached_result {
+                // Cache hit - use cached result
+                cached_rows
+            } else {
+                // Cache miss - execute and cache
+                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let executed_rows = select_executor.execute(subquery)?;
+
+                // Cache the result
+                self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
+                executed_rows
+            }
         } else {
-            crate::select::SelectExecutor::new(database)
+            // Correlated subquery - execute with outer context (can't cache)
+            let select_executor = if !outer_combined.table_schemas.is_empty() {
+                crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                    database,
+                    row,
+                    &outer_combined,
+                    self.depth,
+                )
+            } else {
+                crate::select::SelectExecutor::new(database)
+            };
+            select_executor.execute(subquery)?
         };
-        let rows = select_executor.execute(subquery)?;
 
         // Delegate to shared logic
         Ok(super::super::subqueries_shared::eval_exists_core(!rows.is_empty(), negated))
     }
 
     /// Evaluate quantified comparison (ALL/ANY/SOME)
+    ///
+    /// **Optimization**: Caches non-correlated subquery results to avoid redundant execution.
     pub(super) fn eval_quantified(
         &self,
         expr: &vibesql_ast::Expression,
@@ -212,18 +308,43 @@ impl ExpressionEvaluator<'_> {
             self.schema.clone(),
         );
 
-        // Execute the subquery with outer context and propagate depth
-        let select_executor = if !outer_combined.table_schemas.is_empty() {
-            crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                database,
-                row,
-                &outer_combined,
-                self.depth,
-            )
+        // Check if this is a non-correlated subquery that can be cached
+        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+
+        // Execute or retrieve from cache
+        let rows = if !is_correlated {
+            // Non-correlated subquery - try cache first
+            let cache_key = compute_subquery_hash(subquery);
+
+            // Check cache (use peek() for readonly access)
+            let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+
+            if let Some(cached_rows) = cached_result {
+                // Cache hit - use cached result
+                cached_rows
+            } else {
+                // Cache miss - execute and cache
+                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let executed_rows = select_executor.execute(subquery)?;
+
+                // Cache the result
+                self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
+                executed_rows
+            }
         } else {
-            crate::select::SelectExecutor::new(database)
+            // Correlated subquery - execute with outer context (can't cache)
+            let select_executor = if !outer_combined.table_schemas.is_empty() {
+                crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                    database,
+                    row,
+                    &outer_combined,
+                    self.depth,
+                )
+            } else {
+                crate::select::SelectExecutor::new(database)
+            };
+            select_executor.execute(subquery)?
         };
-        let rows = select_executor.execute(subquery)?;
 
         // Delegate to shared logic
         super::super::subqueries_shared::eval_quantified_core(

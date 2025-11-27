@@ -21,6 +21,9 @@ pub struct ExpressionEvaluator<'a> {
     pub(super) depth: usize,
     /// CSE cache for common sub-expression elimination with LRU eviction (shared via Rc across depth levels)
     pub(super) cse_cache: Rc<RefCell<LruCache<u64, vibesql_types::SqlValue>>>,
+    /// Cache for non-correlated subquery results with LRU eviction (key = subquery hash, value = result rows)
+    /// Shared via Rc across child evaluators within a single statement execution.
+    pub(super) subquery_cache: Rc<RefCell<LruCache<u64, Vec<vibesql_storage::Row>>>>,
     /// Whether CSE is enabled (can be disabled for debugging)
     pub(super) enable_cse: bool,
 }
@@ -37,6 +40,7 @@ impl<'a> ExpressionEvaluator<'a> {
             procedural_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             enable_cse: super::caching::is_cse_enabled(),
         }
     }
@@ -56,6 +60,7 @@ impl<'a> ExpressionEvaluator<'a> {
             procedural_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             enable_cse: super::caching::is_cse_enabled(),
         }
     }
@@ -74,6 +79,7 @@ impl<'a> ExpressionEvaluator<'a> {
             procedural_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             enable_cse: super::caching::is_cse_enabled(),
         }
     }
@@ -93,6 +99,7 @@ impl<'a> ExpressionEvaluator<'a> {
             procedural_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             enable_cse: super::caching::is_cse_enabled(),
         }
     }
@@ -114,6 +121,7 @@ impl<'a> ExpressionEvaluator<'a> {
             procedural_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             enable_cse: super::caching::is_cse_enabled(),
         }
     }
@@ -133,6 +141,7 @@ impl<'a> ExpressionEvaluator<'a> {
             procedural_context: Some(procedural_context),
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             enable_cse: super::caching::is_cse_enabled(),
         }
     }
@@ -198,7 +207,7 @@ impl<'a> ExpressionEvaluator<'a> {
         F: FnOnce(&Self) -> Result<T, ExecutorError>,
     {
         // Create a new evaluator with incremented depth
-        // Share the CSE cache across depth levels for consistent caching
+        // Share caches across depth levels for consistent caching
         let evaluator = ExpressionEvaluator {
             schema: self.schema,
             outer_row: self.outer_row,
@@ -208,6 +217,7 @@ impl<'a> ExpressionEvaluator<'a> {
             procedural_context: self.procedural_context,
             depth: self.depth + 1,
             cse_cache: self.cse_cache.clone(),
+            subquery_cache: self.subquery_cache.clone(),
             enable_cse: self.enable_cse,
         };
         f(&evaluator)
