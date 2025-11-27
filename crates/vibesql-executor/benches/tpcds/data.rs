@@ -376,7 +376,7 @@ impl TPCDSData {
         let catalog_returns_count = ((144_067.0 * scale_factor) as usize).max(500);
         let web_sales_count = ((719_384.0 * scale_factor) as usize).max(2500);
         let web_returns_count = ((71_763.0 * scale_factor) as usize).max(250);
-        let inventory_count = ((11_745_000.0 * scale_factor) as usize).max(50000);
+        let inventory_count = ((11_745_000.0 * scale_factor) as usize).max(10000);
 
         Self {
             scale_factor,

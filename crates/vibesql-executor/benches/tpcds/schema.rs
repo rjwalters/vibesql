@@ -39,10 +39,22 @@
 //! - catalog_returns: Catalog return transactions
 //! - web_sales: Web sales transactions
 //! - web_returns: Web return transactions
+//!
+//! ## Phase 4 Tables (Demographics & Inventory):
+//!
+//! Dimension Tables:
+//! - customer_demographics: Customer demographic attributes
+//! - household_demographics: Household demographic attributes
+//! - income_band: Income range buckets
+//! - call_center: Call center information
+//!
+//! Fact Tables:
+//! - inventory: Inventory levels
 
 use super::data::{
-    TPCDSData, BRANDS, CATEGORIES, CLASSES, CREDIT_RATINGS, GENDERS, ITEM_COLORS, ITEM_SIZES,
-    MARITAL_STATUS, STATES,
+    TPCDSData, BRANDS, BUY_POTENTIALS, CATEGORIES, CLASSES, CREDIT_RATINGS, DEP_COUNTS,
+    EDUCATION_STATUS, GENDERS, INCOME_BANDS, ITEM_COLORS, ITEM_SIZES, MARITAL_STATUS, STATES,
+    VEHICLE_COUNTS,
 };
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::Date;
@@ -84,6 +96,12 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     load_web_page_vibesql(&mut db, &mut data);
     load_web_site_vibesql(&mut db, &mut data);
 
+    // Phase 4 dimension tables (demographics and call center)
+    load_customer_demographics_vibesql(&mut db, &mut data);
+    load_household_demographics_vibesql(&mut db, &mut data);
+    load_income_band_vibesql(&mut db, &mut data);
+    load_call_center_vibesql(&mut db, &mut data);
+
     // Load fact tables
     load_store_sales_vibesql(&mut db, &mut data);
     load_store_returns_vibesql(&mut db, &mut data);
@@ -93,6 +111,9 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     load_catalog_returns_vibesql(&mut db, &mut data);
     load_web_sales_vibesql(&mut db, &mut data);
     load_web_returns_vibesql(&mut db, &mut data);
+
+    // Phase 4 fact table (inventory)
+    load_inventory_vibesql(&mut db, &mut data);
 
     // Create indexes for join optimization
     create_tpcds_indexes_vibesql(&mut db);
@@ -112,12 +133,17 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
         "catalog_page",
         "web_page",
         "web_site",
+        "customer_demographics",
+        "household_demographics",
+        "income_band",
+        "call_center",
         "store_sales",
         "store_returns",
         "catalog_sales",
         "catalog_returns",
         "web_sales",
         "web_returns",
+        "inventory",
     ] {
         if let Some(table) = db.get_table_mut(table_name) {
             table.analyze();
@@ -1584,14 +1610,14 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 default_value: None,
             },
             ColumnSchema {
-                name: "wp_rec_start_date".to_string(),
-                data_type: DataType::Date,
+                name: "wp_rec_start_date_sk".to_string(),
+                data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
             },
             ColumnSchema {
-                name: "wp_rec_end_date".to_string(),
-                data_type: DataType::Date,
+                name: "wp_rec_end_date_sk".to_string(),
+                data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
             },
@@ -1676,14 +1702,14 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 default_value: None,
             },
             ColumnSchema {
-                name: "web_rec_start_date".to_string(),
-                data_type: DataType::Date,
+                name: "web_rec_start_date_sk".to_string(),
+                data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
             },
             ColumnSchema {
-                name: "web_rec_end_date".to_string(),
-                data_type: DataType::Date,
+                name: "web_rec_end_date_sk".to_string(),
+                data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
             },
@@ -2568,6 +2594,358 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
         ],
     ))
     .unwrap();
+
+    // CUSTOMER_DEMOGRAPHICS table - Customer demographic attributes
+    db.create_table(TableSchema::new(
+        "customer_demographics".to_string(),
+        vec![
+            ColumnSchema {
+                name: "cd_demo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_gender".to_string(),
+                data_type: DataType::Varchar { max_length: Some(1) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_marital_status".to_string(),
+                data_type: DataType::Varchar { max_length: Some(1) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_education_status".to_string(),
+                data_type: DataType::Varchar { max_length: Some(20) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_purchase_estimate".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_credit_rating".to_string(),
+                data_type: DataType::Varchar { max_length: Some(10) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_dep_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_dep_employed_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cd_dep_college_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // HOUSEHOLD_DEMOGRAPHICS table - Household demographic attributes
+    db.create_table(TableSchema::new(
+        "household_demographics".to_string(),
+        vec![
+            ColumnSchema {
+                name: "hd_demo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "hd_income_band_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "hd_buy_potential".to_string(),
+                data_type: DataType::Varchar { max_length: Some(15) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "hd_dep_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "hd_vehicle_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // INCOME_BAND table - Income range buckets
+    db.create_table(TableSchema::new(
+        "income_band".to_string(),
+        vec![
+            ColumnSchema {
+                name: "ib_income_band_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ib_lower_bound".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ib_upper_bound".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // CALL_CENTER table - Call center information
+    db.create_table(TableSchema::new(
+        "call_center".to_string(),
+        vec![
+            ColumnSchema {
+                name: "cc_call_center_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_call_center_id".to_string(),
+                data_type: DataType::Varchar { max_length: Some(16) },
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_rec_start_date".to_string(),
+                data_type: DataType::Date,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_rec_end_date".to_string(),
+                data_type: DataType::Date,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_closed_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_open_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_name".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_class".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_employees".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_sq_ft".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_hours".to_string(),
+                data_type: DataType::Varchar { max_length: Some(20) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_manager".to_string(),
+                data_type: DataType::Varchar { max_length: Some(40) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_mkt_id".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_mkt_class".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_mkt_desc".to_string(),
+                data_type: DataType::Varchar { max_length: Some(100) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_market_manager".to_string(),
+                data_type: DataType::Varchar { max_length: Some(40) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_division".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_division_name".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_company".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_company_name".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_street_number".to_string(),
+                data_type: DataType::Varchar { max_length: Some(10) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_street_name".to_string(),
+                data_type: DataType::Varchar { max_length: Some(60) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_street_type".to_string(),
+                data_type: DataType::Varchar { max_length: Some(15) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_suite_number".to_string(),
+                data_type: DataType::Varchar { max_length: Some(10) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_city".to_string(),
+                data_type: DataType::Varchar { max_length: Some(60) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_county".to_string(),
+                data_type: DataType::Varchar { max_length: Some(30) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_state".to_string(),
+                data_type: DataType::Varchar { max_length: Some(2) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_zip".to_string(),
+                data_type: DataType::Varchar { max_length: Some(10) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_country".to_string(),
+                data_type: DataType::Varchar { max_length: Some(20) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_gmt_offset".to_string(),
+                data_type: DataType::Decimal { precision: 5, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cc_tax_percentage".to_string(),
+                data_type: DataType::Decimal { precision: 5, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // INVENTORY table - Inventory levels fact table
+    db.create_table(TableSchema::new(
+        "inventory".to_string(),
+        vec![
+            ColumnSchema {
+                name: "inv_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "inv_item_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "inv_warehouse_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "inv_quantity_on_hand".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
 }
 
 // =============================================================================
@@ -2986,6 +3364,83 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+    )
+    .unwrap();
+
+    // customer_demographics index
+    db.create_index(
+        "idx_customer_demographics_pk".to_string(),
+        "customer_demographics".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "cd_demo_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // household_demographics index
+    db.create_index(
+        "idx_household_demographics_pk".to_string(),
+        "household_demographics".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "hd_demo_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // income_band index
+    db.create_index(
+        "idx_income_band_pk".to_string(),
+        "income_band".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "ib_income_band_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // call_center index
+    db.create_index(
+        "idx_call_center_pk".to_string(),
+        "call_center".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "cc_call_center_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // inventory indexes (composite primary key)
+    db.create_index(
+        "idx_inventory_pk".to_string(),
+        "inventory".to_string(),
+        true,
+        vec![
+            IndexColumn {
+                column_name: "inv_date_sk".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+            IndexColumn {
+                column_name: "inv_item_sk".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+            IndexColumn {
+                column_name: "inv_warehouse_sk".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+        ],
     )
     .unwrap();
 }
@@ -3889,6 +4344,209 @@ fn load_web_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(net_loss),
         ]);
         db.insert_row("web_returns", row).unwrap();
+    }
+}
+
+// =============================================================================
+// Data Loading - CUSTOMER_DEMOGRAPHICS
+// =============================================================================
+
+fn load_customer_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    // Generate all combinations of demographic attributes
+    // TPC-DS spec: 1920 combinations (2 genders * 5 marital * 7 education * ~28 other combos)
+    let mut sk = 0;
+    for gender in GENDERS.iter() {
+        for marital in MARITAL_STATUS.iter() {
+            for education in EDUCATION_STATUS.iter() {
+                for &credit in CREDIT_RATINGS.iter() {
+                    for &dep_count in &DEP_COUNTS[0..3] {
+                        // Limit combinations
+                        sk += 1;
+                        if sk > data.customer_demographics_count {
+                            return;
+                        }
+
+                        let purchase_estimate = data.random_i32(500, 10000);
+                        let dep_employed = data.random_i32(0, dep_count);
+                        let dep_college = data.random_i32(0, dep_count);
+
+                        let row = Row::new(vec![
+                            SqlValue::Integer(sk as i64),
+                            SqlValue::Varchar(gender.to_string()),
+                            SqlValue::Varchar(marital.to_string()),
+                            SqlValue::Varchar(education.to_string()),
+                            SqlValue::Integer(purchase_estimate as i64),
+                            SqlValue::Varchar(credit.to_string()),
+                            SqlValue::Integer(dep_count as i64),
+                            SqlValue::Integer(dep_employed as i64),
+                            SqlValue::Integer(dep_college as i64),
+                        ]);
+                        db.insert_row("customer_demographics", row).unwrap();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Data Loading - HOUSEHOLD_DEMOGRAPHICS
+// =============================================================================
+
+fn load_household_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    // Generate combinations: income_band * buy_potential * dep_count * vehicle_count
+    // TPC-DS spec: 7200 combinations
+    let mut sk = 0;
+    for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
+        for &buy_potential in BUY_POTENTIALS.iter() {
+            for &dep_count in DEP_COUNTS.iter() {
+                for &vehicle_count in VEHICLE_COUNTS.iter() {
+                    sk += 1;
+                    if sk > data.household_demographics_count {
+                        return;
+                    }
+
+                    let row = Row::new(vec![
+                        SqlValue::Integer(sk as i64),
+                        SqlValue::Integer(income_band_sk as i64),
+                        SqlValue::Varchar(buy_potential.to_string()),
+                        SqlValue::Integer(dep_count as i64),
+                        SqlValue::Integer(vehicle_count as i64),
+                    ]);
+                    db.insert_row("household_demographics", row).unwrap();
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Data Loading - INCOME_BAND
+// =============================================================================
+
+fn load_income_band_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    for i in 0..data.income_band_count.min(INCOME_BANDS.len()) {
+        let (lower, upper) = INCOME_BANDS[i];
+
+        let row = Row::new(vec![
+            SqlValue::Integer((i + 1) as i64),
+            SqlValue::Integer(lower as i64),
+            SqlValue::Integer(upper as i64),
+        ]);
+        db.insert_row("income_band", row).unwrap();
+    }
+}
+
+// =============================================================================
+// Data Loading - CALL_CENTER
+// =============================================================================
+
+fn load_call_center_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    let classes = ["small", "medium", "large", "unknown"];
+    let hours = ["8AM-4PM", "8AM-8PM", "8AM-12AM"];
+
+    for i in 1..=data.call_center_count {
+        let cc_call_center_id = format!("AAAAAA{:010}", i);
+        let class_idx = i % classes.len();
+        let hours_idx = i % hours.len();
+
+        let open_date_sk = data.random_i32(1, 500);
+        let employees = data.random_i32(10, 500);
+        let sq_ft = data.random_i32(1000, 50000);
+        let state_idx = i % STATES.len();
+        let gmt_offset = -5.0 - (state_idx % 4) as f64;
+
+        let row = Row::new(vec![
+            SqlValue::Integer(i as i64),
+            SqlValue::Varchar(cc_call_center_id),
+            SqlValue::Null, // cc_rec_start_date
+            SqlValue::Null, // cc_rec_end_date
+            SqlValue::Null, // cc_closed_date_sk
+            SqlValue::Integer(open_date_sk as i64),
+            SqlValue::Varchar(format!("Call Center {}", i)),
+            SqlValue::Varchar(classes[class_idx].to_string()),
+            SqlValue::Integer(employees as i64),
+            SqlValue::Integer(sq_ft as i64),
+            SqlValue::Varchar(hours[hours_idx].to_string()),
+            SqlValue::Varchar(data.random_varchar(30)),
+            SqlValue::Integer((i % 6 + 1) as i64), // cc_mkt_id
+            SqlValue::Varchar(format!("Market Class {}", i % 10)),
+            SqlValue::Varchar(format!("Market Description {}", i)),
+            SqlValue::Varchar(data.random_varchar(30)),
+            SqlValue::Integer((i % 3 + 1) as i64), // cc_division
+            SqlValue::Varchar(format!("Division {}", i % 3 + 1)),
+            SqlValue::Integer((i % 2 + 1) as i64), // cc_company
+            SqlValue::Varchar(format!("Company {}", i % 2 + 1)),
+            SqlValue::Varchar(format!("{}", data.random_i32(100, 9999))),
+            SqlValue::Varchar(data.random_varchar(40)),
+            SqlValue::Varchar("Street".to_string()),
+            SqlValue::Varchar(format!("Suite {}", data.random_i32(100, 999))),
+            SqlValue::Varchar(data.random_city()),
+            SqlValue::Varchar(format!("{} County", STATES[state_idx])),
+            SqlValue::Varchar(STATES[state_idx].to_string()),
+            SqlValue::Varchar(data.random_zip()),
+            SqlValue::Varchar("United States".to_string()),
+            SqlValue::Numeric(gmt_offset),
+            SqlValue::Numeric(data.random_f64(0.0, 0.11)),
+        ]);
+        db.insert_row("call_center", row).unwrap();
+    }
+}
+
+// =============================================================================
+// Data Loading - INVENTORY
+// =============================================================================
+
+fn load_inventory_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    // Inventory is a fact table with date_sk x item_sk x warehouse_sk
+    // Generate inventory snapshots for a subset of dates
+    let num_dates = 52.min(data.date_dim_count); // Weekly snapshots for 1 year
+    let num_items = data.item_count;
+    let num_warehouses = data.warehouse_count;
+
+    let mut count = 0;
+    for week in 0..num_dates {
+        let date_sk = week * 7 + 1; // Weekly snapshots
+
+        // Sample items and warehouses to control data size
+        let items_per_week = (data.inventory_count / num_dates).min(num_items * num_warehouses);
+        let items_sample = (items_per_week / num_warehouses).max(1);
+
+        for item_offset in 0..items_sample {
+            let item_sk = (item_offset % num_items) + 1;
+
+            for warehouse_sk in 1..=num_warehouses {
+                count += 1;
+                if count > data.inventory_count {
+                    return;
+                }
+
+                let quantity = data.random_i32(0, 1000);
+
+                let row = Row::new(vec![
+                    SqlValue::Integer(date_sk as i64),
+                    SqlValue::Integer(item_sk as i64),
+                    SqlValue::Integer(warehouse_sk as i64),
+                    SqlValue::Integer(quantity as i64),
+                ]);
+                db.insert_row("inventory", row).unwrap();
+            }
+        }
     }
 }
 
