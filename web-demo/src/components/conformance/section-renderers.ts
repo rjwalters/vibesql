@@ -1,5 +1,223 @@
-import type { ConformanceData, SQLLogicTestData, ErrorTest } from './types'
+import type {
+  ConformanceData,
+  SQLLogicTestData,
+  ErrorTest,
+  DashboardConformance,
+  DashboardMilestone,
+} from './types'
 import { getStatusColor, getStatusText, escapeHtml } from './render-utils'
+
+/**
+ * Format large numbers with commas for readability
+ */
+function formatNumber(num: number): string {
+  return num.toLocaleString()
+}
+
+/**
+ * Render the hero overview section with large pass rate display
+ */
+export function renderConformanceOverview(conformance: DashboardConformance): string {
+  const { summary } = conformance
+  const passRateFormatted = summary.pass_rate.toFixed(2)
+  const isFullyPassing = summary.files_passing === summary.files_total
+
+  return `
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">SQL Conformance</h2>
+      <p class="text-gray-600 dark:text-gray-400 mb-8">
+        Testing against SQLLogicTest - the industry standard SQL test suite
+      </p>
+
+      <!-- Hero Pass Rate Display -->
+      <div class="text-center mb-8">
+        <div class="inline-block">
+          <div class="text-7xl font-bold ${isFullyPassing ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'} mb-2">
+            ${passRateFormatted}%
+          </div>
+          ${isFullyPassing ? '<div class="text-green-600 dark:text-green-400 font-semibold text-lg mb-4">100% File Pass Rate Achieved!</div>' : ''}
+        </div>
+      </div>
+
+      <!-- Progress Bar -->
+      <div class="relative mb-6">
+        <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+          <div
+            class="h-full ${isFullyPassing ? 'bg-green-500' : 'bg-blue-500'} rounded-full transition-all duration-500"
+            style="width: ${summary.pass_rate}%"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Stats Row -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-center">
+        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Tests Passing</div>
+          <div class="text-2xl font-bold text-gray-900 dark:text-white">
+            ${formatNumber(summary.tests_passing)} / ${formatNumber(summary.tests_total)}
+          </div>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Files Passing</div>
+          <div class="text-2xl font-bold ${isFullyPassing ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}">
+            ${formatNumber(summary.files_passing)} / ${formatNumber(summary.files_total)}
+            ${isFullyPassing ? ' (100%)' : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+/**
+ * Render category breakdown table
+ */
+export function renderCategoryBreakdown(
+  categories: Record<string, { total: number; passing: number; pass_rate: number }>
+): string {
+  const categoryNames: Record<string, string> = {
+    select: 'SELECT Queries',
+    aggregates: 'Aggregates',
+    joins: 'JOINs',
+    expressions: 'Expressions',
+    subqueries: 'Subqueries',
+    index: 'Index Operations',
+    ddl: 'DDL Statements',
+    evidence: 'Evidence Tests',
+    random: 'Random Tests',
+    other: 'Other Tests',
+  }
+
+  const rows = Object.entries(categories)
+    .sort((a, b) => b[1].total - a[1].total) // Sort by total tests descending
+    .map(([key, cat]) => {
+      const name = categoryNames[key] || key.charAt(0).toUpperCase() + key.slice(1)
+      const passRate = cat.pass_rate.toFixed(1)
+      const isComplete = cat.pass_rate === 100
+
+      return `
+        <tr class="border-b border-gray-200 dark:border-gray-700 last:border-0">
+          <td class="py-3 px-4 font-medium text-gray-900 dark:text-white">${name}</td>
+          <td class="py-3 px-4">
+            <div class="flex items-center gap-2">
+              <span class="font-semibold ${isComplete ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}">
+                ${passRate}%
+              </span>
+              ${isComplete ? '<span class="text-green-500">✓</span>' : ''}
+            </div>
+          </td>
+          <td class="py-3 px-4 w-1/3">
+            <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                class="h-full ${isComplete ? 'bg-green-500' : 'bg-blue-500'} rounded-full"
+                style="width: ${cat.pass_rate}%"
+              ></div>
+            </div>
+          </td>
+          <td class="py-3 px-4 text-right text-gray-600 dark:text-gray-400">
+            ${formatNumber(cat.passing)} / ${formatNumber(cat.total)}
+          </td>
+        </tr>
+      `
+    })
+    .join('')
+
+  if (rows.length === 0) {
+    return ''
+  }
+
+  return `
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Test Coverage by Category</h2>
+
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-gray-200 dark:border-gray-700 text-left text-sm text-gray-600 dark:text-gray-400">
+              <th class="py-3 px-4 font-medium">Category</th>
+              <th class="py-3 px-4 font-medium">Pass Rate</th>
+              <th class="py-3 px-4 font-medium">Progress</th>
+              <th class="py-3 px-4 font-medium text-right">Tests</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `
+}
+
+/**
+ * Render container for conformance timeline chart
+ * The actual chart will be initialized by Chart.js after render
+ */
+export function renderConformanceTimeline(): string {
+  return `
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Pass Rate History</h2>
+      <p class="text-gray-600 dark:text-gray-400 mb-6">Conformance progress over the last 90 days</p>
+
+      <div class="h-64 md:h-80">
+        <canvas id="conformance-timeline-chart"></canvas>
+      </div>
+
+      <div id="timeline-loading" class="text-center py-12 text-gray-500 dark:text-gray-400">
+        Loading chart data...
+      </div>
+    </div>
+  `
+}
+
+/**
+ * Render milestones/achievements section
+ */
+export function renderMilestones(milestones: DashboardMilestone[]): string {
+  if (!milestones || milestones.length === 0) {
+    return ''
+  }
+
+  const milestoneItems = milestones
+    .slice(0, 5) // Show only the 5 most recent
+    .map(m => {
+      const dateFormatted = new Date(m.date).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      })
+
+      const linkHtml = m.pr
+        ? `<a href="https://github.com/rjwalters/vibesql/pull/${m.pr}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-sm">PR #${m.pr}</a>`
+        : m.commit
+          ? `<a href="https://github.com/rjwalters/vibesql/commit/${m.commit}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-sm font-mono">${m.commit.slice(0, 7)}</a>`
+          : ''
+
+      return `
+        <div class="flex items-start gap-4 py-3 border-b border-gray-200 dark:border-gray-700 last:border-0">
+          <div class="flex-shrink-0 w-16 text-sm font-medium text-gray-600 dark:text-gray-400">
+            ${dateFormatted}
+          </div>
+          <div class="flex-grow">
+            <div class="text-gray-900 dark:text-white">${escapeHtml(m.description)}</div>
+            ${linkHtml ? `<div class="mt-1">${linkHtml}</div>` : ''}
+          </div>
+          <div class="flex-shrink-0 text-green-500 text-xl">✓</div>
+        </div>
+      `
+    })
+    .join('')
+
+  return `
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Milestones</h2>
+      <div>
+        ${milestoneItems}
+      </div>
+    </div>
+  `
+}
+
+// Legacy section renderers for backward compatibility
 
 /**
  * Render metadata card with commit info and status
@@ -69,21 +287,18 @@ export function renderSqltestResults(data: ConformanceData): string {
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
           <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Passed</div>
           <div class="text-3xl font-bold text-green-600 dark:text-green-400 mb-1">${data.passed}</div>
-          <div class="text-2xl">✅</div>
         </div>
 
         <!-- Failed Tests -->
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
           <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Failed</div>
           <div class="text-3xl font-bold text-red-600 dark:text-red-400 mb-1">${data.failed}</div>
-          <div class="text-2xl">❌</div>
         </div>
 
         <!-- Errors -->
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
           <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Errors</div>
           <div class="text-3xl font-bold text-orange-600 dark:text-orange-400 mb-1">${data.errors}</div>
-          <div class="text-2xl">⚠️</div>
         </div>
       </div>
 
