@@ -16,6 +16,7 @@
 #   - coreutils (GNU timeout for benchmarks)
 #   - node (for web-demo)
 #   - pnpm (for web-demo)
+#   - fossil (for SQLite reference source browsing)
 #   - Docker Desktop (for MySQL/PostgreSQL compatibility testing)
 #
 # Usage:
@@ -211,6 +212,15 @@ else
     missing+=("pnpm")
 fi
 
+# Check fossil (for SQLite reference source browsing)
+print_status "Checking fossil..."
+if command_exists fossil; then
+    print_success "fossil is installed ($(fossil version | head -1))"
+else
+    print_warning "fossil is not installed (needed for: SQLite reference source)"
+    missing+=("fossil")
+fi
+
 # Check Docker (for MySQL/PostgreSQL compatibility testing)
 print_status "Checking Docker..."
 if command_exists docker; then
@@ -343,6 +353,13 @@ if [[ " ${missing[*]} " =~ " pnpm " ]]; then
     print_status "Installing pnpm via Homebrew..."
     brew install pnpm
     print_success "pnpm installed"
+fi
+
+# Install fossil if needed
+if [[ " ${missing[*]} " =~ " fossil " ]]; then
+    print_status "Installing fossil via Homebrew..."
+    brew install fossil
+    print_success "fossil installed"
 fi
 
 # Install Docker if needed
