@@ -4835,3 +4835,4 @@ fn load_store_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
         ]).unwrap();
     }
 }
+
