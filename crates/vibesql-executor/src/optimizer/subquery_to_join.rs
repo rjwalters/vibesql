@@ -562,10 +562,40 @@ fn try_convert_exists_to_join(
         return None;
     }
 
+    // Detect self-join: check if subquery table name conflicts with outer query tables
+    let needs_alias = is_self_join(from, &table_name, &table_alias);
+
+    // Handle self-join case: generate unique alias and rewrite column references
+    let (effective_alias, rewritten_where) = if needs_alias {
+        // Create a unique alias for the right side of the self-join
+        let new_alias = format!("__subquery_{}", table_alias.as_ref().unwrap_or(&table_name));
+
+        if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+            eprintln!("[SUBQUERY_TRANSFORM] EXISTS self-join detected: table={}, alias={:?}, new_alias={}",
+                     table_name, table_alias, new_alias);
+        }
+
+        // Use the table alias (if present) for matching column references, not just the table name
+        // This is critical for Q21 where the subquery uses an alias like "l2" or "l3"
+        // Column references like "l2.l_orderkey" need to match against "l2", not "LINEITEM"
+        let old_table_ref = table_alias.as_ref().unwrap_or(&table_name);
+
+        // Rewrite column references in the WHERE clause to use the new alias
+        let rewritten = rewrite_column_refs_with_alias(where_clause, old_table_ref, &new_alias);
+
+        if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+            eprintln!("[SUBQUERY_TRANSFORM] EXISTS rewritten_where={:?}", rewritten);
+        }
+
+        (Some(new_alias), rewritten)
+    } else {
+        (table_alias.clone(), where_clause.clone())
+    };
+
     // Create the right side of the join
     let right_from = FromClause::Table {
         name: table_name,
-        alias: table_alias,
+        alias: effective_alias,
     };
 
     // Create SEMI or ANTI join based on negation
@@ -580,9 +610,13 @@ fn try_convert_exists_to_join(
         left: Box::new(from.clone()),
         right: Box::new(right_from),
         join_type,
-        condition: Some(where_clause.clone()),
+        condition: Some(rewritten_where),
         natural: false,
     };
+
+    if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+        eprintln!("[SUBQUERY_TRANSFORM] EXISTS new_from={:?}", new_from);
+    }
 
     // EXISTS doesn't leave any residual WHERE clause
     Some((new_from, None))
