@@ -856,10 +856,15 @@ mod tests {
 
     // ===== AVX-512 tests =====
     // AVX-512 tests (only run on AVX-512 capable CPUs)
+    // These tests use runtime feature detection to skip on machines without AVX-512
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_add_f64_avx512() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("Skipping AVX-512 test: CPU does not support AVX-512F");
+            return;
+        }
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
         let b = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0];
         let result = unsafe { simd_add_f64_avx512(&a, &b) };
@@ -869,6 +874,10 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_sub_f64_avx512() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("Skipping AVX-512 test: CPU does not support AVX-512F");
+            return;
+        }
         let a = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0];
         let b = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
         let result = unsafe { simd_sub_f64_avx512(&a, &b) };
@@ -878,6 +887,10 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_mul_f64_avx512() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("Skipping AVX-512 test: CPU does not support AVX-512F");
+            return;
+        }
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
         let b = vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0];
         let result = unsafe { simd_mul_f64_avx512(&a, &b) };
@@ -887,6 +900,10 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_div_f64_avx512() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("Skipping AVX-512 test: CPU does not support AVX-512F");
+            return;
+        }
         let a = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0];
         let b = vec![2.0, 4.0, 3.0, 8.0, 5.0, 6.0, 7.0, 10.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0];
         let result = unsafe { simd_div_f64_avx512(&a, &b) };
@@ -896,6 +913,10 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_add_i64_avx512() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("Skipping AVX-512 test: CPU does not support AVX-512F");
+            return;
+        }
         let a = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
         let b = vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170];
         let result = unsafe { simd_add_i64_avx512(&a, &b) };
@@ -905,6 +926,10 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_sub_i64_avx512() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("Skipping AVX-512 test: CPU does not support AVX-512F");
+            return;
+        }
         let a = vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170];
         let b = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
         let result = unsafe { simd_sub_i64_avx512(&a, &b) };
@@ -914,6 +939,10 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_mul_i64_avx512() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("Skipping AVX-512 test: CPU does not support AVX-512F");
+            return;
+        }
         let a = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
         let b = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
         let result = unsafe { simd_mul_i64_avx512(&a, &b) };
