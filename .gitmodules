@@ -3,7 +3,7 @@
 	url = https://github.com/elliotchance/sqltest.git
 [submodule "third_party/sqllogictest"]
 	path = third_party/sqllogictest
-	url = https://github.com/rjwalters/sqllogictest
+	url = https://github.com/gregrahn/sqllogictest.git
 [submodule "docs/reference/sqlite"]
 	path = docs/reference/sqlite
 	url = https://github.com/sqlite/sqlite.git

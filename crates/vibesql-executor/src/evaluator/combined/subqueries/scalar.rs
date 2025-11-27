@@ -4,7 +4,7 @@
 //! exactly one row and one column. Includes caching for both uncorrelated
 //! and correlated subqueries.
 
-use super::cache::{compute_correlated_cache_key, compute_subquery_hash};
+use crate::evaluator::caching::{compute_correlated_cache_key, compute_subquery_hash};
 use super::correlation::extract_correlation_values;
 use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row};
 use super::super::super::core::CombinedExpressionEvaluator;

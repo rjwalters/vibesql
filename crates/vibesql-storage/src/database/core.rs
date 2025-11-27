@@ -9,6 +9,8 @@ use super::transactions::TransactionChange;
 use crate::columnar_cache::ColumnarCache;
 use crate::{QueryBufferPool, Row, StorageError, Table};
 use std::collections::HashMap;
+
+#[allow(unused_imports)]
 use std::sync::Arc;
 
 pub use super::operations::SpatialIndexMetadata as ExportedSpatialIndexMetadata;
@@ -316,6 +318,10 @@ impl Database {
     pub fn clear_routine_cache(&mut self) {
         self.metadata.clear_routine_cache();
     }
+
+    // NOTE: Columnar cache methods (get_columnar, invalidate_columnar_cache, clear_columnar_cache,
+    // columnar_cache_stats, etc.) are defined in cache.rs to keep cache concerns separated from core
+    // database logic.
 }
 
 #[cfg(test)]
