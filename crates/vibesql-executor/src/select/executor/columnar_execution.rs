@@ -55,6 +55,39 @@ impl SelectExecutor<'_> {
     /// - GROUP BY aggregations
     /// - JOIN operations
     /// - More complex predicates (OR logic, IN clauses)
+    ///
+    /// # Feature Requirements
+    ///
+    /// This function requires the `simd` feature for SIMD-accelerated execution.
+    /// Without `simd`, it always returns `Ok(None)` to fall back to row-based execution.
+    #[cfg(not(feature = "simd"))]
+    pub(in crate::select::executor) fn try_columnar_execution(
+        &self,
+        _stmt: &vibesql_ast::SelectStmt,
+        _cte_results: &HashMap<String, CteResult>,
+    ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
+        // SIMD feature not enabled - fall back to row-based execution
+        Ok(None)
+    }
+
+    /// Try to execute using columnar (SIMD-accelerated) execution
+    ///
+    /// Returns Some(rows) if the query is compatible with columnar execution.
+    /// Returns None if the query should fall back to regular row-based execution.
+    ///
+    /// Columnar execution provides 6-10x speedup for queries with:
+    /// - Simple predicates on numeric columns
+    /// - Aggregations (SUM, AVG, MIN, MAX, COUNT)
+    /// - Single table scans (no JOINs yet)
+    ///
+    /// # Phase 5 Implementation
+    ///
+    /// This initial implementation focuses on simple aggregate queries without GROUP BY.
+    /// Future phases will add support for:
+    /// - GROUP BY aggregations
+    /// - JOIN operations
+    /// - More complex predicates (OR logic, IN clauses)
+    #[cfg(feature = "simd")]
     pub(in crate::select::executor) fn try_columnar_execution(
         &self,
         stmt: &vibesql_ast::SelectStmt,

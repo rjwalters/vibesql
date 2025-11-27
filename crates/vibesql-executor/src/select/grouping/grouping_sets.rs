@@ -92,7 +92,7 @@ pub fn get_base_expressions(clause: &GroupByClause) -> Vec<Expression> {
     match clause {
         GroupByClause::Simple(exprs) => exprs.clone(),
         GroupByClause::Rollup(elements) | GroupByClause::Cube(elements) => {
-            elements.iter().flat_map(|e| element_to_expressions(e)).collect()
+            elements.iter().flat_map(element_to_expressions).collect()
         }
         GroupByClause::GroupingSets(sets) => {
             // Use the first non-empty set's columns as base expressions
@@ -109,7 +109,7 @@ pub fn get_base_expressions(clause: &GroupByClause) -> Vec<Expression> {
                 .flat_map(|item| match item {
                     MixedGroupingItem::Simple(expr) => vec![expr.clone()],
                     MixedGroupingItem::Rollup(elements) | MixedGroupingItem::Cube(elements) => {
-                        elements.iter().flat_map(|e| element_to_expressions(e)).collect()
+                        elements.iter().flat_map(element_to_expressions).collect()
                     }
                     MixedGroupingItem::GroupingSets(sets) => {
                         sets.iter().flat_map(|s| s.columns.clone()).collect()
@@ -130,7 +130,7 @@ pub fn get_base_expressions(clause: &GroupByClause) -> Vec<Expression> {
 fn expand_rollup(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
     // Flatten elements to expressions for base expressions list
     let base_exprs: Vec<Expression> =
-        elements.iter().flat_map(|e| element_to_expressions(e)).collect();
+        elements.iter().flat_map(element_to_expressions).collect();
 
     let mut result = Vec::with_capacity(elements.len() + 1);
 
@@ -138,7 +138,7 @@ fn expand_rollup(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
     for prefix_len in (0..=elements.len()).rev() {
         let group_by_exprs: Vec<Expression> = elements[0..prefix_len]
             .iter()
-            .flat_map(|e| element_to_expressions(e))
+            .flat_map(element_to_expressions)
             .collect();
 
         // Build rolled_up flags - elements beyond prefix_len are rolled up
@@ -168,7 +168,7 @@ fn expand_rollup(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
 /// - ()
 fn expand_cube(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
     let base_exprs: Vec<Expression> =
-        elements.iter().flat_map(|e| element_to_expressions(e)).collect();
+        elements.iter().flat_map(element_to_expressions).collect();
 
     let n = elements.len();
     let num_sets = 1 << n; // 2^n combinations
