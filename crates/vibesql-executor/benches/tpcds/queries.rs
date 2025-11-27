@@ -6,7 +6,7 @@
 //!
 //! ## Phase 1 (Core Tables):
 //! - date_dim, time_dim, item, customer, customer_address, store, store_sales
-//! - Queries: Q3, Q7, Q19, Q42, Q52, Q55, Q68, Q73, Q89, Q96
+//! - Queries: Q1, Q2, Q3, Q6, Q7, Q9, Q10, Q12, Q15, Q19, Q42, Q52, Q55, Q68, Q73, Q89, Q96
 //!
 //! ## Phase 2 (Extended Tables):
 //! - promotion, warehouse, ship_mode, reason, store_returns
@@ -19,6 +19,100 @@
 //!
 //! Queries are numbered to match the official TPC-DS query numbers where possible,
 //! with adaptations noted in comments.
+
+// =============================================================================
+// TPC-DS Q1: Customer Store Returns Analysis
+// =============================================================================
+// Identifies customers whose store return amounts exceed 120% of their
+// store's average return amount for a given year.
+// Tests: CTE, correlated subquery, multi-table join
+pub const TPCDS_Q1: &str = r#"
+WITH customer_total_return AS (
+    SELECT
+        sr_customer_sk AS ctr_customer_sk,
+        sr_store_sk AS ctr_store_sk,
+        SUM(sr_return_amt) AS ctr_total_return
+    FROM store_returns, date_dim
+    WHERE sr_returned_date_sk = d_date_sk
+        AND d_year = 2000
+    GROUP BY sr_customer_sk, sr_store_sk
+)
+SELECT c_customer_id
+FROM customer_total_return ctr1, store, customer
+WHERE ctr1.ctr_total_return > (
+    SELECT AVG(ctr_total_return) * 1.2
+    FROM customer_total_return ctr2
+    WHERE ctr1.ctr_store_sk = ctr2.ctr_store_sk
+)
+AND s_store_sk = ctr1.ctr_store_sk
+AND s_state = 'TN'
+AND ctr1.ctr_customer_sk = c_customer_sk
+ORDER BY c_customer_id
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q2: Weekly Sales Comparison Year-over-Year
+// =============================================================================
+// Compares daily sales ratios between consecutive years (2001 vs 2002)
+// for web and catalog sales channels.
+// Tests: Multiple CTEs, UNION ALL, complex joins
+pub const TPCDS_Q2: &str = r#"
+WITH wscs AS (
+    SELECT sold_date_sk, sales_price
+    FROM (
+        SELECT ws_sold_date_sk sold_date_sk, ws_ext_sales_price sales_price
+        FROM web_sales
+    ) x
+    UNION ALL
+    (SELECT cs_sold_date_sk sold_date_sk, cs_ext_sales_price sales_price
+     FROM catalog_sales)
+),
+wswscs AS (
+    SELECT
+        d_week_seq,
+        SUM(CASE WHEN d_day_name = 'Sunday' THEN sales_price ELSE NULL END) sun_sales,
+        SUM(CASE WHEN d_day_name = 'Monday' THEN sales_price ELSE NULL END) mon_sales,
+        SUM(CASE WHEN d_day_name = 'Tuesday' THEN sales_price ELSE NULL END) tue_sales,
+        SUM(CASE WHEN d_day_name = 'Wednesday' THEN sales_price ELSE NULL END) wed_sales,
+        SUM(CASE WHEN d_day_name = 'Thursday' THEN sales_price ELSE NULL END) thu_sales,
+        SUM(CASE WHEN d_day_name = 'Friday' THEN sales_price ELSE NULL END) fri_sales,
+        SUM(CASE WHEN d_day_name = 'Saturday' THEN sales_price ELSE NULL END) sat_sales
+    FROM wscs, date_dim
+    WHERE d_date_sk = sold_date_sk
+    GROUP BY d_week_seq
+)
+SELECT
+    d_week_seq1,
+    ROUND(sun_sales1 / sun_sales2, 2),
+    ROUND(mon_sales1 / mon_sales2, 2),
+    ROUND(tue_sales1 / tue_sales2, 2),
+    ROUND(wed_sales1 / wed_sales2, 2),
+    ROUND(thu_sales1 / thu_sales2, 2),
+    ROUND(fri_sales1 / fri_sales2, 2),
+    ROUND(sat_sales1 / sat_sales2, 2)
+FROM (
+    SELECT
+        wswscs.d_week_seq d_week_seq1,
+        sun_sales sun_sales1, mon_sales mon_sales1, tue_sales tue_sales1,
+        wed_sales wed_sales1, thu_sales thu_sales1, fri_sales fri_sales1,
+        sat_sales sat_sales1
+    FROM wswscs, date_dim
+    WHERE date_dim.d_week_seq = wswscs.d_week_seq AND d_year = 2001
+) y,
+(
+    SELECT
+        wswscs.d_week_seq d_week_seq2,
+        sun_sales sun_sales2, mon_sales mon_sales2, tue_sales tue_sales2,
+        wed_sales wed_sales2, thu_sales thu_sales2, fri_sales fri_sales2,
+        sat_sales sat_sales2
+    FROM wswscs, date_dim
+    WHERE date_dim.d_week_seq = wswscs.d_week_seq AND d_year = 2002
+) z
+WHERE d_week_seq1 = d_week_seq2 - 53
+ORDER BY d_week_seq1
+LIMIT 100
+"#;
 
 // =============================================================================
 // TPC-DS Q3: Report sales by brand for a given year and month
@@ -42,6 +136,37 @@ LIMIT 100
 "#;
 
 // =============================================================================
+// TPC-DS Q6: State Sales Analysis
+// =============================================================================
+// Analyzes store sales by state for items priced above 120% of their
+// category average during a specific month.
+// Tests: Subquery in WHERE, correlated subquery, 5-way join
+pub const TPCDS_Q6: &str = r#"
+SELECT
+    a.ca_state state,
+    COUNT(*) cnt
+FROM customer_address a, customer c, store_sales s, date_dim d, item i
+WHERE a.ca_address_sk = c.c_current_addr_sk
+    AND c.c_customer_sk = s.ss_customer_sk
+    AND s.ss_sold_date_sk = d.d_date_sk
+    AND s.ss_item_sk = i.i_item_sk
+    AND d.d_month_seq = (
+        SELECT DISTINCT d_month_seq
+        FROM date_dim
+        WHERE d_year = 2000 AND d_moy = 1
+    )
+    AND i.i_current_price > 1.2 * (
+        SELECT AVG(j.i_current_price)
+        FROM item j
+        WHERE j.i_category = i.i_category
+    )
+GROUP BY a.ca_state
+HAVING COUNT(*) >= 10
+ORDER BY cnt
+LIMIT 100
+"#;
+
+// =============================================================================
 // TPC-DS Q7: Promotion impact analysis
 // =============================================================================
 // Original: Uses customer_demographics. Simplified to use base tables.
@@ -61,6 +186,138 @@ WHERE ss_sold_date_sk = d_date_sk
     AND d_year = 2000
 GROUP BY i_item_id
 ORDER BY i_item_id
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q9: Quantity-Based Bucket Analysis
+// =============================================================================
+// Calculates average discount or net paid amounts based on sales quantity
+// thresholds using scalar subqueries in CASE expressions.
+// Tests: Multiple scalar subqueries, CASE expressions, conditional aggregation
+pub const TPCDS_Q9: &str = r#"
+SELECT
+    CASE WHEN (SELECT COUNT(*) FROM store_sales WHERE ss_quantity BETWEEN 1 AND 20) > 62316685
+        THEN (SELECT AVG(ss_ext_discount_amt) FROM store_sales WHERE ss_quantity BETWEEN 1 AND 20)
+        ELSE (SELECT AVG(ss_net_paid) FROM store_sales WHERE ss_quantity BETWEEN 1 AND 20)
+    END bucket1,
+    CASE WHEN (SELECT COUNT(*) FROM store_sales WHERE ss_quantity BETWEEN 21 AND 40) > 19045798
+        THEN (SELECT AVG(ss_ext_discount_amt) FROM store_sales WHERE ss_quantity BETWEEN 21 AND 40)
+        ELSE (SELECT AVG(ss_net_paid) FROM store_sales WHERE ss_quantity BETWEEN 21 AND 40)
+    END bucket2,
+    CASE WHEN (SELECT COUNT(*) FROM store_sales WHERE ss_quantity BETWEEN 41 AND 60) > 365541424
+        THEN (SELECT AVG(ss_ext_discount_amt) FROM store_sales WHERE ss_quantity BETWEEN 41 AND 60)
+        ELSE (SELECT AVG(ss_net_paid) FROM store_sales WHERE ss_quantity BETWEEN 41 AND 60)
+    END bucket3,
+    CASE WHEN (SELECT COUNT(*) FROM store_sales WHERE ss_quantity BETWEEN 61 AND 80) > 216357808
+        THEN (SELECT AVG(ss_ext_discount_amt) FROM store_sales WHERE ss_quantity BETWEEN 61 AND 80)
+        ELSE (SELECT AVG(ss_net_paid) FROM store_sales WHERE ss_quantity BETWEEN 61 AND 80)
+    END bucket4,
+    CASE WHEN (SELECT COUNT(*) FROM store_sales WHERE ss_quantity BETWEEN 81 AND 100) > 184483884
+        THEN (SELECT AVG(ss_ext_discount_amt) FROM store_sales WHERE ss_quantity BETWEEN 81 AND 100)
+        ELSE (SELECT AVG(ss_net_paid) FROM store_sales WHERE ss_quantity BETWEEN 81 AND 100)
+    END bucket5
+FROM reason
+WHERE r_reason_sk = 1
+"#;
+
+// =============================================================================
+// TPC-DS Q10: Customer Demographics Analysis
+// =============================================================================
+// Analyzes customer demographics for customers in specific counties who
+// made purchases across multiple channels (store, web, or catalog) during early 2002.
+// Tests: EXISTS subqueries, OR conditions, multi-table join
+pub const TPCDS_Q10: &str = r#"
+SELECT
+    c_customer_id,
+    c_first_name,
+    c_last_name,
+    c_preferred_cust_flag,
+    c_birth_country,
+    c_login,
+    c_email_address
+FROM customer c, customer_address ca
+WHERE c.c_current_addr_sk = ca.ca_address_sk
+    AND ca_county IN ('Rush County', 'Toole County', 'Jefferson County',
+                      'Dona Ana County', 'La Porte County')
+    AND EXISTS (
+        SELECT 1
+        FROM store_sales, date_dim
+        WHERE c.c_customer_sk = ss_customer_sk
+            AND ss_sold_date_sk = d_date_sk
+            AND d_year = 2002
+            AND d_moy BETWEEN 1 AND 4
+    )
+    AND (
+        EXISTS (
+            SELECT 1
+            FROM web_sales, date_dim
+            WHERE c.c_customer_sk = ws_bill_customer_sk
+                AND ws_sold_date_sk = d_date_sk
+                AND d_year = 2002
+                AND d_moy BETWEEN 1 AND 4
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM catalog_sales, date_dim
+            WHERE c.c_customer_sk = cs_ship_customer_sk
+                AND cs_sold_date_sk = d_date_sk
+                AND d_year = 2002
+                AND d_moy BETWEEN 1 AND 4
+        )
+    )
+ORDER BY c_customer_id
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q12: Web Sales Revenue by Category (Window Function)
+// =============================================================================
+// Calculates web sales revenue and revenue ratio within item classes
+// for specific categories during a 30-day period.
+// Tests: Window function SUM() OVER (PARTITION BY), category filtering
+pub const TPCDS_Q12: &str = r#"
+SELECT
+    i_item_id,
+    i_item_desc,
+    i_category,
+    i_class,
+    i_current_price,
+    SUM(ws_ext_sales_price) AS itemrevenue,
+    SUM(ws_ext_sales_price) * 100 / SUM(SUM(ws_ext_sales_price))
+        OVER (PARTITION BY i_class) AS revenueratio
+FROM web_sales, item, date_dim
+WHERE ws_item_sk = i_item_sk
+    AND i_category IN ('Sports', 'Books', 'Home')
+    AND ws_sold_date_sk = d_date_sk
+    AND d_date BETWEEN '1999-02-22' AND '1999-03-24'
+GROUP BY i_item_id, i_item_desc, i_category, i_class, i_current_price
+ORDER BY i_category, i_class, i_item_id, i_item_desc, revenueratio
+LIMIT 100
+"#;
+
+// =============================================================================
+// TPC-DS Q15: Catalog Sales by Zip Code
+// =============================================================================
+// Aggregates catalog sales totals by zip code for Q2 2001, filtered by
+// specific zip codes, states, or high-value transactions.
+// Tests: OR conditions in WHERE, SUBSTR function, multi-table join
+pub const TPCDS_Q15: &str = r#"
+SELECT
+    ca_zip,
+    SUM(cs_sales_price)
+FROM catalog_sales, customer, customer_address, date_dim
+WHERE cs_bill_customer_sk = c_customer_sk
+    AND c_current_addr_sk = ca_address_sk
+    AND (SUBSTR(ca_zip, 1, 5) IN ('85669', '86197', '88274', '83405', '86475',
+                                  '85392', '85460', '80348', '81792')
+         OR ca_state IN ('CA', 'WA', 'GA')
+         OR cs_sales_price > 500)
+    AND cs_sold_date_sk = d_date_sk
+    AND d_qoy = 2
+    AND d_year = 2001
+GROUP BY ca_zip
+ORDER BY ca_zip
 LIMIT 100
 "#;
 
@@ -625,9 +882,16 @@ ORDER BY d_year
 
 /// All TPC-DS queries available for benchmarking
 pub const TPCDS_QUERIES: &[(&str, &str)] = &[
-    // Phase 1 queries
+    // Phase 1 queries (core tables: date_dim, item, customer, store, store_sales)
+    ("Q1", TPCDS_Q1),
+    ("Q2", TPCDS_Q2),
     ("Q3", TPCDS_Q3),
+    ("Q6", TPCDS_Q6),
     ("Q7", TPCDS_Q7),
+    ("Q9", TPCDS_Q9),
+    ("Q10", TPCDS_Q10),
+    ("Q12", TPCDS_Q12),
+    ("Q15", TPCDS_Q15),
     ("Q19", TPCDS_Q19),
     ("Q42", TPCDS_Q42),
     ("Q52", TPCDS_Q52),
