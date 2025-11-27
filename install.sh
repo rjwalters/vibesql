@@ -11,6 +11,8 @@
 #   - Python 3 (usually pre-installed on macOS)
 #   - maturin (Python bindings build tool)
 #   - jq (JSON processing for test analysis)
+#   - gh (GitHub CLI for issue/PR management)
+#   - sccache (compilation cache for faster builds)
 #   - pnpm (for web-demo, optional)
 #
 # Usage:
@@ -143,6 +145,31 @@ else
     missing+=("jq")
 fi
 
+# Check gh (GitHub CLI)
+print_status "Checking gh (GitHub CLI)..."
+if command_exists gh; then
+    print_success "gh is installed ($(gh --version | head -1))"
+else
+    print_warning "gh is not installed (needed for: issue/PR management)"
+    missing+=("gh")
+fi
+
+# Check sccache
+print_status "Checking sccache..."
+if command_exists sccache; then
+    print_success "sccache is installed ($(sccache --version))"
+    # Check if sccache is configured as rustc wrapper
+    if [[ -f "$HOME/.cargo/config.toml" ]] && grep -q "sccache" "$HOME/.cargo/config.toml" 2>/dev/null; then
+        print_success "sccache is configured as rustc wrapper"
+    else
+        print_warning "sccache is not configured as rustc wrapper"
+        missing+=("sccache-config")
+    fi
+else
+    print_warning "sccache is not installed (speeds up builds)"
+    missing+=("sccache")
+fi
+
 # Check git submodules
 print_status "Checking git submodules..."
 if [[ -d "third_party/sqllogictest/test" ]] && [[ -n "$(ls -A third_party/sqllogictest/test 2>/dev/null)" ]]; then
@@ -242,6 +269,53 @@ if [[ " ${missing[*]} " =~ " jq " ]]; then
     print_status "Installing jq via Homebrew..."
     brew install jq
     print_success "jq installed"
+fi
+
+# Install gh if needed
+if [[ " ${missing[*]} " =~ " gh " ]]; then
+    print_status "Installing gh (GitHub CLI) via Homebrew..."
+    brew install gh
+    print_success "gh installed"
+    echo ""
+    print_warning "Run 'gh auth login' to authenticate with GitHub"
+fi
+
+# Install sccache if needed
+if [[ " ${missing[*]} " =~ " sccache " ]]; then
+    print_status "Installing sccache via Homebrew..."
+    brew install sccache
+    print_success "sccache installed"
+fi
+
+# Configure sccache as rustc wrapper if needed
+if [[ " ${missing[*]} " =~ " sccache " ]] || [[ " ${missing[*]} " =~ " sccache-config " ]]; then
+    print_status "Configuring sccache as rustc wrapper..."
+    mkdir -p "$HOME/.cargo"
+    # Create or update cargo config
+    if [[ -f "$HOME/.cargo/config.toml" ]]; then
+        # Check if [build] section exists
+        if grep -q "^\[build\]" "$HOME/.cargo/config.toml"; then
+            # Check if rustc-wrapper is already set
+            if ! grep -q "rustc-wrapper" "$HOME/.cargo/config.toml"; then
+                # Add rustc-wrapper under existing [build] section
+                sed -i '' '/^\[build\]/a\
+rustc-wrapper = "sccache"
+' "$HOME/.cargo/config.toml"
+            fi
+        else
+            # Add [build] section with rustc-wrapper
+            echo "" >> "$HOME/.cargo/config.toml"
+            echo "[build]" >> "$HOME/.cargo/config.toml"
+            echo 'rustc-wrapper = "sccache"' >> "$HOME/.cargo/config.toml"
+        fi
+    else
+        # Create new config file
+        cat > "$HOME/.cargo/config.toml" << 'EOF'
+[build]
+rustc-wrapper = "sccache"
+EOF
+    fi
+    print_success "sccache configured as rustc wrapper"
 fi
 
 # Initialize submodules if needed
