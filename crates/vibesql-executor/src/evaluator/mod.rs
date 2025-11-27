@@ -3,7 +3,7 @@ pub(crate) mod casting;
 pub mod coercion;
 mod combined;
 mod core;
-mod caching;
+pub(crate) mod caching;
 mod parallel;
 mod single;
 mod combined_core;
