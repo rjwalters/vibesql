@@ -1,0 +1,738 @@
+//! TPC-C Transaction Implementations
+//!
+//! This module implements the 5 TPC-C transactions:
+//! 1. New-Order (45%): Create new order with multiple line items
+//! 2. Payment (43%): Process customer payment
+//! 3. Order-Status (4%): Query customer's last order
+//! 4. Delivery (4%): Batch process pending orders
+//! 5. Stock-Level (4%): Check low stock items
+
+use std::time::Instant;
+
+use super::data::TPCCRng;
+use vibesql_executor::SelectExecutor;
+use vibesql_parser::Parser;
+
+/// Transaction input for New-Order
+#[derive(Debug, Clone)]
+pub struct NewOrderInput {
+    pub w_id: i32,
+    pub d_id: i32,
+    pub c_id: i32,
+    pub ol_cnt: i32,
+    pub items: Vec<NewOrderItemInput>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewOrderItemInput {
+    pub ol_i_id: i32,
+    pub ol_supply_w_id: i32,
+    pub ol_quantity: i32,
+}
+
+/// Transaction input for Payment
+#[derive(Debug, Clone)]
+pub struct PaymentInput {
+    pub w_id: i32,
+    pub d_id: i32,
+    pub c_w_id: i32,
+    pub c_d_id: i32,
+    pub c_id: Option<i32>,
+    pub c_last: Option<String>,
+    pub h_amount: f64,
+}
+
+/// Transaction input for Order-Status
+#[derive(Debug, Clone)]
+pub struct OrderStatusInput {
+    pub w_id: i32,
+    pub d_id: i32,
+    pub c_id: Option<i32>,
+    pub c_last: Option<String>,
+}
+
+/// Transaction input for Delivery
+#[derive(Debug, Clone)]
+pub struct DeliveryInput {
+    pub w_id: i32,
+    pub o_carrier_id: i32,
+}
+
+/// Transaction input for Stock-Level
+#[derive(Debug, Clone)]
+pub struct StockLevelInput {
+    pub w_id: i32,
+    pub d_id: i32,
+    pub threshold: i32,
+}
+
+/// Transaction result with timing information
+#[derive(Debug, Clone)]
+pub struct TransactionResult {
+    pub success: bool,
+    pub duration_us: u64,
+    pub error: Option<String>,
+}
+
+/// Generate random New-Order transaction input
+pub fn generate_new_order_input(rng: &mut TPCCRng, num_warehouses: i32) -> NewOrderInput {
+    let w_id = rng.random_int(1, num_warehouses as i64) as i32;
+    let d_id = rng.random_int(1, 10) as i32;
+    let c_id = rng.nurand(1023, 1, 3000) as i32;
+    let ol_cnt = rng.random_int(5, 15) as i32;
+
+    let mut items = Vec::with_capacity(ol_cnt as usize);
+    for _ in 0..ol_cnt {
+        // 1% of items are from remote warehouse
+        let ol_supply_w_id = if num_warehouses > 1 && rng.random_int(1, 100) == 1 {
+            let mut remote = rng.random_int(1, num_warehouses as i64) as i32;
+            while remote == w_id && num_warehouses > 1 {
+                remote = rng.random_int(1, num_warehouses as i64) as i32;
+            }
+            remote
+        } else {
+            w_id
+        };
+
+        items.push(NewOrderItemInput {
+            ol_i_id: rng.nurand(8191, 1, 100000) as i32,
+            ol_supply_w_id,
+            ol_quantity: rng.random_int(1, 10) as i32,
+        });
+    }
+
+    NewOrderInput {
+        w_id,
+        d_id,
+        c_id,
+        ol_cnt,
+        items,
+    }
+}
+
+/// Generate random Payment transaction input
+pub fn generate_payment_input(rng: &mut TPCCRng, num_warehouses: i32) -> PaymentInput {
+    let w_id = rng.random_int(1, num_warehouses as i64) as i32;
+    let d_id = rng.random_int(1, 10) as i32;
+
+    // 85% local, 15% remote
+    let (c_w_id, c_d_id) = if num_warehouses > 1 && rng.random_int(1, 100) <= 15 {
+        let mut remote_w = rng.random_int(1, num_warehouses as i64) as i32;
+        while remote_w == w_id && num_warehouses > 1 {
+            remote_w = rng.random_int(1, num_warehouses as i64) as i32;
+        }
+        (remote_w, rng.random_int(1, 10) as i32)
+    } else {
+        (w_id, d_id)
+    };
+
+    // 60% by customer ID, 40% by last name
+    let (c_id, c_last) = if rng.random_int(1, 100) <= 60 {
+        (Some(rng.nurand(1023, 1, 3000) as i32), None)
+    } else {
+        (None, Some(TPCCRng::last_name(rng.nurand(255, 0, 999))))
+    };
+
+    PaymentInput {
+        w_id,
+        d_id,
+        c_w_id,
+        c_d_id,
+        c_id,
+        c_last,
+        h_amount: rng.random_int(100, 500000) as f64 / 100.0,
+    }
+}
+
+/// Generate random Order-Status transaction input
+pub fn generate_order_status_input(rng: &mut TPCCRng, num_warehouses: i32) -> OrderStatusInput {
+    let w_id = rng.random_int(1, num_warehouses as i64) as i32;
+    let d_id = rng.random_int(1, 10) as i32;
+
+    // 60% by customer ID, 40% by last name
+    let (c_id, c_last) = if rng.random_int(1, 100) <= 60 {
+        (Some(rng.nurand(1023, 1, 3000) as i32), None)
+    } else {
+        (None, Some(TPCCRng::last_name(rng.nurand(255, 0, 999))))
+    };
+
+    OrderStatusInput {
+        w_id,
+        d_id,
+        c_id,
+        c_last,
+    }
+}
+
+/// Generate random Delivery transaction input
+pub fn generate_delivery_input(rng: &mut TPCCRng, num_warehouses: i32) -> DeliveryInput {
+    DeliveryInput {
+        w_id: rng.random_int(1, num_warehouses as i64) as i32,
+        o_carrier_id: rng.random_int(1, 10) as i32,
+    }
+}
+
+/// Generate random Stock-Level transaction input
+pub fn generate_stock_level_input(rng: &mut TPCCRng, num_warehouses: i32) -> StockLevelInput {
+    StockLevelInput {
+        w_id: rng.random_int(1, num_warehouses as i64) as i32,
+        d_id: rng.random_int(1, 10) as i32,
+        threshold: rng.random_int(10, 20) as i32,
+    }
+}
+
+/// Helper function to execute a SQL query
+fn execute_query(db: &vibesql_storage::Database, sql: &str) -> Result<(), String> {
+    let stmt = match Parser::parse_sql(sql) {
+        Ok(vibesql_ast::Statement::Select(s)) => s,
+        Ok(_) => return Ok(()), // Non-select statements are OK
+        Err(e) => return Err(format!("Parse error: {}", e)),
+    };
+
+    let executor = SelectExecutor::new(db);
+    match executor.execute(&stmt) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Execute error: {}", e)),
+    }
+}
+
+/// TPC-C transaction executor for VibeSQL
+pub struct VibesqlTransactionExecutor<'a> {
+    pub db: &'a vibesql_storage::Database,
+}
+
+impl<'a> VibesqlTransactionExecutor<'a> {
+    pub fn new(db: &'a vibesql_storage::Database) -> Self {
+        Self { db }
+    }
+
+    /// Execute New-Order transaction (read-only simulation)
+    pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        let start = Instant::now();
+
+        // Get warehouse tax rate
+        let w_tax_query = format!(
+            "SELECT w_tax FROM warehouse WHERE w_id = {}",
+            input.w_id
+        );
+
+        // Get district info
+        let d_query = format!(
+            "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+            input.w_id, input.d_id
+        );
+
+        // Get customer info
+        let c_query = format!(
+            "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+            input.w_id, input.d_id, input.c_id
+        );
+
+        // Execute queries
+        if let Err(e) = execute_query(self.db, &w_tax_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Warehouse query failed: {}", e)),
+            };
+        }
+
+        if let Err(e) = execute_query(self.db, &d_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("District query failed: {}", e)),
+            };
+        }
+
+        if let Err(e) = execute_query(self.db, &c_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Customer query failed: {}", e)),
+            };
+        }
+
+        // Process each order line - just query item and stock info
+        for item in &input.items {
+            // Get item info
+            let i_query = format!(
+                "SELECT i_price, i_name, i_data FROM item WHERE i_id = {}",
+                item.ol_i_id
+            );
+            if let Err(e) = execute_query(self.db, &i_query) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Item query failed: {}", e)),
+                };
+            }
+
+            // Get stock info
+            let s_query = format!(
+                "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = {} AND s_w_id = {}",
+                item.ol_i_id, item.ol_supply_w_id
+            );
+            if let Err(e) = execute_query(self.db, &s_query) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Stock query failed: {}", e)),
+                };
+            }
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    /// Execute Payment transaction (read-only simulation)
+    pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        let start = Instant::now();
+
+        // Get warehouse info
+        let w_query = format!(
+            "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = {}",
+            input.w_id
+        );
+        if let Err(e) = execute_query(self.db, &w_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Warehouse query failed: {}", e)),
+            };
+        }
+
+        // Get district info
+        let d_query = format!(
+            "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = {} AND d_id = {}",
+            input.w_id, input.d_id
+        );
+        if let Err(e) = execute_query(self.db, &d_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("District query failed: {}", e)),
+            };
+        }
+
+        // Get customer (by ID or last name)
+        let c_query = if let Some(c_id) = input.c_id {
+            format!(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                input.c_w_id, input.c_d_id, c_id
+            )
+        } else {
+            format!(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
+                input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()
+            )
+        };
+        if let Err(e) = execute_query(self.db, &c_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Customer query failed: {}", e)),
+            };
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    /// Execute Order-Status transaction
+    pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        let start = Instant::now();
+
+        // Get customer (by ID or last name)
+        let c_query = if let Some(c_id) = input.c_id {
+            format!(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                input.w_id, input.d_id, c_id
+            )
+        } else {
+            format!(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
+                input.w_id, input.d_id, input.c_last.as_ref().unwrap()
+            )
+        };
+        if let Err(e) = execute_query(self.db, &c_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Customer query failed: {}", e)),
+            };
+        }
+
+        // Get last order for customer
+        let c_id = input.c_id.unwrap_or(1);
+        let o_query = format!(
+            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = {} AND o_d_id = {} AND o_c_id = {} ORDER BY o_id DESC LIMIT 1",
+            input.w_id, input.d_id, c_id
+        );
+        if let Err(e) = execute_query(self.db, &o_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Order query failed: {}", e)),
+            };
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    /// Execute Delivery transaction (read-only simulation)
+    pub fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
+        let start = Instant::now();
+
+        // Process each district - just query for new orders
+        for d_id in 1..=10 {
+            let no_query = format!(
+                "SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} ORDER BY no_o_id LIMIT 1",
+                input.w_id, d_id
+            );
+            // Ignore errors - some districts may have no new orders
+            let _ = execute_query(self.db, &no_query);
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    /// Execute Stock-Level transaction
+    pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        let start = Instant::now();
+
+        // Get district next order ID
+        let d_query = format!(
+            "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+            input.w_id, input.d_id
+        );
+        if let Err(e) = execute_query(self.db, &d_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("District query failed: {}", e)),
+            };
+        }
+
+        // Count low stock items (simplified query)
+        let stock_query = format!(
+            "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+             WHERE ol_w_id = {} AND ol_d_id = {} \
+             AND s_w_id = {} AND s_i_id = ol_i_id AND s_quantity < {}",
+            input.w_id, input.d_id, input.w_id, input.threshold
+        );
+        if let Err(e) = execute_query(self.db, &stock_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Stock level query failed: {}", e)),
+            };
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+}
+
+/// TPC-C transaction executor for SQLite
+#[cfg(feature = "benchmark-comparison")]
+pub struct SqliteTransactionExecutor<'a> {
+    pub conn: &'a rusqlite::Connection,
+}
+
+#[cfg(feature = "benchmark-comparison")]
+impl<'a> SqliteTransactionExecutor<'a> {
+    pub fn new(conn: &'a rusqlite::Connection) -> Self {
+        Self { conn }
+    }
+
+    pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        let start = Instant::now();
+
+        // Simplified: just run key queries
+        let _ = self.conn.execute(
+            &format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id),
+            [],
+        );
+        let _ = self.conn.execute(
+            &format!("SELECT d_tax FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            [],
+        );
+        let _ = self.conn.execute(
+            &format!("SELECT c_discount FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, input.c_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        let start = Instant::now();
+
+        let _ = self.conn.execute(
+            &format!("SELECT w_name FROM warehouse WHERE w_id = {}", input.w_id),
+            [],
+        );
+        let _ = self.conn.execute(
+            &format!("SELECT d_name FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        let start = Instant::now();
+
+        let c_id = input.c_id.unwrap_or(1);
+        let _ = self.conn.execute(
+            &format!("SELECT c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, c_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
+        let start = Instant::now();
+
+        for d_id in 1..=10 {
+            let _ = self.conn.execute(
+                &format!("SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} LIMIT 1", input.w_id, d_id),
+                [],
+            );
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        let start = Instant::now();
+
+        let _ = self.conn.execute(
+            &format!("SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+}
+
+/// TPC-C transaction executor for DuckDB
+#[cfg(feature = "benchmark-comparison")]
+pub struct DuckdbTransactionExecutor<'a> {
+    pub conn: &'a duckdb::Connection,
+}
+
+#[cfg(feature = "benchmark-comparison")]
+impl<'a> DuckdbTransactionExecutor<'a> {
+    pub fn new(conn: &'a duckdb::Connection) -> Self {
+        Self { conn }
+    }
+
+    pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        let start = Instant::now();
+
+        let _ = self.conn.execute(
+            &format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id),
+            [],
+        );
+        let _ = self.conn.execute(
+            &format!("SELECT d_tax FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            [],
+        );
+        let _ = self.conn.execute(
+            &format!("SELECT c_discount FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, input.c_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        let start = Instant::now();
+
+        let _ = self.conn.execute(
+            &format!("SELECT w_name FROM warehouse WHERE w_id = {}", input.w_id),
+            [],
+        );
+        let _ = self.conn.execute(
+            &format!("SELECT d_name FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        let start = Instant::now();
+
+        let c_id = input.c_id.unwrap_or(1);
+        let _ = self.conn.execute(
+            &format!("SELECT c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, c_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
+        let start = Instant::now();
+
+        for d_id in 1..=10 {
+            let _ = self.conn.execute(
+                &format!("SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} LIMIT 1", input.w_id, d_id),
+                [],
+            );
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        let start = Instant::now();
+
+        let _ = self.conn.execute(
+            &format!("SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            [],
+        );
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+}
+
+/// TPC-C workload generator following standard transaction mix
+pub struct TPCCWorkload {
+    pub rng: TPCCRng,
+    pub num_warehouses: i32,
+}
+
+impl TPCCWorkload {
+    pub fn new(seed: u64, num_warehouses: i32) -> Self {
+        Self {
+            rng: TPCCRng::new(seed),
+            num_warehouses,
+        }
+    }
+
+    /// Generate next transaction according to TPC-C mix
+    /// Returns: transaction_type (0=NewOrder, 1=Payment, 2=OrderStatus, 3=Delivery, 4=StockLevel)
+    pub fn next_transaction_type(&mut self) -> i32 {
+        let roll = self.rng.random_int(1, 100);
+        if roll <= 45 {
+            0 // New-Order (45%)
+        } else if roll <= 88 {
+            1 // Payment (43%)
+        } else if roll <= 92 {
+            2 // Order-Status (4%)
+        } else if roll <= 96 {
+            3 // Delivery (4%)
+        } else {
+            4 // Stock-Level (4%)
+        }
+    }
+
+    pub fn generate_new_order(&mut self) -> NewOrderInput {
+        generate_new_order_input(&mut self.rng, self.num_warehouses)
+    }
+
+    pub fn generate_payment(&mut self) -> PaymentInput {
+        generate_payment_input(&mut self.rng, self.num_warehouses)
+    }
+
+    pub fn generate_order_status(&mut self) -> OrderStatusInput {
+        generate_order_status_input(&mut self.rng, self.num_warehouses)
+    }
+
+    pub fn generate_delivery(&mut self) -> DeliveryInput {
+        generate_delivery_input(&mut self.rng, self.num_warehouses)
+    }
+
+    pub fn generate_stock_level(&mut self) -> StockLevelInput {
+        generate_stock_level_input(&mut self.rng, self.num_warehouses)
+    }
+}
+
+/// Benchmark results summary
+#[derive(Debug, Clone, Default)]
+pub struct TPCCBenchmarkResults {
+    pub total_transactions: u64,
+    pub successful_transactions: u64,
+    pub failed_transactions: u64,
+    pub total_duration_ms: u64,
+    pub transactions_per_second: f64,
+    pub new_order_count: u64,
+    pub new_order_avg_us: f64,
+    pub payment_count: u64,
+    pub payment_avg_us: f64,
+    pub order_status_count: u64,
+    pub order_status_avg_us: f64,
+    pub delivery_count: u64,
+    pub delivery_avg_us: f64,
+    pub stock_level_count: u64,
+    pub stock_level_avg_us: f64,
+}
+
+impl TPCCBenchmarkResults {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}

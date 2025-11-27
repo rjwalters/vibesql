@@ -149,3 +149,8 @@ harness = false
 [[bench]]
 name = "columnar_execution"
 harness = false
+
+[[bench]]
+name = "tpcc_benchmark"
+harness = false
+required-features = ["benchmark-comparison"]
