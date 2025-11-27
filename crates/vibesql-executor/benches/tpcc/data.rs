@@ -14,8 +14,6 @@
 //! - ITEM: 100,000 rows (constant, shared across warehouses)
 //! - STOCK: 100,000 rows (1 per item per warehouse)
 
-use std::collections::HashSet;
-
 /// Random number generator state for reproducible data
 pub struct TPCCRng {
     state: u64,
@@ -124,7 +122,6 @@ impl TPCCRng {
 pub struct TPCCData {
     pub scale_factor: i32,  // Number of warehouses
     pub rng: TPCCRng,
-    pub generated_customer_ids: HashSet<(i32, i32, i32)>,  // (w_id, d_id, c_id)
 }
 
 impl TPCCData {
@@ -132,7 +129,6 @@ impl TPCCData {
         Self {
             scale_factor: scale_factor.max(1.0) as i32,
             rng: TPCCRng::new(42),  // Fixed seed for reproducibility
-            generated_customer_ids: HashSet::new(),
         }
     }
 
