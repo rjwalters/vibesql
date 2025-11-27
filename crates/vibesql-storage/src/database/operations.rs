@@ -166,7 +166,18 @@ impl Operations {
     }
 
     /// Insert multiple rows into a table in a single batch
-    /// Returns the row indices of the inserted rows
+    ///
+    /// This method is optimized for bulk data loading. It uses `Table::insert_batch()`
+    /// internally which provides significant performance improvements:
+    ///
+    /// - Pre-allocates vector capacity
+    /// - Validates all rows before inserting any
+    /// - Rebuilds indexes once after all inserts (vs per-row updates)
+    /// - Invalidates caches only once at the end
+    ///
+    /// # Returns
+    ///
+    /// Row indices of all inserted rows (starting from the first new row)
     pub fn insert_rows_batch(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
@@ -199,29 +210,33 @@ impl Operations {
             return Err(StorageError::TableNotFound(table_name.to_string()));
         };
 
-        let mut row_indices = Vec::with_capacity(rows.len());
-
         // Get table schema once for all rows
         let table_schema = catalog.get_table(table_name);
 
-        // Check unique constraints for all rows before inserting any
+        // Check user-defined unique indexes BEFORE inserting any rows
+        // This is separate from the table-level constraint checks in Table::insert_batch
         if let Some(schema) = table_schema {
             for row in &rows {
                 self.index_manager.check_unique_constraints_for_insert(table_name, schema, row)?;
             }
         }
 
-        // Insert all rows into the table
-        for row in &rows {
-            let row_index = table.row_count();
-            table.insert(row.clone())?;
-            row_indices.push(row_index);
-        }
+        // Record start index for return value
+        let start_index = table.row_count();
 
-        // Batch update indexes for all inserted rows
+        // Clone rows for index updates (needed since insert_batch consumes them)
+        let rows_for_indexes = rows.clone();
+
+        // Use optimized batch insert
+        let count = table.insert_batch(rows)?;
+
+        // Generate row indices for return
+        let row_indices: Vec<usize> = (start_index..start_index + count).collect();
+
+        // Update user-defined indexes for all inserted rows
         if let Some(schema) = table_schema {
-            for (i, row) in rows.iter().enumerate() {
-                let row_index = row_indices[i];
+            for (i, row) in rows_for_indexes.iter().enumerate() {
+                let row_index = start_index + i;
                 self.index_manager.add_to_indexes_for_insert(table_name, schema, row, row_index);
                 // Update spatial indexes
                 self.update_spatial_indexes_for_insert(catalog, table_name, row, row_index);
@@ -229,6 +244,62 @@ impl Operations {
         }
 
         Ok(row_indices)
+    }
+
+    /// Insert rows from an iterator in a streaming fashion
+    ///
+    /// This method processes rows in batches for memory efficiency when loading
+    /// very large datasets. Rows are committed batch-by-batch.
+    ///
+    /// # Arguments
+    ///
+    /// * `catalog` - The database catalog
+    /// * `tables` - Map of table names to tables
+    /// * `table_name` - Name of the table to insert into
+    /// * `rows` - Iterator yielding rows to insert
+    /// * `batch_size` - Number of rows per batch (default: 1000)
+    ///
+    /// # Returns
+    ///
+    /// Total number of rows successfully inserted
+    ///
+    /// # Note
+    ///
+    /// Unlike `insert_rows_batch`, this method commits in batches, so a failure
+    /// partway through will leave previously committed rows in the table.
+    #[allow(dead_code)] // Available for internal use; public API is via Database::insert_rows_iter
+    pub fn insert_rows_iter<I>(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        tables: &mut HashMap<String, Table>,
+        table_name: &str,
+        rows: I,
+        batch_size: usize,
+    ) -> Result<usize, StorageError>
+    where
+        I: Iterator<Item = Row>,
+    {
+        let batch_size = if batch_size == 0 { 1000 } else { batch_size };
+        let mut total_inserted = 0;
+        let mut batch = Vec::with_capacity(batch_size);
+
+        for row in rows {
+            batch.push(row);
+
+            if batch.len() >= batch_size {
+                let indices = self.insert_rows_batch(catalog, tables, table_name, std::mem::take(&mut batch))?;
+                total_inserted += indices.len();
+                batch = Vec::with_capacity(batch_size);
+            }
+        }
+
+        // Insert any remaining rows
+        if !batch.is_empty() {
+            let indices = self.insert_rows_batch(catalog, tables, table_name, batch)?;
+            total_inserted += indices.len();
+        }
+
+        Ok(total_inserted)
     }
 
     // ============================================================================
