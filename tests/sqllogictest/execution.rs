@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use sqllogictest::Runner;
+use sqllogictest::{Runner, SqlDialect};
 use tokio::time::timeout;
 
 use super::{
@@ -30,7 +30,7 @@ impl std::fmt::Display for TestError {
 impl std::error::Error for TestError {}
 
 /// Run a test file asynchronously and capture detailed failure information
-async fn run_test_file_async(contents: &str) -> (Result<(), TestError>, Vec<TestFailure>) {
+async fn run_test_file_async(contents: &str, file_name: &str) -> (Result<(), TestError>, Vec<TestFailure>) {
     let preprocessed = preprocess_for_mysql(contents);
     let mut tester = Runner::new(|| async { Ok(VibeSqlDB::new()) });
     // Enable hash mode with threshold of 8 (standard SQLLogicTest behavior)
@@ -38,8 +38,21 @@ async fn run_test_file_async(contents: &str) -> (Result<(), TestError>, Vec<Test
     // Add "mysql" label for skipif/onlyif directives
     // VibeSQL uses MySQL-compatible division (returns REAL/DECIMAL for integer division)
     tester.add_label("mysql");
+    // Enable auto-dialect switching: instead of skipping tests with `skipif mysql`,
+    // switch to sqlite mode and run them. This maximizes test coverage.
+    tester.enable_auto_switch_dialect();
 
-    match tester.run_script(&preprocessed) {
+    // The random/ tests are from SQLite's official test suite and assume SQLite semantics
+    // (e.g., integer division). Prepend a dialect switch command to run them in SQLite mode.
+    let script = if file_name.starts_with("random/") {
+        // Set SQLite mode and update internal tracking
+        tester.with_default_dialect(SqlDialect::SQLite);
+        format!("statement ok\nSET SQL_MODE = 'sqlite'\n\n{}", preprocessed)
+    } else {
+        preprocessed
+    };
+
+    match tester.run_script(&script) {
         Ok(_) => (Ok(()), vec![]),
         Err(e) => {
             // Capture error information
@@ -62,7 +75,7 @@ async fn run_test_file_with_timeout_impl(
     timeout_secs: u64,
 ) -> (Result<(), TestError>, Vec<TestFailure>) {
     // Create a future that runs the test with a timeout
-    let test_future = run_test_file_async(contents);
+    let test_future = run_test_file_async(contents, file_name);
 
     // Apply timeout
     match timeout(Duration::from_secs(timeout_secs), test_future).await {
