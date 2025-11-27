@@ -18,8 +18,20 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     ) -> Result<RecordOutput<D::ColumnType>, TestError> {
         let result = self.apply_record(record.clone()).await;
 
+        // Helper to check if this record type should be tracked for dialect stats
+        let is_testable_record = matches!(
+            &record,
+            Record::Statement { .. } | Record::Query { .. }
+        );
+
+        // Track dialect statistics for Statement and Query records
+        // We capture the current dialect before validation since it may have been switched
+        let current_dialect = self.current_dialect.clone();
+
         match (record, &result) {
-            (_, RecordOutput::Nothing) => {}
+            (_, RecordOutput::Nothing) => {
+                // Skipped or control records - don't track
+            }
             // Tolerate the mismatched return type...
             (
                 Record::Statement {
@@ -30,6 +42,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 },
             ) => {
                 if let StatementExpect::Error(_) = expected {
+                    self.dialect_stats.record(&current_dialect, false);
                     return Err(TestErrorKind::Ok {
                         sql,
                         kind: RecordKind::Query,
@@ -38,6 +51,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 }
                 if let StatementExpect::Count(expected_count) = expected {
                     if expected_count != rows.len() as u64 {
+                        self.dialect_stats.record(&current_dialect, false);
                         return Err(TestErrorKind::StatementResultMismatch {
                             sql,
                             expected: expected_count,
@@ -54,6 +68,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 RecordOutput::Statement { error: None, .. },
             ) => match expected {
                 QueryExpect::Error(_) => {
+                    self.dialect_stats.record(&current_dialect, false);
                     return Err(TestErrorKind::Ok {
                         sql,
                         kind: RecordKind::Query,
@@ -61,6 +76,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     .at(loc))
                 }
                 QueryExpect::Results { results, .. } if !results.is_empty() => {
+                    self.dialect_stats.record(&current_dialect, false);
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
                         expected: results.join("\n"),
@@ -82,6 +98,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 RecordOutput::Statement { count, error },
             ) => match (error, expected) {
                 (None, StatementExpect::Error(_)) => {
+                    self.dialect_stats.record(&current_dialect, false);
                     return Err(TestErrorKind::Ok {
                         sql,
                         kind: RecordKind::Statement,
@@ -90,6 +107,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 }
                 (None, StatementExpect::Count(expected_count)) => {
                     if expected_count != *count {
+                        self.dialect_stats.record(&current_dialect, false);
                         return Err(TestErrorKind::StatementResultMismatch {
                             sql,
                             expected: expected_count,
@@ -101,6 +119,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 (None, StatementExpect::Ok) => {}
                 (Some(e), StatementExpect::Error(expected_error)) => {
                     if !expected_error.is_match(&e.to_string()) {
+                        self.dialect_stats.record(&current_dialect, false);
                         return Err(TestErrorKind::ErrorMismatch {
                             sql,
                             err: Arc::clone(e),
@@ -111,6 +130,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 }
                 (Some(e), StatementExpect::Count(_) | StatementExpect::Ok) => {
+                    self.dialect_stats.record(&current_dialect, false);
                     return Err(TestErrorKind::Fail {
                         sql,
                         err: Arc::clone(e),
@@ -132,6 +152,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             ) => {
                 match (error, expected) {
                     (None, QueryExpect::Error(_)) => {
+                        self.dialect_stats.record(&current_dialect, false);
                         return Err(TestErrorKind::Ok {
                             sql,
                             kind: RecordKind::Query,
@@ -140,6 +161,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                     (Some(e), QueryExpect::Error(expected_error)) => {
                         if !expected_error.is_match(&e.to_string()) {
+                            self.dialect_stats.record(&current_dialect, false);
                             return Err(TestErrorKind::ErrorMismatch {
                                 sql,
                                 err: Arc::clone(e),
@@ -150,6 +172,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         }
                     }
                     (Some(e), QueryExpect::Results { .. }) => {
+                        self.dialect_stats.record(&current_dialect, false);
                         return Err(TestErrorKind::Fail {
                             sql,
                             err: Arc::clone(e),
@@ -166,6 +189,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         },
                     ) => {
                         if !(self.column_type_validator)(types, &expected_types) {
+                            self.dialect_stats.record(&current_dialect, false);
                             return Err(TestErrorKind::QueryResultColumnsMismatch {
                                 sql,
                                 expected: expected_types.iter().map(|c| c.to_char()).join(""),
@@ -188,6 +212,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             // Flatten the rows so each column value is on its own line for error reporting
                             let output_rows: Vec<String> =
                                 rows.iter().flat_map(|strs| strs.iter().cloned()).collect_vec();
+                            self.dialect_stats.record(&current_dialect, false);
                             return Err(TestErrorKind::QueryResultMismatch {
                                 sql,
                                 expected: expected_results.join("\n"),
@@ -235,6 +260,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 }
             }
             _ => unreachable!(),
+        }
+
+        // Record successful test execution in dialect stats
+        // Only track Statement and Query records (is_testable_record is true for those)
+        // RecordOutput::Nothing means the record was skipped, so we don't track it
+        if is_testable_record && !matches!(result, RecordOutput::Nothing) {
+            self.dialect_stats.record(&current_dialect, true);
         }
 
         Ok(result)
