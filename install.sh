@@ -235,6 +235,34 @@ else
     missing+=("docker")
 fi
 
+# Check Docker (for MySQL/PostgreSQL compatibility testing)
+print_status "Checking Docker..."
+if command_exists docker; then
+    if docker info &> /dev/null; then
+        print_success "Docker is installed and running ($(docker --version | cut -d' ' -f3 | tr -d ','))"
+    else
+        print_warning "Docker is installed but not running"
+        missing+=("docker-running")
+    fi
+else
+    print_warning "Docker is not installed (needed for: MySQL/PostgreSQL compatibility testing)"
+    missing+=("docker")
+fi
+
+# Check Docker (for MySQL/PostgreSQL compatibility testing)
+print_status "Checking Docker..."
+if command_exists docker; then
+    if docker info &> /dev/null; then
+        print_success "Docker is installed and running ($(docker --version | cut -d' ' -f3 | tr -d ','))"
+    else
+        print_warning "Docker is installed but not running"
+        missing+=("docker-running")
+    fi
+else
+    print_warning "Docker is not installed (needed for: MySQL/PostgreSQL compatibility testing)"
+    missing+=("docker")
+fi
+
 echo ""
 
 # If check only mode, exit here

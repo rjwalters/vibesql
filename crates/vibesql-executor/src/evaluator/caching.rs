@@ -6,6 +6,8 @@
 //!
 //! Caches use LRU eviction and can be configured via environment variables.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use lru::LruCache;
 
@@ -53,4 +55,14 @@ pub(super) fn create_cse_cache() -> LruCache<u64, vibesql_types::SqlValue> {
 /// Create a new subquery result cache with configured size
 pub(super) fn create_subquery_cache() -> LruCache<u64, Vec<vibesql_storage::Row>> {
     LruCache::new(NonZeroUsize::new(get_subquery_cache_size()).unwrap())
+}
+
+/// Compute a hash for a subquery to use as a cache key
+///
+/// Uses Debug format for hashing which is sufficient for typical queries.
+/// See combined/subqueries/cache.rs for detailed documentation on trade-offs.
+pub(super) fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    format!("{:?}", subquery).hash(&mut hasher);
+    hasher.finish()
 }
