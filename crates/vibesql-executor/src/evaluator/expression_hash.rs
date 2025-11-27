@@ -133,6 +133,8 @@ impl ExpressionHasher {
                     && removal_char.as_ref().is_none_or(|c| Self::is_deterministic(c))
             }
 
+            vibesql_ast::Expression::Extract { expr, .. } => Self::is_deterministic(expr),
+
             // Literals are deterministic, but column references, pseudo-variables, and session variables are NOT
             // Column references and pseudo-variables depend on the current row data, so they should not be cached
             // across multiple rows in row-iteration contexts
@@ -292,6 +294,12 @@ impl ExpressionHasher {
                     Self::hash_expression(ch, hasher);
                 }
                 Self::hash_expression(string, hasher);
+            }
+
+            vibesql_ast::Expression::Extract { field, expr } => {
+                "EXTRACT".hash(hasher);
+                std::mem::discriminant(field).hash(hasher);
+                Self::hash_expression(expr, hasher);
             }
 
             vibesql_ast::Expression::CurrentDate => {

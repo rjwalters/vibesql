@@ -344,6 +344,10 @@ fn is_expression_correlated(
                 || is_expression_correlated(string, outer_schema, subquery_tables)
         }
 
+        Expression::Extract { expr, .. } => {
+            is_expression_correlated(expr, outer_schema, subquery_tables)
+        }
+
         Expression::WindowFunction { function, over } => {
             // Check window function arguments
             let func_correlated = match function {

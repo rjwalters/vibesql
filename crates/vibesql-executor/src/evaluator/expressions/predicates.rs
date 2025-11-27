@@ -1,7 +1,8 @@
-//! Predicate evaluation methods (BETWEEN, LIKE, IN, POSITION)
+//! Predicate evaluation methods (BETWEEN, LIKE, IN, POSITION, EXTRACT)
 
 use super::super::{casting::cast_value, core::ExpressionEvaluator, pattern::like_match};
 use crate::errors::ExecutorError;
+use chrono::{Datelike, Timelike};
 
 impl ExpressionEvaluator<'_> {
     /// Evaluate BETWEEN predicate: expr BETWEEN low AND high
@@ -200,6 +201,147 @@ impl ExpressionEvaluator<'_> {
         };
 
         Ok(vibesql_types::SqlValue::Varchar(result))
+    }
+
+    /// Evaluate EXTRACT expression
+    /// EXTRACT(field FROM expr) - extracts date/time component from datetime expression
+    #[inline]
+    pub(super) fn eval_extract(
+        &self,
+        field: &vibesql_ast::IntervalUnit,
+        expr: &vibesql_ast::Expression,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        let datetime_val = self.eval(expr, row)?;
+
+        // Handle NULL
+        if matches!(datetime_val, vibesql_types::SqlValue::Null) {
+            return Ok(vibesql_types::SqlValue::Null);
+        }
+
+        // Extract component based on field type
+        use vibesql_ast::IntervalUnit;
+
+        match &datetime_val {
+            vibesql_types::SqlValue::Date(d) => {
+                let result = match field {
+                    IntervalUnit::Year => d.year as i64,
+                    IntervalUnit::Month => d.month as i64,
+                    IntervalUnit::Day => d.day as i64,
+                    IntervalUnit::Quarter => ((d.month - 1) / 3 + 1) as i64,
+                    IntervalUnit::Week => {
+                        // Calculate ISO week number using chrono
+                        let chrono_date = chrono::NaiveDate::from_ymd_opt(d.year, d.month as u32, d.day as u32)
+                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+                        chrono_date.iso_week().week() as i64
+                    }
+                    _ => {
+                        return Err(ExecutorError::InvalidExtractField {
+                            field: format!("{:?}", field),
+                            value_type: "DATE".to_string(),
+                        })
+                    }
+                };
+                Ok(vibesql_types::SqlValue::Integer(result))
+            }
+
+            vibesql_types::SqlValue::Time(t) => {
+                let result = match field {
+                    IntervalUnit::Hour => t.hour as i64,
+                    IntervalUnit::Minute => t.minute as i64,
+                    IntervalUnit::Second => t.second as i64,
+                    IntervalUnit::Microsecond => (t.nanosecond / 1000) as i64,
+                    _ => {
+                        return Err(ExecutorError::InvalidExtractField {
+                            field: format!("{:?}", field),
+                            value_type: "TIME".to_string(),
+                        })
+                    }
+                };
+                Ok(vibesql_types::SqlValue::Integer(result))
+            }
+
+            vibesql_types::SqlValue::Timestamp(ts) => {
+                let result = match field {
+                    IntervalUnit::Year => ts.date.year as i64,
+                    IntervalUnit::Month => ts.date.month as i64,
+                    IntervalUnit::Day => ts.date.day as i64,
+                    IntervalUnit::Hour => ts.time.hour as i64,
+                    IntervalUnit::Minute => ts.time.minute as i64,
+                    IntervalUnit::Second => ts.time.second as i64,
+                    IntervalUnit::Microsecond => (ts.time.nanosecond / 1000) as i64,
+                    IntervalUnit::Quarter => ((ts.date.month - 1) / 3 + 1) as i64,
+                    IntervalUnit::Week => {
+                        // Calculate ISO week number using chrono
+                        let chrono_date = chrono::NaiveDate::from_ymd_opt(ts.date.year, ts.date.month as u32, ts.date.day as u32)
+                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+                        chrono_date.iso_week().week() as i64
+                    }
+                    _ => {
+                        return Err(ExecutorError::InvalidExtractField {
+                            field: format!("{:?}", field),
+                            value_type: "TIMESTAMP".to_string(),
+                        })
+                    }
+                };
+                Ok(vibesql_types::SqlValue::Integer(result))
+            }
+
+            // For string values, try to parse as date/timestamp
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                // Try to parse as date first
+                if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                    let result = match field {
+                        IntervalUnit::Year => date.year() as i64,
+                        IntervalUnit::Month => date.month() as i64,
+                        IntervalUnit::Day => date.day() as i64,
+                        IntervalUnit::Quarter => ((date.month() - 1) / 3 + 1) as i64,
+                        IntervalUnit::Week => date.iso_week().week() as i64,
+                        _ => {
+                            return Err(ExecutorError::InvalidExtractField {
+                                field: format!("{:?}", field),
+                                value_type: "DATE".to_string(),
+                            })
+                        }
+                    };
+                    return Ok(vibesql_types::SqlValue::Integer(result));
+                }
+
+                // Try to parse as timestamp
+                if let Ok(ts) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+                    let result = match field {
+                        IntervalUnit::Year => ts.year() as i64,
+                        IntervalUnit::Month => ts.month() as i64,
+                        IntervalUnit::Day => ts.day() as i64,
+                        IntervalUnit::Hour => ts.hour() as i64,
+                        IntervalUnit::Minute => ts.minute() as i64,
+                        IntervalUnit::Second => ts.second() as i64,
+                        IntervalUnit::Microsecond => ts.nanosecond() as i64 / 1000,
+                        IntervalUnit::Quarter => ((ts.month() - 1) / 3 + 1) as i64,
+                        IntervalUnit::Week => ts.iso_week().week() as i64,
+                        _ => {
+                            return Err(ExecutorError::InvalidExtractField {
+                                field: format!("{:?}", field),
+                                value_type: "TIMESTAMP".to_string(),
+                            })
+                        }
+                    };
+                    return Ok(vibesql_types::SqlValue::Integer(result));
+                }
+
+                Err(ExecutorError::TypeMismatch {
+                    left: datetime_val.clone(),
+                    op: "EXTRACT".to_string(),
+                    right: vibesql_types::SqlValue::Null,
+                })
+            }
+
+            _ => Err(ExecutorError::TypeMismatch {
+                left: datetime_val.clone(),
+                op: "EXTRACT".to_string(),
+                right: vibesql_types::SqlValue::Null,
+            }),
+        }
     }
 
     /// Evaluate LIKE predicate

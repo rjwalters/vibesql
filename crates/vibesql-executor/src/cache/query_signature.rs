@@ -403,6 +403,12 @@ impl QuerySignature {
                 Self::hash_expression(string, hasher);
             }
 
+            Expression::Extract { field, expr } => {
+                "EXTRACT".hash(hasher);
+                std::mem::discriminant(field).hash(hasher);
+                Self::hash_expression(expr, hasher);
+            }
+
             Expression::Like { expr, pattern, negated } => {
                 "LIKE".hash(hasher);
                 Self::hash_expression(expr, hasher);

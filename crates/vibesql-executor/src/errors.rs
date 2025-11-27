@@ -160,6 +160,11 @@ pub enum ExecutorError {
     FunctionReadOnlyViolation(String),
     /// Parse error
     ParseError(String),
+    /// Invalid EXTRACT field for the given value type
+    InvalidExtractField {
+        field: String,
+        value_type: String,
+    },
     Other(String),
 }
 
@@ -504,6 +509,13 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::ParseError(msg) => {
                 write!(f, "Parse error: {}", msg)
+            }
+            ExecutorError::InvalidExtractField { field, value_type } => {
+                write!(
+                    f,
+                    "Cannot extract {} from {} value",
+                    field, value_type
+                )
             }
             ExecutorError::Other(msg) => write!(f, "{}", msg),
         }

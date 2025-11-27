@@ -80,6 +80,7 @@ impl SelectExecutor<'_> {
             | vibesql_ast::Expression::IsNull { .. }
             | vibesql_ast::Expression::Position { .. }
             | vibesql_ast::Expression::Trim { .. }
+            | vibesql_ast::Expression::Extract { .. }
             | vibesql_ast::Expression::Interval { .. } => {
                 simple::evaluate(self, expr, group_rows, group_key, evaluator)
             }
