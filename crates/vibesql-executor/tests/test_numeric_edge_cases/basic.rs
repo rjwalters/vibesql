@@ -149,13 +149,11 @@ fn test_sign_float_zero() {
 
 #[test]
 fn test_mod_by_zero() {
+    // MySQL and SQLite return NULL for MOD(x, 0), not an error
     let (evaluator, row) = create_test_evaluator();
-    assert_function_errors(
-        &evaluator,
-        &row,
-        "MOD",
-        vec![SqlValue::Integer(10), SqlValue::Integer(0)],
-    );
+    let expr = create_function_expr("MOD", vec![SqlValue::Integer(10), SqlValue::Integer(0)]);
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, SqlValue::Null, "MOD by zero should return NULL");
 }
 
 #[test]

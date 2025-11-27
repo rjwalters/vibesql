@@ -333,18 +333,18 @@ mod tests {
     fn test_set_sql_mode_changes_mode() {
         let mut db = Database::new();
 
-        // Default is MySQL
-        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
-
-        // Change to SQLite
-        db.set_sql_mode(SqlMode::SQLite);
+        // Default is SQLite (for SQLLogicTest compatibility)
         assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
-        // Change back to MySQL
+        // Change to MySQL
         db.set_sql_mode(SqlMode::MySQL {
             flags: MySqlModeFlags::default(),
         });
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+
+        // Change back to SQLite
+        db.set_sql_mode(SqlMode::SQLite);
+        assert!(matches!(db.sql_mode(), SqlMode::SQLite));
     }
 
     #[test]
@@ -414,14 +414,16 @@ mod tests {
     fn test_sql_mode_affects_subsequent_queries() {
         let mut db = Database::new();
 
-        // Start in MySQL mode
-        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+        // Start in SQLite mode (default for SQLLogicTest compatibility)
+        assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
-        // Switch to SQLite
-        db.set_sql_mode(SqlMode::SQLite);
+        // Switch to MySQL
+        db.set_sql_mode(SqlMode::MySQL {
+            flags: MySqlModeFlags::default(),
+        });
 
         // Verify the mode is available for query execution
         let mode = db.sql_mode();
-        assert!(matches!(mode, SqlMode::SQLite));
+        assert!(matches!(mode, SqlMode::MySQL { .. }));
     }
 }

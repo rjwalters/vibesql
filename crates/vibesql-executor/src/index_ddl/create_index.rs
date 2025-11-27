@@ -42,6 +42,7 @@ impl CreateIndexExecutor {
     ///     columns: vec![IndexColumn {
     ///         column_name: "email".to_string(),
     ///         direction: OrderDirection::Asc,
+    ///         prefix_length: None,
     ///     }],
     /// };
     ///
