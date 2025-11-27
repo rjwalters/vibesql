@@ -242,8 +242,13 @@ fn test_eval_multiplication() {
 
 #[test]
 fn test_eval_division() {
+    // Use MySQL mode to get Numeric result from integer division
+    let mut db = vibesql_storage::Database::new();
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL {
+        flags: vibesql_types::MySqlModeFlags::default(),
+    });
     let schema = vibesql_catalog::TableSchema::new("test".to_string(), vec![]);
-    let evaluator = ExpressionEvaluator::new(&schema);
+    let evaluator = ExpressionEvaluator::with_database(&schema, &db);
     let row = vibesql_storage::Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::BinaryOp {

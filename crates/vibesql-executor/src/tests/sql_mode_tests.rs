@@ -35,10 +35,10 @@ mod tests {
     fn test_set_sql_mode_mysql() {
         let mut db = Database::new();
 
-        // Default is SQLite mode (for sqllogictest compatibility)
+        // Default is SQLite mode (for SQLLogicTest compatibility)
         assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
-        // Set to mysql mode
+        // Set to mysql
         let result = execute_set_variable(&mut db, "SET sql_mode = 'mysql'").unwrap();
         assert!(result.contains("mysql"));
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));

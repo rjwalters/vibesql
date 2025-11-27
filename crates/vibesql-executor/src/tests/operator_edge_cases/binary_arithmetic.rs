@@ -7,7 +7,11 @@ use crate::*;
 
 #[test]
 fn test_nested_arithmetic() {
-    let db = vibesql_storage::Database::new();
+    // Use MySQL mode for Numeric division result
+    let mut db = vibesql_storage::Database::new();
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL {
+        flags: vibesql_types::MySqlModeFlags::default(),
+    });
     let executor = SelectExecutor::new(&db);
 
     // SELECT ((5 + 3) * 2) - (10 / 2)
