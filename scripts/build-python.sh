@@ -22,13 +22,15 @@ fi
 PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
 echo "✓ Found Python $PYTHON_VERSION"
 
-# Check if maturin is installed
-if ! command -v maturin &> /dev/null; then
+# Check if maturin is available (either as command or via python -m)
+if ! python3 -m maturin --version &> /dev/null; then
     echo ""
     echo "⚠️  maturin is not installed"
     echo "Installing maturin..."
-    pip install maturin
+    pip3 install maturin
     echo "✓ maturin installed"
+else
+    echo "✓ Found maturin $(python3 -m maturin --version 2>&1 | head -1)"
 fi
 
 echo ""
@@ -38,8 +40,8 @@ echo "------------------------"
 # Navigate to Python bindings directory
 cd "$PYTHON_BINDINGS_DIR"
 
-# Build the wheel in release mode
-maturin build --release
+# Build the wheel in release mode (use python3 -m to ensure we find maturin)
+python3 -m maturin build --release
 
 echo ""
 echo "✓ Build complete!"
