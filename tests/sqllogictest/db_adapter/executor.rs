@@ -37,8 +37,9 @@ pub fn execute_sql(
             batching_manager.commit_if_needed(db)?;
 
             // Try cache first if enabled
+            // Include SqlMode in signature to prevent cross-dialect cache hits
             if cache_manager.enabled {
-                let signature = cache_manager.get_signature(sql);
+                let signature = cache_manager.get_signature_with_mode(sql, &db.sql_mode());
                 if let Some((cached_rows, _schema)) = cache_manager.cache.get(&signature) {
                     cache_manager.record_hit();
                     return format_query_result(cached_rows);
@@ -70,11 +71,12 @@ pub fn execute_sql(
             }
 
             // Cache the result if cache is enabled
+            // Include SqlMode in signature to prevent cross-dialect cache hits
             if cache_manager.enabled {
                 use vibesql_catalog::{ColumnSchema, TableSchema};
                 use vibesql_executor::schema::CombinedSchema;
 
-                let signature = cache_manager.get_signature(sql);
+                let signature = cache_manager.get_signature_with_mode(sql, &db.sql_mode());
 
                 // Create a simple schema from the result rows
                 let schema = if let Some(first_row) = rows.first() {

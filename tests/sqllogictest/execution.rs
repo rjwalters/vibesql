@@ -6,7 +6,7 @@ use sqllogictest::{Runner, SqlDialect};
 use tokio::time::timeout;
 
 use super::{
-    db_adapter::VibeSqlDB, preprocessing::preprocess_for_mysql,
+    db_adapter::VibeSqlDB,
     scheduler, stats::TestFailure,
 };
 
@@ -31,7 +31,6 @@ impl std::error::Error for TestError {}
 
 /// Run a test file asynchronously and capture detailed failure information
 async fn run_test_file_async(contents: &str, file_name: &str) -> (Result<(), TestError>, Vec<TestFailure>) {
-    let preprocessed = preprocess_for_mysql(contents);
     let mut tester = Runner::new(|| async { Ok(VibeSqlDB::new()) });
     // Enable hash mode with threshold of 8 (standard SQLLogicTest behavior)
     tester.with_hash_threshold(8);
@@ -47,9 +46,9 @@ async fn run_test_file_async(contents: &str, file_name: &str) -> (Result<(), Tes
     let script = if file_name.starts_with("random/") {
         // Set SQLite mode and update internal tracking
         tester.with_default_dialect(SqlDialect::SQLite);
-        format!("statement ok\nSET SQL_MODE = 'sqlite'\n\n{}", preprocessed)
+        format!("statement ok\nSET SQL_MODE = 'sqlite'\n\n{}", contents)
     } else {
-        preprocessed
+        contents.to_string()
     };
 
     match tester.run_script(&script) {
