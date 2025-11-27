@@ -1,6 +1,7 @@
 //! Test result statistics and failure information tracking.
 
 use std::collections::HashSet;
+use sqllogictest::DialectStats;
 
 /// Detailed failure information for a single test file
 #[allow(dead_code)]
@@ -26,6 +27,8 @@ pub struct TestStats {
     pub tested_files: HashSet<String>, // Files that were actually tested this run
     pub detailed_failures: Vec<(String, Vec<TestFailure>)>, // (file_path, failures) pairs
     pub timed_out_files: Vec<String>, // Files that timed out
+    /// Per-dialect statistics (MySQL vs SQLite mode)
+    pub dialect_stats: DialectStats,
 }
 
 impl TestStats {
@@ -37,5 +40,11 @@ impl TestStats {
         } else {
             (self.passed as f64 / relevant_total as f64) * 100.0
         }
+    }
+
+    /// Merge dialect stats from another DialectStats into this TestStats
+    #[allow(dead_code)]
+    pub fn merge_dialect_stats(&mut self, other: &DialectStats) {
+        self.dialect_stats.merge(other);
     }
 }

@@ -164,10 +164,12 @@ fn run_test_suite() -> (HashMap<String, TestStats>, usize) {
         let _test_start = Instant::now();
 
         // Create a new database for each test file and run with detailed failure capture
-        let (test_result, detailed_failures) =
-            run_test_file_with_details(&contents, &relative_path);
+        let test_file_result = run_test_file_with_details(&contents, &relative_path);
 
-        match test_result {
+        // Merge dialect stats from this test file
+        stats.merge_dialect_stats(&test_file_result.dialect_stats);
+
+        match test_file_result.result {
             Ok(_) => {
                 stats.passed += 1;
             }
@@ -182,7 +184,7 @@ fn run_test_suite() -> (HashMap<String, TestStats>, usize) {
                 stats.failed += 1;
                 // Always track failed files, even if detailed_failures is empty
                 // This ensures accurate pass/fail reporting in JSON output
-                stats.detailed_failures.push((relative_path.clone(), detailed_failures));
+                stats.detailed_failures.push((relative_path.clone(), test_file_result.failures));
             }
         }
     }
@@ -202,16 +204,15 @@ fn main() {
     if env::var("SELECT1_ONLY").is_ok() {
         let test_file = PathBuf::from("third_party/sqllogictest/test/select1.test");
         let contents = std::fs::read_to_string(&test_file).expect("Failed to read select1.test");
-        let (test_result, detailed_failures) =
-            run_test_file_with_details(&contents, "select1.test");
+        let test_file_result = run_test_file_with_details(&contents, "select1.test");
 
-        match test_result {
+        match test_file_result.result {
             Ok(_) => {
                 // Success message already printed
             }
             Err(_) => {
                 // Error message already printed
-                for failure in detailed_failures {
+                for failure in test_file_result.failures {
                     println!("  SQL: {}", failure.sql_statement);
                     println!("  Expected: {:?}", failure.expected_result);
                     println!("  Actual: {:?}", failure.actual_result);
@@ -265,6 +266,7 @@ fn main() {
             grand_total.timed_out += stats.timed_out;
             grand_total.errors += stats.errors;
             grand_total.skipped += stats.skipped;
+            grand_total.merge_dialect_stats(&stats.dialect_stats);
             all_tested_files.extend(stats.tested_files.clone());
         }
     }
@@ -280,6 +282,51 @@ fn main() {
         grand_total.errors,
         grand_total.skipped,
         grand_total.pass_rate()
+    );
+
+    // Print dialect breakdown
+    println!("\n=== Dialect Breakdown ===");
+    let ds = &grand_total.dialect_stats;
+    let mysql_total = ds.mysql_total();
+    let sqlite_total = ds.sqlite_total();
+    let mysql_pass_rate = if mysql_total > 0 {
+        (ds.mysql_passed as f64 / mysql_total as f64) * 100.0
+    } else {
+        0.0
+    };
+    let sqlite_pass_rate = if sqlite_total > 0 {
+        (ds.sqlite_passed as f64 / sqlite_total as f64) * 100.0
+    } else {
+        0.0
+    };
+    println!(
+        "{:<20} {:>12} {:>12} {:>12} {:>10}",
+        "Dialect", "Total", "Passed", "Failed", "Pass Rate"
+    );
+    println!("{}", "-".repeat(70));
+    println!(
+        "{:<20} {:>12} {:>12} {:>12} {:>9.1}%",
+        "MySQL mode",
+        mysql_total,
+        ds.mysql_passed,
+        ds.mysql_failed,
+        mysql_pass_rate
+    );
+    println!(
+        "{:<20} {:>12} {:>12} {:>12} {:>9.1}%",
+        "SQLite mode",
+        sqlite_total,
+        ds.sqlite_passed,
+        ds.sqlite_failed,
+        sqlite_pass_rate
+    );
+    println!("{}", "-".repeat(70));
+    println!(
+        "{:<20} {:>12} {:>12} {:>12}",
+        "TOTAL (records)",
+        ds.total(),
+        ds.mysql_passed + ds.sqlite_passed,
+        ds.mysql_failed + ds.sqlite_failed
     );
 
     println!(
@@ -314,6 +361,21 @@ fn main() {
             "pass_rate": grand_total.pass_rate(),
             "total_available_files": total_available_files,
             "tested_files": tested_files_vec.len(),
+        },
+        "dialect_stats": {
+            "mysql": {
+                "total": mysql_total,
+                "passed": ds.mysql_passed,
+                "failed": ds.mysql_failed,
+                "pass_rate": mysql_pass_rate
+            },
+            "sqlite": {
+                "total": sqlite_total,
+                "passed": ds.sqlite_passed,
+                "failed": ds.sqlite_failed,
+                "pass_rate": sqlite_pass_rate
+            },
+            "total_records": ds.total()
         },
         "tested_files": {
             "passed": results.values().flat_map(|s| &s.tested_files).filter(|f| {

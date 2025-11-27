@@ -166,6 +166,59 @@ impl SqlDialect {
     }
 }
 
+/// Statistics tracking tests executed per SQL dialect.
+#[derive(Debug, Clone, Default)]
+pub struct DialectStats {
+    /// Number of tests that passed in MySQL mode.
+    pub mysql_passed: usize,
+    /// Number of tests that failed in MySQL mode.
+    pub mysql_failed: usize,
+    /// Number of tests that passed in SQLite mode.
+    pub sqlite_passed: usize,
+    /// Number of tests that failed in SQLite mode.
+    pub sqlite_failed: usize,
+}
+
+impl DialectStats {
+    /// Create new empty dialect stats.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a test result for the given dialect.
+    pub fn record(&mut self, dialect: &SqlDialect, passed: bool) {
+        match (dialect, passed) {
+            (SqlDialect::MySQL, true) => self.mysql_passed += 1,
+            (SqlDialect::MySQL, false) => self.mysql_failed += 1,
+            (SqlDialect::SQLite, true) => self.sqlite_passed += 1,
+            (SqlDialect::SQLite, false) => self.sqlite_failed += 1,
+        }
+    }
+
+    /// Total tests run in MySQL mode.
+    pub fn mysql_total(&self) -> usize {
+        self.mysql_passed + self.mysql_failed
+    }
+
+    /// Total tests run in SQLite mode.
+    pub fn sqlite_total(&self) -> usize {
+        self.sqlite_passed + self.sqlite_failed
+    }
+
+    /// Total tests run across all dialects.
+    pub fn total(&self) -> usize {
+        self.mysql_total() + self.sqlite_total()
+    }
+
+    /// Merge another DialectStats into this one.
+    pub fn merge(&mut self, other: &DialectStats) {
+        self.mysql_passed += other.mysql_passed;
+        self.mysql_failed += other.mysql_failed;
+        self.sqlite_passed += other.sqlite_passed;
+        self.sqlite_failed += other.sqlite_failed;
+    }
+}
+
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     pub(super) conn: Connections<D, M>,
@@ -190,6 +243,8 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     pub(super) auto_switch_dialect: bool,
     /// Current SQL dialect being used.
     pub(super) current_dialect: SqlDialect,
+    /// Statistics tracking tests executed per dialect.
+    pub(super) dialect_stats: DialectStats,
 }
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
@@ -211,6 +266,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             locals: RunnerLocals::default(),
             auto_switch_dialect: false,
             current_dialect: SqlDialect::default(),
+            dialect_stats: DialectStats::default(),
         }
     }
 
@@ -257,6 +313,21 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Check if auto dialect switching is enabled.
     pub fn is_auto_switch_dialect_enabled(&self) -> bool {
         self.auto_switch_dialect
+    }
+
+    /// Get the dialect statistics (tests run per dialect).
+    pub fn dialect_stats(&self) -> &DialectStats {
+        &self.dialect_stats
+    }
+
+    /// Get a mutable reference to dialect statistics.
+    pub fn dialect_stats_mut(&mut self) -> &mut DialectStats {
+        &mut self.dialect_stats
+    }
+
+    /// Reset dialect statistics to zero.
+    pub fn reset_dialect_stats(&mut self) {
+        self.dialect_stats = DialectStats::default();
     }
 
     /// Set a local variable for substitution.
