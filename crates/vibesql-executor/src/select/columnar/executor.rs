@@ -2,6 +2,8 @@
 //!
 //! This module provides true columnar query execution that operates on `ColumnarBatch`
 //! throughout the entire pipeline, avoiding row materialization until final output.
+
+#![allow(clippy::needless_range_loop, clippy::unnecessary_map_or)]
 //!
 //! ## Architecture
 //!

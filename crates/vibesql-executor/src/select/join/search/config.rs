@@ -1,5 +1,7 @@
 //! Configuration for join order search
 
+#![allow(clippy::unnecessary_literal_unwrap)]
+
 /// Configuration for parallel join order search
 #[derive(Debug, Clone)]
 pub struct ParallelSearchConfig {

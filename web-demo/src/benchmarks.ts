@@ -35,8 +35,12 @@ interface BenchmarkResults {
 
 /**
  * Format time in appropriate units
+ * Returns null for failed/timeout queries (negative values)
  */
-function formatTime(seconds: number): string {
+function formatTime(seconds: number): string | null {
+  if (seconds < 0) {
+    return null; // Failed or timeout
+  }
   if (seconds < 0.001) {
     return `${(seconds * 1_000_000).toFixed(2)} µs`;
   } else if (seconds < 1) {
@@ -178,26 +182,53 @@ function renderResultsTable(data: BenchmarkResults) {
     // vibesql time
     const vibesqlCell = document.createElement('td');
     vibesqlCell.className = 'px-4 py-3 text-right text-muted';
-    vibesqlCell.textContent = vibesql ? formatTime(vibesql.stats.mean) : 'N/A';
+    const vibesqlTime = vibesql ? formatTime(vibesql.stats.mean) : null;
+    if (vibesqlTime) {
+      vibesqlCell.textContent = vibesqlTime;
+    } else if (vibesql && vibesql.stats.mean < 0) {
+      vibesqlCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
+    } else {
+      vibesqlCell.textContent = 'N/A';
+    }
     row.appendChild(vibesqlCell);
 
     // SQLite time
     const sqliteCell = document.createElement('td');
     sqliteCell.className = 'px-4 py-3 text-right text-muted';
-    sqliteCell.textContent = sqlite ? formatTime(sqlite.stats.mean) : 'N/A';
+    const sqliteTime = sqlite ? formatTime(sqlite.stats.mean) : null;
+    if (sqliteTime) {
+      sqliteCell.textContent = sqliteTime;
+    } else if (sqlite && sqlite.stats.mean < 0) {
+      sqliteCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
+    } else {
+      sqliteCell.textContent = 'N/A';
+    }
     row.appendChild(sqliteCell);
 
     // DuckDB time
     const duckdbCell = document.createElement('td');
     duckdbCell.className = 'px-4 py-3 text-right text-muted';
-    duckdbCell.textContent = duckdb ? formatTime(duckdb.stats.mean) : 'N/A';
+    const duckdbTime = duckdb ? formatTime(duckdb.stats.mean) : null;
+    if (duckdbTime) {
+      duckdbCell.textContent = duckdbTime;
+    } else if (duckdb && duckdb.stats.mean < 0) {
+      duckdbCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
+    } else {
+      duckdbCell.textContent = 'N/A';
+    }
     row.appendChild(duckdbCell);
 
     // Speedup vs SQLite
     const speedupCell = document.createElement('td');
     speedupCell.className = 'px-4 py-3 text-right font-semibold';
 
-    if (vibesql && sqlite) {
+    // Check if vibesql query failed
+    const vibesqlFailed = vibesql && vibesql.stats.mean < 0;
+
+    if (vibesqlFailed) {
+      speedupCell.textContent = 'FAILED';
+      speedupCell.className += ' text-red-600 dark:text-red-400';
+    } else if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
       const speedup = calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
       speedupCell.textContent = `${speedup.toFixed(2)}x`;
 
@@ -222,7 +253,10 @@ function renderResultsTable(data: BenchmarkResults) {
     const winnerCell = document.createElement('td');
     winnerCell.className = 'px-4 py-3 text-center text-2xl';
 
-    if (vibesql && sqlite) {
+    if (vibesqlFailed) {
+      winnerCell.textContent = '❌';
+      winnerCell.title = 'Query failed (timeout or error)';
+    } else if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
       const speedup = calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
       winnerCell.textContent = speedup > 1 ? '🚀' : speedup < 1 ? '🐌' : '🤝';
     } else {
@@ -283,7 +317,12 @@ function renderChart(data: BenchmarkResults) {
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
 
-    if (vibesql || sqlite || duckdb) {
+    // Skip failed queries (negative mean) in the chart
+    const vibesqlValid = vibesql && vibesql.stats.mean > 0;
+    const sqliteValid = sqlite && sqlite.stats.mean > 0;
+    const duckdbValid = duckdb && duckdb.stats.mean > 0;
+
+    if (vibesqlValid || sqliteValid || duckdbValid) {
       // Get label - prefer TPC-H query number if available
       let label = operation.replace(/_/g, ' ').toUpperCase();
       const firstBench = vibesql || sqlite || duckdb;
@@ -295,9 +334,9 @@ function renderChart(data: BenchmarkResults) {
       }
 
       labels.push(label);
-      vibesqlData.push(vibesql ? vibesql.stats.mean * 1000 : 0); // Convert to ms
-      sqliteData.push(sqlite ? sqlite.stats.mean * 1000 : 0);
-      duckdbData.push(duckdb ? duckdb.stats.mean * 1000 : 0);
+      vibesqlData.push(vibesqlValid ? vibesql!.stats.mean * 1000 : 0); // Convert to ms
+      sqliteData.push(sqliteValid ? sqlite!.stats.mean * 1000 : 0);
+      duckdbData.push(duckdbValid ? duckdb!.stats.mean * 1000 : 0);
     }
   }
 

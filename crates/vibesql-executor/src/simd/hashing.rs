@@ -3,6 +3,8 @@
 //! This module provides SIMD-optimized hash functions for common data types
 //! used in JOIN operations. It achieves 2-4x speedup over scalar hashing by
 //! processing multiple keys simultaneously.
+
+#![allow(clippy::manual_hash_one)]
 //!
 //! # Features
 //!

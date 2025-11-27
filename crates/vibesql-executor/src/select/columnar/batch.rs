@@ -2,6 +2,10 @@
 //!
 //! This module implements true columnar storage with type-specialized column arrays
 //! optimized for SIMD operations and cache locality.
+//!
+//! Note: Index-based iteration is used in some places for performance (better vectorization).
+
+#![allow(clippy::needless_range_loop)]
 
 use crate::errors::ExecutorError;
 use vibesql_storage::Row;

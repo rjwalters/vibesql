@@ -3,6 +3,8 @@
 //! This module provides reusable constraint validation that can be used by
 //! CREATE TABLE, ALTER TABLE, and other DDL executors.
 
+#![allow(clippy::new_without_default)]
+
 use vibesql_ast::{ColumnConstraintKind, ColumnDef, Expression, TableConstraint, TableConstraintKind};
 use vibesql_catalog::{ColumnSchema, TableSchema};
 

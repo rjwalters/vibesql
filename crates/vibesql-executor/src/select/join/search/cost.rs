@@ -4,6 +4,8 @@
 //! guide the search algorithm in selecting optimal join orders by predicting
 //! the expense of different join sequences.
 
+#![allow(clippy::doc_lazy_continuation)]
+
 use std::collections::{BTreeSet, HashMap};
 
 use super::context::JoinOrderContext;
@@ -84,6 +86,7 @@ impl JoinOrderContext {
     /// memory explosions in queries like TPC-H Q9 where partsupp has TWO join conditions:
     /// - ps_suppkey = l_suppkey (selectivity ~0.01)
     /// - ps_partkey = l_partkey (selectivity ~0.05)
+    ///
     /// Combined: 0.01 × 0.05 = 0.0005 (much more selective!)
     pub(super) fn compute_edge_selectivities(
         edges: &[super::super::reorder::JoinEdge],
@@ -244,14 +247,16 @@ impl JoinOrderContext {
 
         // Verbose logging for debugging join order decisions
         if self.config.verbose {
+            let left_desc = if joined_tables.is_empty() {
+                "(start)".to_string()
+            } else {
+                format!("{{{}}}({} rows)", joined_tables.iter().cloned().collect::<Vec<_>>().join(","), left_cardinality)
+            };
+            let right_desc = format!("{}({} rows)", next_table, right_cardinality);
             eprintln!(
                 "[JOIN_COST] {} + {} -> output={}, ops={}, selectivity={:.6}, type={:?}",
-                if joined_tables.is_empty() {
-                    "(start)".to_string()
-                } else {
-                    format!("{{{}}}({} rows)", joined_tables.iter().cloned().collect::<Vec<_>>().join(","), left_cardinality)
-                },
-                format!("{}({} rows)", next_table, right_cardinality),
+                left_desc,
+                right_desc,
                 output_cardinality,
                 operations,
                 selectivity,

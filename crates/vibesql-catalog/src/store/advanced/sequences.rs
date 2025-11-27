@@ -1,5 +1,7 @@
 //! Sequence management methods.
 
+#![allow(clippy::only_used_in_recursion)]
+
 use crate::{advanced_objects::Sequence, errors::CatalogError};
 
 impl super::super::Catalog {

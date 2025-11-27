@@ -2,6 +2,8 @@
 //!
 //! This module provides vectorized date and timestamp operations that leverage Arrow's
 //! SIMD-optimized temporal kernels for 4-8x performance improvements on date-heavy queries.
+
+#![allow(clippy::bind_instead_of_map)]
 //!
 //! ## Supported Operations
 //!

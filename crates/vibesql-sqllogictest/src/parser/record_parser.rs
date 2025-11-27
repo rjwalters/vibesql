@@ -1,5 +1,7 @@
 //! Parsing of individual SQL record types (statement, query, system).
 
+#![allow(clippy::while_let_loop)]
+
 use std::fmt;
 use std::iter::Peekable;
 

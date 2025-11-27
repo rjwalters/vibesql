@@ -2,6 +2,8 @@
 // Database Configuration
 // ============================================================================
 
+#![allow(clippy::identity_op)]
+
 /// Default columnar cache budget (256MB)
 pub const DEFAULT_COLUMNAR_CACHE_BUDGET: usize = 256 * 1024 * 1024;
 

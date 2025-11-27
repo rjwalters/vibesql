@@ -7,6 +7,8 @@
 //! - Predicate pushdown for WHERE clause optimization
 //! - Join order optimization (enabled by default for 3+ table joins)
 
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::HashMap;
 
 use super::{cte::CteResult, join::FromResult};

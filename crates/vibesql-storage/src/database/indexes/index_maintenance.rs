@@ -2,6 +2,8 @@
 // Index Maintenance - CRUD operations for indexes
 // ============================================================================
 
+#![allow(clippy::doc_overindented_list_items)]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

@@ -169,6 +169,7 @@ mod tests {
                 pipes_as_concat: true,
                 ansi_quotes: true,
                 strict_mode: true,
+                ..Default::default()
             },
         });
 

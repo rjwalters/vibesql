@@ -1,5 +1,11 @@
 //! Transform IN/EXISTS subqueries to semi/anti-joins
 //!
+//! Note: Some clone_on_copy lints are suppressed because the code is clearer
+//! with explicit clones for operators that may not be Copy in future.
+
+#![allow(clippy::clone_on_copy)]
+
+//!
 //! This module transforms decorrelated IN/NOT IN/EXISTS/NOT EXISTS subqueries
 //! in the WHERE clause into SEMI/ANTI joins in the FROM clause, enabling
 //! efficient hash-based join execution instead of row-by-row subquery evaluation.

@@ -59,6 +59,7 @@ node_modules/
 
 # Benchmark results
 benchmark_results.json
+!web-demo/public/benchmarks/benchmark_results.json
 conformance-report.html
 target/benchmarks/
 benchmarks.db

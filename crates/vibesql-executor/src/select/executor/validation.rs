@@ -4,6 +4,8 @@
 //! against the available schema BEFORE row processing begins. This ensures
 //! that column errors are caught even when tables are empty.
 
+#![allow(clippy::collapsible_if)]
+
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 use vibesql_ast::{Expression, SelectItem};
 

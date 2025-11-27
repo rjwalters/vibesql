@@ -3,6 +3,8 @@
 //! This module analyzes predicates to determine optimal join orderings.
 //! The goal is to maximize row reduction early in the join chain to minimize
 //! intermediate result size during cascade joins.
+
+#![allow(clippy::only_used_in_recursion)]
 //!
 //! ## Example
 //!

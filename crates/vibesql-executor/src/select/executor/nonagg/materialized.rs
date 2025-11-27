@@ -7,6 +7,8 @@
 //!
 //! The execution path includes optimizations like SIMD filtering and spatial indexes.
 
+#![allow(clippy::ptr_arg)]
+
 use super::{builder::SelectExecutor, simd::try_simd_filter, validation::validate_select_column_references_with_context};
 #[cfg(feature = "spatial")]
 use super::super::index_optimization::try_spatial_index_optimization;

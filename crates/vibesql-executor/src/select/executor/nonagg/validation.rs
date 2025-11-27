@@ -7,6 +7,8 @@
 //! These validations happen before row iteration, ensuring proper error messages
 //! even when there are no rows to process.
 
+#![allow(clippy::needless_return, clippy::collapsible_if)]
+
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Validate IN subqueries in WHERE clause before row iteration
