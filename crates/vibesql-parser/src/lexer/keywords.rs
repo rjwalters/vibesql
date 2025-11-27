@@ -44,6 +44,7 @@ pub(super) fn map_keyword(upper_text: String) -> Token {
         "CUBE" => Token::Keyword(Keyword::Cube),
         "SETS" => Token::Keyword(Keyword::Sets),
         "GROUPING" => Token::Keyword(Keyword::Grouping),
+        "GROUPING_ID" => Token::Keyword(Keyword::GroupingId),
         "HAVING" => Token::Keyword(Keyword::Having),
         "ORDER" => Token::Keyword(Keyword::Order),
         "ASC" => Token::Keyword(Keyword::Asc),
