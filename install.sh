@@ -235,34 +235,6 @@ else
     missing+=("docker")
 fi
 
-# Check Docker (for MySQL/PostgreSQL compatibility testing)
-print_status "Checking Docker..."
-if command_exists docker; then
-    if docker info &> /dev/null; then
-        print_success "Docker is installed and running ($(docker --version | cut -d' ' -f3 | tr -d ','))"
-    else
-        print_warning "Docker is installed but not running"
-        missing+=("docker-running")
-    fi
-else
-    print_warning "Docker is not installed (needed for: MySQL/PostgreSQL compatibility testing)"
-    missing+=("docker")
-fi
-
-# Check Docker (for MySQL/PostgreSQL compatibility testing)
-print_status "Checking Docker..."
-if command_exists docker; then
-    if docker info &> /dev/null; then
-        print_success "Docker is installed and running ($(docker --version | cut -d' ' -f3 | tr -d ','))"
-    else
-        print_warning "Docker is installed but not running"
-        missing+=("docker-running")
-    fi
-else
-    print_warning "Docker is not installed (needed for: MySQL/PostgreSQL compatibility testing)"
-    missing+=("docker")
-fi
-
 echo ""
 
 # If check only mode, exit here
@@ -307,6 +279,39 @@ if [[ " ${missing[*]} " =~ " rust " ]]; then
     print_status "Installing Rust via rustup..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     source "$HOME/.cargo/env"
+
+    # Add cargo to shell profile if not already present
+    add_cargo_to_profile() {
+        local profile="$1"
+        if [[ -f "$profile" ]]; then
+            if ! grep -q 'cargo/env' "$profile"; then
+                echo '' >> "$profile"
+                echo '# Rust/Cargo environment (added by VibeSQL install.sh)' >> "$profile"
+                echo '. "$HOME/.cargo/env"' >> "$profile"
+                print_success "Added cargo to $profile"
+            fi
+        fi
+    }
+
+    # Detect shell and update appropriate profile
+    case "$SHELL" in
+        */zsh)
+            add_cargo_to_profile "$HOME/.zshrc"
+            ;;
+        */bash)
+            # macOS uses .bash_profile for login shells
+            if [[ -f "$HOME/.bash_profile" ]]; then
+                add_cargo_to_profile "$HOME/.bash_profile"
+            else
+                add_cargo_to_profile "$HOME/.bashrc"
+            fi
+            ;;
+        *)
+            # Try common profiles
+            add_cargo_to_profile "$HOME/.profile"
+            ;;
+    esac
+
     print_success "Rust installed"
 fi
 
@@ -458,7 +463,9 @@ echo ""
 
 # Check if shell needs to be reloaded for Rust
 if [[ " ${missing[*]} " =~ " rust " ]]; then
-    echo -e "${YELLOW}Note:${NC} You may need to restart your terminal or run:"
+    echo -e "${YELLOW}IMPORTANT:${NC} Rust was installed. To use it in this terminal, run:"
     echo "  source ~/.cargo/env"
+    echo ""
+    echo "Future terminal sessions will automatically have cargo in PATH."
     echo ""
 fi
