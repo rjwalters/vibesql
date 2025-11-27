@@ -130,8 +130,8 @@ fn test_drop_table_with_data() {
 fn test_drop_and_recreate_table() {
     let mut db = Database::new();
 
-    // Create table
-    let create_sql = "CREATE TABLE temp (id INTEGER);";
+    // Create table (use "test_temp" to avoid conflict with TEMP keyword)
+    let create_sql = "CREATE TABLE test_temp (id INTEGER);";
     let create_stmt = Parser::parse_sql(create_sql).unwrap();
 
     if let vibesql_ast::Statement::CreateTable(stmt) = create_stmt {
@@ -139,17 +139,17 @@ fn test_drop_and_recreate_table() {
     }
 
     // Insert data
-    let insert_sql = "INSERT INTO temp VALUES (42);";
+    let insert_sql = "INSERT INTO test_temp VALUES (42);";
     let insert_stmt = Parser::parse_sql(insert_sql).unwrap();
 
     if let vibesql_ast::Statement::Insert(stmt) = insert_stmt {
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
 
-    assert_eq!(db.get_table("TEMP").unwrap().row_count(), 1);
+    assert_eq!(db.get_table("TEST_TEMP").unwrap().row_count(), 1);
 
     // Drop table
-    let drop_sql = "DROP TABLE temp;";
+    let drop_sql = "DROP TABLE test_temp;";
     let drop_stmt = Parser::parse_sql(drop_sql).unwrap();
 
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
@@ -157,7 +157,7 @@ fn test_drop_and_recreate_table() {
     }
 
     // Recreate table
-    let create_sql2 = "CREATE TABLE temp (id INTEGER, name VARCHAR(50));";
+    let create_sql2 = "CREATE TABLE test_temp (id INTEGER, name VARCHAR(50));";
     let create_stmt2 = Parser::parse_sql(create_sql2).unwrap();
 
     if let vibesql_ast::Statement::CreateTable(stmt) = create_stmt2 {
@@ -165,9 +165,9 @@ fn test_drop_and_recreate_table() {
     }
 
     // New table should be empty
-    assert!(db.catalog.table_exists("TEMP"));
-    assert_eq!(db.get_table("TEMP").unwrap().row_count(), 0);
-    assert_eq!(db.get_table("TEMP").unwrap().schema.column_count(), 2);
+    assert!(db.catalog.table_exists("TEST_TEMP"));
+    assert_eq!(db.get_table("TEST_TEMP").unwrap().row_count(), 0);
+    assert_eq!(db.get_table("TEST_TEMP").unwrap().schema.column_count(), 2);
 }
 
 #[test]

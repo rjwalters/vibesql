@@ -170,9 +170,15 @@ fn parse_json_examples(
 
     // Parse the JSON
     let json: serde_json::Value = serde_json::from_str(content)?;
-    let category_obj = json.as_object().ok_or("JSON root must be an object")?;
+    let root_obj = json.as_object().ok_or("JSON root must be an object")?;
 
-    for (example_id, example_value) in category_obj {
+    // Examples are nested under the "examples" key
+    let examples_obj = root_obj
+        .get("examples")
+        .and_then(|v| v.as_object())
+        .ok_or("JSON must have an 'examples' object")?;
+
+    for (example_id, example_value) in examples_obj {
         let example_obj =
             example_value.as_object().ok_or(format!("Example {} must be an object", example_id))?;
 

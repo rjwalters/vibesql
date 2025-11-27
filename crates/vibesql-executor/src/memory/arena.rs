@@ -29,6 +29,7 @@ use std::ptr;
 ///
 /// ```rust
 /// use vibesql_executor::memory::QueryArena;
+/// use std::mem::MaybeUninit;
 ///
 /// let arena = QueryArena::with_capacity(1024);
 ///
@@ -36,10 +37,10 @@ use std::ptr;
 /// let x = arena.alloc(42i64);
 /// assert_eq!(*x, 42);
 ///
-/// // Allocate a slice
+/// // Allocate a slice (returns uninitialized memory)
 /// let slice = arena.alloc_slice::<i32>(10);
 /// for i in 0..10 {
-///     slice[i] = i as i32;
+///     slice[i] = MaybeUninit::new(i as i32);
 /// }
 /// ```
 pub struct QueryArena {
@@ -305,8 +306,8 @@ impl QueryArena {
     ///
     /// let mut arena = QueryArena::new();
     ///
-    /// // Allocate some values
-    /// let x = arena.alloc(42);
+    /// // Allocate some values (i64 = 8 bytes)
+    /// let x = arena.alloc(42i64);
     /// assert_eq!(arena.used_bytes(), 8);
     ///
     /// // Reset and reuse
@@ -314,7 +315,7 @@ impl QueryArena {
     /// assert_eq!(arena.used_bytes(), 0);
     ///
     /// // Can allocate again
-    /// let y = arena.alloc(100);
+    /// let y = arena.alloc(100i64);
     /// ```
     pub fn reset(&mut self) {
         self.offset.set(0);

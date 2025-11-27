@@ -13,7 +13,7 @@
 //!
 //! Implement [`DB`] trait for your database structure:
 //!
-//! ```
+//! ```no_run
 //! struct MyDatabase {
 //!     // fields
 //! }
