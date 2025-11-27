@@ -96,9 +96,24 @@ fn extract_tables_recursive_branch(
             let else_ok = else_result.as_ref().is_none_or(|else_res| extract_tables_recursive_branch(else_res, schema, tables));
             op_ok && when_ok && else_ok
         }
-        vibesql_ast::Expression::In { .. } => {
-            // IN with subquery: may be correlated, treat as complex
-            false
+        vibesql_ast::Expression::In { expr, subquery, .. } => {
+            // IN with subquery: check if non-correlated
+            // Non-correlated subqueries can be pushed down as table-local predicates
+            // because they can be evaluated independently (and cached)
+            //
+            // For example, in Q18:
+            //   WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300)
+            // The subquery is non-correlated, so this can be pushed down to filter the orders table
+            // during the scan phase, significantly reducing the join input size.
+            if !crate::correlation::is_correlated(subquery, schema) {
+                // Non-correlated subquery: the predicate can be pushed down
+                // Extract table references from the left-hand expression only
+                // (the subquery is evaluated independently, so it doesn't add table references)
+                extract_tables_recursive_branch(expr, schema, tables)
+            } else {
+                // Correlated subquery: treat as complex (must be evaluated after joins)
+                false
+            }
         }
         vibesql_ast::Expression::ScalarSubquery(_) => {
             // Scalar subqueries may reference columns from outer scope (correlated subqueries)
