@@ -60,7 +60,7 @@ fn test_parse_create_table_all_spatial_types() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 8);
 
-            let expected_types = vec![
+            let expected_types = [
                 "POINT",
                 "LINESTRING",
                 "POLYGON",

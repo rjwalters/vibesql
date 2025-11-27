@@ -35,6 +35,7 @@ pub(super) fn eval_scalar_function(
     name: &str,
     args: &[vibesql_types::SqlValue],
     character_unit: &Option<vibesql_ast::CharacterUnit>,
+    sql_mode: &vibesql_types::SqlMode,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     match name.to_uppercase().as_str() {
         // NULL handling functions
@@ -111,7 +112,7 @@ pub(super) fn eval_scalar_function(
         "TO_DATE" => conversion::to_date(args),
         "TO_TIMESTAMP" => conversion::to_timestamp(args),
         "TO_CHAR" => conversion::to_char(args),
-        "CAST" => conversion::cast(args),
+        "CAST" => conversion::cast(args, sql_mode),
 
         // System information functions
         "VERSION" => system::version(args),

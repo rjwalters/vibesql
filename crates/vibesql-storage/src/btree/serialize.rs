@@ -438,7 +438,7 @@ mod tests {
 
         for (value, expected_bytes) in test_cases {
             // Test encoding
-            let mut buffer = vec![0u8; 10];
+            let mut buffer = [0u8; 10];
             let mut cursor = Cursor::new(&mut buffer[..]);
             write_varint(&mut cursor, value).unwrap();
 

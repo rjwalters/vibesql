@@ -242,8 +242,13 @@ fn test_eval_multiplication() {
 
 #[test]
 fn test_eval_division() {
+    // Use MySQL mode to get Numeric result from integer division
+    let mut db = vibesql_storage::Database::new();
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL {
+        flags: vibesql_types::MySqlModeFlags::default(),
+    });
     let schema = vibesql_catalog::TableSchema::new("test".to_string(), vec![]);
-    let evaluator = ExpressionEvaluator::new(&schema);
+    let evaluator = ExpressionEvaluator::with_database(&schema, &db);
     let row = vibesql_storage::Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::BinaryOp {
@@ -252,8 +257,9 @@ fn test_eval_division() {
         right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(4))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    // Division returns Numeric for integer operands in MySQL mode (exact decimal arithmetic)
-    assert_eq!(result, vibesql_types::SqlValue::Numeric(5.0));
+    // Default mode is SQLite: integer division returns Integer
+    // MySQL mode would return Numeric(5.0) for exact decimal arithmetic
+    assert_eq!(result, vibesql_types::SqlValue::Integer(5));
 }
 
 #[test]

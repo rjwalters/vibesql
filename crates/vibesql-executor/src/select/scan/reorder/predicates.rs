@@ -8,9 +8,24 @@ use super::utils::resolve_column_with_fallback;
 ///
 /// A table-local predicate is one that references only a single table,
 /// e.g., `c_mktsegment = 'BUILDING'` references only `customer`.
+///
+/// Uses schema-based column resolution to handle unqualified column names like
+/// `p_name LIKE '%green%'` which should be recognized as a `part` table predicate.
 pub(super) fn extract_table_local_predicates(
     where_expr: &Expression,
     table_set: &HashSet<String>,
+) -> HashMap<String, Vec<Expression>> {
+    // Use default empty column map for backward compatibility
+    extract_table_local_predicates_with_schema(where_expr, table_set, &HashMap::new())
+}
+
+/// Extract table-local predicates using schema-based column resolution
+///
+/// This version accepts a column_to_table map for resolving unqualified column names.
+pub(super) fn extract_table_local_predicates_with_schema(
+    where_expr: &Expression,
+    table_set: &HashSet<String>,
+    column_to_table: &HashMap<String, String>,
 ) -> HashMap<String, Vec<Expression>> {
     let mut local_predicates: HashMap<String, Vec<Expression>> = HashMap::new();
 
@@ -18,9 +33,9 @@ pub(super) fn extract_table_local_predicates(
     let predicates = flatten_and_chain(where_expr);
 
     for pred in predicates {
-        // Get tables referenced by this predicate
+        // Get tables referenced by this predicate using schema-based resolution
         let mut referenced_tables = HashSet::new();
-        super::graph::extract_referenced_tables(&pred, &mut referenced_tables, table_set);
+        super::graph::extract_referenced_tables_with_schema(&pred, &mut referenced_tables, table_set, column_to_table);
 
         // If predicate references exactly one table, it's table-local
         if referenced_tables.len() == 1 {

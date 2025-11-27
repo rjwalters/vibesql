@@ -35,16 +35,17 @@ mod tests {
     fn test_set_sql_mode_mysql() {
         let mut db = Database::new();
 
-        // Default should be MySQL mode
-        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
-
-        // Set to sqlite then back to mysql
-        execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
+        // Default is SQLite mode (for SQLLogicTest compatibility)
         assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
+        // Set to mysql
         let result = execute_set_variable(&mut db, "SET sql_mode = 'mysql'").unwrap();
         assert!(result.contains("mysql"));
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+
+        // Set back to sqlite
+        execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
+        assert!(matches!(db.sql_mode(), SqlMode::SQLite));
     }
 
     #[test]
@@ -155,5 +156,120 @@ mod tests {
 
         execute_set_variable(&mut db, "SET Sql_Mode = 'mysql'").unwrap();
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+    }
+
+    #[test]
+    fn test_cast_float_to_integer_mysql_rounds() {
+        let mut db = Database::new();
+
+        // MySQL mode: CAST rounds to nearest integer
+        execute_set_variable(&mut db, "SET sql_mode = 'mysql'").unwrap();
+
+        // 5.7 rounds to 6
+        let result = select_single_value(&db, "SELECT CAST(5.7 AS SIGNED)");
+        match result {
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 6, "MySQL: CAST(5.7 AS SIGNED) should be 6, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 6, "MySQL: CAST(5.7 AS SIGNED) should be 6, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // 5.4 rounds to 5
+        let result = select_single_value(&db, "SELECT CAST(5.4 AS SIGNED)");
+        match result {
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "MySQL: CAST(5.4 AS SIGNED) should be 5, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "MySQL: CAST(5.4 AS SIGNED) should be 5, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // 5.5 rounds to 6 (banker's rounding rounds to nearest even, but MySQL uses round half up)
+        let result = select_single_value(&db, "SELECT CAST(5.5 AS SIGNED)");
+        match result {
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 6, "MySQL: CAST(5.5 AS SIGNED) should be 6, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 6, "MySQL: CAST(5.5 AS SIGNED) should be 6, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // Negative: -5.7 rounds to -6
+        let result = select_single_value(&db, "SELECT CAST(-5.7 AS SIGNED)");
+        match result {
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, -6, "MySQL: CAST(-5.7 AS SIGNED) should be -6, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, -6, "MySQL: CAST(-5.7 AS SIGNED) should be -6, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_cast_float_to_integer_sqlite_truncates() {
+        let mut db = Database::new();
+
+        // SQLite mode: CAST truncates toward zero
+        execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
+
+        // 5.7 truncates to 5
+        let result = select_single_value(&db, "SELECT CAST(5.7 AS INTEGER)");
+        match result {
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "SQLite: CAST(5.7 AS INTEGER) should be 5, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "SQLite: CAST(5.7 AS INTEGER) should be 5, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // 5.4 truncates to 5
+        let result = select_single_value(&db, "SELECT CAST(5.4 AS INTEGER)");
+        match result {
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "SQLite: CAST(5.4 AS INTEGER) should be 5, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "SQLite: CAST(5.4 AS INTEGER) should be 5, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // 5.9 truncates to 5
+        let result = select_single_value(&db, "SELECT CAST(5.9 AS INTEGER)");
+        match result {
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "SQLite: CAST(5.9 AS INTEGER) should be 5, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "SQLite: CAST(5.9 AS INTEGER) should be 5, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // Negative: -5.7 truncates to -5 (toward zero)
+        let result = select_single_value(&db, "SELECT CAST(-5.7 AS INTEGER)");
+        match result {
+            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, -5, "SQLite: CAST(-5.7 AS INTEGER) should be -5, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, -5, "SQLite: CAST(-5.7 AS INTEGER) should be -5, got {}", n),
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_cast_mode_switching() {
+        let mut db = Database::new();
+
+        // Start in MySQL mode
+        execute_set_variable(&mut db, "SET sql_mode = 'mysql'").unwrap();
+        let result = select_single_value(&db, "SELECT CAST(5.7 AS SIGNED)");
+        match result {
+            vibesql_types::SqlValue::Bigint(n) | vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 6, "MySQL mode should round 5.7 to 6")
+            }
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // Switch to SQLite mode
+        execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
+        let result = select_single_value(&db, "SELECT CAST(5.7 AS INTEGER)");
+        match result {
+            vibesql_types::SqlValue::Integer(n) | vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, 5, "SQLite mode should truncate 5.7 to 5")
+            }
+            other => panic!("Expected integer type, got {:?}", other),
+        }
+
+        // Switch back to MySQL mode
+        execute_set_variable(&mut db, "SET sql_mode = 'mysql'").unwrap();
+        let result = select_single_value(&db, "SELECT CAST(5.7 AS SIGNED)");
+        match result {
+            vibesql_types::SqlValue::Bigint(n) | vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 6, "MySQL mode should round 5.7 to 6")
+            }
+            other => panic!("Expected integer type, got {:?}", other),
+        }
     }
 }

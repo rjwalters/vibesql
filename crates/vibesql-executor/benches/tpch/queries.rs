@@ -126,7 +126,7 @@ pub const TPCH_Q7: &str = r#"
 SELECT
     n1.n_name as supp_nation,
     n2.n_name as cust_nation,
-    SUBSTR(l_shipdate, 1, 4) as l_year,
+    EXTRACT(YEAR FROM l_shipdate) as l_year,
     SUM(l_extendedprice * (1 - l_discount)) as revenue
 FROM supplier, lineitem, orders, customer, nation n1, nation n2
 WHERE s_suppkey = l_suppkey
@@ -138,14 +138,14 @@ WHERE s_suppkey = l_suppkey
          OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE'))
     AND l_shipdate >= '1995-01-01'
     AND l_shipdate <= '1996-12-31'
-GROUP BY supp_nation, cust_nation, l_year
+GROUP BY n1.n_name, n2.n_name, EXTRACT(YEAR FROM l_shipdate)
 ORDER BY supp_nation, cust_nation, l_year
 "#;
 
 // TPC-H Q8: National Market Share (8-way join)
 pub const TPCH_Q8: &str = r#"
 SELECT
-    SUBSTR(o_orderdate, 1, 4) as o_year,
+    EXTRACT(YEAR FROM o_orderdate) as o_year,
     SUM(CASE WHEN n2.n_name = 'BRAZIL'
         THEN l_extendedprice * (1 - l_discount)
         ELSE 0 END) / SUM(l_extendedprice * (1 - l_discount)) as mkt_share
@@ -161,7 +161,7 @@ WHERE p_partkey = l_partkey
     AND o_orderdate >= '1995-01-01'
     AND o_orderdate <= '1996-12-31'
     AND p_type = 'ECONOMY ANODIZED STEEL'
-GROUP BY o_year
+GROUP BY EXTRACT(YEAR FROM o_orderdate)
 ORDER BY o_year
 "#;
 
@@ -170,7 +170,7 @@ ORDER BY o_year
 pub const TPCH_Q9: &str = r#"
 SELECT
     n_name as nation,
-    SUBSTR(o_orderdate, 1, 4) as o_year,
+    EXTRACT(YEAR FROM o_orderdate) as o_year,
     SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity) as sum_profit
 FROM part, supplier, lineitem, partsupp, orders, nation
 WHERE s_suppkey = l_suppkey
@@ -180,7 +180,7 @@ WHERE s_suppkey = l_suppkey
     AND o_orderkey = l_orderkey
     AND s_nationkey = n_nationkey
     AND p_name LIKE '%green%'
-GROUP BY nation, o_year
+GROUP BY n_name, EXTRACT(YEAR FROM o_orderdate)
 ORDER BY nation, o_year DESC
 "#;
 

@@ -315,6 +315,11 @@ impl<'a> CombinedExpressionEvaluator<'a> {
         self.schema
     }
 
+    /// Get the database reference (if available)
+    pub(crate) fn database(&self) -> Option<&'a vibesql_storage::Database> {
+        self.database
+    }
+
     /// Get evaluator components for parallel execution
     /// Returns (schema, database, outer_row, outer_schema, window_mapping, enable_cse)
     pub(crate) fn get_parallel_components(&self) -> super::parallel::ParallelComponents<'a> {

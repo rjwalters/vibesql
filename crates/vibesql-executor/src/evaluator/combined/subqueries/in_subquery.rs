@@ -3,7 +3,7 @@
 //! This module handles evaluation of IN and NOT IN predicates with subqueries,
 //! including index-based optimization for simple cases.
 
-use super::cache::compute_subquery_hash;
+use crate::evaluator::caching::compute_subquery_hash;
 use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row, compute_select_list_column_count};
 use super::super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator};
 use crate::errors::ExecutorError;

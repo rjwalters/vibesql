@@ -81,7 +81,8 @@ impl ExpressionEvaluator<'_> {
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         let value = self.eval(expr, row)?;
-        cast_value(&value, data_type)
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        cast_value(&value, data_type, &sql_mode)
     }
 
     /// Evaluate POSITION expression

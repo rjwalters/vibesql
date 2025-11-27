@@ -1,4 +1,5 @@
 //! Tests for Eq/Ord consistency to ensure BTreeMap correctness
+#![allow(clippy::approx_constant)]
 
 use std::cmp::Ordering;
 
@@ -175,7 +176,7 @@ fn test_btreemap_vec_keys() {
     use std::collections::{BTreeMap, HashMap};
 
     // Test data mimicking index keys
-    let keys = vec![
+    let keys = [
         vec![SqlValue::Integer(1), SqlValue::Integer(2)],
         vec![SqlValue::Integer(3), SqlValue::Integer(4)],
         vec![SqlValue::Integer(1), SqlValue::Integer(2)], // Duplicate
@@ -188,8 +189,8 @@ fn test_btreemap_vec_keys() {
 
     // Insert data into both maps
     for (idx, key) in keys.iter().enumerate() {
-        btree.entry(key.clone()).or_insert_with(Vec::new).push(idx);
-        hash.entry(key.clone()).or_insert_with(Vec::new).push(idx);
+        btree.entry(key.clone()).or_default().push(idx);
+        hash.entry(key.clone()).or_default().push(idx);
     }
 
     // Verify both maps have the same keys

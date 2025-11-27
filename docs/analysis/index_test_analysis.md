@@ -131,14 +131,14 @@ Three options for obtaining actual test data:
 **Option A - Targeted Testing** (Recommended for next iteration):
 ```bash
 # Add --category filter to test runner (requires implementation)
-./scripts/sqllogictest run --category index --parallel --workers 8 --time 120
+./scripts/sqllogictest run --category index --parallel --time 120
 # Estimated: 2-3 minutes, sufficient for analysis
 ```
 
 **Option B - Extended Run** (Comprehensive but time-intensive):
 ```bash
-# Full suite on powerful machine
-./scripts/sqllogictest run --parallel --workers 32 --time 600
+# Full suite (auto-detects available CPU cores)
+./scripts/sqllogictest run --parallel --time 600
 # Estimated: 15-30 minutes, complete dataset
 ```
 
@@ -262,7 +262,7 @@ Given these results:
 
 1. **SHORT-TERM**: Run full index test suite to measure actual current pass rate
    ```bash
-   ./scripts/sqllogictest run --parallel --workers 8 --time 300
+   ./scripts/sqllogictest run --parallel --time 300
    # Filter for index/* tests if possible
    ```
 
