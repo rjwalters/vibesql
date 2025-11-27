@@ -64,6 +64,7 @@ pub struct SelectStmt {
 /// - ROLLUP: `GROUP BY ROLLUP(a, b)` - hierarchical subtotals
 /// - CUBE: `GROUP BY CUBE(a, b)` - all dimension combinations
 /// - GROUPING SETS: `GROUP BY GROUPING SETS((a, b), (a), ())` - explicit groupings
+/// - Mixed: `GROUP BY a, ROLLUP(b, c)` - combination of simple and OLAP
 #[derive(Debug, Clone, PartialEq)]
 pub enum GroupByClause {
     /// Simple GROUP BY with list of expressions
@@ -87,6 +88,18 @@ pub enum GroupByClause {
     ///
     /// Example: `GROUP BY GROUPING SETS ((d_year, d_moy), (d_year), ())`
     GroupingSets(Vec<GroupingSet>),
+
+    /// Mixed GROUP BY combining simple expressions with ROLLUP/CUBE/GROUPING SETS
+    ///
+    /// Example: `GROUP BY region, ROLLUP(year, quarter)`
+    /// The simple expressions (region) appear in ALL generated grouping sets,
+    /// while ROLLUP/CUBE/GROUPING SETS columns are expanded normally.
+    ///
+    /// `GROUP BY a, ROLLUP(b, c)` is equivalent to:
+    /// `GROUPING SETS ((a, b, c), (a, b), (a))`
+    ///
+    /// Multiple ROLLUP/CUBE create a cross-product of their expansions.
+    Mixed(Vec<MixedGroupingItem>),
 }
 
 /// A single grouping element within ROLLUP or CUBE
@@ -109,6 +122,28 @@ pub struct GroupingSet {
     pub columns: Vec<Expression>,
 }
 
+/// An item in a mixed GROUP BY clause
+///
+/// Can be a simple expression or a ROLLUP/CUBE/GROUPING SETS construct
+#[derive(Debug, Clone, PartialEq)]
+pub enum MixedGroupingItem {
+    /// Simple expression that appears in all grouping sets
+    /// Example: `a` in `GROUP BY a, ROLLUP(b, c)`
+    Simple(Expression),
+
+    /// ROLLUP construct
+    /// Example: `ROLLUP(b, c)` in `GROUP BY a, ROLLUP(b, c)`
+    Rollup(Vec<GroupingElement>),
+
+    /// CUBE construct
+    /// Example: `CUBE(b, c)` in `GROUP BY a, CUBE(b, c)`
+    Cube(Vec<GroupingElement>),
+
+    /// GROUPING SETS construct
+    /// Example: `GROUPING SETS((b), (c))` in `GROUP BY a, GROUPING SETS((b), (c))`
+    GroupingSets(Vec<GroupingSet>),
+}
+
 impl GroupByClause {
     /// Get all expressions in the GROUP BY clause (flattened)
     ///
@@ -128,6 +163,24 @@ impl GroupByClause {
             GroupByClause::GroupingSets(sets) => {
                 sets.iter().flat_map(|s| s.columns.iter()).collect()
             }
+            GroupByClause::Mixed(items) => items
+                .iter()
+                .flat_map(|item| match item {
+                    MixedGroupingItem::Simple(expr) => vec![expr],
+                    MixedGroupingItem::Rollup(elements) | MixedGroupingItem::Cube(elements) => {
+                        elements
+                            .iter()
+                            .flat_map(|e| match e {
+                                GroupingElement::Single(expr) => vec![expr],
+                                GroupingElement::Composite(exprs) => exprs.iter().collect(),
+                            })
+                            .collect()
+                    }
+                    MixedGroupingItem::GroupingSets(sets) => {
+                        sets.iter().flat_map(|s| s.columns.iter()).collect()
+                    }
+                })
+                .collect(),
         }
     }
 

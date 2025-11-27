@@ -4,6 +4,7 @@
 //! - ROLLUP: Creates hierarchical subtotals
 //! - CUBE: Creates all dimension combinations
 //! - GROUPING SETS: Explicitly specifies groupings
+//! - Mixed: Combines simple columns with ROLLUP/CUBE/GROUPING SETS
 
 use super::*;
 
@@ -15,33 +16,126 @@ impl Parser {
     /// - ROLLUP: `GROUP BY ROLLUP(a, b)`
     /// - CUBE: `GROUP BY CUBE(a, b)`
     /// - GROUPING SETS: `GROUP BY GROUPING SETS((a, b), (a), ())`
+    /// - Mixed: `GROUP BY a, ROLLUP(b, c)` or `GROUP BY ROLLUP(a), b, CUBE(c)`
     pub(crate) fn parse_group_by_clause(
         &mut self,
     ) -> Result<vibesql_ast::GroupByClause, ParseError> {
-        // Check for ROLLUP, CUBE, or GROUPING SETS
+        // Parse all items in the GROUP BY clause
+        let items = self.parse_mixed_group_by_items()?;
+
+        // Determine the clause type based on what we parsed
+        Self::classify_group_by_items(items)
+    }
+
+    /// Parse comma-separated items that can be simple expressions or ROLLUP/CUBE/GROUPING SETS
+    fn parse_mixed_group_by_items(
+        &mut self,
+    ) -> Result<Vec<vibesql_ast::MixedGroupingItem>, ParseError> {
+        let mut items = Vec::new();
+
+        // Parse first item
+        items.push(self.parse_mixed_grouping_item()?);
+
+        // Parse remaining items separated by commas
+        while matches!(self.peek(), Token::Comma) {
+            self.advance(); // consume ','
+            items.push(self.parse_mixed_grouping_item()?);
+        }
+
+        Ok(items)
+    }
+
+    /// Parse a single item in a mixed GROUP BY clause
+    ///
+    /// Can be:
+    /// - ROLLUP(...)
+    /// - CUBE(...)
+    /// - GROUPING SETS(...)
+    /// - Simple expression
+    fn parse_mixed_grouping_item(
+        &mut self,
+    ) -> Result<vibesql_ast::MixedGroupingItem, ParseError> {
         if self.peek_keyword(Keyword::Rollup) {
             self.consume_keyword(Keyword::Rollup)?;
             self.expect_token(Token::LParen)?;
             let elements = self.parse_grouping_element_list()?;
             self.expect_token(Token::RParen)?;
-            Ok(vibesql_ast::GroupByClause::Rollup(elements))
+            Ok(vibesql_ast::MixedGroupingItem::Rollup(elements))
         } else if self.peek_keyword(Keyword::Cube) {
             self.consume_keyword(Keyword::Cube)?;
             self.expect_token(Token::LParen)?;
             let elements = self.parse_grouping_element_list()?;
             self.expect_token(Token::RParen)?;
-            Ok(vibesql_ast::GroupByClause::Cube(elements))
+            Ok(vibesql_ast::MixedGroupingItem::Cube(elements))
         } else if self.peek_keyword(Keyword::Grouping) {
             self.consume_keyword(Keyword::Grouping)?;
             self.expect_keyword(Keyword::Sets)?;
             self.expect_token(Token::LParen)?;
             let sets = self.parse_grouping_sets_list()?;
             self.expect_token(Token::RParen)?;
-            Ok(vibesql_ast::GroupByClause::GroupingSets(sets))
+            Ok(vibesql_ast::MixedGroupingItem::GroupingSets(sets))
         } else {
-            // Simple GROUP BY
-            let group_exprs = self.parse_comma_separated_list(|p| p.parse_expression())?;
-            Ok(vibesql_ast::GroupByClause::Simple(group_exprs))
+            // Simple expression
+            let expr = self.parse_expression()?;
+            Ok(vibesql_ast::MixedGroupingItem::Simple(expr))
+        }
+    }
+
+    /// Classify GROUP BY items into the appropriate GroupByClause variant
+    ///
+    /// - All simple expressions → Simple
+    /// - Single ROLLUP → Rollup
+    /// - Single CUBE → Cube
+    /// - Single GROUPING SETS → GroupingSets
+    /// - Mix of any kind → Mixed
+    fn classify_group_by_items(
+        items: Vec<vibesql_ast::MixedGroupingItem>,
+    ) -> Result<vibesql_ast::GroupByClause, ParseError> {
+        if items.is_empty() {
+            return Err(ParseError {
+                message: "GROUP BY clause cannot be empty".to_string(),
+            });
+        }
+
+        // Check if this is a pure (non-mixed) clause
+        if items.len() == 1 {
+            match items.into_iter().next().unwrap() {
+                vibesql_ast::MixedGroupingItem::Simple(expr) => {
+                    return Ok(vibesql_ast::GroupByClause::Simple(vec![expr]));
+                }
+                vibesql_ast::MixedGroupingItem::Rollup(elements) => {
+                    return Ok(vibesql_ast::GroupByClause::Rollup(elements));
+                }
+                vibesql_ast::MixedGroupingItem::Cube(elements) => {
+                    return Ok(vibesql_ast::GroupByClause::Cube(elements));
+                }
+                vibesql_ast::MixedGroupingItem::GroupingSets(sets) => {
+                    return Ok(vibesql_ast::GroupByClause::GroupingSets(sets));
+                }
+            }
+        }
+
+        // Multiple items - check if all are simple expressions
+        let all_simple = items.iter().all(|item| {
+            matches!(item, vibesql_ast::MixedGroupingItem::Simple(_))
+        });
+
+        if all_simple {
+            // Extract all simple expressions into a Simple clause
+            let exprs: Vec<_> = items
+                .into_iter()
+                .filter_map(|item| {
+                    if let vibesql_ast::MixedGroupingItem::Simple(expr) = item {
+                        Some(expr)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            Ok(vibesql_ast::GroupByClause::Simple(exprs))
+        } else {
+            // Mixed clause - contains at least one ROLLUP/CUBE/GROUPING SETS
+            Ok(vibesql_ast::GroupByClause::Mixed(items))
         }
     }
 
