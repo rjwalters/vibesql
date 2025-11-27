@@ -860,4 +860,247 @@ mod tests {
             _ => panic!("Expected SEMI JOIN in FROM clause"),
         }
     }
+
+    fn table_from_with_alias(name: &str, alias: &str) -> FromClause {
+        FromClause::Table {
+            name: name.to_string(),
+            alias: Some(alias.to_string()),
+        }
+    }
+
+    fn qualified_column_ref(table: &str, column: &str) -> Expression {
+        Expression::ColumnRef {
+            table: Some(table.to_string()),
+            column: column.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_exists_self_join_column_qualification() {
+        // Test EXISTS with self-join aliasing, similar to TPC-H Q21 pattern:
+        // SELECT * FROM lineitem l1 WHERE EXISTS (
+        //   SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey AND l2.l_suppkey <> l1.l_suppkey
+        // )
+        //
+        // The EXISTS subquery references the same table with a different alias.
+        // After transformation to a SEMI join, the join condition should properly
+        // reference both the outer alias (l1) and the subquery's alias.
+
+        // Create outer query: SELECT * FROM lineitem l1
+        let outer_from = table_from_with_alias("lineitem", "l1");
+        let mut stmt = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Wildcard { alias: None }],
+            into_table: None,
+            into_variables: None,
+            from: Some(outer_from.clone()),
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+        };
+
+        // Create correlated EXISTS subquery:
+        // EXISTS (SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey AND l2.l_suppkey <> l1.l_suppkey)
+        let exists_subquery = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Wildcard { alias: None }],
+            into_table: None,
+            into_variables: None,
+            from: Some(table_from_with_alias("lineitem", "l2")),
+            where_clause: Some(Expression::BinaryOp {
+                op: BinaryOperator::And,
+                left: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    left: Box::new(qualified_column_ref("l2", "l_orderkey")),
+                    right: Box::new(qualified_column_ref("l1", "l_orderkey")),
+                }),
+                right: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::NotEqual,
+                    left: Box::new(qualified_column_ref("l2", "l_suppkey")),
+                    right: Box::new(qualified_column_ref("l1", "l_suppkey")),
+                }),
+            }),
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+        };
+
+        stmt.where_clause = Some(Expression::Exists {
+            subquery: Box::new(exists_subquery),
+            negated: false,
+        });
+
+        let transformed = transform_subqueries_to_joins(&stmt);
+
+        // Should have created a SEMI JOIN
+        assert!(
+            transformed.where_clause.is_none(),
+            "EXISTS should be fully transformed, no WHERE clause should remain"
+        );
+
+        match &transformed.from {
+            Some(FromClause::Join {
+                join_type,
+                condition,
+                right,
+                ..
+            }) => {
+                assert!(
+                    matches!(join_type, JoinType::Semi),
+                    "EXISTS should transform to SEMI join, got: {:?}",
+                    join_type
+                );
+
+                // Check that the right side preserves the subquery's alias
+                match right.as_ref() {
+                    FromClause::Table { name, alias } => {
+                        assert_eq!(name, "lineitem", "Table name should be lineitem");
+                        assert_eq!(
+                            alias.as_deref(),
+                            Some("l2"),
+                            "Alias should be preserved as l2"
+                        );
+                    }
+                    _ => panic!("Expected Table on right side of join"),
+                }
+
+                // Verify the join condition includes the correlation predicate
+                assert!(condition.is_some(), "Join should have a condition");
+            }
+            _ => panic!("Expected SEMI JOIN in FROM clause"),
+        }
+    }
+
+    #[test]
+    fn test_not_exists_self_join_column_qualification() {
+        // Test NOT EXISTS with self-join aliasing, similar to TPC-H Q21 pattern:
+        // SELECT * FROM lineitem l1 WHERE NOT EXISTS (
+        //   SELECT * FROM lineitem l3 WHERE l3.l_orderkey = l1.l_orderkey AND l3.l_receiptdate > l3.l_commitdate
+        // )
+        //
+        // NOT EXISTS should transform to an ANTI join with proper alias handling.
+
+        // Create outer query: SELECT * FROM lineitem l1
+        let outer_from = table_from_with_alias("lineitem", "l1");
+        let mut stmt = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Wildcard { alias: None }],
+            into_table: None,
+            into_variables: None,
+            from: Some(outer_from.clone()),
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+        };
+
+        // Create correlated NOT EXISTS subquery:
+        // NOT EXISTS (SELECT * FROM lineitem l3 WHERE l3.l_orderkey = l1.l_orderkey AND l3.l_receiptdate > l3.l_commitdate)
+        let not_exists_subquery = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Wildcard { alias: None }],
+            into_table: None,
+            into_variables: None,
+            from: Some(table_from_with_alias("lineitem", "l3")),
+            where_clause: Some(Expression::BinaryOp {
+                op: BinaryOperator::And,
+                left: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    left: Box::new(qualified_column_ref("l3", "l_orderkey")),
+                    right: Box::new(qualified_column_ref("l1", "l_orderkey")),
+                }),
+                right: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::GreaterThan,
+                    left: Box::new(qualified_column_ref("l3", "l_receiptdate")),
+                    right: Box::new(qualified_column_ref("l3", "l_commitdate")),
+                }),
+            }),
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+        };
+
+        stmt.where_clause = Some(Expression::Exists {
+            subquery: Box::new(not_exists_subquery),
+            negated: true, // NOT EXISTS
+        });
+
+        let transformed = transform_subqueries_to_joins(&stmt);
+
+        // Should have created an ANTI JOIN
+        assert!(
+            transformed.where_clause.is_none(),
+            "NOT EXISTS should be fully transformed, no WHERE clause should remain"
+        );
+
+        match &transformed.from {
+            Some(FromClause::Join {
+                join_type,
+                condition,
+                right,
+                ..
+            }) => {
+                assert!(
+                    matches!(join_type, JoinType::Anti),
+                    "NOT EXISTS should transform to ANTI join, got: {:?}",
+                    join_type
+                );
+
+                // Check that the right side preserves the subquery's alias
+                match right.as_ref() {
+                    FromClause::Table { name, alias } => {
+                        assert_eq!(name, "lineitem", "Table name should be lineitem");
+                        assert_eq!(
+                            alias.as_deref(),
+                            Some("l3"),
+                            "Alias should be preserved as l3"
+                        );
+                    }
+                    _ => panic!("Expected Table on right side of join"),
+                }
+
+                // Verify the join condition includes the correlation predicate
+                assert!(condition.is_some(), "Join should have a condition");
+
+                // Verify the condition contains both correlation and filter predicates
+                if let Some(cond) = condition {
+                    fn contains_l3_ref(expr: &Expression) -> bool {
+                        match expr {
+                            Expression::ColumnRef { table: Some(t), .. } => {
+                                t.eq_ignore_ascii_case("l3")
+                            }
+                            Expression::BinaryOp { left, right, .. } => {
+                                contains_l3_ref(left) || contains_l3_ref(right)
+                            }
+                            _ => false,
+                        }
+                    }
+
+                    assert!(
+                        contains_l3_ref(cond),
+                        "Join condition should contain references to l3 alias. Condition: {:?}",
+                        cond
+                    );
+                }
+            }
+            _ => panic!("Expected ANTI JOIN in FROM clause"),
+        }
+    }
 }
