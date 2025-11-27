@@ -28,9 +28,9 @@ pub fn get_pooled_database() -> Database {
                 db
             }
             None => {
-                // First use - create new database with MySQL mode (default)
-                // The SQLLogicTest suite was generated from MySQL 8 and expects MySQL semantics
-                // including decimal division (INTEGER / INTEGER → DECIMAL)
+                // First use - create new database with SQLite mode (default)
+                // The SQLLogicTest suite is derived from SQLite and expects SQLite semantics
+                // including integer division (INTEGER / INTEGER → INTEGER, truncated)
                 vibesql_storage::Database::new()
             }
         }

@@ -52,10 +52,10 @@ pub enum SqlMode {
 
 impl Default for SqlMode {
     fn default() -> Self {
-        // Default to MySQL mode for SQLLogicTest compatibility
-        SqlMode::MySQL {
-            flags: MySqlModeFlags::default(),
-        }
+        // Default to SQLite mode for SQLLogicTest compatibility
+        // The SQLLogicTest suite is derived from SQLite and expects SQLite semantics
+        // including integer division (INTEGER / INTEGER → INTEGER, truncated)
+        SqlMode::SQLite
     }
 }
 
@@ -180,14 +180,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_is_mysql() {
+    fn test_default_is_sqlite() {
+        // Default is SQLite for SQLLogicTest compatibility (SQLite-derived test suite)
         let mode = SqlMode::default();
-        assert!(matches!(mode, SqlMode::MySQL { .. }));
+        assert!(matches!(mode, SqlMode::SQLite));
     }
 
     #[test]
-    fn test_default_mysql_has_default_flags() {
-        let mode = SqlMode::default();
+    fn test_mysql_mode_has_default_flags() {
+        // Test that MySQL mode can be constructed with default flags
+        let mode = SqlMode::MySQL { flags: MySqlModeFlags::default() };
         if let SqlMode::MySQL { flags } = mode {
             assert_eq!(flags, MySqlModeFlags::default());
         } else {

@@ -178,10 +178,25 @@ mod tests {
     }
 
     #[test]
-    fn test_integer_division() {
-        // Division returns Numeric for integer operands in MySQL mode (exact decimal arithmetic)
+    fn test_integer_division_sqlite() {
+        // SQLite mode (default): Division returns Integer for integer operands (truncated)
         let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(3), vibesql_types::SqlMode::default()).unwrap();
+        assert_eq!(result, SqlValue::Integer(5));
+
+        // Test truncation behavior
+        let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(4), vibesql_types::SqlMode::default()).unwrap();
+        assert_eq!(result, SqlValue::Integer(3)); // 15/4 = 3.75 truncates to 3
+    }
+
+    #[test]
+    fn test_integer_division_mysql() {
+        // MySQL mode: Division returns Numeric for integer operands (exact decimal arithmetic)
+        let mysql_mode = vibesql_types::SqlMode::MySQL { flags: Default::default() };
+        let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(3), mysql_mode.clone()).unwrap();
         assert_eq!(result, SqlValue::Numeric(5.0));
+
+        let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(4), mysql_mode).unwrap();
+        assert_eq!(result, SqlValue::Numeric(3.75));
     }
 
     #[test]
@@ -265,14 +280,28 @@ mod tests {
 
     #[test]
     fn test_boolean_division() {
-        // 10 / TRUE = 10.0 (booleans coerce to integers, then division returns exact decimal)
+        // SQLite mode (default): 10 / TRUE = 10 (integer division)
         let result =
             ArithmeticOps::divide(&SqlValue::Integer(10), &SqlValue::Boolean(true), vibesql_types::SqlMode::default()).unwrap();
+        assert_eq!(result, SqlValue::Integer(10));
+
+        // TRUE / TRUE = 1
+        let result =
+            ArithmeticOps::divide(&SqlValue::Boolean(true), &SqlValue::Boolean(true), vibesql_types::SqlMode::default()).unwrap();
+        assert_eq!(result, SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_boolean_division_mysql() {
+        // MySQL mode: 10 / TRUE = 10.0 (exact decimal division)
+        let mysql_mode = vibesql_types::SqlMode::MySQL { flags: Default::default() };
+        let result =
+            ArithmeticOps::divide(&SqlValue::Integer(10), &SqlValue::Boolean(true), mysql_mode.clone()).unwrap();
         assert_eq!(result, SqlValue::Numeric(10.0));
 
         // TRUE / TRUE = 1.0
         let result =
-            ArithmeticOps::divide(&SqlValue::Boolean(true), &SqlValue::Boolean(true), vibesql_types::SqlMode::default()).unwrap();
+            ArithmeticOps::divide(&SqlValue::Boolean(true), &SqlValue::Boolean(true), mysql_mode).unwrap();
         assert_eq!(result, SqlValue::Numeric(1.0));
     }
 

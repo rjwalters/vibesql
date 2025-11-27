@@ -40,9 +40,9 @@ pub enum ConcatOperator {
 /// ## Example
 ///
 /// ```rust
-/// use vibesql_types::sql_mode::{SqlMode, OperatorBehavior, DivisionBehavior};
+/// use vibesql_types::{SqlMode, MySqlModeFlags, OperatorBehavior, DivisionBehavior};
 ///
-/// let mode = SqlMode::MySQL;
+/// let mode = SqlMode::MySQL { flags: MySqlModeFlags::default() };
 /// assert_eq!(mode.integer_division_behavior(), DivisionBehavior::Decimal);
 /// assert!(mode.supports_xor());
 /// ```
