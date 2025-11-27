@@ -3,6 +3,8 @@
 //! This module provides a trait-based abstraction over filesystem operations,
 //! enabling vibesql to run on different platforms including WebAssembly with OPFS.
 
+#![allow(clippy::suspicious_open_options)]
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::io;
 

@@ -1,4 +1,8 @@
 //! SIMD aggregation operations for columnar data
+//!
+//! Note: Index-based loops are used intentionally for SIMD vectorization.
+
+#![allow(clippy::needless_range_loop)]
 
 #[cfg(feature = "simd")]
 use wide::*;

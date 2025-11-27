@@ -3,6 +3,8 @@
 //! This module integrates the columnar execution engine with the query executor,
 //! providing automatic detection and execution of queries that can benefit from
 //! SIMD-accelerated columnar processing.
+
+#![allow(clippy::ptr_arg)]
 //!
 //! ## Phase 2: Native Columnar Execution
 //!
@@ -58,6 +60,14 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
+        // GROUP BY queries are NOT supported in this columnar path
+        // They should use try_native_columnar_execution or fall back to row-oriented
+        // execute_columnar() computes overall aggregates, ignoring GROUP BY
+        if stmt.group_by.is_some() {
+            log::debug!("  Columnar execution: Not supported - has GROUP BY");
+            return Ok(None);
+        }
+
         // Check if this query is compatible with columnar execution
         // Use adaptive execution model selection for better query decisions
         match choose_execution_model(stmt) {

@@ -2,6 +2,9 @@
 //!
 //! This module handles NULL value detection to enable graceful fallback
 //! from SIMD to scalar evaluation when NULL values are present.
+
+#![allow(clippy::unnecessary_lazy_evaluations)]
+
 //!
 //! # Why Graceful Fallback?
 //!

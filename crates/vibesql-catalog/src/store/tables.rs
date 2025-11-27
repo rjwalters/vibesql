@@ -3,6 +3,8 @@
 //! This module handles all table-related operations including creation,
 //! modification, deletion, and queries.
 
+#![allow(clippy::only_used_in_recursion)]
+
 use crate::{errors::CatalogError, table::TableSchema};
 use std::collections::{HashMap, HashSet};
 

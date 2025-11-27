@@ -9,6 +9,8 @@
 //! These operations process multiple values per instruction using SIMD,
 //! providing 4-8x performance improvement over scalar operations.
 
+#![allow(clippy::useless_conversion)]
+
 use crate::errors::ExecutorError;
 use arrow::array::{Array, ArrayRef, Float64Array, Int64Array};
 use arrow::compute::kernels::numeric::{add, div, mul, sub};
@@ -91,21 +93,17 @@ fn apply_int64_op(
 
     let result: ArrayRef = match op {
         BinaryOperator::Plus => add(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD add failed: {}", e)))?
-            .into(),
+            .map_err(|e| ExecutorError::Other(format!("SIMD add failed: {}", e)))?,
         BinaryOperator::Minus => sub(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD subtract failed: {}", e)))?
-            .into(),
+            .map_err(|e| ExecutorError::Other(format!("SIMD subtract failed: {}", e)))?,
         BinaryOperator::Multiply => mul(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD multiply failed: {}", e)))?
-            .into(),
+            .map_err(|e| ExecutorError::Other(format!("SIMD multiply failed: {}", e)))?,
         BinaryOperator::Divide => {
             // For integer division, cast to float64 first
             let left_f64 = cast_int64_to_float64(left_arr)?;
             let right_f64 = cast_int64_to_float64(right_arr)?;
             div(&left_f64, &right_f64)
                 .map_err(|e| ExecutorError::Other(format!("SIMD divide failed: {}", e)))?
-                .into()
         }
         _ => {
             return Err(ExecutorError::Other(format!(

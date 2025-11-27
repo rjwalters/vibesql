@@ -1,5 +1,7 @@
 //! Output handling and validation for sqllogictest execution.
 
+#![allow(clippy::redundant_closure)]
+
 use itertools::Itertools;
 
 use crate::error_handling::AnyError;

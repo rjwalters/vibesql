@@ -2,6 +2,8 @@
 // Database Constructors and Initialization
 // ============================================================================
 
+#![allow(clippy::clone_on_copy)]
+
 use super::config::{DatabaseConfig, DEFAULT_COLUMNAR_CACHE_BUDGET};
 use super::lifecycle::Lifecycle;
 use super::metadata::Metadata;

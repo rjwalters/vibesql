@@ -6,6 +6,8 @@
 //! - Views
 //! - Predicate pushdown optimization
 
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::HashMap;
 
 use super::predicates::{apply_table_local_predicates, apply_table_local_predicates_ref};

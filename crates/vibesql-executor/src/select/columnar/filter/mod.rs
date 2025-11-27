@@ -1,4 +1,9 @@
 //! Columnar filtering - efficient predicate evaluation on column data
+//!
+//! Note: Some loops use explicit index iteration for better cache locality
+//! and auto-vectorization opportunities.
+
+#![allow(clippy::needless_range_loop)]
 
 mod comparison;
 mod evaluation;

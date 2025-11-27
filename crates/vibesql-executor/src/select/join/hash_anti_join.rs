@@ -1,3 +1,5 @@
+#![allow(clippy::doc_lazy_continuation)]
+
 use std::collections::HashMap;
 
 #[cfg(feature = "parallel")]

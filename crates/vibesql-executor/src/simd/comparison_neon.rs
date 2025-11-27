@@ -3,6 +3,8 @@
 //! This module provides ARM64-specific comparison implementations using NEON intrinsics.
 //! NEON comparisons return mask vectors that need to be converted to boolean results.
 
+#![allow(clippy::needless_range_loop)]
+
 #[cfg(all(feature = "simd", target_arch = "aarch64"))]
 use std::arch::aarch64::*;
 

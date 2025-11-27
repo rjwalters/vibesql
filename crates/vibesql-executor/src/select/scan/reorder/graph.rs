@@ -1,5 +1,7 @@
 //! Join graph construction and table reference analysis
 
+#![allow(clippy::only_used_in_recursion)]
+
 use std::collections::{HashMap, HashSet};
 use vibesql_ast::{Expression, FromClause, JoinType};
 

@@ -1,5 +1,7 @@
 //! NULL handling for SIMD operations using bitmasks
 
+#![allow(clippy::needless_range_loop)]
+
 #[cfg(feature = "simd")]
 use wide::*;
 

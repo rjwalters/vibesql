@@ -1,7 +1,10 @@
-/// Hash join iterator implementation for lazy evaluation
-///
-/// This module implements an iterator-based hash join that provides O(N+M)
-/// performance while maintaining lazy evaluation for the left (probe) side.
+//! Hash join iterator implementation for lazy evaluation
+//!
+//! This module implements an iterator-based hash join that provides O(N+M)
+//! performance while maintaining lazy evaluation for the left (probe) side.
+
+#![allow(clippy::manual_is_multiple_of)]
+
 use std::collections::HashMap;
 
 use super::{combine_rows, FromResult};

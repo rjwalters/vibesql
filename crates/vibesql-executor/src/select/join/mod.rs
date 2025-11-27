@@ -229,6 +229,7 @@ fn apply_post_join_filter(
 /// Note: This function combines rows from left and right according to the join type
 /// and join condition. For queries with many tables and large intermediate results,
 /// consider applying WHERE filters earlier to reduce memory usage.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn nested_loop_join(
     left: FromResult,
     right: FromResult,
