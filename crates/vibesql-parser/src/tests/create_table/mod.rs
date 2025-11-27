@@ -7,6 +7,7 @@ mod mysql_table_options;
 mod northwind;
 mod numeric_types;
 mod spatial_types;
+mod storage_format;
 mod string_types;
 mod temporal_types;
 mod text_types;

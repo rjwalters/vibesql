@@ -85,6 +85,23 @@ use crate::{Row, StorageError};
 /// - **Row-oriented (default)**: Traditional row storage, optimized for OLTP
 /// - **Columnar**: Native column storage, optimized for OLAP with zero conversion overhead
 ///
+/// ## Columnar Storage Limitations
+///
+/// **IMPORTANT**: Columnar tables are optimized for read-heavy analytical workloads.
+/// Each INSERT/UPDATE/DELETE operation triggers a full rebuild of the columnar
+/// representation (O(n) cost). This makes columnar tables unsuitable for:
+/// - High-frequency INSERT workloads
+/// - OLTP use cases with frequent writes
+/// - Streaming inserts
+///
+/// **Recommended use cases for columnar tables**:
+/// - Bulk-loaded analytical data (load once, query many times)
+/// - Reporting tables with infrequent updates
+/// - Data warehouse fact tables
+///
+/// For mixed workloads, use row-oriented storage with the columnar cache
+/// (via `scan_columnar()`), which provides SIMD acceleration with caching.
+///
 /// # Performance Characteristics
 ///
 /// - **INSERT**: O(1) amortized for row append + O(1) for index updates
