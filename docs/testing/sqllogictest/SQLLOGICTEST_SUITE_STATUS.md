@@ -64,14 +64,14 @@ Runs SQLLogicTest files in parallel across multiple worker processes with dynami
 # Basic usage - uses all available CPUs by default
 python3 scripts/run_parallel_tests.py
 
-# Specify worker count (default: all available CPU cores)
-python3 scripts/run_parallel_tests.py --workers 16
+# Override worker count if needed (default: all available CPU cores)
+python3 scripts/run_parallel_tests.py --workers 8
 
 # Set time budget per file (default: 300 seconds per file)
 python3 scripts/run_parallel_tests.py --time-budget 3600
 
-# Combined example
-python3 scripts/run_parallel_tests.py --workers 16 --time-budget 7200
+# Combined example with custom worker count and time budget
+python3 scripts/run_parallel_tests.py --workers 8 --time-budget 7200
 ```
 
 **Output files**:
@@ -292,12 +292,12 @@ ORDER BY avg_pass_rate DESC;
 ### Step 1: Run Full Test Suite
 
 ```bash
-# Run with parallel workers (1-2 hours depending on machine)
-./scripts/sqllogictest run --parallel --workers 64
+# Run with parallel workers (auto-detects CPU cores, 1-2 hours depending on machine)
+./scripts/sqllogictest run --parallel
 ```
 
 **What happens**:
-- Tests divided among 64 worker processes
+- Tests divided among worker processes (one per CPU core)
 - Each worker runs test files in priority order
 - Results logged to `/tmp/sqllogictest_results/worker_*.log`
 - Individual analysis per worker in `worker_*_analysis.json`
@@ -488,8 +488,8 @@ For comprehensive testing on high-core-count machines:
 # Compile in release mode first
 cargo build --release --test sqllogictest_suite
 
-# Run with 64 workers (best for high-core machines)
-./scripts/sqllogictest run --parallel --workers 64 --time 3600
+# Run with all available CPU cores (auto-detected)
+./scripts/sqllogictest run --parallel --time 3600
 
 # Monitor progress
 watch -n 5 'ls /tmp/sqllogictest_results/worker_*.log | wc -l'
@@ -521,8 +521,8 @@ After implementing a fix, measure its impact:
 # 1. Run quick smoke test
 SQLLOGICTEST_TIME_BUDGET=600 cargo test --test sqllogictest_suite
 
-# 2. Run full test suite on remote (if making major changes)
-./scripts/sqllogictest run --parallel --workers 64
+# 2. Run full test suite on remote (if making major changes, uses all CPU cores)
+./scripts/sqllogictest run --parallel
 
 # 3. Aggregate and analyze
 python3 scripts/aggregate_worker_results.py /tmp/sqllogictest_results
