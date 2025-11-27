@@ -94,10 +94,10 @@ pub(crate) fn cast_value(
             SqlValue::Smallint(n) => Ok(SqlValue::Integer(*n as i64)),
             SqlValue::Bigint(n) => Ok(SqlValue::Integer(*n)),
             SqlValue::Unsigned(n) => Ok(SqlValue::Integer(*n as i64)),
-            SqlValue::Numeric(f) => Ok(SqlValue::Integer(f.round() as i64)),
-            SqlValue::Float(f) => Ok(SqlValue::Integer(f.round() as i64)),
-            SqlValue::Real(f) => Ok(SqlValue::Integer((*f as f64).round() as i64)),
-            SqlValue::Double(f) => Ok(SqlValue::Integer(f.round() as i64)),
+            SqlValue::Numeric(f) => Ok(SqlValue::Integer(f.trunc() as i64)),
+            SqlValue::Float(f) => Ok(SqlValue::Integer(f.trunc() as i64)),
+            SqlValue::Real(f) => Ok(SqlValue::Integer((*f as f64).trunc() as i64)),
+            SqlValue::Double(f) => Ok(SqlValue::Integer(f.trunc() as i64)),
             SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) => {
                 s.parse::<i64>().map(SqlValue::Integer).map_err(|_| ExecutorError::CastError {
@@ -117,10 +117,10 @@ pub(crate) fn cast_value(
             SqlValue::Integer(n) => Ok(SqlValue::Smallint(*n as i16)),
             SqlValue::Bigint(n) => Ok(SqlValue::Smallint(*n as i16)),
             SqlValue::Unsigned(n) => Ok(SqlValue::Smallint(*n as i16)),
-            SqlValue::Numeric(f) => Ok(SqlValue::Smallint(f.round() as i16)),
-            SqlValue::Float(f) => Ok(SqlValue::Smallint(f.round() as i16)),
-            SqlValue::Real(f) => Ok(SqlValue::Smallint((*f as f64).round() as i16)),
-            SqlValue::Double(f) => Ok(SqlValue::Smallint(f.round() as i16)),
+            SqlValue::Numeric(f) => Ok(SqlValue::Smallint(f.trunc() as i16)),
+            SqlValue::Float(f) => Ok(SqlValue::Smallint(f.trunc() as i16)),
+            SqlValue::Real(f) => Ok(SqlValue::Smallint((*f as f64).trunc() as i16)),
+            SqlValue::Double(f) => Ok(SqlValue::Smallint(f.trunc() as i16)),
             SqlValue::Boolean(b) => Ok(SqlValue::Smallint(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) => {
                 s.parse::<i16>().map(SqlValue::Smallint).map_err(|_| ExecutorError::CastError {
@@ -140,10 +140,10 @@ pub(crate) fn cast_value(
             SqlValue::Integer(n) => Ok(SqlValue::Bigint(*n)),
             SqlValue::Smallint(n) => Ok(SqlValue::Bigint(*n as i64)),
             SqlValue::Unsigned(n) => Ok(SqlValue::Bigint(*n as i64)),
-            SqlValue::Numeric(f) => Ok(SqlValue::Bigint(f.round() as i64)),
-            SqlValue::Float(f) => Ok(SqlValue::Bigint(f.round() as i64)),
-            SqlValue::Real(f) => Ok(SqlValue::Bigint((*f as f64).round() as i64)),
-            SqlValue::Double(f) => Ok(SqlValue::Bigint(f.round() as i64)),
+            SqlValue::Numeric(f) => Ok(SqlValue::Bigint(f.trunc() as i64)),
+            SqlValue::Float(f) => Ok(SqlValue::Bigint(f.trunc() as i64)),
+            SqlValue::Real(f) => Ok(SqlValue::Bigint((*f as f64).trunc() as i64)),
+            SqlValue::Double(f) => Ok(SqlValue::Bigint(f.trunc() as i64)),
             SqlValue::Boolean(b) => Ok(SqlValue::Bigint(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) => {
                 s.parse::<i64>().map(SqlValue::Bigint).map_err(|_| ExecutorError::CastError {
@@ -173,20 +173,20 @@ pub(crate) fn cast_value(
                 Ok(SqlValue::Unsigned(*n as u64))
             }
             SqlValue::Numeric(f) => {
-                // Round numeric to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned(f.round() as u64))
+                // Truncate numeric to unsigned (MySQL behavior)
+                Ok(SqlValue::Unsigned(f.trunc() as u64))
             }
             SqlValue::Float(f) => {
-                // Round float to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned(f.round() as u64))
+                // Truncate float to unsigned (MySQL behavior)
+                Ok(SqlValue::Unsigned(f.trunc() as u64))
             }
             SqlValue::Real(f) => {
-                // Round real to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned((*f as f64).round() as u64))
+                // Truncate real to unsigned (MySQL behavior)
+                Ok(SqlValue::Unsigned((*f as f64).trunc() as u64))
             }
             SqlValue::Double(f) => {
-                // Round double to unsigned (MySQL behavior)
-                Ok(SqlValue::Unsigned(f.round() as u64))
+                // Truncate double to unsigned (MySQL behavior)
+                Ok(SqlValue::Unsigned(f.trunc() as u64))
             }
             SqlValue::Boolean(b) => {
                 // Boolean to unsigned: true=1, false=0 (SQL standard)
