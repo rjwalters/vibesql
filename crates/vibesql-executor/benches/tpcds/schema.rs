@@ -3207,8 +3207,8 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
     for i in 1..=data.customer_count {
         let c_customer_id = format!("AAAAAA{:010}", i);
-        let gender_idx = i % GENDERS.len();
-        let marital_idx = i % MARITAL_STATUS.len();
+        let _gender_idx = i % GENDERS.len();
+        let _marital_idx = i % MARITAL_STATUS.len();
         let sal_idx = i % salutations.len();
 
         let birth_year = data.random_i32(1930, 1990);

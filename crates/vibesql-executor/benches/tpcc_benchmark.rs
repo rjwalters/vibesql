@@ -93,14 +93,19 @@ fn print_results(results: &TPCCBenchmarkResults, transaction_type: TransactionTy
     }
 }
 
-fn run_benchmark(
-    db: &vibesql_storage::Database,
+/// Run a TPC-C benchmark with any executor that implements `TPCCExecutor`.
+///
+/// This generic function replaces the previous three separate functions
+/// (`run_benchmark`, `run_sqlite_benchmark`, `run_duckdb_benchmark`)
+/// that contained nearly identical code.
+fn run_benchmark<E: TPCCExecutor>(
+    executor: &E,
     transaction_type: TransactionType,
     num_warehouses: i32,
     duration: Duration,
     warmup: Duration,
+    print_phases: bool,
 ) -> TPCCBenchmarkResults {
-    let executor = VibesqlTransactionExecutor::new(db);
     let mut workload = TPCCWorkload::new(42, num_warehouses);
 
     let mut results = TPCCBenchmarkResults::new();
@@ -111,7 +116,9 @@ fn run_benchmark(
     let mut stock_level_times: Vec<u64> = Vec::new();
 
     // Warmup phase
-    eprintln!("Warmup phase ({:?})...", warmup);
+    if print_phases {
+        eprintln!("Warmup phase ({:?})...", warmup);
+    }
     let warmup_start = Instant::now();
     while warmup_start.elapsed() < warmup {
         let txn_type = match transaction_type {
@@ -134,257 +141,9 @@ fn run_benchmark(
     }
 
     // Measurement phase
-    eprintln!("Measurement phase ({:?})...", duration);
-    let benchmark_start = Instant::now();
-    while benchmark_start.elapsed() < duration {
-        let txn_type = match transaction_type {
-            TransactionType::Mixed => workload.next_transaction_type(),
-            TransactionType::NewOrder => 0,
-            TransactionType::Payment => 1,
-            TransactionType::OrderStatus => 2,
-            TransactionType::Delivery => 3,
-            TransactionType::StockLevel => 4,
-        };
-
-        let result = match txn_type {
-            0 => {
-                let r = executor.new_order(&workload.generate_new_order());
-                new_order_times.push(r.duration_us);
-                r
-            }
-            1 => {
-                let r = executor.payment(&workload.generate_payment());
-                payment_times.push(r.duration_us);
-                r
-            }
-            2 => {
-                let r = executor.order_status(&workload.generate_order_status());
-                order_status_times.push(r.duration_us);
-                r
-            }
-            3 => {
-                let r = executor.delivery(&workload.generate_delivery());
-                delivery_times.push(r.duration_us);
-                r
-            }
-            4 => {
-                let r = executor.stock_level(&workload.generate_stock_level());
-                stock_level_times.push(r.duration_us);
-                r
-            }
-            _ => unreachable!(),
-        };
-
-        results.total_transactions += 1;
-        if result.success {
-            results.successful_transactions += 1;
-        } else {
-            results.failed_transactions += 1;
-        }
+    if print_phases {
+        eprintln!("Measurement phase ({:?})...", duration);
     }
-
-    results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
-    if results.total_duration_ms > 0 {
-        results.transactions_per_second =
-            results.total_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
-    }
-
-    // Calculate averages
-    if !new_order_times.is_empty() {
-        results.new_order_count = new_order_times.len() as u64;
-        results.new_order_avg_us =
-            new_order_times.iter().sum::<u64>() as f64 / new_order_times.len() as f64;
-    }
-    if !payment_times.is_empty() {
-        results.payment_count = payment_times.len() as u64;
-        results.payment_avg_us =
-            payment_times.iter().sum::<u64>() as f64 / payment_times.len() as f64;
-    }
-    if !order_status_times.is_empty() {
-        results.order_status_count = order_status_times.len() as u64;
-        results.order_status_avg_us =
-            order_status_times.iter().sum::<u64>() as f64 / order_status_times.len() as f64;
-    }
-    if !delivery_times.is_empty() {
-        results.delivery_count = delivery_times.len() as u64;
-        results.delivery_avg_us =
-            delivery_times.iter().sum::<u64>() as f64 / delivery_times.len() as f64;
-    }
-    if !stock_level_times.is_empty() {
-        results.stock_level_count = stock_level_times.len() as u64;
-        results.stock_level_avg_us =
-            stock_level_times.iter().sum::<u64>() as f64 / stock_level_times.len() as f64;
-    }
-
-    results
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn run_sqlite_benchmark(
-    conn: &rusqlite::Connection,
-    transaction_type: TransactionType,
-    num_warehouses: i32,
-    duration: Duration,
-    warmup: Duration,
-) -> TPCCBenchmarkResults {
-    let executor = SqliteTransactionExecutor::new(conn);
-    let mut workload = TPCCWorkload::new(42, num_warehouses);
-
-    let mut results = TPCCBenchmarkResults::new();
-    let mut new_order_times: Vec<u64> = Vec::new();
-    let mut payment_times: Vec<u64> = Vec::new();
-    let mut order_status_times: Vec<u64> = Vec::new();
-    let mut delivery_times: Vec<u64> = Vec::new();
-    let mut stock_level_times: Vec<u64> = Vec::new();
-
-    // Warmup phase
-    let warmup_start = Instant::now();
-    while warmup_start.elapsed() < warmup {
-        let txn_type = match transaction_type {
-            TransactionType::Mixed => workload.next_transaction_type(),
-            TransactionType::NewOrder => 0,
-            TransactionType::Payment => 1,
-            TransactionType::OrderStatus => 2,
-            TransactionType::Delivery => 3,
-            TransactionType::StockLevel => 4,
-        };
-
-        match txn_type {
-            0 => { let _ = executor.new_order(&workload.generate_new_order()); }
-            1 => { let _ = executor.payment(&workload.generate_payment()); }
-            2 => { let _ = executor.order_status(&workload.generate_order_status()); }
-            3 => { let _ = executor.delivery(&workload.generate_delivery()); }
-            4 => { let _ = executor.stock_level(&workload.generate_stock_level()); }
-            _ => unreachable!(),
-        }
-    }
-
-    // Measurement phase
-    let benchmark_start = Instant::now();
-    while benchmark_start.elapsed() < duration {
-        let txn_type = match transaction_type {
-            TransactionType::Mixed => workload.next_transaction_type(),
-            TransactionType::NewOrder => 0,
-            TransactionType::Payment => 1,
-            TransactionType::OrderStatus => 2,
-            TransactionType::Delivery => 3,
-            TransactionType::StockLevel => 4,
-        };
-
-        let result = match txn_type {
-            0 => {
-                let r = executor.new_order(&workload.generate_new_order());
-                new_order_times.push(r.duration_us);
-                r
-            }
-            1 => {
-                let r = executor.payment(&workload.generate_payment());
-                payment_times.push(r.duration_us);
-                r
-            }
-            2 => {
-                let r = executor.order_status(&workload.generate_order_status());
-                order_status_times.push(r.duration_us);
-                r
-            }
-            3 => {
-                let r = executor.delivery(&workload.generate_delivery());
-                delivery_times.push(r.duration_us);
-                r
-            }
-            4 => {
-                let r = executor.stock_level(&workload.generate_stock_level());
-                stock_level_times.push(r.duration_us);
-                r
-            }
-            _ => unreachable!(),
-        };
-
-        results.total_transactions += 1;
-        if result.success {
-            results.successful_transactions += 1;
-        } else {
-            results.failed_transactions += 1;
-        }
-    }
-
-    results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
-    if results.total_duration_ms > 0 {
-        results.transactions_per_second =
-            results.total_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
-    }
-
-    // Calculate averages
-    if !new_order_times.is_empty() {
-        results.new_order_count = new_order_times.len() as u64;
-        results.new_order_avg_us =
-            new_order_times.iter().sum::<u64>() as f64 / new_order_times.len() as f64;
-    }
-    if !payment_times.is_empty() {
-        results.payment_count = payment_times.len() as u64;
-        results.payment_avg_us =
-            payment_times.iter().sum::<u64>() as f64 / payment_times.len() as f64;
-    }
-    if !order_status_times.is_empty() {
-        results.order_status_count = order_status_times.len() as u64;
-        results.order_status_avg_us =
-            order_status_times.iter().sum::<u64>() as f64 / order_status_times.len() as f64;
-    }
-    if !delivery_times.is_empty() {
-        results.delivery_count = delivery_times.len() as u64;
-        results.delivery_avg_us =
-            delivery_times.iter().sum::<u64>() as f64 / delivery_times.len() as f64;
-    }
-    if !stock_level_times.is_empty() {
-        results.stock_level_count = stock_level_times.len() as u64;
-        results.stock_level_avg_us =
-            stock_level_times.iter().sum::<u64>() as f64 / stock_level_times.len() as f64;
-    }
-
-    results
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn run_duckdb_benchmark(
-    conn: &duckdb::Connection,
-    transaction_type: TransactionType,
-    num_warehouses: i32,
-    duration: Duration,
-    warmup: Duration,
-) -> TPCCBenchmarkResults {
-    let executor = DuckdbTransactionExecutor::new(conn);
-    let mut workload = TPCCWorkload::new(42, num_warehouses);
-
-    let mut results = TPCCBenchmarkResults::new();
-    let mut new_order_times: Vec<u64> = Vec::new();
-    let mut payment_times: Vec<u64> = Vec::new();
-    let mut order_status_times: Vec<u64> = Vec::new();
-    let mut delivery_times: Vec<u64> = Vec::new();
-    let mut stock_level_times: Vec<u64> = Vec::new();
-
-    // Warmup phase
-    let warmup_start = Instant::now();
-    while warmup_start.elapsed() < warmup {
-        let txn_type = match transaction_type {
-            TransactionType::Mixed => workload.next_transaction_type(),
-            TransactionType::NewOrder => 0,
-            TransactionType::Payment => 1,
-            TransactionType::OrderStatus => 2,
-            TransactionType::Delivery => 3,
-            TransactionType::StockLevel => 4,
-        };
-
-        match txn_type {
-            0 => { let _ = executor.new_order(&workload.generate_new_order()); }
-            1 => { let _ = executor.payment(&workload.generate_payment()); }
-            2 => { let _ = executor.order_status(&workload.generate_order_status()); }
-            3 => { let _ = executor.delivery(&workload.generate_delivery()); }
-            4 => { let _ = executor.stock_level(&workload.generate_stock_level()); }
-            _ => unreachable!(),
-        }
-    }
-
-    // Measurement phase
     let benchmark_start = Instant::now();
     while benchmark_start.elapsed() < duration {
         let txn_type = match transaction_type {
@@ -542,7 +301,8 @@ fn main() {
 
     // Run VibeSQL benchmark
     eprintln!("\n--- VibeSQL Benchmark ---");
-    let vibesql_results = run_benchmark(&vibesql_db, transaction_type, scale_factor, duration, warmup);
+    let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
+    let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, scale_factor, duration, warmup, true);
     print_results(&vibesql_results, transaction_type);
 
     // Comparison benchmarks (if feature enabled)
@@ -557,9 +317,8 @@ fn main() {
         let sqlite_conn = load_sqlite(scale_factor as f64);
         eprintln!("SQLite loaded in {:?}", sqlite_load_start.elapsed());
 
-        eprintln!("Warmup phase ({:?})...", warmup);
-        eprintln!("Measurement phase ({:?})...", duration);
-        let sqlite_results = run_sqlite_benchmark(&sqlite_conn, transaction_type, scale_factor, duration, warmup);
+        let sqlite_executor = SqliteTransactionExecutor::new(&sqlite_conn);
+        let sqlite_results = run_benchmark(&sqlite_executor, transaction_type, scale_factor, duration, warmup, true);
         print_results(&sqlite_results, transaction_type);
 
         // DuckDB benchmark
@@ -569,9 +328,8 @@ fn main() {
         let duckdb_conn = load_duckdb(scale_factor as f64);
         eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
 
-        eprintln!("Warmup phase ({:?})...", warmup);
-        eprintln!("Measurement phase ({:?})...", duration);
-        let duckdb_results = run_duckdb_benchmark(&duckdb_conn, transaction_type, scale_factor, duration, warmup);
+        let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
+        let duckdb_results = run_benchmark(&duckdb_executor, transaction_type, scale_factor, duration, warmup, true);
         print_results(&duckdb_results, transaction_type);
 
         // Summary comparison
@@ -580,42 +338,22 @@ fn main() {
         eprintln!("{:<12} {:>12} {:>12}", "Database", "TPS", "Avg (us)");
         eprintln!("{:-<12} {:->12} {:->12}", "", "", "");
 
-        let vibesql_avg = if vibesql_results.total_transactions > 0 {
-            let total_time = vibesql_results.new_order_avg_us * vibesql_results.new_order_count as f64
-                + vibesql_results.payment_avg_us * vibesql_results.payment_count as f64
-                + vibesql_results.order_status_avg_us * vibesql_results.order_status_count as f64
-                + vibesql_results.delivery_avg_us * vibesql_results.delivery_count as f64
-                + vibesql_results.stock_level_avg_us * vibesql_results.stock_level_count as f64;
-            total_time / vibesql_results.total_transactions as f64
-        } else {
-            0.0
-        };
+        fn compute_avg(results: &TPCCBenchmarkResults) -> f64 {
+            if results.total_transactions > 0 {
+                let total_time = results.new_order_avg_us * results.new_order_count as f64
+                    + results.payment_avg_us * results.payment_count as f64
+                    + results.order_status_avg_us * results.order_status_count as f64
+                    + results.delivery_avg_us * results.delivery_count as f64
+                    + results.stock_level_avg_us * results.stock_level_count as f64;
+                total_time / results.total_transactions as f64
+            } else {
+                0.0
+            }
+        }
 
-        let sqlite_avg = if sqlite_results.total_transactions > 0 {
-            let total_time = sqlite_results.new_order_avg_us * sqlite_results.new_order_count as f64
-                + sqlite_results.payment_avg_us * sqlite_results.payment_count as f64
-                + sqlite_results.order_status_avg_us * sqlite_results.order_status_count as f64
-                + sqlite_results.delivery_avg_us * sqlite_results.delivery_count as f64
-                + sqlite_results.stock_level_avg_us * sqlite_results.stock_level_count as f64;
-            total_time / sqlite_results.total_transactions as f64
-        } else {
-            0.0
-        };
-
-        let duckdb_avg = if duckdb_results.total_transactions > 0 {
-            let total_time = duckdb_results.new_order_avg_us * duckdb_results.new_order_count as f64
-                + duckdb_results.payment_avg_us * duckdb_results.payment_count as f64
-                + duckdb_results.order_status_avg_us * duckdb_results.order_status_count as f64
-                + duckdb_results.delivery_avg_us * duckdb_results.delivery_count as f64
-                + duckdb_results.stock_level_avg_us * duckdb_results.stock_level_count as f64;
-            total_time / duckdb_results.total_transactions as f64
-        } else {
-            0.0
-        };
-
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, vibesql_avg);
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "SQLite", sqlite_results.transactions_per_second, sqlite_avg);
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "DuckDB", duckdb_results.transactions_per_second, duckdb_avg);
+        eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, compute_avg(&vibesql_results));
+        eprintln!("{:<12} {:>12.2} {:>12.2}", "SQLite", sqlite_results.transactions_per_second, compute_avg(&sqlite_results));
+        eprintln!("{:<12} {:>12.2} {:>12.2}", "DuckDB", duckdb_results.transactions_per_second, compute_avg(&duckdb_results));
     }
 
     eprintln!("\n=== Done ===");

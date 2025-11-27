@@ -9,6 +9,18 @@
 
 use std::time::Instant;
 
+/// Trait for TPC-C transaction executors.
+///
+/// This trait abstracts over different database backends (VibeSQL, SQLite, DuckDB)
+/// allowing a single generic benchmark runner to work with any executor type.
+pub trait TPCCExecutor {
+    fn new_order(&self, input: &NewOrderInput) -> TransactionResult;
+    fn payment(&self, input: &PaymentInput) -> TransactionResult;
+    fn order_status(&self, input: &OrderStatusInput) -> TransactionResult;
+    fn delivery(&self, input: &DeliveryInput) -> TransactionResult;
+    fn stock_level(&self, input: &StockLevelInput) -> TransactionResult;
+}
+
 use super::data::TPCCRng;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
@@ -452,6 +464,28 @@ impl<'a> VibesqlTransactionExecutor<'a> {
     }
 }
 
+impl<'a> TPCCExecutor for VibesqlTransactionExecutor<'a> {
+    fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        self.new_order(input)
+    }
+
+    fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        self.payment(input)
+    }
+
+    fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        self.order_status(input)
+    }
+
+    fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
+        self.delivery(input)
+    }
+
+    fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        self.stock_level(input)
+    }
+}
+
 /// TPC-C transaction executor for SQLite
 #[cfg(feature = "benchmark-comparison")]
 pub struct SqliteTransactionExecutor<'a> {
@@ -556,6 +590,29 @@ impl<'a> SqliteTransactionExecutor<'a> {
     }
 }
 
+#[cfg(feature = "benchmark-comparison")]
+impl<'a> TPCCExecutor for SqliteTransactionExecutor<'a> {
+    fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        self.new_order(input)
+    }
+
+    fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        self.payment(input)
+    }
+
+    fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        self.order_status(input)
+    }
+
+    fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
+        self.delivery(input)
+    }
+
+    fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        self.stock_level(input)
+    }
+}
+
 /// TPC-C transaction executor for DuckDB
 #[cfg(feature = "benchmark-comparison")]
 pub struct DuckdbTransactionExecutor<'a> {
@@ -656,6 +713,29 @@ impl<'a> DuckdbTransactionExecutor<'a> {
             duration_us: start.elapsed().as_micros() as u64,
             error: None,
         }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+impl<'a> TPCCExecutor for DuckdbTransactionExecutor<'a> {
+    fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        self.new_order(input)
+    }
+
+    fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        self.payment(input)
+    }
+
+    fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        self.order_status(input)
+    }
+
+    fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
+        self.delivery(input)
+    }
+
+    fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        self.stock_level(input)
     }
 }
 
