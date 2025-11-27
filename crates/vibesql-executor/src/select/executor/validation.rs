@@ -151,12 +151,13 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
     }
 }
 
-/// Validate a single column reference against the schema
+/// Validate a single column reference against the schema (and optionally outer schema)
 fn validate_column_ref(
     col_ref: &ColumnReference,
     schema: &CombinedSchema,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<(), ExecutorError> {
-    // Check if column exists in schema
+    // Check if column exists in inner schema
     if schema
         .get_column_index(col_ref.table.as_deref(), &col_ref.column)
         .is_some()
@@ -164,8 +165,18 @@ fn validate_column_ref(
         return Ok(());
     }
 
+    // For correlated subqueries, also check outer schema (#2694)
+    if let Some(outer) = outer_schema {
+        if outer
+            .get_column_index(col_ref.table.as_deref(), &col_ref.column)
+            .is_some()
+        {
+            return Ok(());
+        }
+    }
+
     // Column not found - build error with context
-    let searched_tables: Vec<String> = if let Some(ref table) = col_ref.table {
+    let mut searched_tables: Vec<String> = if let Some(ref table) = col_ref.table {
         // If qualified, only report that table
         vec![table.clone()]
     } else {
@@ -173,12 +184,25 @@ fn validate_column_ref(
         schema.table_schemas.keys().cloned().collect()
     };
 
-    // Collect available columns for suggestions
-    let available_columns: Vec<String> = schema
+    // Collect available columns for suggestions (from both schemas)
+    let mut available_columns: Vec<String> = schema
         .table_schemas
         .values()
         .flat_map(|(_, table_schema)| table_schema.columns.iter().map(|c| c.name.clone()))
         .collect();
+
+    // Include outer schema tables and columns in error message
+    if let Some(outer) = outer_schema {
+        if col_ref.table.is_none() {
+            searched_tables.extend(outer.table_schemas.keys().cloned());
+        }
+        available_columns.extend(
+            outer
+                .table_schemas
+                .values()
+                .flat_map(|(_, table_schema)| table_schema.columns.iter().map(|c| c.name.clone())),
+        );
+    }
 
     Err(ExecutorError::ColumnNotFound {
         column_name: col_ref.column.clone(),
@@ -191,15 +215,20 @@ fn validate_column_ref(
     })
 }
 
-/// Validate all column references with optional procedural context
+/// Validate all column references with optional procedural context and outer schema
 ///
 /// When a procedural context is provided, variable names from the context are
 /// allowed as column references (they will be resolved at runtime).
+///
+/// When an outer_schema is provided (for correlated subqueries), column references
+/// are also validated against the outer schema. This fixes issue #2694 where
+/// correlated subqueries failed to resolve outer table references during validation.
 pub fn validate_select_columns_with_context(
     select_list: &[SelectItem],
     where_clause: Option<&Expression>,
     schema: &CombinedSchema,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<(), ExecutorError> {
     // Collect procedure variable names if in procedural context
     let proc_vars: std::collections::HashSet<String> = procedural_context
@@ -223,18 +252,29 @@ pub fn validate_select_columns_with_context(
                 // Wildcard doesn't reference specific columns
             }
             SelectItem::QualifiedWildcard { qualifier, .. } => {
-                // Validate that the qualifier matches a known table
+                // Validate that the qualifier matches a known table (check both schemas)
                 let qualifier_lower = qualifier.to_lowercase();
-                let table_exists = schema
+                let table_in_inner = schema
                     .table_schemas
                     .keys()
                     .any(|k| k.to_lowercase() == qualifier_lower);
+                let table_in_outer = outer_schema.is_some_and(|outer| {
+                    outer
+                        .table_schemas
+                        .keys()
+                        .any(|k| k.to_lowercase() == qualifier_lower)
+                });
 
-                if !table_exists {
+                if !table_in_inner && !table_in_outer {
+                    let mut available_tables: Vec<String> =
+                        schema.table_schemas.keys().cloned().collect();
+                    if let Some(outer) = outer_schema {
+                        available_tables.extend(outer.table_schemas.keys().cloned());
+                    }
                     return Err(ExecutorError::InvalidTableQualifier {
                         qualifier: qualifier.clone(),
                         column: "*".to_string(),
-                        available_tables: schema.table_schemas.keys().cloned().collect(),
+                        available_tables,
                     });
                 }
             }
@@ -254,10 +294,22 @@ pub fn validate_select_columns_with_context(
                 continue;
             }
         }
-        validate_column_ref(col_ref, schema)?;
+        validate_column_ref(col_ref, schema, outer_schema)?;
     }
 
     Ok(())
+}
+
+/// Validate column references in SELECT list and WHERE clause against schema
+///
+/// Simple validation without procedural context - used for standard SELECT queries.
+#[cfg(test)]
+pub fn validate_select_columns(
+    select_list: &[SelectItem],
+    where_clause: Option<&Expression>,
+    schema: &CombinedSchema,
+) -> Result<(), ExecutorError> {
+    validate_select_columns_with_context(select_list, where_clause, schema, None, None)
 }
 
 #[cfg(test)]

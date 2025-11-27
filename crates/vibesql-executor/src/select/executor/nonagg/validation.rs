@@ -149,14 +149,19 @@ fn collect_select_aliases(select_list: &[vibesql_ast::SelectItem]) -> std::colle
     aliases
 }
 
-/// Validate column references with optional procedural context
+/// Validate column references with optional procedural context and outer schema
 ///
 /// When a procedural context is provided, variable names from the context are
 /// allowed as column references (they will be resolved at runtime).
+///
+/// When an outer_schema is provided (for correlated subqueries), column references
+/// are also validated against the outer schema. This fixes issue #2694 where
+/// correlated subqueries failed to resolve outer table references during validation.
 pub(super) fn validate_select_column_references_with_context(
     stmt: &vibesql_ast::SelectStmt,
     schema: &CombinedSchema,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<(), ExecutorError> {
     // Collect SELECT aliases for ORDER BY validation
     let select_aliases = collect_select_aliases(&stmt.select_list);
@@ -174,21 +179,21 @@ pub(super) fn validate_select_column_references_with_context(
     // Validate SELECT list column references
     for item in &stmt.select_list {
         if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
-            validate_expression_column_refs(expr, schema, &proc_vars)?;
+            validate_expression_column_refs(expr, schema, outer_schema, &proc_vars)?;
         }
         // Wildcards (*, table.*) don't need validation - they're handled separately
     }
 
     // Validate WHERE clause column references (allowing procedure variables)
     if let Some(where_expr) = &stmt.where_clause {
-        validate_expression_column_refs(where_expr, schema, &proc_vars)?;
+        validate_expression_column_refs(where_expr, schema, outer_schema, &proc_vars)?;
     }
 
     // Validate ORDER BY column references (allowing aliases and procedure variables)
     if let Some(order_by) = &stmt.order_by {
         let combined: std::collections::HashSet<String> = select_aliases.union(&proc_vars).cloned().collect();
         for order_item in order_by {
-            validate_expression_column_refs(&order_item.expr, schema, &combined)?;
+            validate_expression_column_refs(&order_item.expr, schema, outer_schema, &combined)?;
         }
     }
 
@@ -196,14 +201,14 @@ pub(super) fn validate_select_column_references_with_context(
     if let Some(group_by) = &stmt.group_by {
         let combined: std::collections::HashSet<String> = select_aliases.union(&proc_vars).cloned().collect();
         for group_expr in group_by {
-            validate_expression_column_refs(group_expr, schema, &combined)?;
+            validate_expression_column_refs(group_expr, schema, outer_schema, &combined)?;
         }
     }
 
     // Validate HAVING clause column references (allowing aliases and procedure variables)
     if let Some(having_expr) = &stmt.having {
         let combined: std::collections::HashSet<String> = select_aliases.union(&proc_vars).cloned().collect();
-        validate_expression_column_refs(having_expr, schema, &combined)?;
+        validate_expression_column_refs(having_expr, schema, outer_schema, &combined)?;
     }
 
     Ok(())
@@ -211,11 +216,15 @@ pub(super) fn validate_select_column_references_with_context(
 
 /// Recursively validate column references in an expression against the schema.
 ///
+/// The `outer_schema` parameter contains the outer query's schema for correlated subqueries.
+/// This allows correlated subqueries to reference columns from the outer query (#2694).
+///
 /// The `allowed_aliases` parameter contains aliases that are valid to use in this context
 /// (e.g., SELECT aliases when validating ORDER BY).
 fn validate_expression_column_refs(
     expr: &vibesql_ast::Expression,
     schema: &CombinedSchema,
+    outer_schema: Option<&CombinedSchema>,
     allowed_aliases: &std::collections::HashSet<String>,
 ) -> Result<(), ExecutorError> {
     use vibesql_ast::Expression;
@@ -235,42 +244,61 @@ fn validate_expression_column_refs(
                 }
             }
 
-            // Try to resolve the column in the schema
-            if schema.get_column_index(table.as_deref(), column).is_none() {
-                // Column not found - build error with context
-                let searched_tables: Vec<String> =
-                    schema.table_schemas.keys().cloned().collect();
-                let available_columns: Vec<String> = schema
-                    .table_schemas
-                    .values()
-                    .flat_map(|(_, tbl_schema)| {
-                        tbl_schema.columns.iter().map(|c| c.name.clone())
-                    })
-                    .collect();
-
-                return Err(ExecutorError::ColumnNotFound {
-                    column_name: column.clone(),
-                    table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
-                    searched_tables,
-                    available_columns,
-                });
+            // Try to resolve the column in the inner schema first
+            if schema.get_column_index(table.as_deref(), column).is_some() {
+                return Ok(());
             }
-            Ok(())
+
+            // For correlated subqueries, also check outer schema (#2694)
+            if let Some(outer) = outer_schema {
+                if outer.get_column_index(table.as_deref(), column).is_some() {
+                    return Ok(());
+                }
+            }
+
+            // Column not found - build error with context
+            let mut searched_tables: Vec<String> =
+                schema.table_schemas.keys().cloned().collect();
+            let mut available_columns: Vec<String> = schema
+                .table_schemas
+                .values()
+                .flat_map(|(_, tbl_schema)| {
+                    tbl_schema.columns.iter().map(|c| c.name.clone())
+                })
+                .collect();
+
+            // Include outer schema info in error message
+            if let Some(outer) = outer_schema {
+                searched_tables.extend(outer.table_schemas.keys().cloned());
+                available_columns.extend(
+                    outer
+                        .table_schemas
+                        .values()
+                        .flat_map(|(_, tbl_schema)| tbl_schema.columns.iter().map(|c| c.name.clone())),
+                );
+            }
+
+            return Err(ExecutorError::ColumnNotFound {
+                column_name: column.clone(),
+                table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
+                searched_tables,
+                available_columns,
+            });
         }
 
         // Recurse into binary operations
         Expression::BinaryOp { left, right, .. } => {
-            validate_expression_column_refs(left, schema, allowed_aliases)?;
-            validate_expression_column_refs(right, schema, allowed_aliases)
+            validate_expression_column_refs(left, schema, outer_schema, allowed_aliases)?;
+            validate_expression_column_refs(right, schema, outer_schema, allowed_aliases)
         }
 
         // Recurse into unary operations
-        Expression::UnaryOp { expr, .. } => validate_expression_column_refs(expr, schema, allowed_aliases),
+        Expression::UnaryOp { expr, .. } => validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases),
 
         // Function calls
         Expression::Function { args, .. } => {
             for arg in args {
-                validate_expression_column_refs(arg, schema, allowed_aliases)?;
+                validate_expression_column_refs(arg, schema, outer_schema, allowed_aliases)?;
             }
             Ok(())
         }
@@ -278,7 +306,7 @@ fn validate_expression_column_refs(
         // Aggregate functions
         Expression::AggregateFunction { args, .. } => {
             for arg in args {
-                validate_expression_column_refs(arg, schema, allowed_aliases)?;
+                validate_expression_column_refs(arg, schema, outer_schema, allowed_aliases)?;
             }
             Ok(())
         }
@@ -292,18 +320,18 @@ fn validate_expression_column_refs(
                 vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
             };
             for arg in args {
-                validate_expression_column_refs(arg, schema, allowed_aliases)?;
+                validate_expression_column_refs(arg, schema, outer_schema, allowed_aliases)?;
             }
             // Validate PARTITION BY expressions
             if let Some(partition_exprs) = &over.partition_by {
                 for partition_expr in partition_exprs {
-                    validate_expression_column_refs(partition_expr, schema, allowed_aliases)?;
+                    validate_expression_column_refs(partition_expr, schema, outer_schema, allowed_aliases)?;
                 }
             }
             // Validate ORDER BY expressions
             if let Some(order_items) = &over.order_by {
                 for order_item in order_items {
-                    validate_expression_column_refs(&order_item.expr, schema, allowed_aliases)?;
+                    validate_expression_column_refs(&order_item.expr, schema, outer_schema, allowed_aliases)?;
                 }
             }
             Ok(())
@@ -312,35 +340,35 @@ fn validate_expression_column_refs(
         // CASE expressions
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                validate_expression_column_refs(op, schema, allowed_aliases)?;
+                validate_expression_column_refs(op, schema, outer_schema, allowed_aliases)?;
             }
             for when_clause in when_clauses {
                 for cond in &when_clause.conditions {
-                    validate_expression_column_refs(cond, schema, allowed_aliases)?;
+                    validate_expression_column_refs(cond, schema, outer_schema, allowed_aliases)?;
                 }
-                validate_expression_column_refs(&when_clause.result, schema, allowed_aliases)?;
+                validate_expression_column_refs(&when_clause.result, schema, outer_schema, allowed_aliases)?;
             }
             if let Some(else_res) = else_result {
-                validate_expression_column_refs(else_res, schema, allowed_aliases)?;
+                validate_expression_column_refs(else_res, schema, outer_schema, allowed_aliases)?;
             }
             Ok(())
         }
 
         // IS NULL / IS NOT NULL
-        Expression::IsNull { expr, .. } => validate_expression_column_refs(expr, schema, allowed_aliases),
+        Expression::IsNull { expr, .. } => validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases),
 
         // IN list
         Expression::InList { expr, values, .. } => {
-            validate_expression_column_refs(expr, schema, allowed_aliases)?;
+            validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)?;
             for val in values {
-                validate_expression_column_refs(val, schema, allowed_aliases)?;
+                validate_expression_column_refs(val, schema, outer_schema, allowed_aliases)?;
             }
             Ok(())
         }
 
         // IN subquery - don't validate inside subquery (it has its own schema)
         Expression::In { expr, .. } => {
-            validate_expression_column_refs(expr, schema, allowed_aliases)
+            validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)
         }
 
         // EXISTS subquery - no column refs to validate at this level
@@ -348,19 +376,19 @@ fn validate_expression_column_refs(
 
         // BETWEEN
         Expression::Between { expr, low, high, .. } => {
-            validate_expression_column_refs(expr, schema, allowed_aliases)?;
-            validate_expression_column_refs(low, schema, allowed_aliases)?;
-            validate_expression_column_refs(high, schema, allowed_aliases)
+            validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)?;
+            validate_expression_column_refs(low, schema, outer_schema, allowed_aliases)?;
+            validate_expression_column_refs(high, schema, outer_schema, allowed_aliases)
         }
 
         // LIKE pattern matching
         Expression::Like { expr, pattern, .. } => {
-            validate_expression_column_refs(expr, schema, allowed_aliases)?;
-            validate_expression_column_refs(pattern, schema, allowed_aliases)
+            validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)?;
+            validate_expression_column_refs(pattern, schema, outer_schema, allowed_aliases)
         }
 
         // CAST
-        Expression::Cast { expr, .. } => validate_expression_column_refs(expr, schema, allowed_aliases),
+        Expression::Cast { expr, .. } => validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases),
 
         // Literals and other simple expressions - no column refs to validate
         Expression::Literal(_)
@@ -377,29 +405,29 @@ fn validate_expression_column_refs(
 
         // Quantified comparison - validate left expression, subquery has its own schema
         Expression::QuantifiedComparison { expr, .. } => {
-            validate_expression_column_refs(expr, schema, allowed_aliases)
+            validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)
         }
 
         // INTERVAL expression
-        Expression::Interval { value, .. } => validate_expression_column_refs(value, schema, allowed_aliases),
+        Expression::Interval { value, .. } => validate_expression_column_refs(value, schema, outer_schema, allowed_aliases),
 
         // POSITION expression
         Expression::Position { substring, string, .. } => {
-            validate_expression_column_refs(substring, schema, allowed_aliases)?;
-            validate_expression_column_refs(string, schema, allowed_aliases)
+            validate_expression_column_refs(substring, schema, outer_schema, allowed_aliases)?;
+            validate_expression_column_refs(string, schema, outer_schema, allowed_aliases)
         }
 
         // TRIM expression
         Expression::Trim { removal_char, string, .. } => {
             if let Some(char_expr) = removal_char {
-                validate_expression_column_refs(char_expr, schema, allowed_aliases)?;
+                validate_expression_column_refs(char_expr, schema, outer_schema, allowed_aliases)?;
             }
-            validate_expression_column_refs(string, schema, allowed_aliases)
+            validate_expression_column_refs(string, schema, outer_schema, allowed_aliases)
         }
 
         // MATCH AGAINST - column names are strings, not expressions
         Expression::MatchAgainst { search_modifier, .. } => {
-            validate_expression_column_refs(search_modifier, schema, allowed_aliases)
+            validate_expression_column_refs(search_modifier, schema, outer_schema, allowed_aliases)
         }
 
         // Pseudo variables (OLD.col, NEW.col) - used in triggers, not validated against schema
