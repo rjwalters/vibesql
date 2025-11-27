@@ -63,12 +63,14 @@ impl SelectExecutor<'_> {
         // This ensures column errors are caught even when tables are empty
         // Only validate if we have a FROM clause (skip for SELECT without FROM)
         // Pass procedural context to allow procedure variables in WHERE clause
+        // Pass outer_schema for correlated subqueries (#2694)
         if stmt.from.is_some() {
             crate::select::executor::validation::validate_select_columns_with_context(
                 &stmt.select_list,
                 stmt.where_clause.as_ref(),
                 &from_result.schema,
                 self.procedural_context,
+                self.outer_schema,
             )?;
         }
 

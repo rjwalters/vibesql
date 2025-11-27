@@ -46,7 +46,8 @@ impl SelectExecutor<'_> {
         // Validate column references upfront, before row iteration
         // This ensures proper error messages even when the table is empty
         // Pass procedural context to allow procedure variables in WHERE clause
-        validate_select_column_references_with_context(stmt, &from_result.schema, self.procedural_context)?;
+        // Pass outer_schema for correlated subqueries (#2694)
+        validate_select_column_references_with_context(stmt, &from_result.schema, self.procedural_context, self.outer_schema)?;
 
         // Phase D: Use iterator-based execution for simple queries
         // This provides memory efficiency and early termination for LIMIT queries

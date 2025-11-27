@@ -109,11 +109,13 @@ impl SelectExecutor<'_> {
         // Validate column references BEFORE processing (issue #2654)
         // This ensures column errors are caught even when tables are empty
         // Pass procedural context to allow procedure variables in WHERE clause
+        // Pass outer_schema for correlated subqueries (#2694)
         super::validation::validate_select_columns_with_context(
             &stmt.select_list,
             stmt.where_clause.as_ref(),
             &schema,
             self.procedural_context,
+            self.outer_schema,
         )?;
 
         // Extract expressions from SELECT list (only Expression items, skip wildcards)
@@ -220,11 +222,13 @@ impl SelectExecutor<'_> {
         // Validate column references BEFORE processing (issue #2654)
         // This ensures column errors are caught even when tables are empty
         // Pass procedural context to allow procedure variables in WHERE clause
+        // Pass outer_schema for correlated subqueries (#2694)
         super::validation::validate_select_columns_with_context(
             &stmt.select_list,
             stmt.where_clause.as_ref(),
             &schema,
             self.procedural_context,
+            self.outer_schema,
         )?;
 
         // Get columnar representation from cache or convert from storage
