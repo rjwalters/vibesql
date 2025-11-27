@@ -609,6 +609,68 @@ pub(super) fn nested_loop_join(
         }
     }
 
+    // Try to use hash join for CROSS JOINs when equijoin conditions exist in WHERE clause
+    // This is critical for Q21 and other TPC-H queries with implicit (comma-separated) joins
+    // CROSS JOIN with equijoin predicates should be executed as hash INNER JOIN
+    if let vibesql_ast::JoinType::Cross = join_type {
+        if !additional_equijoins.is_empty() {
+            // Get column count and right table info for analysis
+            let left_col_count: usize =
+                left.schema.table_schemas.values().map(|(_, schema)| schema.columns.len()).sum();
+
+            let right_table_name = right
+                .schema
+                .table_schemas
+                .keys()
+                .next()
+                .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
+                .clone();
+
+            let right_schema = right
+                .schema
+                .table_schemas
+                .get(&right_table_name)
+                .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
+                .1
+                .clone();
+
+            let temp_schema =
+                CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+
+            // Try WHERE clause equijoins for hash join
+            for (idx, equijoin) in additional_equijoins.iter().enumerate() {
+                if let Some(equi_join_info) =
+                    join_analyzer::analyze_equi_join(equijoin, &temp_schema, left_col_count)
+                {
+                    // Found a WHERE clause equijoin suitable for hash join!
+                    // Execute CROSS JOIN as hash INNER JOIN with the equijoin condition
+                    let mut result = hash_join_inner(
+                        left,
+                        right,
+                        equi_join_info.left_col_idx,
+                        equi_join_info.right_col_idx,
+                    )?;
+
+                    // Apply remaining equijoins as post-join filters
+                    let remaining_conditions: Vec<_> = additional_equijoins
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i != idx)
+                        .map(|(_, e)| e.clone())
+                        .collect();
+
+                    if !remaining_conditions.is_empty() {
+                        if let Some(filter_expr) = combine_with_and(remaining_conditions) {
+                            result = apply_post_join_filter(result, &filter_expr, database)?;
+                        }
+                    }
+
+                    return Ok(result);
+                }
+            }
+        }
+    }
+
     // Prepare combined join condition including additional equijoins from WHERE clause
     let mut all_join_conditions = Vec::new();
     if let Some(cond) = condition {
