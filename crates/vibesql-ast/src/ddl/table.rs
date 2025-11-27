@@ -19,6 +19,32 @@ pub enum ReferentialAction {
     SetDefault,
 }
 
+/// Storage format for tables
+///
+/// Tables can be stored in row-oriented (default) or columnar format.
+/// Columnar storage is optimized for analytical queries (OLAP) with
+/// SIMD-accelerated scans and aggregations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StorageFormat {
+    /// Traditional row-oriented storage (default)
+    /// Optimized for OLTP workloads: fast inserts, point lookups
+    #[default]
+    Row,
+    /// Native columnar storage for analytical tables
+    /// Optimized for OLAP workloads: fast scans, aggregations
+    /// Eliminates row-to-columnar conversion overhead
+    Columnar,
+}
+
+impl std::fmt::Display for StorageFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StorageFormat::Row => write!(f, "row"),
+            StorageFormat::Columnar => write!(f, "columnar"),
+        }
+    }
+}
+
 /// MySQL table options for CREATE TABLE
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableOption {
@@ -52,6 +78,9 @@ pub enum TableOption {
     Collate(Option<String>),
     /// COMMENT [=] 'string'
     Comment(Option<String>),
+    /// STORAGE [=] {ROW | COLUMNAR}
+    /// VibeSQL extension for native columnar storage
+    Storage(StorageFormat),
 }
 
 /// MySQL INSERT_METHOD values

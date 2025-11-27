@@ -300,6 +300,9 @@ pub enum Keyword {
     // Temporary object keywords (SQLite)
     Temp,
     Temporary,
+    // VibeSQL storage format keywords
+    Storage,
+    Columnar,
 }
 
 impl Keyword {
@@ -590,6 +593,9 @@ impl fmt::Display for Keyword {
             // Temporary object keywords
             Keyword::Temp => "TEMP",
             Keyword::Temporary => "TEMPORARY",
+            // VibeSQL storage format keywords
+            Keyword::Storage => "STORAGE",
+            Keyword::Columnar => "COLUMNAR",
         };
         write!(f, "{}", keyword_str)
     }

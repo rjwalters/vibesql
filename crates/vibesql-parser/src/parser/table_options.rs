@@ -40,6 +40,8 @@ impl Parser {
                 self.parse_collate_option()?
             } else if self.try_consume_keyword(Keyword::Comment) {
                 self.parse_comment_option()?
+            } else if self.try_consume_keyword(Keyword::Storage) {
+                self.parse_storage_option()?
             } else {
                 // No more table options
                 break;
@@ -248,6 +250,23 @@ impl Parser {
             }
             _ => Err(ParseError { message: "Expected string value for COMMENT".to_string() }),
         }
+    }
+
+    /// Parse STORAGE = {ROW | COLUMNAR} option (VibeSQL extension)
+    fn parse_storage_option(&mut self) -> Result<vibesql_ast::TableOption, ParseError> {
+        // Optional = sign
+        self.try_consume(&Token::Symbol('='));
+        // Parse storage format value
+        let format = if self.try_consume_keyword(Keyword::Row) {
+            vibesql_ast::StorageFormat::Row
+        } else if self.try_consume_keyword(Keyword::Columnar) {
+            vibesql_ast::StorageFormat::Columnar
+        } else {
+            return Err(ParseError {
+                message: "Expected ROW or COLUMNAR for STORAGE".to_string(),
+            });
+        };
+        Ok(vibesql_ast::TableOption::Storage(format))
     }
 
     /// Parse a numeric value that can be integer or float (converts float to int by truncation)
