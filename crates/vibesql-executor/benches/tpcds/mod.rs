@@ -1,0 +1,25 @@
+//! TPC-DS Benchmark Module
+//!
+//! This module provides TPC-DS (Decision Support) benchmark utilities including:
+//! - Data generation (`data` module)
+//! - Query definitions (`queries` module)
+//! - Schema creation and data loading (`schema` module)
+//!
+//! TPC-DS models decision support systems with 25 tables and 99 queries.
+//! This implementation focuses on the dimension tables needed for demographic
+//! filtering queries.
+
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
+pub mod data;
+pub mod queries;
+pub mod schema;
+
+// Re-export commonly used items for convenience
+pub use data::TPCDSData;
+pub use queries::*;
+pub use schema::load_vibesql;
+
+#[cfg(feature = "benchmark-comparison")]
+pub use schema::{load_duckdb, load_sqlite};
