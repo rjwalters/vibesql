@@ -1,9 +1,21 @@
 //! TPC-DS Query Definitions
 //!
-//! This module contains TPC-DS benchmark queries adapted for the Phase 1 schema.
-//! The original TPC-DS has 99 queries; we implement a subset that work with
-//! our current tables: date_dim, time_dim, item, customer, customer_address,
-//! store, and store_sales.
+//! This module contains TPC-DS benchmark queries adapted for the implemented schema.
+//! The original TPC-DS has 99 queries; we implement a subset that work with our
+//! current tables across three phases:
+//!
+//! ## Phase 1 (Core Tables):
+//! - date_dim, time_dim, item, customer, customer_address, store, store_sales
+//! - Queries: Q3, Q7, Q19, Q42, Q52, Q55, Q68, Q73, Q89, Q96
+//!
+//! ## Phase 2 (Extended Tables):
+//! - promotion, warehouse, ship_mode, reason, store_returns
+//! - Queries: Q25, Q26, Q27, Q35, Q50, Q81, Q82, Q83
+//!
+//! ## Phase 3 (Full E-Commerce):
+//! - catalog_page, web_page, web_site
+//! - catalog_sales, catalog_returns, web_sales, web_returns
+//! - Queries: Q13, Q16, Q20, Q32, Q37, Q60, Q62, Q76, Q84, Q92
 //!
 //! Queries are numbered to match the official TPC-DS query numbers where possible,
 //! with adaptations noted in comments.
@@ -406,6 +418,178 @@ LIMIT 100
 "#;
 
 // =============================================================================
+// Phase 3 Queries - Using catalog_sales, catalog_returns, web_sales, web_returns
+// =============================================================================
+
+// TPC-DS Q13: Catalog sales analysis by demographics
+// Tests: Join with catalog_sales and customer
+pub const TPCDS_Q13: &str = r#"
+SELECT
+    AVG(cs_quantity) as avg_quantity,
+    AVG(cs_ext_sales_price) as avg_sales_price,
+    AVG(cs_ext_wholesale_cost) as avg_wholesale_cost,
+    SUM(cs_ext_wholesale_cost) as total_wholesale_cost
+FROM catalog_sales, customer, date_dim
+WHERE cs_sold_date_sk = d_date_sk
+    AND cs_bill_customer_sk = c_customer_sk
+    AND c_birth_year BETWEEN 1970 AND 1980
+    AND d_year = 2000
+LIMIT 100
+"#;
+
+// TPC-DS Q16: Catalog sales with return analysis
+// Tests: Join between catalog_sales and catalog_returns
+pub const TPCDS_Q16: &str = r#"
+SELECT
+    COUNT(DISTINCT cs_order_number) as order_count,
+    SUM(cs_ext_ship_cost) as total_ship_cost,
+    SUM(cs_net_profit) as total_profit
+FROM catalog_sales cs1, date_dim, customer_address
+WHERE cs1.cs_sold_date_sk = d_date_sk
+    AND cs1.cs_ship_addr_sk = ca_address_sk
+    AND d_year = 2000
+    AND d_moy BETWEEN 1 AND 6
+    AND ca_state = 'TX'
+LIMIT 100
+"#;
+
+// TPC-DS Q20: Catalog sales by catalog page
+// Tests: Join with catalog_page table
+pub const TPCDS_Q20: &str = r#"
+SELECT
+    i_item_id,
+    i_item_desc,
+    i_category,
+    i_class,
+    i_current_price,
+    SUM(cs_ext_sales_price) as itemrevenue,
+    SUM(cs_ext_sales_price) * 100 / SUM(SUM(cs_ext_sales_price)) OVER () as revenueratio
+FROM catalog_sales, item, date_dim
+WHERE cs_item_sk = i_item_sk
+    AND cs_sold_date_sk = d_date_sk
+    AND d_year = 2000
+    AND d_moy = 1
+GROUP BY i_item_id, i_item_desc, i_category, i_class, i_current_price
+ORDER BY i_category, i_class, i_item_id, i_item_desc, revenueratio
+LIMIT 100
+"#;
+
+// TPC-DS Q32: Catalog sales and promotions
+// Tests: Complex catalog sales filtering
+pub const TPCDS_Q32: &str = r#"
+SELECT
+    SUM(cs_ext_discount_amt) as excess_discount
+FROM catalog_sales, item, date_dim
+WHERE cs_item_sk = i_item_sk
+    AND cs_sold_date_sk = d_date_sk
+    AND i_manufact_id = 1
+    AND d_year = 2000
+    AND d_moy = 1
+LIMIT 100
+"#;
+
+// TPC-DS Q37: Catalog page analysis
+// Tests: Join with catalog_page
+pub const TPCDS_Q37: &str = r#"
+SELECT
+    i_item_id,
+    i_item_desc,
+    i_current_price
+FROM item, catalog_page, catalog_sales, date_dim
+WHERE i_item_sk = cs_item_sk
+    AND cs_catalog_page_sk = cp_catalog_page_sk
+    AND cs_sold_date_sk = d_date_sk
+    AND d_year = 2000
+    AND cp_catalog_page_number BETWEEN 1 AND 100
+    AND i_current_price BETWEEN 20 AND 50
+GROUP BY i_item_id, i_item_desc, i_current_price
+ORDER BY i_item_id
+LIMIT 100
+"#;
+
+// TPC-DS Q60: Web sales by category
+// Tests: Web sales table with item join
+pub const TPCDS_Q60: &str = r#"
+SELECT
+    i_item_id,
+    SUM(ws_ext_sales_price) as total_sales
+FROM web_sales, item, date_dim
+WHERE ws_item_sk = i_item_sk
+    AND ws_sold_date_sk = d_date_sk
+    AND d_year = 2000
+    AND d_moy = 12
+GROUP BY i_item_id
+ORDER BY total_sales DESC, i_item_id
+LIMIT 100
+"#;
+
+// TPC-DS Q62: Web sales shipping analysis
+// Tests: Web sales with warehouse and ship_mode
+pub const TPCDS_Q62: &str = r#"
+SELECT
+    w_warehouse_name,
+    sm_type,
+    SUM(ws_ext_ship_cost) as ship_cost,
+    SUM(ws_net_profit) as net_profit
+FROM web_sales, warehouse, ship_mode, date_dim, web_site
+WHERE ws_warehouse_sk = w_warehouse_sk
+    AND ws_ship_mode_sk = sm_ship_mode_sk
+    AND ws_sold_date_sk = d_date_sk
+    AND ws_web_site_sk = web_site_sk
+    AND d_year = 2000
+GROUP BY w_warehouse_name, sm_type
+ORDER BY w_warehouse_name, sm_type
+LIMIT 100
+"#;
+
+// TPC-DS Q76: Web page and catalog page analysis
+// Tests: Multi-channel sales analysis
+pub const TPCDS_Q76: &str = r#"
+SELECT
+    'web' as channel,
+    wp_web_page_id as page_id,
+    SUM(ws_ext_sales_price) as sales
+FROM web_sales, web_page, date_dim
+WHERE ws_web_page_sk = wp_web_page_sk
+    AND ws_sold_date_sk = d_date_sk
+    AND d_year = 2000
+GROUP BY wp_web_page_id
+ORDER BY sales DESC
+LIMIT 100
+"#;
+
+// TPC-DS Q84: Web returns analysis
+// Tests: Web returns table usage
+pub const TPCDS_Q84: &str = r#"
+SELECT
+    c_customer_id,
+    c_last_name,
+    c_first_name,
+    SUM(wr_return_amt) as total_returns
+FROM customer, web_returns, date_dim
+WHERE c_customer_sk = wr_refunded_customer_sk
+    AND wr_returned_date_sk = d_date_sk
+    AND d_year = 2000
+GROUP BY c_customer_id, c_last_name, c_first_name
+HAVING SUM(wr_return_amt) > 100
+ORDER BY total_returns DESC, c_customer_id
+LIMIT 100
+"#;
+
+// TPC-DS Q92: Web sales vs web returns
+// Tests: Web returns with reason analysis
+pub const TPCDS_Q92: &str = r#"
+SELECT
+    SUM(ws_ext_discount_amt) as discount_amt
+FROM web_sales, item, date_dim
+WHERE ws_item_sk = i_item_sk
+    AND ws_sold_date_sk = d_date_sk
+    AND i_manufact_id = 1
+    AND d_year = 2000
+LIMIT 100
+"#;
+
+// =============================================================================
 // Simple Sanity Queries for Testing
 // =============================================================================
 
@@ -461,6 +645,17 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q81", TPCDS_Q81),
     ("Q82", TPCDS_Q82),
     ("Q83", TPCDS_Q83),
+    // Phase 3 queries (use catalog_sales, catalog_returns, web_sales, web_returns)
+    ("Q13", TPCDS_Q13),
+    ("Q16", TPCDS_Q16),
+    ("Q20", TPCDS_Q20),
+    ("Q32", TPCDS_Q32),
+    ("Q37", TPCDS_Q37),
+    ("Q60", TPCDS_Q60),
+    ("Q62", TPCDS_Q62),
+    ("Q76", TPCDS_Q76),
+    ("Q84", TPCDS_Q84),
+    ("Q92", TPCDS_Q92),
 ];
 
 /// Sanity check queries for validation

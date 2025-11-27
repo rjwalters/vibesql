@@ -27,7 +27,18 @@
 //! Fact Tables:
 //! - store_returns: Store return transactions
 //!
-//! Additional tables (catalog_sales, web_sales, etc.) will be added in future phases.
+//! ## Phase 3 Tables (Full E-Commerce):
+//!
+//! Dimension Tables:
+//! - catalog_page: Catalog page information
+//! - web_page: Web page information
+//! - web_site: Web site information
+//!
+//! Fact Tables:
+//! - catalog_sales: Catalog sales transactions
+//! - catalog_returns: Catalog return transactions
+//! - web_sales: Web sales transactions
+//! - web_returns: Web return transactions
 
 use super::data::{
     TPCDSData, BRANDS, CATEGORIES, CLASSES, CREDIT_RATINGS, GENDERS, ITEM_COLORS, ITEM_SIZES,
@@ -68,9 +79,20 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     load_ship_mode_vibesql(&mut db, &mut data);
     load_reason_vibesql(&mut db, &mut data);
 
+    // Phase 3 dimension tables
+    load_catalog_page_vibesql(&mut db, &mut data);
+    load_web_page_vibesql(&mut db, &mut data);
+    load_web_site_vibesql(&mut db, &mut data);
+
     // Load fact tables
     load_store_sales_vibesql(&mut db, &mut data);
     load_store_returns_vibesql(&mut db, &mut data);
+
+    // Phase 3 fact tables
+    load_catalog_sales_vibesql(&mut db, &mut data);
+    load_catalog_returns_vibesql(&mut db, &mut data);
+    load_web_sales_vibesql(&mut db, &mut data);
+    load_web_returns_vibesql(&mut db, &mut data);
 
     // Create indexes for join optimization
     create_tpcds_indexes_vibesql(&mut db);
@@ -87,8 +109,15 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
         "warehouse",
         "ship_mode",
         "reason",
+        "catalog_page",
+        "web_page",
+        "web_site",
         "store_sales",
         "store_returns",
+        "catalog_sales",
+        "catalog_returns",
+        "web_sales",
+        "web_returns",
     ] {
         if let Some(table) = db.get_table_mut(table_name) {
             table.analyze();
@@ -1471,6 +1500,1074 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
         ],
     ))
     .unwrap();
+
+    // =========================================================================
+    // Phase 3 Tables
+    // =========================================================================
+
+    // CATALOG_PAGE table
+    db.create_table(TableSchema::new(
+        "catalog_page".to_string(),
+        vec![
+            ColumnSchema {
+                name: "cp_catalog_page_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_catalog_page_id".to_string(),
+                data_type: DataType::Varchar { max_length: Some(16) },
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_start_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_end_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_department".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_catalog_number".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_catalog_page_number".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_description".to_string(),
+                data_type: DataType::Varchar { max_length: Some(100) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cp_type".to_string(),
+                data_type: DataType::Varchar { max_length: Some(100) },
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // WEB_PAGE table
+    db.create_table(TableSchema::new(
+        "web_page".to_string(),
+        vec![
+            ColumnSchema {
+                name: "wp_web_page_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_web_page_id".to_string(),
+                data_type: DataType::Varchar { max_length: Some(16) },
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_rec_start_date".to_string(),
+                data_type: DataType::Date,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_rec_end_date".to_string(),
+                data_type: DataType::Date,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_creation_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_access_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_autogen_flag".to_string(),
+                data_type: DataType::Varchar { max_length: Some(1) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_url".to_string(),
+                data_type: DataType::Varchar { max_length: Some(100) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_type".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_char_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_link_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_image_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wp_max_ad_count".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // WEB_SITE table
+    db.create_table(TableSchema::new(
+        "web_site".to_string(),
+        vec![
+            ColumnSchema {
+                name: "web_site_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_site_id".to_string(),
+                data_type: DataType::Varchar { max_length: Some(16) },
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_rec_start_date".to_string(),
+                data_type: DataType::Date,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_rec_end_date".to_string(),
+                data_type: DataType::Date,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_name".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_open_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_close_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_class".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_manager".to_string(),
+                data_type: DataType::Varchar { max_length: Some(40) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_mkt_id".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_mkt_class".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_mkt_desc".to_string(),
+                data_type: DataType::Varchar { max_length: Some(100) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_market_manager".to_string(),
+                data_type: DataType::Varchar { max_length: Some(40) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_company_id".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_company_name".to_string(),
+                data_type: DataType::Varchar { max_length: Some(50) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_street_number".to_string(),
+                data_type: DataType::Varchar { max_length: Some(10) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_street_name".to_string(),
+                data_type: DataType::Varchar { max_length: Some(60) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_street_type".to_string(),
+                data_type: DataType::Varchar { max_length: Some(15) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_suite_number".to_string(),
+                data_type: DataType::Varchar { max_length: Some(10) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_city".to_string(),
+                data_type: DataType::Varchar { max_length: Some(60) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_county".to_string(),
+                data_type: DataType::Varchar { max_length: Some(30) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_state".to_string(),
+                data_type: DataType::Varchar { max_length: Some(2) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_zip".to_string(),
+                data_type: DataType::Varchar { max_length: Some(10) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_country".to_string(),
+                data_type: DataType::Varchar { max_length: Some(20) },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_gmt_offset".to_string(),
+                data_type: DataType::Decimal { precision: 5, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "web_tax_percentage".to_string(),
+                data_type: DataType::Decimal { precision: 5, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // CATALOG_SALES fact table
+    db.create_table(TableSchema::new(
+        "catalog_sales".to_string(),
+        vec![
+            ColumnSchema {
+                name: "cs_sold_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_sold_time_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ship_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_bill_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_bill_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_bill_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_bill_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ship_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ship_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ship_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ship_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_call_center_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_catalog_page_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ship_mode_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_warehouse_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_item_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_promo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_order_number".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_quantity".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_wholesale_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_list_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_sales_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ext_discount_amt".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ext_sales_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ext_wholesale_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ext_list_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ext_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_coupon_amt".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_ext_ship_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_net_paid".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_net_paid_inc_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_net_paid_inc_ship".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_net_paid_inc_ship_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cs_net_profit".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // CATALOG_RETURNS fact table
+    db.create_table(TableSchema::new(
+        "catalog_returns".to_string(),
+        vec![
+            ColumnSchema {
+                name: "cr_returned_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_returned_time_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_item_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_refunded_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_refunded_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_refunded_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_refunded_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_returning_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_returning_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_returning_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_returning_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_call_center_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_catalog_page_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_ship_mode_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_warehouse_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_reason_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_order_number".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_return_quantity".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_return_amount".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_return_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_return_amt_inc_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_fee".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_return_ship_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_refunded_cash".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_reversed_charge".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_store_credit".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "cr_net_loss".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // WEB_SALES fact table
+    db.create_table(TableSchema::new(
+        "web_sales".to_string(),
+        vec![
+            ColumnSchema {
+                name: "ws_sold_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_sold_time_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ship_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_item_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_bill_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_bill_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_bill_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_bill_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ship_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ship_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ship_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ship_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_web_page_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_web_site_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ship_mode_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_warehouse_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_promo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_order_number".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_quantity".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_wholesale_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_list_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_sales_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ext_discount_amt".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ext_sales_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ext_wholesale_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ext_list_price".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ext_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_coupon_amt".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_ext_ship_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_net_paid".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_net_paid_inc_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_net_paid_inc_ship".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_net_paid_inc_ship_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "ws_net_profit".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
+
+    // WEB_RETURNS fact table
+    db.create_table(TableSchema::new(
+        "web_returns".to_string(),
+        vec![
+            ColumnSchema {
+                name: "wr_returned_date_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_returned_time_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_item_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_refunded_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_refunded_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_refunded_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_refunded_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_returning_customer_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_returning_cdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_returning_hdemo_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_returning_addr_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_web_page_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_reason_sk".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_order_number".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_return_quantity".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_return_amt".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_return_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_return_amt_inc_tax".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_fee".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_return_ship_cost".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_refunded_cash".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_reversed_charge".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_account_credit".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "wr_net_loss".to_string(),
+                data_type: DataType::Decimal { precision: 7, scale: 2 },
+                nullable: true,
+                default_value: None,
+            },
+        ],
+    ))
+    .unwrap();
 }
 
 // =============================================================================
@@ -1697,6 +2794,195 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         false,
         vec![IndexColumn {
             column_name: "sr_customer_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // Phase 3 indexes - Dimension tables
+    db.create_index(
+        "idx_catalog_page_pk".to_string(),
+        "catalog_page".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "cp_catalog_page_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_web_page_pk".to_string(),
+        "web_page".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "wp_web_page_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_web_site_pk".to_string(),
+        "web_site".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "web_site_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // catalog_sales indexes
+    db.create_index(
+        "idx_catalog_sales_pk".to_string(),
+        "catalog_sales".to_string(),
+        true,
+        vec![
+            IndexColumn {
+                column_name: "cs_item_sk".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+            IndexColumn {
+                column_name: "cs_order_number".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+        ],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_catalog_sales_date".to_string(),
+        "catalog_sales".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "cs_sold_date_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_catalog_sales_customer".to_string(),
+        "catalog_sales".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "cs_bill_customer_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // catalog_returns indexes
+    db.create_index(
+        "idx_catalog_returns_pk".to_string(),
+        "catalog_returns".to_string(),
+        true,
+        vec![
+            IndexColumn {
+                column_name: "cr_item_sk".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+            IndexColumn {
+                column_name: "cr_order_number".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+        ],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_catalog_returns_date".to_string(),
+        "catalog_returns".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "cr_returned_date_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // web_sales indexes
+    db.create_index(
+        "idx_web_sales_pk".to_string(),
+        "web_sales".to_string(),
+        true,
+        vec![
+            IndexColumn {
+                column_name: "ws_item_sk".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+            IndexColumn {
+                column_name: "ws_order_number".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+        ],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_web_sales_date".to_string(),
+        "web_sales".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "ws_sold_date_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_web_sales_customer".to_string(),
+        "web_sales".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "ws_bill_customer_sk".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // web_returns indexes
+    db.create_index(
+        "idx_web_returns_pk".to_string(),
+        "web_returns".to_string(),
+        true,
+        vec![
+            IndexColumn {
+                column_name: "wr_item_sk".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+            IndexColumn {
+                column_name: "wr_order_number".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            },
+        ],
+    )
+    .unwrap();
+
+    db.create_index(
+        "idx_web_returns_date".to_string(),
+        "web_returns".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "wr_returned_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
@@ -2226,6 +3512,383 @@ fn load_store_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Numeric(net_loss),
         ]);
         db.insert_row("store_returns", row).unwrap();
+    }
+}
+
+// =============================================================================
+// Data Loading - Phase 3 Dimension Tables
+// =============================================================================
+
+fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use super::data::CATALOG_PAGE_TYPES;
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    for i in 1..=data.catalog_page_count {
+        let cp_catalog_page_id = format!("AAAAAA{:010}", i);
+        let type_idx = i % CATALOG_PAGE_TYPES.len();
+        let catalog_number = (i / 100) + 1;
+        let page_number = (i % 100) + 1;
+
+        let row = Row::new(vec![
+            SqlValue::Integer(i as i64),
+            SqlValue::Varchar(cp_catalog_page_id),
+            SqlValue::Integer(((i - 1) / 1000 + 1) as i64),  // cp_start_date_sk
+            SqlValue::Integer(((i - 1) / 1000 + 365) as i64),  // cp_end_date_sk
+            SqlValue::Varchar(format!("{}", data.random_varchar(80))),  // cp_department
+            SqlValue::Integer(catalog_number as i64),
+            SqlValue::Integer(page_number as i64),
+            SqlValue::Varchar(format!("Catalog page {}", i)),  // cp_description
+            SqlValue::Varchar(CATALOG_PAGE_TYPES[type_idx].to_string()),
+        ]);
+        db.insert_row("catalog_page", row).unwrap();
+    }
+}
+
+fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use super::data::WEB_PAGE_TYPES;
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    for i in 1..=data.web_page_count {
+        let wp_web_page_id = format!("AAAAAA{:010}", i);
+        let type_idx = i % WEB_PAGE_TYPES.len();
+
+        let row = Row::new(vec![
+            SqlValue::Integer(i as i64),
+            SqlValue::Varchar(wp_web_page_id),
+            SqlValue::Integer(((i - 1) / 100 + 1) as i64),  // wp_rec_start_date_sk (date_sk)
+            SqlValue::Null,  // wp_rec_end_date_sk
+            SqlValue::Integer(((i - 1) / 20 + 1) as i64),  // wp_creation_date_sk
+            SqlValue::Integer(((i - 1) / 10 + 1) as i64),  // wp_access_date_sk
+            SqlValue::Varchar("N".to_string()),  // wp_autogen_flag
+            SqlValue::Integer((i % data.customer_count + 1) as i64),  // wp_customer_sk
+            SqlValue::Varchar(format!("/page/{}", i)),  // wp_url
+            SqlValue::Varchar(WEB_PAGE_TYPES[type_idx].to_string()),
+            SqlValue::Integer(data.random_i32(1, 10) as i64),  // wp_char_count
+            SqlValue::Integer(data.random_i32(1, 5) as i64),  // wp_link_count
+            SqlValue::Integer(data.random_i32(1, 20) as i64),  // wp_image_count
+            SqlValue::Integer(data.random_i32(5, 100) as i64),  // wp_max_ad_count
+        ]);
+        db.insert_row("web_page", row).unwrap();
+    }
+}
+
+fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use super::data::WEB_SITE_CLASSES;
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    for i in 1..=data.web_site_count {
+        let web_site_id = format!("AAAAAA{:010}", i);
+        let state_idx = i % STATES.len();
+        let class_idx = i % WEB_SITE_CLASSES.len();
+
+        let row = Row::new(vec![
+            SqlValue::Integer(i as i64),
+            SqlValue::Varchar(web_site_id),
+            SqlValue::Integer(((i - 1) / 10 + 1) as i64),  // web_rec_start_date_sk
+            SqlValue::Null,  // web_rec_end_date_sk
+            SqlValue::Varchar(format!("site_{}", i)),  // web_name
+            SqlValue::Integer(((i - 1) / 5 + 1) as i64),  // web_open_date_sk
+            SqlValue::Null,  // web_close_date_sk
+            SqlValue::Varchar(WEB_SITE_CLASSES[class_idx].to_string()),
+            SqlValue::Varchar(format!("Manager{}", i % 50)),  // web_manager
+            SqlValue::Integer((i % 10 + 1) as i64),  // web_mkt_id
+            SqlValue::Varchar(format!("Market class {}", i % 5)),  // web_mkt_class
+            SqlValue::Varchar(format!("Market description {}", i)),  // web_mkt_desc
+            SqlValue::Varchar(format!("MarketManager{}", i % 20)),  // web_market_manager
+            SqlValue::Integer((i % 5 + 1) as i64),  // web_company_id
+            SqlValue::Varchar(format!("Company{}", i % 5 + 1)),
+            SqlValue::Varchar(format!("{}", data.random_i32(1, 999))),  // web_street_number
+            SqlValue::Varchar(data.random_varchar(30)),  // web_street_name
+            SqlValue::Varchar("Street".to_string()),
+            SqlValue::Varchar(format!("Suite {}", data.random_i32(100, 999))),
+            SqlValue::Varchar(data.random_city()),
+            SqlValue::Varchar(format!("{} County", STATES[state_idx])),
+            SqlValue::Varchar(STATES[state_idx].to_string()),
+            SqlValue::Varchar(data.random_zip()),
+            SqlValue::Varchar("United States".to_string()),
+            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),  // web_gmt_offset
+            SqlValue::Numeric(data.random_f64(0.0, 0.12)),  // web_tax_percentage
+        ]);
+        db.insert_row("web_site", row).unwrap();
+    }
+}
+
+// =============================================================================
+// Data Loading - Phase 3 Fact Tables
+// =============================================================================
+
+fn load_catalog_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    let num_dates = 2191.min(data.date_dim_count);
+
+    for i in 0..data.catalog_sales_count {
+        let cs_sold_date_sk = (i % num_dates) + 1;
+        let cs_sold_time_sk = (i % 24) * 3600;
+        let cs_ship_date_sk = cs_sold_date_sk + data.random_i32(1, 30) as usize;
+        let cs_bill_customer_sk = (i % data.customer_count) + 1;
+        let cs_ship_customer_sk = cs_bill_customer_sk;
+        let cs_item_sk = (i % data.item_count) + 1;
+        let cs_promo_sk = (i % data.promotion_count) + 1;
+        let cs_warehouse_sk = (i % data.warehouse_count) + 1;
+        let cs_ship_mode_sk = (i % data.ship_mode_count.min(20)) + 1;
+        let cs_catalog_page_sk = (i % data.catalog_page_count) + 1;
+        let cs_order_number = (i / 5) + 1;  // ~5 items per order
+
+        let quantity = data.random_i32(1, 20);
+        let wholesale_cost = data.random_f64(10.0, 100.0);
+        let list_price = wholesale_cost * 1.5;
+        let sales_price = list_price * data.random_f64(0.8, 1.0);
+        let ext_discount_amt = (list_price - sales_price) * quantity as f64;
+        let ext_sales_price = sales_price * quantity as f64;
+        let ext_wholesale_cost = wholesale_cost * quantity as f64;
+        let ext_list_price = list_price * quantity as f64;
+        let ext_tax = ext_sales_price * 0.08;
+        let coupon_amt = data.random_f64(0.0, 20.0);
+        let ext_ship_cost = data.random_f64(5.0, 30.0);
+        let net_paid = ext_sales_price - coupon_amt;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship_cost;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale_cost;
+
+        let row = Row::new(vec![
+            SqlValue::Integer(cs_sold_date_sk as i64),
+            SqlValue::Integer(cs_sold_time_sk as i64),
+            SqlValue::Integer(cs_ship_date_sk as i64),
+            SqlValue::Integer(cs_bill_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // cs_bill_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // cs_bill_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cs_bill_addr_sk
+            SqlValue::Integer(cs_ship_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // cs_ship_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // cs_ship_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cs_ship_addr_sk
+            SqlValue::Integer((i % 6 + 1) as i64),  // cs_call_center_sk
+            SqlValue::Integer(cs_catalog_page_sk as i64),
+            SqlValue::Integer(cs_ship_mode_sk as i64),
+            SqlValue::Integer(cs_warehouse_sk as i64),
+            SqlValue::Integer(cs_item_sk as i64),
+            SqlValue::Integer(cs_promo_sk as i64),
+            SqlValue::Integer(cs_order_number as i64),
+            SqlValue::Integer(quantity as i64),
+            SqlValue::Numeric(wholesale_cost),
+            SqlValue::Numeric(list_price),
+            SqlValue::Numeric(sales_price),
+            SqlValue::Numeric(ext_discount_amt),
+            SqlValue::Numeric(ext_sales_price),
+            SqlValue::Numeric(ext_wholesale_cost),
+            SqlValue::Numeric(ext_list_price),
+            SqlValue::Numeric(ext_tax),
+            SqlValue::Numeric(coupon_amt),
+            SqlValue::Numeric(ext_ship_cost),
+            SqlValue::Numeric(net_paid),
+            SqlValue::Numeric(net_paid_inc_tax),
+            SqlValue::Numeric(net_paid_inc_ship),
+            SqlValue::Numeric(net_paid_inc_ship_tax),
+            SqlValue::Numeric(net_profit),
+        ]);
+        db.insert_row("catalog_sales", row).unwrap();
+    }
+}
+
+fn load_catalog_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    let num_dates = 2191.min(data.date_dim_count);
+
+    for i in 0..data.catalog_returns_count {
+        let cr_returned_date_sk = (i % num_dates) + 1;
+        let cr_returned_time_sk = (i % 24) * 3600;
+        let cr_item_sk = (i % data.item_count) + 1;
+        let cr_refunded_customer_sk = (i % data.customer_count) + 1;
+        let cr_returning_customer_sk = cr_refunded_customer_sk;
+        let cr_reason_sk = (i % data.reason_count.min(15)) + 1;
+        let cr_catalog_page_sk = (i % data.catalog_page_count) + 1;
+        let cr_ship_mode_sk = (i % data.ship_mode_count.min(20)) + 1;
+        let cr_warehouse_sk = (i % data.warehouse_count) + 1;
+        let cr_order_number = (i / 3) + 1;  // ~3 items per return
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let store_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - store_credit + fee;
+
+        let row = Row::new(vec![
+            SqlValue::Integer(cr_returned_date_sk as i64),
+            SqlValue::Integer(cr_returned_time_sk as i64),
+            SqlValue::Integer(cr_item_sk as i64),
+            SqlValue::Integer(cr_refunded_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // cr_refunded_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // cr_refunded_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cr_refunded_addr_sk
+            SqlValue::Integer(cr_returning_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // cr_returning_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // cr_returning_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cr_returning_addr_sk
+            SqlValue::Integer((i % 6 + 1) as i64),  // cr_call_center_sk
+            SqlValue::Integer(cr_catalog_page_sk as i64),
+            SqlValue::Integer(cr_ship_mode_sk as i64),
+            SqlValue::Integer(cr_warehouse_sk as i64),
+            SqlValue::Integer(cr_reason_sk as i64),
+            SqlValue::Integer(cr_order_number as i64),
+            SqlValue::Integer(return_quantity as i64),
+            SqlValue::Numeric(return_amt),
+            SqlValue::Numeric(return_tax),
+            SqlValue::Numeric(return_amt_inc_tax),
+            SqlValue::Numeric(fee),
+            SqlValue::Numeric(return_ship_cost),
+            SqlValue::Numeric(refunded_cash),
+            SqlValue::Numeric(reversed_charge),
+            SqlValue::Numeric(store_credit),
+            SqlValue::Numeric(net_loss),
+        ]);
+        db.insert_row("catalog_returns", row).unwrap();
+    }
+}
+
+fn load_web_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    let num_dates = 2191.min(data.date_dim_count);
+
+    for i in 0..data.web_sales_count {
+        let ws_sold_date_sk = (i % num_dates) + 1;
+        let ws_sold_time_sk = (i % 24) * 3600;
+        let ws_ship_date_sk = ws_sold_date_sk + data.random_i32(1, 30) as usize;
+        let ws_item_sk = (i % data.item_count) + 1;
+        let ws_bill_customer_sk = (i % data.customer_count) + 1;
+        let ws_ship_customer_sk = ws_bill_customer_sk;
+        let ws_promo_sk = (i % data.promotion_count) + 1;
+        let ws_warehouse_sk = (i % data.warehouse_count) + 1;
+        let ws_ship_mode_sk = (i % data.ship_mode_count.min(20)) + 1;
+        let ws_web_page_sk = (i % data.web_page_count) + 1;
+        let ws_web_site_sk = (i % data.web_site_count) + 1;
+        let ws_order_number = (i / 5) + 1;  // ~5 items per order
+
+        let quantity = data.random_i32(1, 20);
+        let wholesale_cost = data.random_f64(10.0, 100.0);
+        let list_price = wholesale_cost * 1.5;
+        let sales_price = list_price * data.random_f64(0.8, 1.0);
+        let ext_discount_amt = (list_price - sales_price) * quantity as f64;
+        let ext_sales_price = sales_price * quantity as f64;
+        let ext_wholesale_cost = wholesale_cost * quantity as f64;
+        let ext_list_price = list_price * quantity as f64;
+        let ext_tax = ext_sales_price * 0.08;
+        let coupon_amt = data.random_f64(0.0, 20.0);
+        let ext_ship_cost = data.random_f64(5.0, 30.0);
+        let net_paid = ext_sales_price - coupon_amt;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship_cost;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale_cost;
+
+        let row = Row::new(vec![
+            SqlValue::Integer(ws_sold_date_sk as i64),
+            SqlValue::Integer(ws_sold_time_sk as i64),
+            SqlValue::Integer(ws_ship_date_sk as i64),
+            SqlValue::Integer(ws_item_sk as i64),
+            SqlValue::Integer(ws_bill_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // ws_bill_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // ws_bill_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // ws_bill_addr_sk
+            SqlValue::Integer(ws_ship_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // ws_ship_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // ws_ship_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // ws_ship_addr_sk
+            SqlValue::Integer(ws_web_page_sk as i64),
+            SqlValue::Integer(ws_web_site_sk as i64),
+            SqlValue::Integer(ws_ship_mode_sk as i64),
+            SqlValue::Integer(ws_warehouse_sk as i64),
+            SqlValue::Integer(ws_promo_sk as i64),
+            SqlValue::Integer(ws_order_number as i64),
+            SqlValue::Integer(quantity as i64),
+            SqlValue::Numeric(wholesale_cost),
+            SqlValue::Numeric(list_price),
+            SqlValue::Numeric(sales_price),
+            SqlValue::Numeric(ext_discount_amt),
+            SqlValue::Numeric(ext_sales_price),
+            SqlValue::Numeric(ext_wholesale_cost),
+            SqlValue::Numeric(ext_list_price),
+            SqlValue::Numeric(ext_tax),
+            SqlValue::Numeric(coupon_amt),
+            SqlValue::Numeric(ext_ship_cost),
+            SqlValue::Numeric(net_paid),
+            SqlValue::Numeric(net_paid_inc_tax),
+            SqlValue::Numeric(net_paid_inc_ship),
+            SqlValue::Numeric(net_paid_inc_ship_tax),
+            SqlValue::Numeric(net_profit),
+        ]);
+        db.insert_row("web_sales", row).unwrap();
+    }
+}
+
+fn load_web_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    let num_dates = 2191.min(data.date_dim_count);
+
+    for i in 0..data.web_returns_count {
+        let wr_returned_date_sk = (i % num_dates) + 1;
+        let wr_returned_time_sk = (i % 24) * 3600;
+        let wr_item_sk = (i % data.item_count) + 1;
+        let wr_refunded_customer_sk = (i % data.customer_count) + 1;
+        let wr_returning_customer_sk = wr_refunded_customer_sk;
+        let wr_reason_sk = (i % data.reason_count.min(15)) + 1;
+        let wr_web_page_sk = (i % data.web_page_count) + 1;
+        let wr_order_number = (i / 3) + 1;  // ~3 items per return
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let account_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - account_credit + fee;
+
+        let row = Row::new(vec![
+            SqlValue::Integer(wr_returned_date_sk as i64),
+            SqlValue::Integer(wr_returned_time_sk as i64),
+            SqlValue::Integer(wr_item_sk as i64),
+            SqlValue::Integer(wr_refunded_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // wr_refunded_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // wr_refunded_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // wr_refunded_addr_sk
+            SqlValue::Integer(wr_returning_customer_sk as i64),
+            SqlValue::Integer((i % 1920 + 1) as i64),  // wr_returning_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64),  // wr_returning_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // wr_returning_addr_sk
+            SqlValue::Integer(wr_web_page_sk as i64),
+            SqlValue::Integer(wr_reason_sk as i64),
+            SqlValue::Integer(wr_order_number as i64),
+            SqlValue::Integer(return_quantity as i64),
+            SqlValue::Numeric(return_amt),
+            SqlValue::Numeric(return_tax),
+            SqlValue::Numeric(return_amt_inc_tax),
+            SqlValue::Numeric(fee),
+            SqlValue::Numeric(return_ship_cost),
+            SqlValue::Numeric(refunded_cash),
+            SqlValue::Numeric(reversed_charge),
+            SqlValue::Numeric(account_credit),
+            SqlValue::Numeric(net_loss),
+        ]);
+        db.insert_row("web_returns", row).unwrap();
     }
 }
 
