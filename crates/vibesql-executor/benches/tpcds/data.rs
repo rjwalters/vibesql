@@ -313,12 +313,99 @@ pub const ITEM_UNITS: &[&str] = &[
 // Item containers
 pub const ITEM_CONTAINERS: &[&str] = &["Unknown", "Wrap", "Box"];
 
+/// Time granularity for time_dim table
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimeGranularity {
+    /// One row per second (86,400 rows) - TPC-DS spec
+    Second,
+    /// One row per minute (1,440 rows) - recommended default
+    #[default]
+    Minute,
+    /// One row per hour (24 rows) - minimal for fast loading
+    Hour,
+}
+
+impl TimeGranularity {
+    /// Returns the number of seconds between each time_dim row
+    pub fn seconds_per_row(&self) -> usize {
+        match self {
+            TimeGranularity::Second => 1,
+            TimeGranularity::Minute => 60,
+            TimeGranularity::Hour => 3600,
+        }
+    }
+
+    /// Returns the number of rows in time_dim for this granularity
+    pub fn row_count(&self) -> usize {
+        86400 / self.seconds_per_row()
+    }
+}
+
+/// Configuration for TPC-DS dimension table sizes
+///
+/// By default, uses reduced sizes for faster data loading while maintaining
+/// meaningful benchmark results:
+/// - date_dim: 6 years (1998-2003) instead of 200 years
+/// - time_dim: minute granularity instead of second granularity
+#[derive(Debug, Clone)]
+pub struct TPCDSConfig {
+    /// Start year for date_dim (default: 1998)
+    pub date_start_year: i32,
+    /// End year for date_dim (default: 2003)
+    pub date_end_year: i32,
+    /// Time granularity for time_dim (default: Minute)
+    pub time_granularity: TimeGranularity,
+}
+
+impl Default for TPCDSConfig {
+    fn default() -> Self {
+        Self {
+            date_start_year: 1998,
+            date_end_year: 2003,
+            time_granularity: TimeGranularity::Minute,
+        }
+    }
+}
+
+impl TPCDSConfig {
+    /// Create a config with TPC-DS spec-compliant sizes (much larger)
+    pub fn spec_compliant() -> Self {
+        Self {
+            date_start_year: 1900,
+            date_end_year: 2100,
+            time_granularity: TimeGranularity::Second,
+        }
+    }
+
+    /// Create a minimal config for fastest loading (testing only)
+    pub fn minimal() -> Self {
+        Self {
+            date_start_year: 1998,
+            date_end_year: 2003,
+            time_granularity: TimeGranularity::Hour,
+        }
+    }
+
+    /// Calculate the number of days in the date range
+    /// Uses simplified calculation (365 days per year, ignoring leap years)
+    pub fn date_dim_count(&self) -> usize {
+        let years = (self.date_end_year - self.date_start_year + 1) as usize;
+        years * 365
+    }
+
+    /// Calculate the number of rows in time_dim
+    pub fn time_dim_count(&self) -> usize {
+        self.time_granularity.row_count()
+    }
+}
+
 pub struct TPCDSData {
     pub scale_factor: f64,
+    pub config: TPCDSConfig,
 
     // Dimension table counts (fixed or scaled)
-    pub date_dim_count: usize,       // ~73K days (200 years)
-    pub time_dim_count: usize,       // 86,400 seconds in a day
+    pub date_dim_count: usize,       // Configurable (default: ~2K days for 1998-2003)
+    pub time_dim_count: usize,       // Configurable (default: 1,440 minutes)
     pub item_count: usize,           // SF * 18,000
     pub customer_count: usize,       // SF * 100,000
     pub customer_address_count: usize,
@@ -348,10 +435,16 @@ pub struct TPCDSData {
 }
 
 impl TPCDSData {
+    /// Create a new TPCDSData with default configuration (reduced dimension sizes)
     pub fn new(scale_factor: f64) -> Self {
-        // Dimension table sizes based on TPC-DS spec
-        let date_dim_count = 73049; // Fixed: dates from 1900-01-01 to 2100-12-31
-        let time_dim_count = 86400; // Fixed: seconds in a day
+        Self::with_config(scale_factor, TPCDSConfig::default())
+    }
+
+    /// Create a new TPCDSData with custom configuration
+    pub fn with_config(scale_factor: f64, config: TPCDSConfig) -> Self {
+        // Dimension table sizes based on config
+        let date_dim_count = config.date_dim_count();
+        let time_dim_count = config.time_dim_count();
         let item_count = ((18_000.0 * scale_factor) as usize).max(1000);
         let customer_count = ((100_000.0 * scale_factor) as usize).max(1000);
         let customer_address_count = customer_count * 2; // ~2 addresses per customer
@@ -380,6 +473,7 @@ impl TPCDSData {
 
         Self {
             scale_factor,
+            config,
             date_dim_count,
             time_dim_count,
             item_count,
