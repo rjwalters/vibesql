@@ -15,6 +15,9 @@
 //!
 //! **Write Tests:**
 //! - `oltp_insert` - Single row inserts
+//! - `oltp_delete` - DELETE by primary key
+//! - `oltp_update_index` - UPDATE indexed column `k` by primary key
+//! - `oltp_update_non_index` - UPDATE non-indexed column `c` by primary key
 //! - `oltp_write_only` - Write-only workload (1 index update, 1 non-index update, 1 delete, 1 insert)
 //!
 //! **Mixed Tests:**
@@ -31,6 +34,15 @@
 //!
 //! # Run only insert benchmarks
 //! cargo bench --bench sysbench_oltp --features benchmark-comparison -- insert
+//!
+//! # Run only delete benchmarks
+//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- delete
+//!
+//! # Run only update_index benchmarks
+//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- update_index
+//!
+//! # Run only update_non_index benchmarks
+//! cargo bench --bench sysbench_oltp --features benchmark-comparison -- update_non_index
 //!
 //! # Run only write_only benchmarks
 //! cargo bench --bench sysbench_oltp --features benchmark-comparison -- write_only
@@ -374,6 +386,221 @@ fn benchmark_insert_duckdb(c: &mut Criterion) {
 }
 
 // =============================================================================
+// Delete Benchmarks
+// =============================================================================
+
+/// Benchmark oltp_delete on VibeSQL
+///
+/// This test measures DELETE by primary key performance. Uses iter_batched
+/// to set up a fresh database for each iteration batch since deletes modify state.
+///
+/// Sysbench equivalent: DELETE FROM sbtest1 WHERE id = ?
+fn benchmark_delete_vibesql(c: &mut Criterion) {
+    use criterion::BatchSize;
+
+    let mut group = c.benchmark_group("sysbench_delete");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
+        b.iter_batched(
+            || {
+                // Setup: create fresh database
+                let db = load_vibesql(TABLE_SIZE);
+                let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
+                let id = rng.random_range(1..=TABLE_SIZE as i64);
+                (db, id)
+            },
+            |(mut db, id)| {
+                // Delete single row
+                vibesql_delete(&mut db, id);
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_delete_sqlite(c: &mut Criterion) {
+    use criterion::BatchSize;
+
+    let mut group = c.benchmark_group("sysbench_delete");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
+        b.iter_batched(
+            || {
+                let conn = load_sqlite(TABLE_SIZE);
+                let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
+                let id = rng.random_range(1..=TABLE_SIZE as i64);
+                (conn, id)
+            },
+            |(conn, id)| {
+                sqlite_delete(&conn, id);
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_delete_duckdb(c: &mut Criterion) {
+    use criterion::BatchSize;
+
+    let mut group = c.benchmark_group("sysbench_delete");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
+        b.iter_batched(
+            || {
+                let conn = load_duckdb(TABLE_SIZE);
+                let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
+                let id = rng.random_range(1..=TABLE_SIZE as i64);
+                (conn, id)
+            },
+            |(conn, id)| {
+                duckdb_delete(&conn, id);
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.finish();
+}
+
+// =============================================================================
+// Update Index Benchmarks
+// =============================================================================
+
+/// Benchmark oltp_update_index on VibeSQL
+///
+/// This test measures UPDATE performance on an indexed column (k).
+/// Tests index maintenance overhead since k has a secondary index.
+///
+/// Sysbench equivalent: UPDATE sbtest1 SET k = k + 1 WHERE id = ?
+fn benchmark_update_index_vibesql(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_update_index");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
+        let mut db = load_vibesql(TABLE_SIZE);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        b.iter(|| {
+            let id = rng.random_range(1..=TABLE_SIZE as i64);
+            vibesql_update_index(&mut db, id);
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_update_index_sqlite(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_update_index");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
+        let conn = load_sqlite(TABLE_SIZE);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        b.iter(|| {
+            let id = rng.random_range(1..=TABLE_SIZE as i64);
+            sqlite_update_index(&conn, id);
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_update_index_duckdb(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_update_index");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
+        let conn = load_duckdb(TABLE_SIZE);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        b.iter(|| {
+            let id = rng.random_range(1..=TABLE_SIZE as i64);
+            duckdb_update_index(&conn, id);
+        });
+    });
+
+    group.finish();
+}
+
+// =============================================================================
+// Update Non-Index Benchmarks
+// =============================================================================
+
+/// Benchmark oltp_update_non_index on VibeSQL
+///
+/// This test measures UPDATE performance on a non-indexed column (c).
+/// This avoids index maintenance overhead, measuring pure row update performance.
+///
+/// Sysbench equivalent: UPDATE sbtest1 SET c = ? WHERE id = ?
+fn benchmark_update_non_index_vibesql(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_update_non_index");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
+        let mut db = load_vibesql(TABLE_SIZE);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        b.iter(|| {
+            let id = rng.random_range(1..=TABLE_SIZE as i64);
+            let c = generate_c_string();
+            vibesql_update_non_index(&mut db, id, &c);
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_update_non_index_sqlite(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_update_non_index");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
+        let conn = load_sqlite(TABLE_SIZE);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        b.iter(|| {
+            let id = rng.random_range(1..=TABLE_SIZE as i64);
+            let c = generate_c_string();
+            sqlite_update_non_index(&conn, id, &c);
+        });
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_update_non_index_duckdb(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_update_non_index");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
+        let conn = load_duckdb(TABLE_SIZE);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        b.iter(|| {
+            let id = rng.random_range(1..=TABLE_SIZE as i64);
+            let c = generate_c_string();
+            duckdb_update_non_index(&conn, id, &c);
+        });
+    });
+
+    group.finish();
+}
+
+// =============================================================================
 // Write-Only Benchmarks
 // =============================================================================
 
@@ -658,6 +885,9 @@ criterion_group!(
     benches,
     benchmark_point_select_vibesql,
     benchmark_insert_vibesql,
+    benchmark_delete_vibesql,
+    benchmark_update_index_vibesql,
+    benchmark_update_non_index_vibesql,
     benchmark_write_only_vibesql,
     benchmark_read_write_vibesql
 );
@@ -671,6 +901,15 @@ criterion_group!(
     benchmark_insert_vibesql,
     benchmark_insert_sqlite,
     benchmark_insert_duckdb,
+    benchmark_delete_vibesql,
+    benchmark_delete_sqlite,
+    benchmark_delete_duckdb,
+    benchmark_update_index_vibesql,
+    benchmark_update_index_sqlite,
+    benchmark_update_index_duckdb,
+    benchmark_update_non_index_vibesql,
+    benchmark_update_non_index_sqlite,
+    benchmark_update_non_index_duckdb,
     benchmark_write_only_vibesql,
     benchmark_write_only_sqlite,
     benchmark_write_only_duckdb,
