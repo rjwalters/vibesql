@@ -467,19 +467,50 @@ impl<'a> SqliteTransactionExecutor<'a> {
     pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
         let start = Instant::now();
 
-        // Simplified: just run key queries
+        // Get warehouse tax rate
         let _ = self.conn.execute(
             &format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id),
             [],
         );
+
+        // Get district info
         let _ = self.conn.execute(
-            &format!("SELECT d_tax FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            &format!(
+                "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+                input.w_id, input.d_id
+            ),
             [],
         );
+
+        // Get customer info
         let _ = self.conn.execute(
-            &format!("SELECT c_discount FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, input.c_id),
+            &format!(
+                "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                input.w_id, input.d_id, input.c_id
+            ),
             [],
         );
+
+        // Process each order line - query item and stock info
+        for item in &input.items {
+            // Get item info
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT i_price, i_name, i_data FROM item WHERE i_id = {}",
+                    item.ol_i_id
+                ),
+                [],
+            );
+
+            // Get stock info
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = {} AND s_w_id = {}",
+                    item.ol_i_id, item.ol_supply_w_id
+                ),
+                [],
+            );
+        }
 
         TransactionResult {
             success: true,
@@ -491,14 +522,42 @@ impl<'a> SqliteTransactionExecutor<'a> {
     pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
         let start = Instant::now();
 
+        // Get warehouse info
         let _ = self.conn.execute(
-            &format!("SELECT w_name FROM warehouse WHERE w_id = {}", input.w_id),
+            &format!(
+                "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = {}",
+                input.w_id
+            ),
             [],
         );
+
+        // Get district info
         let _ = self.conn.execute(
-            &format!("SELECT d_name FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            &format!(
+                "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = {} AND d_id = {}",
+                input.w_id, input.d_id
+            ),
             [],
         );
+
+        // Get customer (by ID or last name)
+        if let Some(c_id) = input.c_id {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                    input.c_w_id, input.c_d_id, c_id
+                ),
+                [],
+            );
+        } else {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
+                    input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()
+                ),
+                [],
+            );
+        }
 
         TransactionResult {
             success: true,
@@ -510,9 +569,33 @@ impl<'a> SqliteTransactionExecutor<'a> {
     pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
         let start = Instant::now();
 
-        let c_id = input.c_id.unwrap_or(1);
+        // Get customer (by ID or last name)
+        let c_id = if let Some(c_id) = input.c_id {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                    input.w_id, input.d_id, c_id
+                ),
+                [],
+            );
+            c_id
+        } else {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
+                    input.w_id, input.d_id, input.c_last.as_ref().unwrap()
+                ),
+                [],
+            );
+            1 // Default c_id for order lookup
+        };
+
+        // Get last order for customer
         let _ = self.conn.execute(
-            &format!("SELECT c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, c_id),
+            &format!(
+                "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = {} AND o_d_id = {} AND o_c_id = {} ORDER BY o_id DESC LIMIT 1",
+                input.w_id, input.d_id, c_id
+            ),
             [],
         );
 
@@ -526,9 +609,13 @@ impl<'a> SqliteTransactionExecutor<'a> {
     pub fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
         let start = Instant::now();
 
+        // Process each district - query for new orders
         for d_id in 1..=10 {
             let _ = self.conn.execute(
-                &format!("SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} LIMIT 1", input.w_id, d_id),
+                &format!(
+                    "SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} ORDER BY no_o_id LIMIT 1",
+                    input.w_id, d_id
+                ),
                 [],
             );
         }
@@ -543,8 +630,23 @@ impl<'a> SqliteTransactionExecutor<'a> {
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
         let start = Instant::now();
 
+        // Get district next order ID
         let _ = self.conn.execute(
-            &format!("SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            &format!(
+                "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+                input.w_id, input.d_id
+            ),
+            [],
+        );
+
+        // Count low stock items (same query as VibeSQL)
+        let _ = self.conn.execute(
+            &format!(
+                "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+                 WHERE ol_w_id = {} AND ol_d_id = {} \
+                 AND s_w_id = {} AND s_i_id = ol_i_id AND s_quantity < {}",
+                input.w_id, input.d_id, input.w_id, input.threshold
+            ),
             [],
         );
 
@@ -571,18 +673,50 @@ impl<'a> DuckdbTransactionExecutor<'a> {
     pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
         let start = Instant::now();
 
+        // Get warehouse tax rate
         let _ = self.conn.execute(
             &format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id),
             [],
         );
+
+        // Get district info
         let _ = self.conn.execute(
-            &format!("SELECT d_tax FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            &format!(
+                "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+                input.w_id, input.d_id
+            ),
             [],
         );
+
+        // Get customer info
         let _ = self.conn.execute(
-            &format!("SELECT c_discount FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, input.c_id),
+            &format!(
+                "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                input.w_id, input.d_id, input.c_id
+            ),
             [],
         );
+
+        // Process each order line - query item and stock info
+        for item in &input.items {
+            // Get item info
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT i_price, i_name, i_data FROM item WHERE i_id = {}",
+                    item.ol_i_id
+                ),
+                [],
+            );
+
+            // Get stock info
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = {} AND s_w_id = {}",
+                    item.ol_i_id, item.ol_supply_w_id
+                ),
+                [],
+            );
+        }
 
         TransactionResult {
             success: true,
@@ -594,14 +728,42 @@ impl<'a> DuckdbTransactionExecutor<'a> {
     pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
         let start = Instant::now();
 
+        // Get warehouse info
         let _ = self.conn.execute(
-            &format!("SELECT w_name FROM warehouse WHERE w_id = {}", input.w_id),
+            &format!(
+                "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = {}",
+                input.w_id
+            ),
             [],
         );
+
+        // Get district info
         let _ = self.conn.execute(
-            &format!("SELECT d_name FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            &format!(
+                "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = {} AND d_id = {}",
+                input.w_id, input.d_id
+            ),
             [],
         );
+
+        // Get customer (by ID or last name)
+        if let Some(c_id) = input.c_id {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                    input.c_w_id, input.c_d_id, c_id
+                ),
+                [],
+            );
+        } else {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
+                    input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()
+                ),
+                [],
+            );
+        }
 
         TransactionResult {
             success: true,
@@ -613,9 +775,33 @@ impl<'a> DuckdbTransactionExecutor<'a> {
     pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
         let start = Instant::now();
 
-        let c_id = input.c_id.unwrap_or(1);
+        // Get customer (by ID or last name)
+        let c_id = if let Some(c_id) = input.c_id {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                    input.w_id, input.d_id, c_id
+                ),
+                [],
+            );
+            c_id
+        } else {
+            let _ = self.conn.execute(
+                &format!(
+                    "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
+                    input.w_id, input.d_id, input.c_last.as_ref().unwrap()
+                ),
+                [],
+            );
+            1 // Default c_id for order lookup
+        };
+
+        // Get last order for customer
         let _ = self.conn.execute(
-            &format!("SELECT c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}", input.w_id, input.d_id, c_id),
+            &format!(
+                "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = {} AND o_d_id = {} AND o_c_id = {} ORDER BY o_id DESC LIMIT 1",
+                input.w_id, input.d_id, c_id
+            ),
             [],
         );
 
@@ -629,9 +815,13 @@ impl<'a> DuckdbTransactionExecutor<'a> {
     pub fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
         let start = Instant::now();
 
+        // Process each district - query for new orders
         for d_id in 1..=10 {
             let _ = self.conn.execute(
-                &format!("SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} LIMIT 1", input.w_id, d_id),
+                &format!(
+                    "SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} ORDER BY no_o_id LIMIT 1",
+                    input.w_id, d_id
+                ),
                 [],
             );
         }
@@ -646,8 +836,23 @@ impl<'a> DuckdbTransactionExecutor<'a> {
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
         let start = Instant::now();
 
+        // Get district next order ID
         let _ = self.conn.execute(
-            &format!("SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}", input.w_id, input.d_id),
+            &format!(
+                "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+                input.w_id, input.d_id
+            ),
+            [],
+        );
+
+        // Count low stock items (same query as VibeSQL)
+        let _ = self.conn.execute(
+            &format!(
+                "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+                 WHERE ol_w_id = {} AND ol_d_id = {} \
+                 AND s_w_id = {} AND s_i_id = ol_i_id AND s_quantity < {}",
+                input.w_id, input.d_id, input.w_id, input.threshold
+            ),
             [],
         );
 
