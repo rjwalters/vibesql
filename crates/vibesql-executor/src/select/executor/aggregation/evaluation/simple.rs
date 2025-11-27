@@ -30,7 +30,8 @@ pub(super) fn evaluate(
             let inner_value = executor.evaluate_with_aggregates(inner_expr, group_rows, group_key, evaluator)?;
 
             // Cast the result to the target type using the casting module
-            crate::evaluator::casting::cast_value(&inner_value, data_type)
+            let sql_mode = executor.database.sql_mode();
+            crate::evaluator::casting::cast_value(&inner_value, data_type, &sql_mode)
         }
 
         // BETWEEN: expr BETWEEN low AND high
