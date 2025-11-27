@@ -2,7 +2,7 @@
 
 **Last Updated**: 2025-11-17
 **Current Status**: 92.9% pass rate (579/623 files passing) ✅
-**Test Infrastructure**: Stable parallel execution with 8 workers
+**Test Infrastructure**: Stable parallel execution (auto-detects available CPU cores)
 **Memory Management**: 26 memory-intensive 1000+ row tests blocklisted (counted as failures)
 **Remaining Work**: 18 edge case bug fixes + 26 blocklisted test optimizations
 
@@ -24,8 +24,8 @@ cargo test --test sqllogictest_suite -- random/select
 ### Run Full Test Suite (Comprehensive)
 
 ```bash
-# Run full suite with parallel workers (requires 64-core machine)
-./scripts/sqllogictest run --parallel --workers 64 --time 3600
+# Run full suite with parallel workers (auto-detects available CPU cores)
+./scripts/sqllogictest run --parallel --time 3600
 
 # Aggregate results from all workers
 python3 scripts/aggregate_worker_results.py /tmp/sqllogictest_results
@@ -61,17 +61,17 @@ Runs SQLLogicTest files in parallel across multiple worker processes with dynami
 - **Real-time progress**: Monitor results during long test runs
 
 ```bash
-# Basic usage - use all available CPUs
+# Basic usage - uses all available CPUs by default
 python3 scripts/run_parallel_tests.py
 
-# Specify worker count (default: CPU count)
-python3 scripts/run_parallel_tests.py --workers 8
+# Specify worker count (default: all available CPU cores)
+python3 scripts/run_parallel_tests.py --workers 16
 
 # Set time budget per file (default: 300 seconds per file)
 python3 scripts/run_parallel_tests.py --time-budget 3600
 
 # Combined example
-python3 scripts/run_parallel_tests.py --workers 8 --time-budget 7200
+python3 scripts/run_parallel_tests.py --workers 16 --time-budget 7200
 ```
 
 **Output files**:
