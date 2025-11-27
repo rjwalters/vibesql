@@ -140,10 +140,10 @@ fn test_having_clause() {
         ],
         from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None }),
         where_clause: None,
-        group_by: Some(vec![vibesql_ast::Expression::ColumnRef {
+        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: None,
             column: "dept".to_string(),
-        }]),
+        }])),
         having: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),

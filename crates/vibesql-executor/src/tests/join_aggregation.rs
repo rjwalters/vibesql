@@ -175,10 +175,10 @@ fn test_inner_join_with_group_by_count() {
             natural: false,
         }),
         where_clause: None,
-        group_by: Some(vec![vibesql_ast::Expression::ColumnRef {
+        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: Some("d".to_string()),
             column: "dept_name".to_string(),
-        }]),
+        }])),
         having: None,
         order_by: None, // ORDER BY with aggregate aliases not yet supported
         limit: None,
@@ -277,10 +277,10 @@ fn test_left_join_with_group_by_avg_salary() {
             natural: false,
         }),
         where_clause: None,
-        group_by: Some(vec![vibesql_ast::Expression::ColumnRef {
+        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: Some("d".to_string()),
             column: "dept_name".to_string(),
-        }]),
+        }])),
         having: None,
         order_by: None, // ORDER BY with aggregate aliases not yet supported
         limit: None,
@@ -380,10 +380,10 @@ fn test_join_group_by_with_having() {
             natural: false,
         }),
         where_clause: None,
-        group_by: Some(vec![vibesql_ast::Expression::ColumnRef {
+        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: Some("d".to_string()),
             column: "dept_name".to_string(),
-        }]),
+        }])),
         having: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::Function {
                 name: "COUNT".to_string(),
@@ -495,10 +495,10 @@ fn test_join_group_by_multiple_aggregates() {
             natural: false,
         }),
         where_clause: None,
-        group_by: Some(vec![vibesql_ast::Expression::ColumnRef {
+        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: Some("d".to_string()),
             column: "dept_name".to_string(),
-        }]),
+        }])),
         having: None,
         order_by: None,
         limit: None,

@@ -217,9 +217,7 @@ impl LiteralExtractor {
 
         // Extract from GROUP BY
         if let Some(ref group_by) = select.group_by {
-            for expr in group_by {
-                Self::extract_from_expression(expr, literals);
-            }
+            Self::extract_from_group_by(group_by, literals);
         }
 
         // Extract from HAVING
@@ -249,6 +247,41 @@ impl LiteralExtractor {
             }
             vibesql_ast::FromClause::Table { .. } => {
                 // No literals in table references
+            }
+        }
+    }
+
+    fn extract_from_group_by(
+        group_by: &vibesql_ast::GroupByClause,
+        literals: &mut Vec<LiteralValue>,
+    ) {
+        match group_by {
+            vibesql_ast::GroupByClause::Simple(exprs) => {
+                for expr in exprs {
+                    Self::extract_from_expression(expr, literals);
+                }
+            }
+            vibesql_ast::GroupByClause::Rollup(elements)
+            | vibesql_ast::GroupByClause::Cube(elements) => {
+                for element in elements {
+                    match element {
+                        vibesql_ast::GroupingElement::Single(expr) => {
+                            Self::extract_from_expression(expr, literals);
+                        }
+                        vibesql_ast::GroupingElement::Composite(exprs) => {
+                            for expr in exprs {
+                                Self::extract_from_expression(expr, literals);
+                            }
+                        }
+                    }
+                }
+            }
+            vibesql_ast::GroupByClause::GroupingSets(sets) => {
+                for set in sets {
+                    for expr in &set.columns {
+                        Self::extract_from_expression(expr, literals);
+                    }
+                }
             }
         }
     }

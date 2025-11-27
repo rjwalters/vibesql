@@ -39,6 +39,11 @@ pub(super) fn map_keyword(upper_text: String) -> Token {
         "ON" => Token::Keyword(Keyword::On),
         "GROUP" => Token::Keyword(Keyword::Group),
         "BY" => Token::Keyword(Keyword::By),
+        // OLAP extensions for GROUP BY
+        "ROLLUP" => Token::Keyword(Keyword::Rollup),
+        "CUBE" => Token::Keyword(Keyword::Cube),
+        "SETS" => Token::Keyword(Keyword::Sets),
+        "GROUPING" => Token::Keyword(Keyword::Grouping),
         "HAVING" => Token::Keyword(Keyword::Having),
         "ORDER" => Token::Keyword(Keyword::Order),
         "ASC" => Token::Keyword(Keyword::Asc),

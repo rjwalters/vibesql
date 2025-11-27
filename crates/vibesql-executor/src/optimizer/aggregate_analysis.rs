@@ -9,6 +9,8 @@
 
 use std::collections::HashSet;
 use vibesql_ast::{Expression, SelectStmt};
+#[cfg(test)]
+use vibesql_ast::GroupByClause;
 
 /// Analysis of aggregate operations in a query
 ///
@@ -106,7 +108,7 @@ impl AggregateAnalysis {
 
         // Analyze GROUP BY expressions
         if let Some(ref group_by) = stmt.group_by {
-            for expr in group_by {
+            for expr in group_by.all_expressions() {
                 Self::extract_table_refs(expr, &mut grouping_tables);
             }
         }
@@ -555,7 +557,7 @@ mod tests {
             into_variables: None,
             from: None,
             where_clause: None,
-            group_by: Some(vec![make_column_ref("orders", "customer_id")]),
+            group_by: Some(GroupByClause::Simple(vec![make_column_ref("orders", "customer_id")])),
             having: None,
             order_by: None,
             limit: None,
@@ -589,7 +591,7 @@ mod tests {
             into_variables: None,
             from: None,
             where_clause: None,
-            group_by: Some(vec![make_column_ref("lineitem", "l_orderkey")]),
+            group_by: Some(GroupByClause::Simple(vec![make_column_ref("lineitem", "l_orderkey")])),
             having: Some(Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 left: Box::new(make_aggregate("SUM", make_column_ref("lineitem", "l_quantity"))),

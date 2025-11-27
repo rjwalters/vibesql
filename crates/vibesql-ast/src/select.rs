@@ -44,13 +44,115 @@ pub struct SelectStmt {
     pub into_variables: Option<Vec<String>>,
     pub from: Option<FromClause>,
     pub where_clause: Option<Expression>,
-    pub group_by: Option<Vec<Expression>>,
+    pub group_by: Option<GroupByClause>,
     pub having: Option<Expression>,
     pub order_by: Option<Vec<OrderByItem>>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     /// Set operation (UNION, INTERSECT, EXCEPT) combining this query with another
     pub set_operation: Option<SetOperation>,
+}
+
+// ============================================================================
+// GROUP BY Clause (with ROLLUP, CUBE, GROUPING SETS support)
+// ============================================================================
+
+/// GROUP BY clause structure supporting OLAP extensions
+///
+/// SQL:1999 OLAP extensions allow multi-dimensional aggregation:
+/// - Simple: `GROUP BY a, b`
+/// - ROLLUP: `GROUP BY ROLLUP(a, b)` - hierarchical subtotals
+/// - CUBE: `GROUP BY CUBE(a, b)` - all dimension combinations
+/// - GROUPING SETS: `GROUP BY GROUPING SETS((a, b), (a), ())` - explicit groupings
+#[derive(Debug, Clone, PartialEq)]
+pub enum GroupByClause {
+    /// Simple GROUP BY with list of expressions
+    /// Example: `GROUP BY a, b, c`
+    Simple(Vec<Expression>),
+
+    /// ROLLUP creates subtotals that roll up from the most detailed level
+    /// to a grand total, following the order of columns specified.
+    ///
+    /// Example: `GROUP BY ROLLUP(d_year, i_category)`
+    /// Equivalent to: `GROUPING SETS ((d_year, i_category), (d_year), ())`
+    Rollup(Vec<GroupingElement>),
+
+    /// CUBE creates subtotals for all combinations of dimensions.
+    ///
+    /// Example: `GROUP BY CUBE(a, b)`
+    /// Equivalent to: `GROUPING SETS ((a, b), (a), (b), ())`
+    Cube(Vec<GroupingElement>),
+
+    /// GROUPING SETS explicitly specifies which groupings to compute.
+    ///
+    /// Example: `GROUP BY GROUPING SETS ((d_year, d_moy), (d_year), ())`
+    GroupingSets(Vec<GroupingSet>),
+}
+
+/// A single grouping element within ROLLUP or CUBE
+///
+/// Can be a single expression or a composite (multiple expressions treated as one unit)
+#[derive(Debug, Clone, PartialEq)]
+pub enum GroupingElement {
+    /// Single expression: `a` in `ROLLUP(a, b)`
+    Single(Expression),
+
+    /// Composite: `(a, b)` in `ROLLUP((a, b), c)` - treated as one grouping unit
+    Composite(Vec<Expression>),
+}
+
+/// A single grouping set within GROUPING SETS
+///
+/// Example: `(a, b)` or `()` (empty for grand total) in `GROUPING SETS ((a, b), ())`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupingSet {
+    pub columns: Vec<Expression>,
+}
+
+impl GroupByClause {
+    /// Get all expressions in the GROUP BY clause (flattened)
+    ///
+    /// This returns all expressions, regardless of ROLLUP/CUBE/GROUPING SETS structure.
+    /// Useful for validation and simple GROUP BY processing that doesn't need
+    /// the multi-grouping-set semantics.
+    pub fn all_expressions(&self) -> Vec<&Expression> {
+        match self {
+            GroupByClause::Simple(exprs) => exprs.iter().collect(),
+            GroupByClause::Rollup(elements) | GroupByClause::Cube(elements) => elements
+                .iter()
+                .flat_map(|e| match e {
+                    GroupingElement::Single(expr) => vec![expr],
+                    GroupingElement::Composite(exprs) => exprs.iter().collect(),
+                })
+                .collect(),
+            GroupByClause::GroupingSets(sets) => {
+                sets.iter().flat_map(|s| s.columns.iter()).collect()
+            }
+        }
+    }
+
+    /// Get the number of expressions (flattened)
+    pub fn len(&self) -> usize {
+        self.all_expressions().len()
+    }
+
+    /// Check if the GROUP BY clause is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Check if this is a simple GROUP BY (not ROLLUP/CUBE/GROUPING SETS)
+    pub fn is_simple(&self) -> bool {
+        matches!(self, GroupByClause::Simple(_))
+    }
+
+    /// Get the simple expressions if this is a simple GROUP BY
+    pub fn as_simple(&self) -> Option<&Vec<Expression>> {
+        match self {
+            GroupByClause::Simple(exprs) => Some(exprs),
+            _ => None,
+        }
+    }
 }
 
 /// Set operation combining two SELECT statements

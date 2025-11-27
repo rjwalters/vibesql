@@ -395,19 +395,26 @@ impl SelectExecutor<'_> {
             ExecutorError::Other("GROUP BY clause required for group_by execution".to_string())
         })?;
 
-        let group_cols: Vec<usize> = group_by_clause
+        // Only support simple GROUP BY in columnar path (not ROLLUP/CUBE/GROUPING SETS)
+        let simple_exprs = group_by_clause.as_simple().ok_or_else(|| {
+            ExecutorError::Other(
+                "ROLLUP/CUBE/GROUPING SETS not supported in columnar execution path".to_string(),
+            )
+        })?;
+
+        let group_cols: Vec<usize> = simple_exprs
             .iter()
             .filter_map(|expr| {
                 match expr {
                     vibesql_ast::Expression::ColumnRef { table, column } => {
-                        schema.get_column_index(table.as_deref(), column)
+                        schema.get_column_index(table.as_deref(), column.as_str())
                     }
                     _ => None, // Only simple column references supported for now
                 }
             })
             .collect();
 
-        if group_cols.len() != group_by_clause.len() {
+        if group_cols.len() != simple_exprs.len() {
             log::debug!("GROUP BY contains non-column expressions, falling back to row-oriented");
             return Err(ExecutorError::Other(
                 "GROUP BY with non-column expressions not supported in columnar path".to_string()

@@ -25,7 +25,7 @@ pub fn extract_tables_from_select(stmt: &vibesql_ast::SelectStmt) -> HashSet<Str
 
     // Extract from GROUP BY
     if let Some(group_by) = &stmt.group_by {
-        for expr in group_by {
+        for expr in group_by.all_expressions() {
             extract_from_expression(expr, &mut tables);
         }
     }

@@ -128,11 +128,14 @@ impl GenericGroupedAggregationPlan {
             return None;
         }
 
-        // Must have GROUP BY
+        // Must have GROUP BY (only simple GROUP BY supported in monomorphic path)
         let group_by = stmt.group_by.as_ref()?;
 
+        // Only simple GROUP BY supported in monomorphic path
+        let simple_exprs = group_by.as_simple()?;
+
         // Extract GROUP BY columns
-        let group_by_columns = Self::extract_group_by_columns(group_by, schema)?;
+        let group_by_columns = Self::extract_group_by_columns(simple_exprs, schema)?;
 
         // Extract aggregations
         let aggregates = Self::extract_aggregates(&stmt.select_list, schema)?;

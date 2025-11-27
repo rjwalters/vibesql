@@ -150,9 +150,7 @@ impl QuerySignature {
 
         // Hash GROUP BY
         if let Some(ref group_by) = select.group_by {
-            for expr in group_by {
-                Self::hash_expression(expr, hasher);
-            }
+            Self::hash_group_by(group_by, hasher);
         }
 
         // Hash HAVING
@@ -194,6 +192,54 @@ impl QuerySignature {
                 "SUBQUERY".hash(hasher);
                 Self::hash_select(query, hasher);
                 alias.hash(hasher);
+            }
+        }
+    }
+
+    fn hash_group_by(group_by: &vibesql_ast::GroupByClause, hasher: &mut DefaultHasher) {
+        match group_by {
+            vibesql_ast::GroupByClause::Simple(exprs) => {
+                "SIMPLE".hash(hasher);
+                for expr in exprs {
+                    Self::hash_expression(expr, hasher);
+                }
+            }
+            vibesql_ast::GroupByClause::Rollup(elements) => {
+                "ROLLUP".hash(hasher);
+                Self::hash_grouping_elements(elements, hasher);
+            }
+            vibesql_ast::GroupByClause::Cube(elements) => {
+                "CUBE".hash(hasher);
+                Self::hash_grouping_elements(elements, hasher);
+            }
+            vibesql_ast::GroupByClause::GroupingSets(sets) => {
+                "GROUPING_SETS".hash(hasher);
+                for set in sets {
+                    "SET".hash(hasher);
+                    for expr in &set.columns {
+                        Self::hash_expression(expr, hasher);
+                    }
+                }
+            }
+        }
+    }
+
+    fn hash_grouping_elements(
+        elements: &[vibesql_ast::GroupingElement],
+        hasher: &mut DefaultHasher,
+    ) {
+        for element in elements {
+            match element {
+                vibesql_ast::GroupingElement::Single(expr) => {
+                    "SINGLE".hash(hasher);
+                    Self::hash_expression(expr, hasher);
+                }
+                vibesql_ast::GroupingElement::Composite(exprs) => {
+                    "COMPOSITE".hash(hasher);
+                    for expr in exprs {
+                        Self::hash_expression(expr, hasher);
+                    }
+                }
             }
         }
     }

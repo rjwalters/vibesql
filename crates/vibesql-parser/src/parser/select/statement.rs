@@ -88,15 +88,12 @@ impl Parser {
             None
         };
 
-        // Parse optional GROUP BY clause
+        // Parse optional GROUP BY clause (with ROLLUP, CUBE, GROUPING SETS support)
         let group_by = if self.peek_keyword(Keyword::Group) {
             self.consume_keyword(Keyword::Group)?;
             self.expect_keyword(Keyword::By)?;
 
-            // Parse comma-separated list of expressions
-            let group_exprs = self.parse_comma_separated_list(|p| p.parse_expression())?;
-
-            Some(group_exprs)
+            Some(self.parse_group_by_clause()?)
         } else {
             None
         };

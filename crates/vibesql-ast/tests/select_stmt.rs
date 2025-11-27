@@ -206,10 +206,10 @@ fn test_select_with_group_by() {
         into_variables: None,
         from: Some(FromClause::Table { name: "orders".to_string(), alias: None }),
         where_clause: None,
-        group_by: Some(vec![Expression::ColumnRef {
+        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
             table: None,
             column: "customer_id".to_string(),
-        }]),
+        }])),
         having: None,
         order_by: None,
         limit: None,
@@ -229,7 +229,7 @@ fn test_select_with_having() {
         into_variables: None,
         from: Some(FromClause::Table { name: "sales".to_string(), alias: None }),
         where_clause: None,
-        group_by: Some(vec![Expression::ColumnRef { table: None, column: "region".to_string() }]),
+        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef { table: None, column: "region".to_string() }])),
         having: Some(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
             left: Box::new(Expression::Function {
