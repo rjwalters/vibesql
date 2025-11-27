@@ -191,6 +191,18 @@ fn validate_column_ref(
     })
 }
 
+/// Validate column references in SELECT list and WHERE clause against schema
+///
+/// Simple validation without procedural context - used for standard SELECT queries.
+#[cfg(test)]
+pub fn validate_select_columns(
+    select_list: &[SelectItem],
+    where_clause: Option<&Expression>,
+    schema: &CombinedSchema,
+) -> Result<(), ExecutorError> {
+    validate_select_columns_with_context(select_list, where_clause, schema, None)
+}
+
 /// Validate all column references with optional procedural context
 ///
 /// When a procedural context is provided, variable names from the context are
