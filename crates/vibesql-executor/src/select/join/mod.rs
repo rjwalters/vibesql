@@ -164,6 +164,18 @@ impl FromResult {
     pub(super) fn rows(&mut self) -> &Vec<vibesql_storage::Row> {
         self.data.as_rows()
     }
+
+    /// Get a slice reference to rows without triggering materialization
+    ///
+    /// This is a zero-cost operation that accesses the underlying data directly
+    /// without calling collect_vec(). This is critical for performance as it
+    /// avoids the row materialization bottleneck (up to 57% of query time).
+    ///
+    /// Unlike `rows()` which may trigger iterator collection, this method
+    /// provides direct access to the underlying Vec<Row> or iterator buffer.
+    pub(super) fn as_slice(&self) -> &[vibesql_storage::Row] {
+        self.data.as_slice()
+    }
 }
 
 /// Helper function to combine two rows without unnecessary cloning

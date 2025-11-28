@@ -122,30 +122,30 @@ fn build_hash_table_parallel(
 /// - Space: O(n) where n is the size of the right table (smaller than inner join because we don't store indices)
 /// - Expected speedup: 100-10,000x for large semi-joins
 pub(super) fn hash_semi_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     left_col_idx: usize,
     right_col_idx: usize,
 ) -> Result<FromResult, ExecutorError> {
     // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
     let timeout_ctx = TimeoutContext::new_default();
 
-    // Get left and right row data
-    let left_rows = left.rows();
-    let right_rows = right.rows();
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
 
     // Build phase: Create hash table from right side (using parallel algorithm)
     // Key: join column value
     // Value: () (we only need to know if the key exists, not store row indices)
     // Automatically uses parallel build when beneficial (based on row count and hardware)
-    let hash_table = build_hash_table_parallel(right_rows, right_col_idx, &timeout_ctx)?;
+    let hash_table = build_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
 
     // Probe phase: Check each left row for a match
     // We only emit left rows that have a match in the right table
-    let estimated_capacity = left_rows.len().min(100_000);
+    let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
 
-    for (idx, left_row) in left_rows.iter().enumerate() {
+    for (idx, left_row) in left_slice.iter().enumerate() {
         // Check timeout periodically during probe phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
@@ -191,8 +191,8 @@ pub(super) fn hash_semi_join(
 ///
 /// Performance: Still O(n + m) average case, much faster than nested loop O(n*m)
 pub(super) fn hash_semi_join_with_filter(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     left_col_idx: usize,
     right_col_idx: usize,
     additional_filter: Option<&vibesql_ast::Expression>,
@@ -209,16 +209,16 @@ pub(super) fn hash_semi_join_with_filter(
 
     let filter = additional_filter.unwrap();
 
-    // Get left and right row data
-    let left_rows = left.rows();
-    let right_rows = right.rows();
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
 
     // Build phase: Create hash table from right side
     // Unlike simple hash_semi_join, we need to store row indices to check the filter
     use std::collections::HashMap;
     let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
 
-    for (idx, row) in right_rows.iter().enumerate() {
+    for (idx, row) in right_slice.iter().enumerate() {
         // Check timeout periodically during build phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
@@ -231,14 +231,14 @@ pub(super) fn hash_semi_join_with_filter(
     }
 
     // Probe phase: Check each left row for a match that passes the filter
-    let estimated_capacity = left_rows.len().min(100_000);
+    let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
 
     // Create evaluator for filter evaluation
     let evaluator = CombinedExpressionEvaluator::with_database(combined_schema, database);
     let mut probe_iterations = 0;
 
-    for left_row in left_rows.iter() {
+    for left_row in left_slice.iter() {
         // Check timeout periodically during probe phase
         probe_iterations += 1;
         if probe_iterations % CHECK_INTERVAL == 0 {
@@ -257,7 +257,7 @@ pub(super) fn hash_semi_join_with_filter(
             // Check if any matching right row passes the additional filter
             let mut found_match = false;
             for &right_idx in right_indices {
-                let right_row = &right_rows[right_idx];
+                let right_row = &right_slice[right_idx];
 
                 // Create combined row for filter evaluation
                 let combined_row = create_combined_row(left_row, right_row);
