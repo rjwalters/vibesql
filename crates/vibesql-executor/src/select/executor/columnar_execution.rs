@@ -531,6 +531,22 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
+        // For now, only handle SELECT * (all columns) - projection not yet implemented
+        // TODO: Implement column projection for partial selects
+        let is_select_star = stmt.select_list.iter().any(|item| {
+            matches!(item, vibesql_ast::SelectItem::Wildcard { .. } | vibesql_ast::SelectItem::QualifiedWildcard { .. })
+        });
+        if !is_select_star {
+            log::debug!("Columnar join: only SELECT * is supported, falling back");
+            return Ok(None);
+        }
+
+        // Only handle INNER joins for now - CROSS, LEFT, RIGHT, FULL need special handling
+        if !is_inner_join_only(from_clause) {
+            log::debug!("Columnar join: only INNER joins are supported, falling back");
+            return Ok(None);
+        }
+
         // Flatten the join tree to get all tables
         let mut table_refs = Vec::new();
         flatten_join_tree_simple(from_clause, &mut table_refs);
@@ -662,7 +678,6 @@ impl SelectExecutor<'_> {
 
         // Start with the first table
         let mut current_batch = batches[0].2.clone();
-        let mut current_col_offset = 0usize;
 
         // Track which tables have been joined
         let mut joined_tables: Vec<&str> = vec![
@@ -707,7 +722,6 @@ impl SelectExecutor<'_> {
                 join_cond,
                 &joined_tables,
                 table_ref,
-                current_col_offset,
                 schema,
                 combined_schema,
             )?;
@@ -727,7 +741,6 @@ impl SelectExecutor<'_> {
             )?;
 
             // Update tracking
-            current_col_offset = current_batch.column_count() - batch.column_count();
             joined_tables.push(table_ref);
         }
 
@@ -819,6 +832,18 @@ impl SelectExecutor<'_> {
     }
 }
 
+/// Check if a FROM clause only contains INNER joins (no CROSS, LEFT, RIGHT, FULL)
+fn is_inner_join_only(from: &FromClause) -> bool {
+    match from {
+        FromClause::Table { .. } | FromClause::Subquery { .. } => true,
+        FromClause::Join { left, right, join_type, .. } => {
+            matches!(join_type, JoinType::Inner)
+                && is_inner_join_only(left)
+                && is_inner_join_only(right)
+        }
+    }
+}
+
 /// Simple table reference: (name, alias, is_subquery)
 type SimpleTableRef = (String, Option<String>, bool);
 
@@ -852,8 +877,9 @@ fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<EquiJoinCondi
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } => {}
         FromClause::Join { left, right, condition, join_type, .. } => {
-            // Only handle INNER and CROSS joins in columnar path
-            if !matches!(join_type, JoinType::Inner | JoinType::Cross) {
+            // Only handle INNER joins in columnar path
+            // CROSS joins should not have ON conditions, and OUTER joins need special handling
+            if !matches!(join_type, JoinType::Inner) {
                 return;
             }
 
@@ -974,7 +1000,6 @@ fn resolve_join_column_indices(
     cond: &EquiJoinCondition,
     joined_tables: &[&str],
     new_table: &str,
-    col_offset: usize,
     new_table_schema: &vibesql_catalog::TableSchema,
     combined_schema: &CombinedSchema,
 ) -> Result<(usize, usize), ExecutorError> {
