@@ -1,17 +1,86 @@
-//! SIMD-accelerated filtering for columnar batches
+//! Auto-vectorized filtering for columnar batches
 
 use super::batch::{ColumnArray, ColumnarBatch};
 use super::filter::ColumnPredicate;
 use crate::errors::ExecutorError;
-
-#[cfg(feature = "simd")]
-use crate::simd::comparison::{
-    simd_eq_f64, simd_eq_i32, simd_eq_i64, simd_ge_f64, simd_ge_i32, simd_ge_i64, simd_gt_f64,
-    simd_gt_i32, simd_gt_i64, simd_le_f64, simd_le_i32, simd_le_i64, simd_lt_f64, simd_lt_i32,
-    simd_lt_i64,
-};
-
 use vibesql_types::SqlValue;
+
+// Auto-vectorized comparison functions (LLVM will vectorize these iterator patterns)
+
+#[inline]
+fn simd_lt_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    values.iter().map(|&v| v < threshold).collect()
+}
+
+#[inline]
+fn simd_gt_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    values.iter().map(|&v| v > threshold).collect()
+}
+
+#[inline]
+fn simd_le_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    values.iter().map(|&v| v <= threshold).collect()
+}
+
+#[inline]
+fn simd_ge_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    values.iter().map(|&v| v >= threshold).collect()
+}
+
+#[inline]
+fn simd_eq_i64(values: &[i64], target: i64) -> Vec<bool> {
+    values.iter().map(|&v| v == target).collect()
+}
+
+#[inline]
+fn simd_lt_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    values.iter().map(|&v| v < threshold).collect()
+}
+
+#[inline]
+fn simd_gt_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    values.iter().map(|&v| v > threshold).collect()
+}
+
+#[inline]
+fn simd_le_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    values.iter().map(|&v| v <= threshold).collect()
+}
+
+#[inline]
+fn simd_ge_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    values.iter().map(|&v| v >= threshold).collect()
+}
+
+#[inline]
+fn simd_eq_i32(values: &[i32], target: i32) -> Vec<bool> {
+    values.iter().map(|&v| v == target).collect()
+}
+
+#[inline]
+fn simd_lt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v < threshold).collect()
+}
+
+#[inline]
+fn simd_gt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v > threshold).collect()
+}
+
+#[inline]
+fn simd_le_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v <= threshold).collect()
+}
+
+#[inline]
+fn simd_ge_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v >= threshold).collect()
+}
+
+#[inline]
+fn simd_eq_f64(values: &[f64], target: f64) -> Vec<bool> {
+    values.iter().map(|&v| v == target).collect()
+}
 
 /// Check if any value in a predicate is NULL
 /// Per SQL standard, any comparison with NULL returns UNKNOWN (treated as false in WHERE)

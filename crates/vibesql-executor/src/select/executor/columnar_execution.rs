@@ -38,7 +38,7 @@ use crate::{
 use vibesql_ast::FromClause;
 
 impl SelectExecutor<'_> {
-    /// Try to execute using columnar (SIMD-accelerated) execution
+    /// Try to execute using columnar (auto-vectorized) execution
     ///
     /// Returns Some(rows) if the query is compatible with columnar execution.
     /// Returns None if the query should fall back to regular row-based execution.
@@ -55,49 +55,6 @@ impl SelectExecutor<'_> {
     /// - GROUP BY aggregations
     /// - JOIN operations
     /// - More complex predicates (OR logic, IN clauses)
-    ///
-    /// # Feature Requirements
-    ///
-    /// This function requires the `simd` feature for SIMD-accelerated execution.
-    /// Without `simd`, it always returns `Ok(None)` to fall back to row-based execution.
-    ///
-    /// NOTE: This method is retained for potential future use. The unified pipeline
-    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
-    /// ExecutionPipeline trait.
-    #[allow(dead_code)]
-    #[cfg(not(feature = "simd"))]
-    pub(in crate::select::executor) fn try_columnar_execution(
-        &self,
-        _stmt: &vibesql_ast::SelectStmt,
-        _cte_results: &HashMap<String, CteResult>,
-    ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
-        // SIMD feature not enabled - fall back to row-based execution
-        Ok(None)
-    }
-
-    /// Try to execute using columnar (SIMD-accelerated) execution
-    ///
-    /// Returns Some(rows) if the query is compatible with columnar execution.
-    /// Returns None if the query should fall back to regular row-based execution.
-    ///
-    /// Columnar execution provides 6-10x speedup for queries with:
-    /// - Simple predicates on numeric columns
-    /// - Aggregations (SUM, AVG, MIN, MAX, COUNT)
-    /// - Single table scans (no JOINs yet)
-    ///
-    /// # Phase 5 Implementation
-    ///
-    /// This initial implementation focuses on simple aggregate queries without GROUP BY.
-    /// Future phases will add support for:
-    /// - GROUP BY aggregations
-    /// - JOIN operations
-    /// - More complex predicates (OR logic, IN clauses)
-    ///
-    /// NOTE: This method is retained for potential future use. The unified pipeline
-    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
-    /// ExecutionPipeline trait.
-    #[allow(dead_code)]
-    #[cfg(feature = "simd")]
     pub(in crate::select::executor) fn try_columnar_execution(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -223,11 +180,6 @@ impl SelectExecutor<'_> {
     /// - **SIMD filtering**: 4-8x faster filtering using vectorized instructions
     /// - **SIMD aggregation**: 10x faster aggregation for numeric columns
     /// - **Cache efficiency**: Columnar data access is cache-friendly
-    ///
-    /// NOTE: This method is retained for potential future use. The unified pipeline
-    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
-    /// ExecutionPipeline trait.
-    #[allow(dead_code)]
     pub(in crate::select::executor) fn try_native_columnar_execution(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -407,11 +359,6 @@ impl SelectExecutor<'_> {
     ///
     /// This method implements the GROUP BY path for native columnar execution,
     /// using hash-based grouping with the existing `columnar_group_by` function.
-    ///
-    /// NOTE: This method is retained for potential future use. The unified pipeline
-    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
-    /// ExecutionPipeline trait.
-    #[allow(dead_code)]
     fn execute_columnar_group_by(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -423,30 +370,11 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let start = std::time::Instant::now();
 
-        // Phase 1: Apply SIMD filtering to get filtered batch
+        // Phase 1: Apply auto-vectorized filtering to get filtered batch
         let filtered_batch = if predicates.is_empty() {
             batch.clone()
         } else {
-            #[cfg(feature = "simd")]
-            {
-                columnar::simd_filter_batch(batch, predicates)?
-            }
-            #[cfg(not(feature = "simd"))]
-            {
-                // Scalar fallback - convert to rows, filter, convert back
-                let rows = batch.to_rows()?;
-                let filter_bitmap = columnar::create_filter_bitmap(
-                    rows.len(),
-                    predicates,
-                    |row_idx, col_idx| rows.get(row_idx).and_then(|r| r.get(col_idx)),
-                )?;
-                let filtered_rows: Vec<_> = rows
-                    .into_iter()
-                    .zip(filter_bitmap.iter())
-                    .filter_map(|(row, &pass)| if pass { Some(row) } else { None })
-                    .collect();
-                columnar::ColumnarBatch::from_rows(&filtered_rows)?
-            }
+            columnar::simd_filter_batch(batch, predicates)?
         };
 
         #[cfg(feature = "profile-q6")]
@@ -545,11 +473,6 @@ impl SelectExecutor<'_> {
 /// Extract a single table name from a FROM clause if it's a simple table reference
 ///
 /// Returns None if the FROM clause contains JOINs, subqueries, or other complex constructs.
-///
-/// NOTE: This function is retained for potential future use. The unified pipeline
-/// dispatcher (execute_via_pipeline) now handles columnar execution via the
-/// ExecutionPipeline trait.
-#[allow(dead_code)]
 fn extract_single_table_name(from_clause: &FromClause) -> Option<String> {
     match from_clause {
         FromClause::Table { name, .. } => Some(name.clone()),

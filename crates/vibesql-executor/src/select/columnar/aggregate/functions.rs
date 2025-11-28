@@ -12,8 +12,36 @@ use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::scan::ColumnarScan;
 use super::AggregateOp;
 
-#[cfg(feature = "simd")]
-use crate::simd::aggregation::*;
+// Auto-vectorized aggregation functions (LLVM will vectorize these iterator patterns)
+#[inline]
+fn simd_sum_i64(values: &[i64]) -> i64 {
+    values.iter().sum()
+}
+
+#[inline]
+fn simd_min_i64(values: &[i64]) -> Option<i64> {
+    values.iter().copied().min()
+}
+
+#[inline]
+fn simd_max_i64(values: &[i64]) -> Option<i64> {
+    values.iter().copied().max()
+}
+
+#[inline]
+fn simd_sum_f64(values: &[f64]) -> f64 {
+    values.iter().sum()
+}
+
+#[inline]
+fn simd_min_f64(values: &[f64]) -> Option<f64> {
+    values.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+#[inline]
+fn simd_max_f64(values: &[f64]) -> Option<f64> {
+    values.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
 
 /// Compute SUM aggregate on a column
 pub(super) fn compute_sum(
@@ -257,7 +285,6 @@ pub(super) fn compute_columnar_aggregate_impl(
 ///
 /// This function works directly on the typed column arrays in ColumnarBatch,
 /// avoiding the overhead of converting back to rows.
-#[cfg(feature = "simd")]
 pub(super) fn compute_batch_sum(
     batch: &ColumnarBatch,
     column_idx: usize,
@@ -321,13 +348,11 @@ pub(super) fn compute_batch_sum(
 }
 
 /// Compute COUNT aggregate directly on a ColumnarBatch
-#[cfg(feature = "simd")]
 pub(super) fn compute_batch_count(batch: &ColumnarBatch) -> Result<SqlValue, ExecutorError> {
     Ok(SqlValue::Integer(batch.row_count() as i64))
 }
 
 /// Compute AVG aggregate directly on a ColumnarBatch column
-#[cfg(feature = "simd")]
 pub(super) fn compute_batch_avg(
     batch: &ColumnarBatch,
     column_idx: usize,
@@ -391,7 +416,6 @@ pub(super) fn compute_batch_avg(
 }
 
 /// Compute MIN aggregate directly on a ColumnarBatch column
-#[cfg(feature = "simd")]
 pub(super) fn compute_batch_min(
     batch: &ColumnarBatch,
     column_idx: usize,
@@ -447,7 +471,6 @@ pub(super) fn compute_batch_min(
 }
 
 /// Compute MAX aggregate directly on a ColumnarBatch column
-#[cfg(feature = "simd")]
 pub(super) fn compute_batch_max(
     batch: &ColumnarBatch,
     column_idx: usize,
@@ -503,7 +526,6 @@ pub(super) fn compute_batch_max(
 }
 
 /// Compute batch aggregate (dispatcher for all aggregate types)
-#[cfg(feature = "simd")]
 pub(super) fn compute_batch_aggregate(
     batch: &ColumnarBatch,
     column_idx: usize,

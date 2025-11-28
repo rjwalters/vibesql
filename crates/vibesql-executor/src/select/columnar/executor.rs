@@ -22,14 +22,43 @@
 use super::batch::{ColumnArray, ColumnarBatch};
 use super::aggregate::{AggregateOp, AggregateSource, AggregateSpec};
 use super::filter::ColumnPredicate;
+use super::simd_filter::simd_filter_batch;
 use crate::errors::ExecutorError;
 use crate::schema::CombinedSchema;
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-#[cfg(feature = "simd")]
-use super::simd_filter::simd_filter_batch;
+// Auto-vectorized aggregation functions (LLVM will vectorize these iterator patterns)
+#[inline]
+fn simd_sum_i64(values: &[i64]) -> i64 {
+    values.iter().sum()
+}
+
+#[inline]
+fn simd_min_i64(values: &[i64]) -> Option<i64> {
+    values.iter().copied().min()
+}
+
+#[inline]
+fn simd_max_i64(values: &[i64]) -> Option<i64> {
+    values.iter().copied().max()
+}
+
+#[inline]
+fn simd_sum_f64(values: &[f64]) -> f64 {
+    values.iter().sum()
+}
+
+#[inline]
+fn simd_min_f64(values: &[f64]) -> Option<f64> {
+    values.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+#[inline]
+fn simd_max_f64(values: &[f64]) -> Option<f64> {
+    values.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
 
 /// Execute a columnar query end-to-end on a ColumnarBatch
 ///
@@ -65,23 +94,14 @@ pub fn execute_columnar_batch(
         return Ok(vec![Row::new(values)]);
     }
 
-    // Phase 1: Apply SIMD filtering
+    // Phase 1: Apply auto-vectorized filtering
     #[cfg(feature = "profile-q6")]
     let filter_start = std::time::Instant::now();
 
     let filtered_batch = if predicates.is_empty() {
         batch.clone()
     } else {
-        #[cfg(feature = "simd")]
-        {
-            simd_filter_batch(batch, predicates)?
-        }
-        #[cfg(not(feature = "simd"))]
-        {
-            // Scalar fallback - create filter bitmap and apply
-            let filter_bitmap = create_filter_bitmap_for_batch(batch, predicates)?;
-            apply_filter_bitmap_to_batch(batch, &filter_bitmap)?
-        }
+        simd_filter_batch(batch, predicates)?
     };
 
     #[cfg(feature = "profile-q6")]
@@ -171,7 +191,7 @@ fn compute_column_aggregate(
     }
 }
 
-/// Compute aggregate on i64 column using SIMD
+/// Compute aggregate on i64 column using auto-vectorized operations
 fn compute_i64_aggregate(
     values: &[i64],
     nulls: Option<&Vec<bool>>,
@@ -203,67 +223,35 @@ fn compute_i64_aggregate(
         });
     }
 
-    #[cfg(feature = "simd")]
-    {
-        log::debug!("[SIMD] Using SIMD path for i64 aggregate with {} valid values", valid_values.len());
-        use crate::simd::aggregation::{simd_sum_i64, simd_min_i64, simd_max_i64};
+    log::debug!("[SIMD] Using auto-vectorized path for i64 aggregate with {} valid values", valid_values.len());
 
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64(&valid_values))),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
-            AggregateOp::Avg => {
-                let sum = simd_sum_i64(&valid_values);
-                Ok(SqlValue::Double(sum as f64 / valid_values.len() as f64))
-            }
-            AggregateOp::Min => {
-                simd_min_i64(&valid_values)
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                simd_max_i64(&valid_values)
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
+    match op {
+        AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64(&valid_values))),
+        AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
+        AggregateOp::Avg => {
+            let sum = simd_sum_i64(&valid_values);
+            Ok(SqlValue::Double(sum as f64 / valid_values.len() as f64))
         }
-    }
-
-    #[cfg(not(feature = "simd"))]
-    {
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Integer(valid_values.iter().sum())),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
-            AggregateOp::Avg => {
-                let sum: i64 = valid_values.iter().sum();
-                Ok(SqlValue::Double(sum as f64 / valid_values.len() as f64))
-            }
-            AggregateOp::Min => {
-                valid_values.iter().min().copied()
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                valid_values.iter().max().copied()
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
+        AggregateOp::Min => {
+            simd_min_i64(&valid_values)
+                .map(SqlValue::Integer)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MIN".to_string(),
+                    reason: "empty set".to_string(),
+                })
+        }
+        AggregateOp::Max => {
+            simd_max_i64(&valid_values)
+                .map(SqlValue::Integer)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MAX".to_string(),
+                    reason: "empty set".to_string(),
+                })
         }
     }
 }
 
-/// Compute aggregate on f64 column using SIMD
+/// Compute aggregate on f64 column using auto-vectorized operations
 fn compute_f64_aggregate(
     values: &[f64],
     nulls: Option<&Vec<bool>>,
@@ -295,64 +283,30 @@ fn compute_f64_aggregate(
         });
     }
 
-    #[cfg(feature = "simd")]
-    {
-        log::debug!("[SIMD] Using SIMD path for f64 aggregate with {} valid values", valid_values.len());
-        use crate::simd::aggregation::{simd_sum_f64, simd_min_f64, simd_max_f64};
+    log::debug!("[SIMD] Using auto-vectorized path for f64 aggregate with {} valid values", valid_values.len());
 
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Double(simd_sum_f64(&valid_values))),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
-            AggregateOp::Avg => {
-                let sum = simd_sum_f64(&valid_values);
-                Ok(SqlValue::Double(sum / valid_values.len() as f64))
-            }
-            AggregateOp::Min => {
-                simd_min_f64(&valid_values)
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                simd_max_f64(&valid_values)
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
+    match op {
+        AggregateOp::Sum => Ok(SqlValue::Double(simd_sum_f64(&valid_values))),
+        AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
+        AggregateOp::Avg => {
+            let sum = simd_sum_f64(&valid_values);
+            Ok(SqlValue::Double(sum / valid_values.len() as f64))
         }
-    }
-
-    #[cfg(not(feature = "simd"))]
-    {
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Double(valid_values.iter().sum())),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
-            AggregateOp::Avg => {
-                let sum: f64 = valid_values.iter().sum();
-                Ok(SqlValue::Double(sum / valid_values.len() as f64))
-            }
-            AggregateOp::Min => {
-                valid_values.iter().cloned()
-                    .min_by(|a, b| a.partial_cmp(b).unwrap())
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                valid_values.iter().cloned()
-                    .max_by(|a, b| a.partial_cmp(b).unwrap())
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
+        AggregateOp::Min => {
+            simd_min_f64(&valid_values)
+                .map(SqlValue::Double)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MIN".to_string(),
+                    reason: "empty set".to_string(),
+                })
+        }
+        AggregateOp::Max => {
+            simd_max_f64(&valid_values)
+                .map(SqlValue::Double)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MAX".to_string(),
+                    reason: "empty set".to_string(),
+                })
         }
     }
 }
