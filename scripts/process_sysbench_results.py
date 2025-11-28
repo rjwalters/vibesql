@@ -139,44 +139,101 @@ def parse_criterion_output(output: str) -> List[Dict]:
     Parse Criterion benchmark output from stdout.
 
     Handles format like:
-    sysbench_point_select/vibesql/10000  time:   [45.123 us 45.456 us 45.789 us]
+    sysbench_point_select/vibesql/10000
+                            time:   [45.123 µs 45.456 µs 45.789 µs]
+
+    Also extracts iteration counts from lines like:
+    Collecting 100 samples in estimated 10.075 s (111k iterations)
     """
     results = []
 
-    # Pattern: group/engine/size  time:   [low mean high]
+    # Build a map of benchmark name -> iterations from the output
+    # Pattern: "Collecting N samples ... (Mk iterations)" or "(N iterations)"
+    iterations_map = {}
+    iter_pattern = re.compile(
+        r'^Benchmarking\s+(\S+).*?Collecting\s+(\d+)\s+samples.*?\(([0-9.]+)([kMG]?)\s+iterations\)',
+        re.MULTILINE | re.DOTALL
+    )
+    # Simpler approach: find "Collecting" lines directly
+    collect_pattern = re.compile(
+        r'Benchmarking\s+(\S+)\s*\n.*?Collecting\s+(\d+)\s+samples.*?\(([0-9.]+)([kMG]?)\s+iterations\)',
+        re.DOTALL
+    )
+    for match in collect_pattern.finditer(output):
+        bench_name = match.group(1)
+        samples = int(match.group(2))
+        iter_val = float(match.group(3))
+        iter_suffix = match.group(4)
+        if iter_suffix == 'k':
+            iterations = int(iter_val * 1000)
+        elif iter_suffix == 'M':
+            iterations = int(iter_val * 1_000_000)
+        elif iter_suffix == 'G':
+            iterations = int(iter_val * 1_000_000_000)
+        else:
+            iterations = int(iter_val)
+        iterations_map[bench_name] = iterations
+
+    # Pattern: group/engine/size followed by time: [low mean high]
+    # Note: µ (U+00B5) and μ (U+03BC) are both valid micro signs
+    # Also handle 'us' as ASCII alternative
     pattern = re.compile(
-        r'^(\w+)/(\w+)/(\d+)\s+'
-        r'time:\s+\[([\d.]+)\s+(us|ms|ns)\s+'
-        r'([\d.]+)\s+(us|ms|ns)\s+'
-        r'([\d.]+)\s+(us|ms|ns)\]',
+        r'^(\w+)/(\w+)/(\d+)\s*\n\s*'
+        r'time:\s+\[([\d.]+)\s+([µμu]?s|ms|ns)\s+'
+        r'([\d.]+)\s+([µμu]?s|ms|ns)\s+'
+        r'([\d.]+)\s+([µμu]?s|ms|ns)\]',
         re.MULTILINE
     )
+
+    def unit_to_ns(val: float, unit: str) -> float:
+        """Convert time value to nanoseconds."""
+        unit = unit.lower()
+        if unit in ('µs', 'μs', 'us'):
+            return val * 1000
+        elif unit == 'ms':
+            return val * 1_000_000
+        elif unit == 's':
+            return val * 1_000_000_000
+        else:  # ns
+            return val
 
     for match in pattern.finditer(output):
         test_name = match.group(1).replace("sysbench_", "")
         engine = match.group(2).lower()
         table_size = int(match.group(3))
 
-        # Parse mean time
+        # Parse low, mean, high times
+        low_val = float(match.group(4))
+        low_unit = match.group(5)
         mean_val = float(match.group(6))
         mean_unit = match.group(7)
+        high_val = float(match.group(8))
+        high_unit = match.group(9)
 
         # Convert to nanoseconds
-        if mean_unit == 'us':
-            mean_ns = mean_val * 1000
-        elif mean_unit == 'ms':
-            mean_ns = mean_val * 1_000_000
-        else:  # ns
-            mean_ns = mean_val
+        low_ns = unit_to_ns(low_val, low_unit)
+        mean_ns = unit_to_ns(mean_val, mean_unit)
+        high_ns = unit_to_ns(high_val, high_unit)
+
+        # Estimate std_dev from confidence interval
+        # Criterion uses ~95% CI, so interval is roughly 4 std devs
+        std_dev_ns = (high_ns - low_ns) / 4.0
+
+        # Use mean as median estimate (Criterion median is close to mean for normal distributions)
+        median_ns = mean_ns
+
+        # Look up iterations
+        bench_key = f"{match.group(1)}/{engine}/{table_size}"
+        iterations = iterations_map.get(bench_key)
 
         results.append({
             'database_engine': engine,
             'test_name': test_name,
             'table_size': table_size,
             'mean_time_ns': mean_ns,
-            'std_dev_ns': None,
-            'median_time_ns': None,
-            'iterations': None
+            'std_dev_ns': std_dev_ns,
+            'median_time_ns': median_ns,
+            'iterations': iterations
         })
 
     return results
