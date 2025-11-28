@@ -76,7 +76,15 @@ pub trait ExecutionPipeline {
     ///
     /// # Returns
     /// A `CombinedExpressionEvaluator` configured for this pipeline's execution model
-    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> CombinedExpressionEvaluator<'a>;
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation delegates to `ctx.create_evaluator()`, which handles
+    /// all the context variants (CTE, outer row, procedural, windows).
+    #[inline]
+    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> CombinedExpressionEvaluator<'a> {
+        ctx.create_evaluator()
+    }
 
     /// Apply WHERE clause filtering to the input data.
     ///
