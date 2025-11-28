@@ -92,9 +92,11 @@ pub fn rows_to_record_batch_with_columns(
     column_indices: Option<&[usize]>,
 ) -> Result<RecordBatch, ExecutorError> {
     if rows.is_empty() {
-        return Err(ExecutorError::Other(
-            "Cannot create RecordBatch from empty rows".to_string(),
-        ));
+        return Err(ExecutorError::ColumnarLengthMismatch {
+            expected: 1,
+            actual: 0,
+            context: "Cannot create RecordBatch from empty rows".to_string(),
+        });
     }
 
     // Determine which columns to convert
@@ -104,9 +106,10 @@ pub fn rows_to_record_batch_with_columns(
     };
 
     if indices.is_empty() {
-        return Err(ExecutorError::Other(
-            "Must specify at least one column".to_string(),
-        ));
+        return Err(ExecutorError::ColumnarColumnNotFound {
+            column_index: 0,
+            batch_columns: 0,
+        });
     }
 
     // Build schema for selected columns only
@@ -124,9 +127,10 @@ pub fn rows_to_record_batch_with_columns(
             Some(SqlValue::Date(_)) => DataType::Date32,
             Some(SqlValue::Timestamp(_)) => DataType::Timestamp(TimeUnit::Microsecond, None),
             Some(SqlValue::Null) => DataType::Int64,
-            _ => return Err(ExecutorError::Other(format!(
-                "Unsupported type for SIMD at column {}", col_idx
-            ))),
+            _ => return Err(ExecutorError::UnsupportedArrayType {
+                operation: format!("SIMD conversion at column {}", col_idx),
+                array_type: format!("{:?}", rows[0].values.get(col_idx)),
+            }),
         };
 
         schema_fields.push(Field::new(name, data_type, true));
@@ -142,7 +146,10 @@ pub fn rows_to_record_batch_with_columns(
     }
 
     RecordBatch::try_new(Arc::new(schema), columns)
-        .map_err(|e| ExecutorError::Other(format!("Failed to create RecordBatch: {}", e)))
+        .map_err(|e| ExecutorError::SimdOperationFailed {
+            operation: "RecordBatch creation".to_string(),
+            reason: e.to_string(),
+        })
 }
 
 /// Convert RecordBatch back to row format
@@ -279,9 +286,10 @@ fn infer_schema_from_row(row: &Row, column_names: &[String]) -> Result<Schema, E
             SqlValue::Date(_) => DataType::Date32,
             SqlValue::Timestamp(_) => DataType::Timestamp(TimeUnit::Microsecond, None),
             SqlValue::Null => DataType::Int64, // Default to Int64 for nulls
-            _ => return Err(ExecutorError::Other(format!(
-                "Unsupported type for SIMD: {:?}", value
-            ))),
+            _ => return Err(ExecutorError::UnsupportedArrayType {
+                operation: "SIMD schema inference".to_string(),
+                array_type: format!("{:?}", value),
+            }),
         };
 
         Ok(Field::new(name, data_type, true))
@@ -369,10 +377,10 @@ fn build_column_array(
             }
             Ok(Arc::new(builder.finish()))
         }
-        _ => Err(ExecutorError::Other(format!(
-            "Unsupported Arrow data type: {:?}",
-            data_type
-        ))),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "build_column_array".to_string(),
+            array_type: format!("{:?}", data_type),
+        }),
     }
 }
 
@@ -385,40 +393,58 @@ fn arrow_value_to_sql(array: &dyn Array, idx: usize) -> Result<SqlValue, Executo
     match array.data_type() {
         DataType::Int64 => {
             let arr = array.as_any().downcast_ref::<Int64Array>()
-                .ok_or_else(|| ExecutorError::Other("Failed to downcast Int64Array".to_string()))?;
+                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                    expected_type: "Int64Array".to_string(),
+                    context: "arrow_value_to_sql".to_string(),
+                })?;
             Ok(SqlValue::Integer(arr.value(idx)))
         }
         DataType::Float64 => {
             let arr = array.as_any().downcast_ref::<Float64Array>()
-                .ok_or_else(|| ExecutorError::Other("Failed to downcast Float64Array".to_string()))?;
+                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                    expected_type: "Float64Array".to_string(),
+                    context: "arrow_value_to_sql".to_string(),
+                })?;
             Ok(SqlValue::Double(arr.value(idx)))
         }
         DataType::Utf8 => {
             let arr = array.as_any().downcast_ref::<StringArray>()
-                .ok_or_else(|| ExecutorError::Other("Failed to downcast StringArray".to_string()))?;
+                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                    expected_type: "StringArray".to_string(),
+                    context: "arrow_value_to_sql".to_string(),
+                })?;
             Ok(SqlValue::Varchar(arr.value(idx).to_string()))
         }
         DataType::Boolean => {
             let arr = array.as_any().downcast_ref::<BooleanArray>()
-                .ok_or_else(|| ExecutorError::Other("Failed to downcast BooleanArray".to_string()))?;
+                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                    expected_type: "BooleanArray".to_string(),
+                    context: "arrow_value_to_sql".to_string(),
+                })?;
             Ok(SqlValue::Boolean(arr.value(idx)))
         }
         DataType::Date32 => {
             let arr = array.as_any().downcast_ref::<Date32Array>()
-                .ok_or_else(|| ExecutorError::Other("Failed to downcast Date32Array".to_string()))?;
+                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                    expected_type: "Date32Array".to_string(),
+                    context: "arrow_value_to_sql".to_string(),
+                })?;
             let days = arr.value(idx);
             Ok(SqlValue::Date(days_since_epoch_to_date(days)))
         }
         DataType::Timestamp(TimeUnit::Microsecond, None) => {
             let arr = array.as_any().downcast_ref::<TimestampMicrosecondArray>()
-                .ok_or_else(|| ExecutorError::Other("Failed to downcast TimestampMicrosecondArray".to_string()))?;
+                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                    expected_type: "TimestampMicrosecondArray".to_string(),
+                    context: "arrow_value_to_sql".to_string(),
+                })?;
             let micros = arr.value(idx);
             Ok(SqlValue::Timestamp(microseconds_to_timestamp(micros)))
         }
-        _ => Err(ExecutorError::Other(format!(
-            "Unsupported Arrow data type for conversion: {:?}",
-            array.data_type()
-        ))),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "arrow_value_to_sql conversion".to_string(),
+            array_type: format!("{:?}", array.data_type()),
+        }),
     }
 }
 

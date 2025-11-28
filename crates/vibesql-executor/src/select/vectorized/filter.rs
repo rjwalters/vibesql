@@ -18,7 +18,10 @@ pub fn filter_record_batch_simd(
 ) -> Result<RecordBatch, ExecutorError> {
     let mask = evaluate_predicate_simd(batch, predicate)?;
     filter_record_batch(batch, &mask)
-        .map_err(|e| ExecutorError::Other(format!("SIMD filter failed: {}", e)))
+        .map_err(|e| ExecutorError::SimdOperationFailed {
+            operation: "filter".to_string(),
+            reason: e.to_string(),
+        })
 }
 
 /// Evaluate a predicate expression on a RecordBatch
@@ -33,7 +36,11 @@ fn evaluate_predicate_simd(
         Expression::Literal(value) => {
             match value {
                 SqlValue::Boolean(b) => Ok(BooleanArray::from(vec![*b; batch.num_rows()])),
-                _ => Err(ExecutorError::Other("Non-boolean literal in WHERE clause".to_string())),
+                _ => Err(ExecutorError::ColumnarTypeMismatch {
+                    operation: "WHERE clause literal".to_string(),
+                    left_type: format!("{:?}", value),
+                    right_type: Some("Boolean".to_string()),
+                }),
             }
         }
         Expression::ColumnRef { column, .. } => {
@@ -43,15 +50,18 @@ fn evaluate_predicate_simd(
             match op {
                 vibesql_ast::UnaryOperator::Not => {
                     let expr_mask = evaluate_predicate_simd(batch, expr)?;
-                    not_op(&expr_mask).map_err(|e| ExecutorError::Other(format!("SIMD NOT failed: {}", e)))
+                    not_op(&expr_mask).map_err(|e| ExecutorError::SimdOperationFailed {
+                        operation: "NOT".to_string(),
+                        reason: e.to_string(),
+                    })
                 }
-                _ => Err(ExecutorError::Other(format!("Unsupported unary operator: {:?}", op))),
+                _ => Err(ExecutorError::UnsupportedFeature(format!("unary operator {:?} in SIMD predicate", op))),
             }
         }
         Expression::Like { expr, pattern, negated } => {
             evaluate_like_simd(batch, expr, pattern, *negated)
         }
-        _ => Err(ExecutorError::Other(format!("Unsupported SIMD predicate: {:?}", expr))),
+        _ => Err(ExecutorError::UnsupportedFeature(format!("SIMD predicate expression: {:?}", expr))),
     }
 }
 
@@ -74,7 +84,10 @@ fn evaluate_binary_op_simd(
 
             // Evaluate right side
             let right_mask = evaluate_predicate_simd(batch, right)?;
-            and_op(&left_mask, &right_mask).map_err(|e| ExecutorError::Other(format!("SIMD AND failed: {}", e)))
+            and_op(&left_mask, &right_mask).map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "AND".to_string(),
+                reason: e.to_string(),
+            })
         }
         BinaryOperator::Or => {
             // Evaluate left side first
@@ -87,13 +100,16 @@ fn evaluate_binary_op_simd(
 
             // Evaluate right side
             let right_mask = evaluate_predicate_simd(batch, right)?;
-            or_op(&left_mask, &right_mask).map_err(|e| ExecutorError::Other(format!("SIMD OR failed: {}", e)))
+            or_op(&left_mask, &right_mask).map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "OR".to_string(),
+                reason: e.to_string(),
+            })
         }
         BinaryOperator::Equal | BinaryOperator::NotEqual | BinaryOperator::LessThan
         | BinaryOperator::LessThanOrEqual | BinaryOperator::GreaterThan | BinaryOperator::GreaterThanOrEqual => {
             evaluate_comparison_simd(batch, left, op, right)
         }
-        _ => Err(ExecutorError::Other(format!("Unsupported SIMD binary operator: {:?}", op))),
+        _ => Err(ExecutorError::UnsupportedFeature(format!("SIMD binary operator: {:?}", op))),
     }
 }
 
@@ -118,12 +134,15 @@ fn evaluate_comparison_simd(
 ) -> Result<BooleanArray, ExecutorError> {
     let (col_name, literal_value) = match (left, right) {
         (Expression::ColumnRef { column, .. }, Expression::Literal(val)) => (column, val),
-        _ => return Err(ExecutorError::Other("SIMD comparison requires: column <op> literal".to_string())),
+        _ => return Err(ExecutorError::UnsupportedFeature("SIMD comparison requires: column <op> literal".to_string())),
     };
 
     let schema = batch.schema();
     let (col_idx, _) = schema.column_with_name(col_name)
-        .ok_or_else(|| ExecutorError::Other(format!("Column not found: {}", col_name)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: 0, // Column referenced by name, not index
+            batch_columns: schema.fields().len(),
+        })?;
     let column = batch.column(col_idx);
 
     match column.data_type() {
@@ -132,18 +151,28 @@ fn evaluate_comparison_simd(
         arrow::datatypes::DataType::Utf8 => compare_string(column, literal_value, op),
         arrow::datatypes::DataType::Date32 => compare_date32(column, literal_value, op),
         arrow::datatypes::DataType::Timestamp(TimeUnit::Microsecond, None) => compare_timestamp(column, literal_value, op),
-        _ => Err(ExecutorError::Other(format!("Unsupported column type: {:?}", column.data_type()))),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "comparison".to_string(),
+            array_type: format!("{:?}", column.data_type()),
+        }),
     }
 }
 
 fn compare_int64(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) -> Result<BooleanArray, ExecutorError> {
     let array = column.as_any().downcast_ref::<Int64Array>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast Int64Array".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "Int64Array".to_string(),
+            context: "compare_int64".to_string(),
+        })?;
 
     let val = match literal {
         SqlValue::Integer(i) | SqlValue::Bigint(i) => *i,
         SqlValue::Smallint(i) => *i as i64,
-        _ => return Err(ExecutorError::Other("Type mismatch".to_string())),
+        _ => return Err(ExecutorError::ColumnarTypeMismatch {
+            operation: "Int64 comparison".to_string(),
+            left_type: "Int64".to_string(),
+            right_type: Some(format!("{:?}", literal)),
+        }),
     };
 
     // Create scalar array for comparison
@@ -151,18 +180,18 @@ fn compare_int64(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) -> 
 
     let result = match op {
         BinaryOperator::Equal => eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::NotEqual => neq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD neq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "neq".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThan => lt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThanOrEqual => lt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt_eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt_eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThan => gt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThanOrEqual => gt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt_eq failed: {}", e)))?,
-        _ => return Err(ExecutorError::Other("Unsupported operator".to_string())),
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt_eq".to_string(), reason: e.to_string() })?,
+        _ => return Err(ExecutorError::UnsupportedFeature(format!("comparison operator {:?}", op))),
     };
 
     Ok(result)
@@ -170,13 +199,20 @@ fn compare_int64(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) -> 
 
 fn compare_float64(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) -> Result<BooleanArray, ExecutorError> {
     let array = column.as_any().downcast_ref::<Float64Array>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast Float64Array".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "Float64Array".to_string(),
+            context: "compare_float64".to_string(),
+        })?;
 
     let val = match literal {
         SqlValue::Double(f) | SqlValue::Numeric(f) => *f,
         SqlValue::Float(f) | SqlValue::Real(f) => *f as f64,
         SqlValue::Integer(i) => *i as f64,
-        _ => return Err(ExecutorError::Other("Type mismatch".to_string())),
+        _ => return Err(ExecutorError::ColumnarTypeMismatch {
+            operation: "Float64 comparison".to_string(),
+            left_type: "Float64".to_string(),
+            right_type: Some(format!("{:?}", literal)),
+        }),
     };
 
     // Create scalar array for comparison
@@ -184,18 +220,18 @@ fn compare_float64(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) -
 
     let result = match op {
         BinaryOperator::Equal => eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::NotEqual => neq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD neq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "neq".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThan => lt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThanOrEqual => lt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt_eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt_eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThan => gt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThanOrEqual => gt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt_eq failed: {}", e)))?,
-        _ => return Err(ExecutorError::Other("Unsupported operator".to_string())),
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt_eq".to_string(), reason: e.to_string() })?,
+        _ => return Err(ExecutorError::UnsupportedFeature(format!("comparison operator {:?}", op))),
     };
 
     Ok(result)
@@ -203,11 +239,18 @@ fn compare_float64(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) -
 
 fn compare_string(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) -> Result<BooleanArray, ExecutorError> {
     let array = column.as_any().downcast_ref::<StringArray>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast StringArray".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "StringArray".to_string(),
+            context: "compare_string".to_string(),
+        })?;
 
     let val = match literal {
         SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
-        _ => return Err(ExecutorError::Other("Type mismatch".to_string())),
+        _ => return Err(ExecutorError::ColumnarTypeMismatch {
+            operation: "String comparison".to_string(),
+            left_type: "String".to_string(),
+            right_type: Some(format!("{:?}", literal)),
+        }),
     };
 
     // Create scalar array for comparison
@@ -215,18 +258,18 @@ fn compare_string(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) ->
 
     let result = match op {
         BinaryOperator::Equal => eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::NotEqual => neq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD neq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "neq".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThan => lt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThanOrEqual => lt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt_eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt_eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThan => gt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThanOrEqual => gt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt_eq failed: {}", e)))?,
-        _ => return Err(ExecutorError::Other("Unsupported operator".to_string())),
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt_eq".to_string(), reason: e.to_string() })?,
+        _ => return Err(ExecutorError::UnsupportedFeature(format!("comparison operator {:?}", op))),
     };
 
     Ok(result)
@@ -236,11 +279,18 @@ fn compare_date32(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) ->
     use super::batch::date_to_days_since_epoch;
 
     let array = column.as_any().downcast_ref::<Date32Array>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast Date32Array".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "Date32Array".to_string(),
+            context: "compare_date32".to_string(),
+        })?;
 
     let val = match literal {
         SqlValue::Date(d) => date_to_days_since_epoch(d),
-        _ => return Err(ExecutorError::Other("Type mismatch: expected Date".to_string())),
+        _ => return Err(ExecutorError::ColumnarTypeMismatch {
+            operation: "Date comparison".to_string(),
+            left_type: "Date32".to_string(),
+            right_type: Some(format!("{:?}", literal)),
+        }),
     };
 
     // Create scalar array for comparison
@@ -248,18 +298,18 @@ fn compare_date32(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator) ->
 
     let result = match op {
         BinaryOperator::Equal => eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::NotEqual => neq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD neq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "neq".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThan => lt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThanOrEqual => lt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt_eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt_eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThan => gt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThanOrEqual => gt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt_eq failed: {}", e)))?,
-        _ => return Err(ExecutorError::Other("Unsupported operator".to_string())),
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt_eq".to_string(), reason: e.to_string() })?,
+        _ => return Err(ExecutorError::UnsupportedFeature(format!("comparison operator {:?}", op))),
     };
 
     Ok(result)
@@ -269,11 +319,18 @@ fn compare_timestamp(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator)
     use super::batch::timestamp_to_microseconds;
 
     let array = column.as_any().downcast_ref::<TimestampMicrosecondArray>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast TimestampMicrosecondArray".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "TimestampMicrosecondArray".to_string(),
+            context: "compare_timestamp".to_string(),
+        })?;
 
     let val = match literal {
         SqlValue::Timestamp(ts) => timestamp_to_microseconds(ts),
-        _ => return Err(ExecutorError::Other("Type mismatch: expected Timestamp".to_string())),
+        _ => return Err(ExecutorError::ColumnarTypeMismatch {
+            operation: "Timestamp comparison".to_string(),
+            left_type: "Timestamp".to_string(),
+            right_type: Some(format!("{:?}", literal)),
+        }),
     };
 
     // Create scalar array for comparison
@@ -281,18 +338,18 @@ fn compare_timestamp(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator)
 
     let result = match op {
         BinaryOperator::Equal => eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::NotEqual => neq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD neq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "neq".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThan => lt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt".to_string(), reason: e.to_string() })?,
         BinaryOperator::LessThanOrEqual => lt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD lt_eq failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "lt_eq".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThan => gt(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt".to_string(), reason: e.to_string() })?,
         BinaryOperator::GreaterThanOrEqual => gt_eq(array, &scalar_array)
-            .map_err(|e| ExecutorError::Other(format!("SIMD gt_eq failed: {}", e)))?,
-        _ => return Err(ExecutorError::Other("Unsupported operator".to_string())),
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "gt_eq".to_string(), reason: e.to_string() })?,
+        _ => return Err(ExecutorError::UnsupportedFeature(format!("comparison operator {:?}", op))),
     };
 
     Ok(result)
@@ -301,10 +358,16 @@ fn compare_timestamp(column: &ArrayRef, literal: &SqlValue, op: &BinaryOperator)
 fn get_boolean_column(batch: &RecordBatch, col_name: &str) -> Result<BooleanArray, ExecutorError> {
     let schema = batch.schema();
     let (col_idx, _) = schema.column_with_name(col_name)
-        .ok_or_else(|| ExecutorError::Other(format!("Column not found: {}", col_name)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: 0, // Column referenced by name
+            batch_columns: schema.fields().len(),
+        })?;
     let column = batch.column(col_idx);
     let array = column.as_any().downcast_ref::<BooleanArray>()
-        .ok_or_else(|| ExecutorError::Other("Column is not boolean type".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "BooleanArray".to_string(),
+            context: "get_boolean_column".to_string(),
+        })?;
     Ok(array.clone())
 }
 
@@ -318,7 +381,7 @@ fn evaluate_like_simd(
     // Extract column name from expression
     let col_name = match expr {
         Expression::ColumnRef { column, .. } => column,
-        _ => return Err(ExecutorError::Other("SIMD LIKE requires: column LIKE literal".to_string())),
+        _ => return Err(ExecutorError::UnsupportedFeature("SIMD LIKE requires: column LIKE literal".to_string())),
     };
 
     // Extract pattern string from literal
@@ -328,31 +391,50 @@ fn evaluate_like_simd(
             // NULL pattern matches nothing - return all false
             return Ok(BooleanArray::from(vec![false; batch.num_rows()]));
         }
-        _ => return Err(ExecutorError::Other("SIMD LIKE pattern must be a string literal".to_string())),
+        _ => return Err(ExecutorError::ColumnarTypeMismatch {
+            operation: "LIKE pattern".to_string(),
+            left_type: "String".to_string(),
+            right_type: Some(format!("{:?}", pattern)),
+        }),
     };
 
     // Get the string column
     let schema = batch.schema();
     let (col_idx, _) = schema.column_with_name(col_name)
-        .ok_or_else(|| ExecutorError::Other(format!("Column not found: {}", col_name)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: 0, // Column referenced by name
+            batch_columns: schema.fields().len(),
+        })?;
     let column = batch.column(col_idx);
 
     // Ensure column is string type
     if !matches!(column.data_type(), arrow::datatypes::DataType::Utf8) {
-        return Err(ExecutorError::Other(format!("LIKE requires string column, got: {:?}", column.data_type())));
+        return Err(ExecutorError::UnsupportedArrayType {
+            operation: "LIKE".to_string(),
+            array_type: format!("{:?}", column.data_type()),
+        });
     }
 
     let string_array = column.as_any().downcast_ref::<StringArray>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast StringArray".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "StringArray".to_string(),
+            context: "evaluate_like_simd".to_string(),
+        })?;
 
     // Use Arrow's SIMD-accelerated like kernel
     let pattern_scalar = Scalar::new(StringArray::from(vec![pattern_str]));
     let result = like(string_array, &pattern_scalar)
-        .map_err(|e| ExecutorError::Other(format!("SIMD LIKE failed: {}", e)))?;
+        .map_err(|e| ExecutorError::SimdOperationFailed {
+            operation: "LIKE".to_string(),
+            reason: e.to_string(),
+        })?;
 
     // Apply negation if needed
     if negated {
-        not_op(&result).map_err(|e| ExecutorError::Other(format!("SIMD NOT failed: {}", e)))
+        not_op(&result).map_err(|e| ExecutorError::SimdOperationFailed {
+            operation: "NOT".to_string(),
+            reason: e.to_string(),
+        })
     } else {
         Ok(result)
     }
