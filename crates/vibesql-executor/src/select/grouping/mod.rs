@@ -14,6 +14,9 @@ mod keys;
 
 // Re-export public API
 pub(super) use aggregates::{AggregateAccumulator, compare_sql_values};
-pub(super) use grouping_sets::{expand_group_by_clause, get_base_expressions, GroupingContext};
+pub(super) use grouping_sets::{
+    expand_group_by_clause, get_base_expressions, resolve_base_expressions_aliases,
+    resolve_grouping_set_aliases, GroupingContext,
+};
 pub(super) use hash::group_rows;
 pub(crate) use keys::{GroupKey, GroupKeySpec};
