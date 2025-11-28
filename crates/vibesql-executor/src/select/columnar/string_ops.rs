@@ -563,7 +563,7 @@ mod tests {
         ];
         let nulls = Some(vec![false, false, true, false]);
 
-        let result = batch_string_eq(&values, nulls.as_ref(), "apple");
+        let result = batch_string_eq(&values, nulls.as_deref(), "apple");
         assert_eq!(result, vec![true, false, false, false]);
     }
 

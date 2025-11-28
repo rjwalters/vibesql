@@ -3,8 +3,12 @@
 //! This module integrates the columnar execution engine with the query executor,
 //! providing automatic detection and execution of queries that can benefit from
 //! SIMD-accelerated columnar processing.
+//!
+//! Note: This module is experimental/research code. Some methods are not yet
+//! integrated into the main execution path.
 
 #![allow(clippy::ptr_arg)]
+#![allow(dead_code)]
 //!
 //! ## Phase 2: Native Columnar Execution
 //!

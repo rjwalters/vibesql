@@ -15,6 +15,11 @@
 //! 2. **SIMD hashing**: Hashes 4-8 values simultaneously
 //! 3. **Cache-friendly**: Contiguous memory access patterns
 //! 4. **Deferred materialization**: Only creates rows at output if needed
+//!
+//! Note: This module is experimental/research code. Some functions are not yet
+//! integrated into the main execution path.
+
+#![allow(dead_code)]
 
 use crate::errors::ExecutorError;
 use crate::select::columnar::{ColumnArray, ColumnarBatch};
@@ -319,7 +324,7 @@ fn gather_join_result(
     right_batch: &ColumnarBatch,
     indices: &JoinIndices,
 ) -> Result<ColumnarBatch, ExecutorError> {
-    let result_count = indices.left_indices.len();
+    let _result_count = indices.left_indices.len();
 
     // Gather left columns
     let mut result_columns = Vec::new();
@@ -498,6 +503,7 @@ pub fn hash_join_indices_columnar(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_hash_table_build_and_probe() {
@@ -524,16 +530,16 @@ mod tests {
     fn test_columnar_hash_join() {
         // Create left batch: customer_id, name
         let left_columns = vec![
-            ColumnArray::Int64(vec![1, 2, 3, 4], None),
-            ColumnArray::String(vec!["Alice".into(), "Bob".into(), "Carol".into(), "Dave".into()], None),
+            ColumnArray::Int64(Arc::new(vec![1, 2, 3, 4]), None),
+            ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into(), "Dave".into()]), None),
         ];
         let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["customer_id".into(), "name".into()])).unwrap();
 
         // Create right batch: order_id, customer_id, amount
         let right_columns = vec![
-            ColumnArray::Int64(vec![101, 102, 103, 104, 105], None),
-            ColumnArray::Int64(vec![1, 2, 1, 3, 2], None),
-            ColumnArray::Float64(vec![100.0, 200.0, 150.0, 300.0, 250.0], None),
+            ColumnArray::Int64(Arc::new(vec![101, 102, 103, 104, 105]), None),
+            ColumnArray::Int64(Arc::new(vec![1, 2, 1, 3, 2]), None),
+            ColumnArray::Float64(Arc::new(vec![100.0, 200.0, 150.0, 300.0, 250.0]), None),
         ];
         let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["order_id".into(), "customer_id".into(), "amount".into()])).unwrap();
 

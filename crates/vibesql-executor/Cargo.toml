@@ -71,6 +71,8 @@ native-columnar = []
 # Enable JIT compilation support using Cranelift (research/experimental)
 # Usage: cargo bench --features jit,benchmark-comparison
 jit = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-native"]
+# Enable experimental SIMD-accelerated group-by aggregation (research/experimental)
+simd = []
 
 [[test]]
 name = "foreign_key_tests"
