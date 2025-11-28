@@ -1018,4 +1018,209 @@ mod tests {
         // Should match two middle rows
         assert_eq!(filtered.row_count(), 2);
     }
+
+    #[test]
+    fn test_between_f64_bug() {
+        // Create a batch with f64 column - matching the issue test case
+        let rows = vec![
+            Row::new(vec![SqlValue::Double(0.02)]),  // Should pass BETWEEN 0.02 AND 0.03
+            Row::new(vec![SqlValue::Double(0.03)]),  // Should pass BETWEEN 0.02 AND 0.03
+            Row::new(vec![SqlValue::Double(0.025)]), // Should pass BETWEEN 0.02 AND 0.03
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: column_0 BETWEEN 0.02 AND 0.03
+        let predicates = vec![ColumnPredicate::Between {
+            column_idx: 0,
+            low: SqlValue::Double(0.02),
+            high: SqlValue::Double(0.03),
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // All 3 rows should pass
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass BETWEEN 0.02 AND 0.03"
+        );
+    }
+
+    /// Reproduce the exact issue #2857 scenario
+    /// The bug appears when combining:
+    /// - Multiple predicates including date range and BETWEEN on float
+    /// - Expression aggregate SUM(amount * fee)
+    #[test]
+    fn test_issue_2857_scenario() {
+        use vibesql_types::Date;
+
+        // Match the test case exactly:
+        // TXN_DATE (Date), AMOUNT (Double), FEE (Double)
+        // (2024-01-10, 1000.0, 0.02)
+        // (2024-01-15, 2000.0, 0.03)
+        // (2024-01-20, 1500.0, 0.025)
+        let rows = vec![
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 10 }),
+                SqlValue::Double(1000.0),
+                SqlValue::Double(0.02),
+            ]),
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 15 }),
+                SqlValue::Double(2000.0),
+                SqlValue::Double(0.03),
+            ]),
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 20 }),
+                SqlValue::Double(1500.0),
+                SqlValue::Double(0.025),
+            ]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Predicates from the query:
+        // WHERE txn_date >= '2024-01-01'
+        //   AND txn_date < '2024-02-01'
+        //   AND fee BETWEEN 0.02 AND 0.03
+        let predicates = vec![
+            ColumnPredicate::GreaterThanOrEqual {
+                column_idx: 0,
+                value: SqlValue::Date(Date { year: 2024, month: 1, day: 1 }),
+            },
+            ColumnPredicate::LessThan {
+                column_idx: 0,
+                value: SqlValue::Date(Date { year: 2024, month: 2, day: 1 }),
+            },
+            ColumnPredicate::Between {
+                column_idx: 2,
+                low: SqlValue::Double(0.02),
+                high: SqlValue::Double(0.03),
+            },
+        ];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // All 3 rows should pass all predicates:
+        // - All dates are in Jan 2024
+        // - All fees are in [0.02, 0.03] range
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass all predicates"
+        );
+    }
+
+    /// Test with SqlValue::Numeric predicates (what the parser generates)
+    #[test]
+    fn test_issue_2857_with_numeric_predicates() {
+        use vibesql_types::Date;
+
+        // Data uses SqlValue::Double (from storage)
+        let rows = vec![
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 10 }),
+                SqlValue::Double(1000.0),
+                SqlValue::Double(0.02),  // Data is Double
+            ]),
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 15 }),
+                SqlValue::Double(2000.0),
+                SqlValue::Double(0.03),
+            ]),
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 20 }),
+                SqlValue::Double(1500.0),
+                SqlValue::Double(0.025),
+            ]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Predicates use SqlValue::Numeric (from parser)
+        // This matches what happens in real queries
+        let predicates = vec![
+            ColumnPredicate::GreaterThanOrEqual {
+                column_idx: 0,
+                value: SqlValue::Date(Date { year: 2024, month: 1, day: 1 }),
+            },
+            ColumnPredicate::LessThan {
+                column_idx: 0,
+                value: SqlValue::Date(Date { year: 2024, month: 2, day: 1 }),
+            },
+            ColumnPredicate::Between {
+                column_idx: 2,
+                low: SqlValue::Numeric(0.02),  // Parser generates Numeric!
+                high: SqlValue::Numeric(0.03),
+            },
+        ];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // All 3 rows should pass
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass (Numeric predicate on Double column)"
+        );
+    }
+
+    /// Test using from_storage_columnar which is the path used by native columnar execution
+    #[test]
+    fn test_issue_2857_from_storage_columnar() {
+        use vibesql_types::Date;
+
+        // Create rows the same way the integration test does
+        let rows = vec![
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 10 }),
+                SqlValue::Double(1000.0),
+                SqlValue::Double(0.02),
+            ]),
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 15 }),
+                SqlValue::Double(2000.0),
+                SqlValue::Double(0.03),
+            ]),
+            Row::new(vec![
+                SqlValue::Date(Date { year: 2024, month: 1, day: 20 }),
+                SqlValue::Double(1500.0),
+                SqlValue::Double(0.025),
+            ]),
+        ];
+
+        let column_names = vec!["TXN_DATE".to_string(), "AMOUNT".to_string(), "FEE".to_string()];
+        let storage_columnar = vibesql_storage::ColumnarTable::from_rows(&rows, &column_names).unwrap();
+
+        // This is the path used by try_native_columnar_execution
+        let batch = ColumnarBatch::from_storage_columnar(&storage_columnar).unwrap();
+
+        // Predicates exactly like what the parser would generate
+        // Note: Date predicates come from 'YYYY-MM-DD' string literals parsed to SqlValue::Date
+        let predicates = vec![
+            ColumnPredicate::GreaterThanOrEqual {
+                column_idx: 0,
+                value: SqlValue::Date(Date { year: 2024, month: 1, day: 1 }),
+            },
+            ColumnPredicate::LessThan {
+                column_idx: 0,
+                value: SqlValue::Date(Date { year: 2024, month: 2, day: 1 }),
+            },
+            ColumnPredicate::Between {
+                column_idx: 2,
+                low: SqlValue::Numeric(0.02),  // Parser generates Numeric
+                high: SqlValue::Numeric(0.03),
+            },
+        ];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // All 3 rows should pass all predicates
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass from_storage_columnar path"
+        );
+    }
 }
