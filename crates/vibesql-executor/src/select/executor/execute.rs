@@ -1,4 +1,23 @@
 //! Main execution methods for SelectExecutor
+//!
+//! This module implements the unified execution dispatcher that routes queries
+//! to the appropriate execution pipeline based on the selected strategy.
+//!
+//! ## Execution Pipeline Architecture
+//!
+//! The dispatcher uses the `ExecutionPipeline` trait to provide a unified interface
+//! for query execution across different strategies:
+//!
+//! - **NativeColumnar**: Zero-copy SIMD execution from columnar storage
+//! - **StandardColumnar**: SIMD execution with row-to-batch conversion
+//! - **RowOriented**: Traditional row-by-row execution
+//! - **ExpressionOnly**: SELECT without FROM clause (special case)
+//!
+//! ```text
+//! Strategy Selection → Create Pipeline → Execute Pipeline Stages → Results
+//!                          ↓
+//!          apply_filter → apply_projection → apply_aggregation → apply_limit_offset
+//! ```
 
 use std::collections::HashMap;
 
@@ -7,6 +26,10 @@ use crate::{
     errors::ExecutorError,
     optimizer::adaptive::{
         choose_execution_strategy, ExecutionStrategy, StrategyContext,
+    },
+    pipeline::{
+        ColumnarPipeline, ExecutionContext, ExecutionPipeline, NativeColumnarPipeline,
+        PipelineInput,
     },
     select::{
         cte::{execute_ctes, CteResult},
@@ -152,7 +175,22 @@ impl SelectExecutor<'_> {
     /// - NativeColumnar: Zero-copy SIMD execution from columnar storage
     /// - StandardColumnar: SIMD execution with row-to-batch conversion
     /// - RowOriented: Traditional row-by-row execution
-    /// - ExpressionOnly: SELECT without FROM clause
+    /// - ExpressionOnly: SELECT without FROM clause (special case)
+    ///
+    /// ## Pipeline-Based Execution (Phase 5)
+    ///
+    /// This method uses the `ExecutionPipeline` trait to provide a unified interface
+    /// for query execution. Each strategy creates an appropriate pipeline that
+    /// implements filter, projection, aggregation, and limit/offset operations.
+    ///
+    /// ```text
+    /// Strategy Selection → Create Pipeline → Execute via Trait Methods
+    ///                              ↓
+    ///   NativeColumnar  → NativeColumnarPipeline::apply_*()
+    ///   StandardColumnar → ColumnarPipeline::apply_*()
+    ///   RowOriented     → RowOrientedPipeline::apply_*()
+    ///   ExpressionOnly  → Special case (no table scan)
+    /// ```
     pub(super) fn execute_with_ctes(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -166,8 +204,8 @@ impl SelectExecutor<'_> {
             cfg!(feature = "native-columnar") || std::env::var("VIBESQL_NATIVE_COLUMNAR").is_ok();
 
         // Use unified strategy selection for the execution path
-        let ctx = StrategyContext::new(stmt, cte_results, native_columnar_enabled);
-        let strategy = choose_execution_strategy(&ctx);
+        let strategy_ctx = StrategyContext::new(stmt, cte_results, native_columnar_enabled);
+        let strategy = choose_execution_strategy(&strategy_ctx);
 
         log::debug!(
             "Execution strategy selected: {} (reason: {})",
@@ -182,77 +220,58 @@ impl SelectExecutor<'_> {
             strategy.score().reason
         );
 
-        // Dispatch based on selected strategy
+        // Dispatch based on selected strategy using ExecutionPipeline trait
+        // Pipeline execution returns Option<Vec<Row>> - None means fallback needed
         let mut results = match strategy {
             ExecutionStrategy::NativeColumnar { .. } => {
-                // Try native columnar execution path (zero-copy, SIMD-accelerated)
-                #[cfg(feature = "profile-q6")]
-                let native_start = std::time::Instant::now();
-
-                if let Some(result) = self.try_native_columnar_execution(stmt, cte_results)? {
-                    log::debug!("✓ Native columnar execution succeeded");
-                    #[cfg(feature = "profile-q6")]
-                    {
-                        eprintln!(
-                            "[PROFILE-Q6] ✓ NATIVE COLUMNAR execution: {:?}",
-                            native_start.elapsed()
-                        );
+                // Try native columnar execution via pipeline
+                match self.execute_via_pipeline(
+                    stmt,
+                    cte_results,
+                    || NativeColumnarPipeline::new(),
+                    "NativeColumnar",
+                )? {
+                    Some(result) => result,
+                    None => {
+                        // Fall back to row-oriented if native columnar fails
+                        log::debug!("Native columnar runtime fallback to row-oriented");
+                        #[cfg(feature = "profile-q6")]
+                        eprintln!("[PROFILE-Q6] Native columnar fallback to row-oriented");
+                        self.execute_row_oriented(stmt, cte_results)?
                     }
-                    return Ok(result);
                 }
-
-                // Fall back to row-oriented if native columnar fails at runtime
-                // (e.g., table not in columnar cache, unsupported predicate)
-                log::debug!("Native columnar runtime fallback to row-oriented");
-                #[cfg(feature = "profile-q6")]
-                eprintln!("[PROFILE-Q6] Native columnar fallback to row-oriented");
-
-                self.execute_row_oriented(stmt, cte_results)?
             }
 
             ExecutionStrategy::StandardColumnar { .. } => {
-                // Try standard columnar execution path (row-to-batch conversion)
-                #[cfg(feature = "profile-q6")]
-                let columnar_start = std::time::Instant::now();
-
-                if let Some(result) = self.try_columnar_execution(stmt, cte_results)? {
-                    log::debug!("✓ Standard columnar execution succeeded");
-                    #[cfg(feature = "profile-q6")]
-                    {
-                        eprintln!(
-                            "[PROFILE-Q6] ✓ STANDARD COLUMNAR execution: {:?}",
-                            columnar_start.elapsed()
-                        );
+                // Try standard columnar execution via pipeline
+                match self.execute_via_pipeline(
+                    stmt,
+                    cte_results,
+                    || ColumnarPipeline::new(),
+                    "StandardColumnar",
+                )? {
+                    Some(result) => result,
+                    None => {
+                        log::debug!("Standard columnar runtime fallback to row-oriented");
+                        #[cfg(feature = "profile-q6")]
+                        eprintln!("[PROFILE-Q6] Standard columnar fallback to row-oriented");
+                        self.execute_row_oriented(stmt, cte_results)?
                     }
-                    return Ok(result);
                 }
-
-                // Fall back to row-oriented if columnar fails at runtime
-                log::debug!("Standard columnar runtime fallback to row-oriented");
-                #[cfg(feature = "profile-q6")]
-                eprintln!("[PROFILE-Q6] Standard columnar fallback to row-oriented");
-
-                self.execute_row_oriented(stmt, cte_results)?
             }
 
             ExecutionStrategy::RowOriented { .. } => {
-                // Use traditional row-by-row execution
+                // Row-oriented uses the traditional path which has full feature support
+                // The RowOrientedPipeline is used for simpler queries, but complex
+                // queries (with JOINs, window functions, DISTINCT, etc.) need the
+                // full execute_row_oriented implementation
                 self.execute_row_oriented(stmt, cte_results)?
             }
 
             ExecutionStrategy::ExpressionOnly { .. } => {
-                // SELECT without FROM - but may still have aggregates
-                // (e.g., SELECT COUNT(*), SELECT MAX(1))
-                let has_aggregates =
-                    self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
-
-                if has_aggregates {
-                    // Aggregates without FROM need the aggregation path
-                    self.execute_with_aggregation(stmt, cte_results)?
-                } else {
-                    // Simple expression evaluation (e.g., SELECT 1 + 1)
-                    self.execute_select_without_from(stmt)?
-                }
+                // SELECT without FROM - special case that doesn't use pipelines
+                // May still have aggregates (e.g., SELECT COUNT(*), SELECT MAX(1))
+                return self.execute_expression_only(stmt, cte_results);
             }
         };
 
@@ -268,6 +287,258 @@ impl SelectExecutor<'_> {
         }
 
         Ok(results)
+    }
+
+    /// Execute SELECT without FROM clause (ExpressionOnly strategy)
+    ///
+    /// This is a special case that doesn't use the pipeline trait since there's
+    /// no table scan involved. Handles both simple expressions and aggregates.
+    fn execute_expression_only(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+        cte_results: &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
+
+        if has_aggregates {
+            // Aggregates without FROM need the aggregation path
+            self.execute_with_aggregation(stmt, cte_results)
+        } else {
+            // Simple expression evaluation (e.g., SELECT 1 + 1)
+            self.execute_select_without_from(stmt)
+        }
+    }
+
+    /// Execute a query using the specified execution pipeline
+    ///
+    /// This method provides a unified interface for pipeline-based execution.
+    /// It creates the pipeline, prepares input, and executes the pipeline stages.
+    ///
+    /// Returns `Ok(Some(results))` if the pipeline executed successfully,
+    /// `Ok(None)` if the pipeline cannot handle the query (fallback needed),
+    /// or `Err` if an error occurred.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `P` - The pipeline type (must implement `ExecutionPipeline`)
+    /// * `F` - Factory function to create the pipeline
+    fn execute_via_pipeline<P, F>(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+        cte_results: &HashMap<String, CteResult>,
+        create_pipeline: F,
+        strategy_name: &str,
+    ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError>
+    where
+        P: ExecutionPipeline,
+        F: FnOnce() -> P,
+    {
+        #[cfg(feature = "profile-q6")]
+        let start = std::time::Instant::now();
+
+        // Check query complexity - pipelines don't support all features
+        let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
+        let has_group_by = stmt.group_by.is_some();
+        let has_joins = stmt.from.as_ref().map_or(false, |f| matches!(f, vibesql_ast::FromClause::Join { .. }));
+        let has_order_by = stmt.order_by.is_some();
+        let has_distinct = stmt.distinct;
+        let has_set_ops = stmt.set_operation.is_some();
+        let has_window_funcs = self.has_window_functions(&stmt.select_list);
+        let has_distinct_aggregates = self.has_distinct_aggregates(&stmt.select_list);
+
+        // Create the pipeline
+        let pipeline = create_pipeline();
+
+        // Check if the pipeline supports this query pattern
+        if !pipeline.supports_query_pattern(has_aggregates, has_group_by, has_joins) {
+            log::debug!(
+                "{} pipeline doesn't support query pattern (agg={}, group_by={}, joins={})",
+                strategy_name,
+                has_aggregates,
+                has_group_by,
+                has_joins
+            );
+            return Ok(None);
+        }
+
+        // For complex queries (ORDER BY, DISTINCT, window functions, set ops, DISTINCT aggregates),
+        // fall back to full execution paths which have complete support
+        if has_order_by || has_distinct || has_window_funcs || has_set_ops || has_distinct_aggregates {
+            log::debug!(
+                "{} pipeline doesn't support complex features (order_by={}, distinct={}, window={}, set_ops={}, distinct_agg={})",
+                strategy_name,
+                has_order_by,
+                has_distinct,
+                has_window_funcs,
+                has_set_ops,
+                has_distinct_aggregates
+            );
+            return Ok(None);
+        }
+
+        // Must have a FROM clause for pipeline execution
+        let from_clause = match &stmt.from {
+            Some(from) => from,
+            None => return Ok(None),
+        };
+
+        // Execute FROM clause to get input data
+        let from_result = self.execute_from_with_where(
+            from_clause,
+            cte_results,
+            None, // Pipeline will apply WHERE filter
+            None, // ORDER BY handled separately
+        )?;
+
+        // Build execution context
+        let exec_ctx = ExecutionContext::new(&from_result.schema, self.database);
+        let exec_ctx = if !cte_results.is_empty() {
+            exec_ctx.with_cte_context(cte_results)
+        } else {
+            exec_ctx
+        };
+
+        // Validate column references BEFORE processing
+        super::validation::validate_select_columns_with_context(
+            &stmt.select_list,
+            stmt.where_clause.as_ref(),
+            &from_result.schema,
+            self.procedural_context,
+            self.outer_schema,
+        )?;
+
+        // Prepare input from FROM result
+        let input = PipelineInput::from_rows_owned(from_result.data.into_rows());
+
+        // Execute pipeline stages with fallback on error
+        // If any pipeline stage fails with UnsupportedFeature, fall back to row-oriented
+
+        // Stage 1: Filter (WHERE clause)
+        let filtered = match pipeline.apply_filter(input, stmt.where_clause.as_ref(), &exec_ctx) {
+            Ok(result) => result,
+            Err(ExecutorError::UnsupportedFeature(_)) | Err(ExecutorError::UnsupportedExpression(_)) => {
+                log::debug!("{} pipeline filter failed, falling back", strategy_name);
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
+
+        // Stage 2: Projection or Aggregation
+        let result = if has_aggregates || has_group_by {
+            // Execute aggregation (includes projection)
+            // Get GROUP BY expressions if present (as slice)
+            let group_by_slice: Option<&[vibesql_ast::Expression]> =
+                stmt.group_by.as_ref().and_then(|g| g.as_simple()).map(|v| v.as_slice());
+            match pipeline.apply_aggregation(
+                filtered.into_input(),
+                &stmt.select_list,
+                group_by_slice,
+                stmt.having.as_ref(),
+                &exec_ctx,
+            ) {
+                Ok(result) => result,
+                Err(ExecutorError::UnsupportedFeature(_)) | Err(ExecutorError::UnsupportedExpression(_)) => {
+                    log::debug!("{} pipeline aggregation failed, falling back", strategy_name);
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            }
+        } else {
+            // Execute projection only
+            match pipeline.apply_projection(filtered.into_input(), &stmt.select_list, &exec_ctx) {
+                Ok(result) => result,
+                Err(ExecutorError::UnsupportedFeature(_)) | Err(ExecutorError::UnsupportedExpression(_)) => {
+                    log::debug!("{} pipeline projection failed, falling back", strategy_name);
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            }
+        };
+
+        // Stage 3: Limit/Offset (convert usize to u64)
+        let limit_u64 = stmt.limit.map(|l| l as u64);
+        let offset_u64 = stmt.offset.map(|o| o as u64);
+        let final_result = pipeline.apply_limit_offset(result, limit_u64, offset_u64)?;
+
+        #[cfg(feature = "profile-q6")]
+        {
+            eprintln!(
+                "[PROFILE-Q6] ✓ {} pipeline execution: {:?}",
+                strategy_name,
+                start.elapsed()
+            );
+        }
+
+        log::debug!("✓ {} pipeline execution succeeded", strategy_name);
+        Ok(Some(final_result))
+    }
+
+    /// Check if the select list contains window functions
+    fn has_window_functions(&self, select_list: &[vibesql_ast::SelectItem]) -> bool {
+        select_list.iter().any(|item| {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                self.expr_has_window_function(expr)
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Recursively check if an expression contains a window function
+    fn expr_has_window_function(&self, expr: &vibesql_ast::Expression) -> bool {
+        match expr {
+            vibesql_ast::Expression::WindowFunction { .. } => true,
+            vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+                self.expr_has_window_function(left) || self.expr_has_window_function(right)
+            }
+            vibesql_ast::Expression::UnaryOp { expr, .. } => self.expr_has_window_function(expr),
+            vibesql_ast::Expression::Function { args, .. } => {
+                args.iter().any(|arg| self.expr_has_window_function(arg))
+            }
+            vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
+                operand.as_ref().map_or(false, |e| self.expr_has_window_function(e))
+                    || when_clauses.iter().any(|case_when| {
+                        case_when.conditions.iter().any(|c| self.expr_has_window_function(c))
+                            || self.expr_has_window_function(&case_when.result)
+                    })
+                    || else_result.as_ref().map_or(false, |e| self.expr_has_window_function(e))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if the select list contains any DISTINCT aggregates (e.g., COUNT(DISTINCT x))
+    fn has_distinct_aggregates(&self, select_list: &[vibesql_ast::SelectItem]) -> bool {
+        select_list.iter().any(|item| {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                self.expr_has_distinct_aggregate(expr)
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Recursively check if an expression contains a DISTINCT aggregate
+    fn expr_has_distinct_aggregate(&self, expr: &vibesql_ast::Expression) -> bool {
+        match expr {
+            vibesql_ast::Expression::AggregateFunction { distinct, .. } => *distinct,
+            vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+                self.expr_has_distinct_aggregate(left) || self.expr_has_distinct_aggregate(right)
+            }
+            vibesql_ast::Expression::UnaryOp { expr, .. } => self.expr_has_distinct_aggregate(expr),
+            vibesql_ast::Expression::Function { args, .. } => {
+                args.iter().any(|arg| self.expr_has_distinct_aggregate(arg))
+            }
+            vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
+                operand.as_ref().map_or(false, |e| self.expr_has_distinct_aggregate(e))
+                    || when_clauses.iter().any(|case_when| {
+                        case_when.conditions.iter().any(|c| self.expr_has_distinct_aggregate(c))
+                            || self.expr_has_distinct_aggregate(&case_when.result)
+                    })
+                    || else_result.as_ref().map_or(false, |e| self.expr_has_distinct_aggregate(e))
+            }
+            _ => false,
+        }
     }
 
     /// Execute using traditional row-oriented path

@@ -60,6 +60,11 @@ impl SelectExecutor<'_> {
     ///
     /// This function requires the `simd` feature for SIMD-accelerated execution.
     /// Without `simd`, it always returns `Ok(None)` to fall back to row-based execution.
+    ///
+    /// NOTE: This method is retained for potential future use. The unified pipeline
+    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
+    /// ExecutionPipeline trait.
+    #[allow(dead_code)]
     #[cfg(not(feature = "simd"))]
     pub(in crate::select::executor) fn try_columnar_execution(
         &self,
@@ -87,6 +92,11 @@ impl SelectExecutor<'_> {
     /// - GROUP BY aggregations
     /// - JOIN operations
     /// - More complex predicates (OR logic, IN clauses)
+    ///
+    /// NOTE: This method is retained for potential future use. The unified pipeline
+    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
+    /// ExecutionPipeline trait.
+    #[allow(dead_code)]
     #[cfg(feature = "simd")]
     pub(in crate::select::executor) fn try_columnar_execution(
         &self,
@@ -213,6 +223,11 @@ impl SelectExecutor<'_> {
     /// - **SIMD filtering**: 4-8x faster filtering using vectorized instructions
     /// - **SIMD aggregation**: 10x faster aggregation for numeric columns
     /// - **Cache efficiency**: Columnar data access is cache-friendly
+    ///
+    /// NOTE: This method is retained for potential future use. The unified pipeline
+    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
+    /// ExecutionPipeline trait.
+    #[allow(dead_code)]
     pub(in crate::select::executor) fn try_native_columnar_execution(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -392,6 +407,11 @@ impl SelectExecutor<'_> {
     ///
     /// This method implements the GROUP BY path for native columnar execution,
     /// using hash-based grouping with the existing `columnar_group_by` function.
+    ///
+    /// NOTE: This method is retained for potential future use. The unified pipeline
+    /// dispatcher (execute_via_pipeline) now handles columnar execution via the
+    /// ExecutionPipeline trait.
+    #[allow(dead_code)]
     fn execute_columnar_group_by(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -525,6 +545,11 @@ impl SelectExecutor<'_> {
 /// Extract a single table name from a FROM clause if it's a simple table reference
 ///
 /// Returns None if the FROM clause contains JOINs, subqueries, or other complex constructs.
+///
+/// NOTE: This function is retained for potential future use. The unified pipeline
+/// dispatcher (execute_via_pipeline) now handles columnar execution via the
+/// ExecutionPipeline trait.
+#[allow(dead_code)]
 fn extract_single_table_name(from_clause: &FromClause) -> Option<String> {
     match from_clause {
         FromClause::Table { name, .. } => Some(name.clone()),
