@@ -26,6 +26,8 @@ use super::scan::ColumnarScan;
 // Re-export public types and functions to maintain API compatibility
 pub use expression::extract_aggregates;
 pub use group_by::columnar_group_by;
+#[cfg(feature = "simd")]
+pub use group_by::columnar_group_by_batch;
 
 /// Aggregate operation type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
