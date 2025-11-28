@@ -1,10 +1,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
-use super::{build, combine_rows, FromResult};
-use super::build::{CompositeKey, build_hash_table_composite_parallel};
-
-#[cfg(all(feature = "parallel", not(feature = "simd")))]
-use super::build::build_hash_table_parallel;
+use super::{combine_rows, FromResult};
+use super::build::{CompositeKey, build_hash_table_composite_parallel, build_hash_table_parallel};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 // Note: Memory limit checking removed from hash join.
@@ -73,18 +70,8 @@ pub(in crate::select::join) fn hash_join_inner(
     // Build phase: Create hash table from build side
     // Key: join column value
     // Value: vector of row indices (not row references) for deferred materialization
-    // Uses SIMD-accelerated hashing when available, with optional parallelization
-    #[cfg(all(feature = "parallel", feature = "simd"))]
-    let hash_table = build::build_hash_table_parallel_simd(build_rows, build_col_idx);
-
-    #[cfg(all(feature = "simd", not(feature = "parallel")))]
-    let hash_table = build::build_hash_table_simd(build_rows, build_col_idx);
-
-    #[cfg(all(feature = "parallel", not(feature = "simd")))]
+    // Uses parallel hashing when available for large tables
     let hash_table = build_hash_table_parallel(build_rows, build_col_idx);
-
-    #[cfg(not(any(feature = "parallel", feature = "simd")))]
-    let hash_table = build::build_hash_table_sequential(build_rows, build_col_idx);
 
     // Probe phase: Collect (build_idx, probe_idx) pairs without materializing rows
     // This defers the expensive row cloning until after we know all matches

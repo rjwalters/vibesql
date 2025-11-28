@@ -1,8 +1,7 @@
 //! Columnar Execution Pipeline
 //!
 //! Implements the `ExecutionPipeline` trait using columnar batch execution.
-//! When the `simd` feature is enabled, this uses SIMD-accelerated operations
-//! for filtering and aggregation. Otherwise, falls back to scalar operations.
+//! Uses LLVM auto-vectorized operations for filtering and aggregation.
 
 use vibesql_ast::{Expression, SelectItem};
 use vibesql_storage::Row;
@@ -11,7 +10,6 @@ use crate::errors::ExecutorError;
 
 use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
 
-#[cfg(feature = "simd")]
 use crate::select::columnar::{
     extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateSource,
     ColumnarBatch,
@@ -23,10 +21,9 @@ use crate::select::columnar::{
 /// operations when available. It provides significant speedups (4-8x for filtering,
 /// 10x for aggregation) on large datasets.
 ///
-/// # Feature Flags
+/// # Performance
 ///
-/// - `simd`: Enables SIMD-accelerated filtering and aggregation
-/// - Without `simd`: Falls back to scalar columnar operations
+/// Uses LLVM auto-vectorization for filtering and aggregation.
 ///
 /// # Performance Characteristics
 ///
@@ -54,24 +51,22 @@ pub struct ColumnarPipeline {
 impl ColumnarPipeline {
     /// Create a new columnar pipeline.
     ///
-    /// SIMD acceleration is automatically enabled when the `simd` feature
-    /// is available at compile time.
+    /// SIMD acceleration is provided via LLVM auto-vectorization.
     #[inline]
     pub fn new() -> Self {
         Self {
-            use_simd: cfg!(feature = "simd"),
+            use_simd: true,
         }
     }
 
     /// Create a columnar pipeline with explicit SIMD setting.
     ///
-    /// This is primarily for testing purposes. In production, SIMD
-    /// availability is determined by the compile-time feature flag.
+    /// This is primarily for testing purposes.
     #[inline]
     #[allow(dead_code)]
     pub fn with_simd(use_simd: bool) -> Self {
         Self {
-            use_simd: use_simd && cfg!(feature = "simd"),
+            use_simd,
         }
     }
 }
@@ -97,8 +92,6 @@ impl ExecutionPipeline for ColumnarPipeline {
     /// 3. Applies SIMD-accelerated filtering
     /// 4. Converts result back to rows
     ///
-    /// Without SIMD, falls back to scalar columnar filtering.
-    #[cfg(feature = "simd")]
     fn apply_filter(
         &self,
         input: PipelineInput<'_>,
@@ -140,18 +133,6 @@ impl ExecutionPipeline for ColumnarPipeline {
         // Convert back to rows
         let filtered_rows = filtered_batch.to_rows()?;
         Ok(PipelineOutput::from_rows(filtered_rows))
-    }
-
-    /// Scalar fallback when SIMD is not available.
-    #[cfg(not(feature = "simd"))]
-    fn apply_filter(
-        &self,
-        input: PipelineInput<'_>,
-        predicate: Option<&Expression>,
-        ctx: &ExecutionContext<'_>,
-    ) -> Result<PipelineOutput, ExecutorError> {
-        // Without SIMD, use row-oriented filtering
-        self.fallback_filter(input.into_rows(), predicate, ctx)
     }
 
     /// Apply SELECT projection in columnar mode.
@@ -200,7 +181,6 @@ impl ExecutionPipeline for ColumnarPipeline {
     /// 3. Returns single result row
     ///
     /// Falls back to row-oriented for GROUP BY or complex aggregates.
-    #[cfg(feature = "simd")]
     fn apply_aggregation(
         &self,
         input: PipelineInput<'_>,
@@ -269,20 +249,6 @@ impl ExecutionPipeline for ColumnarPipeline {
         Ok(PipelineOutput::from_rows(vec![Row::new(results)]))
     }
 
-    /// Scalar fallback when SIMD is not available.
-    #[cfg(not(feature = "simd"))]
-    fn apply_aggregation(
-        &self,
-        input: PipelineInput<'_>,
-        select_items: &[SelectItem],
-        group_by: Option<&[Expression]>,
-        having: Option<&Expression>,
-        ctx: &ExecutionContext<'_>,
-    ) -> Result<PipelineOutput, ExecutorError> {
-        // Without SIMD, fall back to row-oriented aggregation
-        self.fallback_aggregation(input, select_items, group_by, having, ctx)
-    }
-
     /// Columnar supports simple aggregates without GROUP BY.
     fn supports_query_pattern(
         &self,
@@ -298,11 +264,7 @@ impl ExecutionPipeline for ColumnarPipeline {
 
     #[inline]
     fn name(&self) -> &'static str {
-        if cfg!(feature = "simd") {
-            "ColumnarPipeline (SIMD)"
-        } else {
-            "ColumnarPipeline (scalar)"
-        }
+        "ColumnarPipeline (SIMD)"
     }
 }
 

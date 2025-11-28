@@ -28,9 +28,6 @@ log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
 ahash = "0.8"
 
-# SIMD dependencies for columnar acceleration
-wide = { version = "0.8", optional = true }
-
 # Arrow dependencies for vectorized execution
 # Using 53.0+ for chrono 0.4.42 compatibility (fixes quarter() method ambiguity)
 arrow = "57.1"
@@ -58,13 +55,11 @@ paste = "1.0"
 env_logger = "0.11"
 
 [features]
-default = ["parallel", "spatial", "simd"]
+default = ["parallel", "spatial"]
 # Parallel processing using rayon (disabled in WASM where it provides no benefit)
 parallel = ["rayon"]
 # Spatial/geospatial query support (optional, reduces binary size)
 spatial = ["geo", "wkt", "rstar"]
-# SIMD acceleration for columnar operations (4-6x faster joins)
-simd = ["wide"]
 # Enable this feature for benchmarks that compare against other SQL engines
 # Usage: cargo bench --features benchmark-comparison
 benchmark-comparison = ["rusqlite", "duckdb"]
@@ -142,10 +137,6 @@ harness = false
 name = "tpch_profiling"
 harness = false
 required-features = ["benchmark-comparison"]
-
-[[bench]]
-name = "simd_dispatch_benchmark"
-harness = false
 
 [[bench]]
 name = "columnar_execution"
