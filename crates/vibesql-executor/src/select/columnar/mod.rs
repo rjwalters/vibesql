@@ -34,9 +34,9 @@
 // Experimental module - allow dead code warnings for future optimization work
 #![allow(dead_code)]
 
-mod batch;
+pub mod batch;
 mod scan;
-mod filter;
+pub mod filter;
 mod aggregate;
 mod executor;
 
@@ -44,7 +44,7 @@ mod executor;
 mod simd_aggregate;
 
 #[cfg(feature = "simd")]
-mod simd_filter;
+pub mod simd_filter;
 
 #[cfg(feature = "simd")]
 mod simd_join;

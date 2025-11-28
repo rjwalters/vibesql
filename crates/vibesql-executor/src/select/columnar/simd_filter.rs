@@ -8,7 +8,7 @@ use crate::errors::ExecutorError;
 use crate::simd::comparison::{
     simd_eq_f64, simd_eq_i32, simd_eq_i64, simd_ge_f64, simd_ge_i32, simd_ge_i64, simd_gt_f64,
     simd_gt_i32, simd_gt_i64, simd_le_f64, simd_le_i32, simd_le_i64, simd_lt_f64, simd_lt_i32,
-    simd_lt_i64,
+    simd_lt_i64, simd_ne_f64, simd_ne_i32, simd_ne_i64,
 };
 
 use vibesql_types::SqlValue;
@@ -21,7 +21,8 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         | ColumnPredicate::GreaterThan { value, .. }
         | ColumnPredicate::GreaterThanOrEqual { value, .. }
         | ColumnPredicate::LessThanOrEqual { value, .. }
-        | ColumnPredicate::Equal { value, .. } => matches!(value, SqlValue::Null),
+        | ColumnPredicate::Equal { value, .. }
+        | ColumnPredicate::NotEqual { value, .. } => matches!(value, SqlValue::Null),
         ColumnPredicate::Between { low, high, .. } => {
             matches!(low, SqlValue::Null) || matches!(high, SqlValue::Null)
         }
@@ -102,6 +103,7 @@ fn evaluate_predicate_simd(
         | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
         | ColumnPredicate::LessThanOrEqual { column_idx, .. }
         | ColumnPredicate::Equal { column_idx, .. }
+        | ColumnPredicate::NotEqual { column_idx, .. }
         | ColumnPredicate::Between { column_idx, .. } => *column_idx,
     };
 
@@ -270,6 +272,23 @@ fn evaluate_predicate_i64_simd(
                 simd_le_f64(&f64_values, threshold)
             }
         }
+
+        ColumnPredicate::NotEqual { value, .. } => {
+            if let SqlValue::Integer(target) = value {
+                simd_ne_i64(values, *target)
+            } else if let SqlValue::Bigint(target) = value {
+                simd_ne_i64(values, *target)
+            } else {
+                let target = value_to_f64(value)
+                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "comparison".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", value)),
+                    })?;
+                let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
+                simd_ne_f64(&f64_values, target)
+            }
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -365,6 +384,16 @@ fn evaluate_predicate_i32_simd(
                 .map(|(&a, &b)| a && b)
                 .collect()
         }
+
+        ColumnPredicate::NotEqual { value, .. } => {
+            let target = value_to_date_i32(value)
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "date comparison".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: None,
+                })?;
+            simd_ne_i32(values, target)
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -459,6 +488,16 @@ fn evaluate_predicate_f64_simd(
                 .zip(le_high.iter())
                 .map(|(&a, &b)| a && b)
                 .collect()
+        }
+
+        ColumnPredicate::NotEqual { value, .. } => {
+            let target = value_to_f64(value)
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "comparison".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", value)),
+                })?;
+            simd_ne_f64(values, target)
         }
     };
 

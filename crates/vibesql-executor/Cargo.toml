@@ -180,3 +180,7 @@ harness = false
 [[bench]]
 name = "tpcds_runner"
 harness = false
+
+[[bench]]
+name = "simd_filter_benchmark"
+harness = false

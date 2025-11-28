@@ -47,6 +47,9 @@ pub enum ColumnPredicate {
     /// column = value
     Equal { column_idx: usize, value: SqlValue },
 
+    /// column <> value (not equal)
+    NotEqual { column_idx: usize, value: SqlValue },
+
     /// column BETWEEN low AND high
     Between {
         column_idx: usize,
@@ -181,6 +184,10 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                         column_idx,
                         value: value.clone(),
                     },
+                    BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
+                        column_idx,
+                        value: value.clone(),
+                    },
                     _ => return None,
                 };
                 return Some(PredicateTree::Leaf(predicate));
@@ -209,6 +216,11 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                         value: value.clone(),
                     },
                     BinaryOperator::Equal => ColumnPredicate::Equal {
+                        column_idx,
+                        value: value.clone(),
+                    },
+                    // NotEqual is symmetric: literal <> column == column <> literal
+                    BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
                         column_idx,
                         value: value.clone(),
                     },
@@ -295,6 +307,10 @@ fn extract_predicates_recursive(
                         column_idx,
                         value: value.clone(),
                     },
+                    BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
+                        column_idx,
+                        value: value.clone(),
+                    },
                     _ => return None, // Unsupported operator
                 };
                 predicates.push(predicate);
@@ -325,6 +341,11 @@ fn extract_predicates_recursive(
                         value: value.clone(),
                     },
                     BinaryOperator::Equal => ColumnPredicate::Equal {
+                        column_idx,
+                        value: value.clone(),
+                    },
+                    // NotEqual is symmetric: literal <> column == column <> literal
+                    BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
                         column_idx,
                         value: value.clone(),
                     },

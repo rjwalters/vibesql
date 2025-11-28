@@ -460,6 +460,7 @@ fn create_filter_bitmap_for_batch(
                 | ColumnPredicate::LessThanOrEqual { column_idx, .. }
                 | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
                 | ColumnPredicate::Equal { column_idx, .. }
+                | ColumnPredicate::NotEqual { column_idx, .. }
                 | ColumnPredicate::Between { column_idx, .. } => *column_idx,
             };
 
