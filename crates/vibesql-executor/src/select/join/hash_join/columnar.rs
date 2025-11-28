@@ -357,87 +357,87 @@ fn gather_column(column: &ColumnArray, indices: &[u32]) -> Result<ColumnArray, E
                 .map(|&idx| values[idx as usize])
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::Int64(gathered, gathered_nulls))
+            Ok(ColumnArray::Int64(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Int32(values, nulls) => {
             let gathered: Vec<i32> = indices.iter()
                 .map(|&idx| values[idx as usize])
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::Int32(gathered, gathered_nulls))
+            Ok(ColumnArray::Int32(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Float64(values, nulls) => {
             let gathered: Vec<f64> = indices.iter()
                 .map(|&idx| values[idx as usize])
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::Float64(gathered, gathered_nulls))
+            Ok(ColumnArray::Float64(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Float32(values, nulls) => {
             let gathered: Vec<f32> = indices.iter()
                 .map(|&idx| values[idx as usize])
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::Float32(gathered, gathered_nulls))
+            Ok(ColumnArray::Float32(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::String(values, nulls) => {
             let gathered: Vec<String> = indices.iter()
                 .map(|&idx| values[idx as usize].clone())
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::String(gathered, gathered_nulls))
+            Ok(ColumnArray::String(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::FixedString(values, nulls) => {
             let gathered: Vec<String> = indices.iter()
                 .map(|&idx| values[idx as usize].clone())
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::FixedString(gathered, gathered_nulls))
+            Ok(ColumnArray::FixedString(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Date(values, nulls) => {
             let gathered: Vec<i32> = indices.iter()
                 .map(|&idx| values[idx as usize])
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::Date(gathered, gathered_nulls))
+            Ok(ColumnArray::Date(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Timestamp(values, nulls) => {
             let gathered: Vec<i64> = indices.iter()
                 .map(|&idx| values[idx as usize])
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::Timestamp(gathered, gathered_nulls))
+            Ok(ColumnArray::Timestamp(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Boolean(values, nulls) => {
             let gathered: Vec<u8> = indices.iter()
                 .map(|&idx| values[idx as usize])
                 .collect();
             let gathered_nulls = nulls.as_ref().map(|n| {
-                indices.iter().map(|&idx| n[idx as usize]).collect()
+                std::sync::Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
             });
-            Ok(ColumnArray::Boolean(gathered, gathered_nulls))
+            Ok(ColumnArray::Boolean(std::sync::Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Mixed(values) => {
             let gathered: Vec<vibesql_types::SqlValue> = indices.iter()
                 .map(|&idx| values[idx as usize].clone())
                 .collect();
-            Ok(ColumnArray::Mixed(gathered))
+            Ok(ColumnArray::Mixed(std::sync::Arc::new(gathered)))
         }
     }
 }
