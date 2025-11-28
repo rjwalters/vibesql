@@ -40,13 +40,12 @@ pub mod filter;
 mod aggregate;
 mod executor;
 
-#[cfg(feature = "simd")]
+// Auto-vectorized SIMD operations - replaces the `wide` crate dependency
+// See simd_ops.rs for documentation on why these patterns are structured this way
+pub mod simd_ops;
+
 mod simd_aggregate;
-
-#[cfg(feature = "simd")]
 pub mod simd_filter;
-
-#[cfg(feature = "simd")]
 mod simd_join;
 
 pub use batch::{ColumnarBatch, ColumnArray};
@@ -59,27 +58,15 @@ pub use filter::{
 };
 pub use aggregate::{columnar_group_by, compute_multiple_aggregates, extract_aggregates, AggregateOp, AggregateSpec, AggregateSource};
 
-#[cfg(feature = "simd")]
 pub use aggregate::compute_aggregates_from_batch;
-
-#[cfg(feature = "simd")]
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
-
-#[cfg(feature = "simd")]
 pub use simd_filter::simd_filter_batch;
-
-#[cfg(feature = "simd")]
 pub use simd_join::columnar_hash_join_inner;
 
-#[cfg(feature = "simd")]
 use crate::errors::ExecutorError;
-#[cfg(feature = "simd")]
 use crate::schema::CombinedSchema;
-#[cfg(feature = "simd")]
 use vibesql_storage::Row;
-#[cfg(feature = "simd")]
 use vibesql_types::SqlValue;
-#[cfg(feature = "simd")]
 use log;
 
 /// Execute a columnar aggregate query with filtering
@@ -115,9 +102,8 @@ use log;
 /// let result = execute_columnar_aggregate(&rows, &predicates, &aggregates)?;
 /// ```
 ///
-/// Note: This function requires the `simd` feature to be enabled for SIMD-accelerated
-/// filtering and aggregation. Without SIMD, callers should use the row-oriented path.
-#[cfg(feature = "simd")]
+/// Note: This function provides SIMD-accelerated filtering and aggregation through
+/// LLVM auto-vectorization of batch-native operations.
 pub fn execute_columnar_aggregate(
     rows: &[Row],
     predicates: &[ColumnPredicate],
@@ -201,8 +187,7 @@ pub fn execute_columnar_aggregate(
 /// Some(Result) if the query can be optimized using columnar execution,
 /// None if the expressions are too complex for columnar optimization.
 ///
-/// Note: This function requires the `simd` feature for vectorized execution.
-#[cfg(feature = "simd")]
+/// Note: This function uses LLVM auto-vectorization for vectorized execution.
 pub fn execute_columnar(
     rows: &[Row],
     filter: Option<&vibesql_ast::Expression>,
@@ -251,7 +236,7 @@ pub fn execute_columnar(
     Some(execute_columnar_aggregate(rows, &predicates, &agg_specs, schema_ref))
 }
 
-#[cfg(all(test, feature = "simd"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use vibesql_types::Date;

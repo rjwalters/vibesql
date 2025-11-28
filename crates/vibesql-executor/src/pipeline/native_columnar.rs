@@ -11,7 +11,6 @@ use crate::errors::ExecutorError;
 
 use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
 
-#[cfg(feature = "simd")]
 use crate::select::columnar::{
     extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateOp, AggregateSource,
     AggregateSpec, ColumnarBatch,
@@ -23,10 +22,9 @@ use crate::select::columnar::{
 /// only converting to rows at the final output stage. This provides maximum
 /// performance for large-scale analytical queries.
 ///
-/// # Feature Flags
+/// # Performance
 ///
-/// - `simd`: Required for SIMD-accelerated operations
-/// - Without `simd`: Falls back to row-oriented execution
+/// Uses LLVM auto-vectorization for SIMD-accelerated operations.
 ///
 /// # Performance Characteristics
 ///
@@ -59,7 +57,7 @@ impl NativeColumnarPipeline {
     #[inline]
     pub fn new() -> Self {
         Self {
-            has_columnar_storage: cfg!(feature = "simd"),
+            has_columnar_storage: true,
         }
     }
 
@@ -68,7 +66,7 @@ impl NativeColumnarPipeline {
     #[allow(dead_code)]
     pub fn with_storage(has_columnar_storage: bool) -> Self {
         Self {
-            has_columnar_storage: has_columnar_storage && cfg!(feature = "simd"),
+            has_columnar_storage,
         }
     }
 }
@@ -92,7 +90,6 @@ impl ExecutionPipeline for NativeColumnarPipeline {
     /// 1. Extracts simple predicates from WHERE clause
     /// 2. Applies SIMD filtering directly on column arrays
     /// 3. Returns filtered columnar batch (converted to rows for output)
-    #[cfg(feature = "simd")]
     fn apply_filter(
         &self,
         input: PipelineInput<'_>,
@@ -188,17 +185,6 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         Ok(PipelineOutput::from_rows(filtered_rows))
     }
 
-    /// Scalar fallback when SIMD is not available.
-    #[cfg(not(feature = "simd"))]
-    fn apply_filter(
-        &self,
-        input: PipelineInput<'_>,
-        predicate: Option<&Expression>,
-        ctx: &ExecutionContext<'_>,
-    ) -> Result<PipelineOutput, ExecutorError> {
-        self.fallback_filter(input.into_rows(), predicate, ctx)
-    }
-
     /// Apply SELECT projection using columnar operations.
     ///
     /// In native columnar execution, projection is typically implicit -
@@ -244,7 +230,6 @@ impl ExecutionPipeline for NativeColumnarPipeline {
     /// 1. Extracts aggregate specifications from SELECT list
     /// 2. For simple aggregates without GROUP BY: Uses SIMD reductions
     /// 3. For GROUP BY: Uses hash-based grouping with columnar aggregation
-    #[cfg(feature = "simd")]
     fn apply_aggregation(
         &self,
         input: PipelineInput<'_>,
@@ -311,43 +296,23 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         Ok(PipelineOutput::from_rows(vec![Row::new(results)]))
     }
 
-    /// Scalar fallback when SIMD is not available.
-    #[cfg(not(feature = "simd"))]
-    fn apply_aggregation(
-        &self,
-        _input: PipelineInput<'_>,
-        _select_items: &[SelectItem],
-        _group_by: Option<&[Expression]>,
-        _having: Option<&Expression>,
-        _ctx: &ExecutionContext<'_>,
-    ) -> Result<PipelineOutput, ExecutorError> {
-        Err(ExecutorError::UnsupportedFeature(
-            "Native columnar aggregation requires SIMD feature".to_string(),
-        ))
-    }
-
     /// Native columnar supports simple aggregates with optional GROUP BY.
     fn supports_query_pattern(
         &self,
         has_aggregation: bool,
-        has_group_by: bool,
+        _has_group_by: bool,
         has_joins: bool,
     ) -> bool {
         // Native columnar supports:
         // - Aggregates with or without GROUP BY (single table only)
         // - No JOINs (single table requirement)
-        has_aggregation && !has_joins && cfg!(feature = "simd")
-            // GROUP BY is supported for simple column references
-            && (!has_group_by || cfg!(feature = "simd"))
+        // GROUP BY is supported for simple column references
+        has_aggregation && !has_joins
     }
 
     #[inline]
     fn name(&self) -> &'static str {
-        if cfg!(feature = "simd") {
-            "NativeColumnarPipeline (SIMD)"
-        } else {
-            "NativeColumnarPipeline (disabled)"
-        }
+        "NativeColumnarPipeline (SIMD)"
     }
 }
 
@@ -385,7 +350,6 @@ impl NativeColumnarPipeline {
     }
 
     /// Execute GROUP BY using hash-based columnar aggregation.
-    #[cfg(feature = "simd")]
     fn execute_group_by(
         &self,
         batch: &ColumnarBatch,
@@ -467,10 +431,9 @@ mod tests {
     fn test_native_columnar_pipeline_supports_aggregates() {
         let pipeline = NativeColumnarPipeline::new();
 
-        // Supports aggregates without joins
+        // Supports aggregates without joins (SIMD always enabled via auto-vectorization)
         let supports_simple = pipeline.supports_query_pattern(true, false, false);
-        // SIMD feature determines support
-        assert_eq!(supports_simple, cfg!(feature = "simd"));
+        assert!(supports_simple);
 
         // Does not support joins
         assert!(!pipeline.supports_query_pattern(true, false, true));

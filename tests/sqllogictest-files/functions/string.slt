@@ -18,6 +18,31 @@ SELECT SUBSTRING('hello' FROM 2 FOR 3)
 ----
 ell
 
+# SUBSTRING with Date (implicit coercion)
+# Extracts year from date in YYYY-MM-DD format
+query T
+SELECT SUBSTRING(DATE '1996-07-15' FROM 1 FOR 4)
+----
+1996
+
+# SUBSTR alias with Date - extract month
+query T
+SELECT SUBSTR(DATE '1996-07-15', 6, 2)
+----
+07
+
+# SUBSTR with Date - extract day
+query T
+SELECT SUBSTR(DATE '1996-07-15', 9, 2)
+----
+15
+
+# SUBSTRING with Timestamp (implicit coercion)
+query T
+SELECT SUBSTRING(TIMESTAMP '1996-07-15 08:30:00' FROM 1 FOR 10)
+----
+1996-07-15
+
 # CHAR_LENGTH
 query I
 SELECT CHAR_LENGTH('test')
