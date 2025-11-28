@@ -44,6 +44,7 @@ pub use context::ExecutionContext;
 pub use types::{PipelineInput, PipelineOutput};
 
 use crate::errors::ExecutorError;
+use crate::evaluator::CombinedExpressionEvaluator;
 use vibesql_ast::{Expression, SelectItem};
 
 /// Unified execution pipeline trait for all query execution strategies.
@@ -58,6 +59,19 @@ use vibesql_ast::{Expression, SelectItem};
 /// - Columnar: Works with `ColumnarBatch`
 /// - Native columnar: Works directly with table storage
 pub trait ExecutionPipeline {
+    /// Create an evaluator with appropriate context for this pipeline.
+    ///
+    /// This factory method allows each pipeline implementation to create
+    /// evaluators configured for their specific execution model (CTE context,
+    /// outer row for correlation, procedural context, etc.).
+    ///
+    /// # Arguments
+    /// * `ctx` - Execution context containing schema, database, and optional contexts
+    ///
+    /// # Returns
+    /// A `CombinedExpressionEvaluator` configured for this pipeline's execution model
+    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> CombinedExpressionEvaluator<'a>;
+
     /// Apply WHERE clause filtering to the input data.
     ///
     /// # Arguments
