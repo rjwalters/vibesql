@@ -21,6 +21,9 @@ pub(super) use inner::hash_join_inner;
 pub(super) use inner::hash_join_inner_multi;
 pub(super) use outer::hash_join_left_outer;
 
+// Re-export existence hash table builders for semi-join and anti-join
+pub(super) use build::build_existence_hash_table_parallel;
+
 // Re-export FromResult type for use in submodules
 pub(super) use super::FromResult;
 
