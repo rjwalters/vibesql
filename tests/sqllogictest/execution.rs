@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use sqllogictest::{Runner, SqlDialect};
+use sqllogictest::Runner;
 use tokio::time::timeout;
 
 use super::{
@@ -49,24 +49,14 @@ async fn run_test_file_async(contents: &str, file_name: &str) -> TestFileResult 
     // VibeSQL uses MySQL-compatible division (returns REAL/DECIMAL for integer division)
     tester.add_label("mysql");
 
-    // The random/ tests are from SQLite's official test suite and assume SQLite semantics
-    // (e.g., integer division). The `onlyif mysql` directives in these tests are for
-    // MySQL-specific SYNTAX (like CAST AS SIGNED), not MySQL division semantics.
-    // Therefore, we:
-    // 1. Set SQLite mode for random/ tests
-    // 2. Do NOT enable auto-dialect switching for random/ tests (they should stay in SQLite mode)
-    // 3. Enable auto-dialect switching only for non-random tests
-    let script = if file_name.starts_with("random/") {
-        // Set SQLite mode and update internal tracking
-        // Do NOT enable auto-dialect switching - these tests expect SQLite division semantics
-        // even when using MySQL-specific syntax like CAST AS SIGNED (issue #2783)
-        tester.with_default_dialect(SqlDialect::SQLite);
-        format!("statement ok\nSET SQL_MODE = 'sqlite'\n\n{}", contents)
-    } else {
-        // Enable auto-dialect switching for non-random tests to maximize coverage
-        tester.enable_auto_switch_dialect();
-        contents.to_string()
-    };
+    // The dolthub/sqllogictest corpus was regenerated against MySQL 8.x
+    // (see third_party/sqllogictest/README.md), so all tests expect MySQL semantics
+    // including decimal division (INTEGER / INTEGER → DECIMAL).
+    // The `onlyif mysql` directives are for MySQL-specific SYNTAX (like CAST AS SIGNED).
+    // The Database default is now MySQL mode, so tests use MySQL division semantics.
+    // Enable auto-dialect switching to handle tests with skipif/onlyif conditions.
+    tester.enable_auto_switch_dialect();
+    let script = contents.to_string();
 
     let result = tester.run_script(&script);
 

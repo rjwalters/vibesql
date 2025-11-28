@@ -76,11 +76,11 @@ impl Database {
     /// use vibesql_types::{MySqlModeFlags, SqlMode};
     ///
     /// let mut db = Database::new();
-    /// // Default is SQLite (for SQLLogicTest compatibility)
-    /// assert!(matches!(db.sql_mode(), SqlMode::SQLite));
-    ///
-    /// db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
+    /// // Default is MySQL (for SQLLogicTest compatibility)
     /// assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+    ///
+    /// db.set_sql_mode(SqlMode::SQLite);
+    /// assert!(matches!(db.sql_mode(), SqlMode::SQLite));
     /// ```
     pub fn set_sql_mode(&mut self, mode: vibesql_types::SqlMode) {
         self.sql_mode = mode.clone();
@@ -125,18 +125,18 @@ mod tests {
     fn test_set_sql_mode_changes_mode() {
         let mut db = Database::new();
 
-        // Default is SQLite (for SQLLogicTest compatibility)
+        // Default is MySQL (for SQLLogicTest compatibility - dolthub corpus was regenerated against MySQL 8.x)
+        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+
+        // Change to SQLite
+        db.set_sql_mode(SqlMode::SQLite);
         assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
-        // Change to MySQL
+        // Change back to MySQL
         db.set_sql_mode(SqlMode::MySQL {
             flags: MySqlModeFlags::default(),
         });
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
-
-        // Change back to SQLite
-        db.set_sql_mode(SqlMode::SQLite);
-        assert!(matches!(db.sql_mode(), SqlMode::SQLite));
     }
 
     #[test]
@@ -209,16 +209,14 @@ mod tests {
     fn test_sql_mode_affects_subsequent_queries() {
         let mut db = Database::new();
 
-        // Start in SQLite mode (default)
-        assert!(matches!(db.sql_mode(), SqlMode::SQLite));
+        // Start in MySQL mode (default)
+        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
 
-        // Switch to MySQL
-        db.set_sql_mode(SqlMode::MySQL {
-            flags: MySqlModeFlags::default(),
-        });
+        // Switch to SQLite
+        db.set_sql_mode(SqlMode::SQLite);
 
-        // Verify the mode is available for query execution
+        // Verify the mode changed
         let mode = db.sql_mode();
-        assert!(matches!(mode, SqlMode::MySQL { .. }));
+        assert!(matches!(mode, SqlMode::SQLite));
     }
 }
