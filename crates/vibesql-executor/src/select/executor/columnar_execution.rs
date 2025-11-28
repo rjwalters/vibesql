@@ -218,8 +218,10 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
-        // Check if native columnar execution is enabled via feature flag
-        if !cfg!(feature = "native-columnar") && std::env::var("VIBESQL_NATIVE_COLUMNAR").is_err() {
+        // Native columnar execution is now enabled by default for eligible queries
+        // Set VIBESQL_DISABLE_COLUMNAR=1 to opt-out and use row-oriented execution
+        if std::env::var("VIBESQL_DISABLE_COLUMNAR").is_ok() {
+            log::debug!("Native columnar: disabled via VIBESQL_DISABLE_COLUMNAR");
             return Ok(None);
         }
 
@@ -311,6 +313,12 @@ impl SelectExecutor<'_> {
             columnar_arc.row_count()
         );
 
+        // Skip empty tables - columnar provides no benefit and may have column lookup issues
+        if columnar_arc.row_count() == 0 {
+            log::debug!("Native columnar: skipping empty table");
+            return Ok(None);
+        }
+
         // Convert to ColumnarBatch (zero-copy when possible)
         // Use Arc deref to pass a reference to the cached ColumnarTable
         let batch = columnar::ColumnarBatch::from_storage_columnar(&columnar_arc)?;
@@ -337,8 +345,29 @@ impl SelectExecutor<'_> {
             }
         };
 
+        // Skip native columnar for expression aggregates (e.g., SUM(a * b)) as there's
+        // a known bug with predicate evaluation in this path. Fall back to standard
+        // columnar which handles these correctly. See issue for tracking.
+        // TODO: Remove this guard once the expression aggregate bug is fixed
+        let has_expression_aggregates = aggregates.iter().any(|agg| {
+            matches!(agg.source, columnar::AggregateSource::Expression(_))
+        });
+        if has_expression_aggregates {
+            log::debug!("Native columnar: skipping - has expression aggregates (known bug)");
+            return Ok(None);
+        }
+
         // Check if this query has GROUP BY
         let has_group_by = stmt.group_by.is_some();
+
+        // Skip native columnar for complex GROUP BY (ROLLUP/CUBE/GROUPING SETS)
+        // These require special handling that the columnar path doesn't support
+        if let Some(ref group_by) = stmt.group_by {
+            if group_by.as_simple().is_none() {
+                log::debug!("Native columnar: skipping - ROLLUP/CUBE/GROUPING SETS not supported");
+                return Ok(None);
+            }
+        }
 
         // Execute using native columnar pipeline
         #[cfg(feature = "profile-q6")]
