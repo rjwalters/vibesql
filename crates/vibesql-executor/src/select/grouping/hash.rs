@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 /// Grouped rows: (group key values, rows in group)
 pub type GroupedRows = Vec<(Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>)>;
@@ -36,12 +36,12 @@ pub fn group_rows<'a>(
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,
     executor: &crate::SelectExecutor<'a>,
 ) -> Result<GroupedRows, crate::errors::ExecutorError> {
-    // Use HashMap for O(1) group lookups
+    // Use AHashMap for O(1) group lookups with faster hashing
     // Pre-allocate with reasonable capacity to reduce rehashing
     // Most GROUP BY queries have < 1000 groups; estimate 10% of rows as groups
     let estimated_groups = (rows.len() / 10).max(16);
-    let mut groups_map: HashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>> =
-        HashMap::with_capacity(estimated_groups);
+    let mut groups_map: AHashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>> =
+        AHashMap::with_capacity(estimated_groups);
     let mut rows_processed = 0;
     const CHECK_INTERVAL: usize = 1000;
 
