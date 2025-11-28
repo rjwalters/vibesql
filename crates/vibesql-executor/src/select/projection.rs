@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::select::window::WindowFunctionKey;
 
 /// Project columns from a row based on SELECT list (combined schema version)
-pub(super) fn project_row_combined(
+pub(crate) fn project_row_combined(
     row: &vibesql_storage::Row,
     columns: &[vibesql_ast::SelectItem],
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,

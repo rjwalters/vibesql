@@ -315,7 +315,7 @@ pub(super) fn apply_where_filter_combined_parallel<'a>(
 /// - < 100 rows: Sequential (low overhead)
 /// - 100-10000 rows: Vectorized (cache-friendly chunking)
 /// - > 10000 rows: Parallel (multi-core utilization)
-pub(super) fn apply_where_filter_combined_auto<'a>(
+pub(crate) fn apply_where_filter_combined_auto<'a>(
     rows: Vec<vibesql_storage::Row>,
     where_expr: Option<&vibesql_ast::Expression>,
     evaluator: &CombinedExpressionEvaluator,

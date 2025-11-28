@@ -39,9 +39,15 @@
 
 mod context;
 mod types;
+mod row_oriented;
+mod columnar;
+mod native_columnar;
 
 pub use context::ExecutionContext;
 pub use types::{PipelineInput, PipelineOutput};
+pub use row_oriented::RowOrientedPipeline;
+pub use columnar::ColumnarPipeline;
+pub use native_columnar::NativeColumnarPipeline;
 
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
