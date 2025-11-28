@@ -4,6 +4,8 @@
 //! to track column positions and validate that expressions can be evaluated in the
 //! current schema state.
 
+#![allow(dead_code)]
+
 //!
 //! Example:
 //! ```ignore

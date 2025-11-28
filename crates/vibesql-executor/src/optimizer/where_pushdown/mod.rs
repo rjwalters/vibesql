@@ -52,6 +52,7 @@ pub(crate) use table_refs::flatten_conjuncts;
 // ============================================================================
 
 /// Classification of a WHERE clause predicate (branch version)
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PredicateCategory {
     /// Predicate references only a single table - can be pushed to table scan
@@ -115,6 +116,7 @@ impl PredicateDecomposition {
     }
 
     /// Rebuild a WHERE clause from all categories (for validation/debugging)
+    #[allow(dead_code)]
     pub fn rebuild_where_clause(&self) -> Option<vibesql_ast::Expression> {
         let mut all_predicates = Vec::new();
 

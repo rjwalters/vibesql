@@ -8,6 +8,7 @@
 //! integrated into the main execution path.
 
 #![allow(clippy::ptr_arg)]
+#![allow(dead_code)]
 //!
 //! ## Phase 2: Native Columnar Execution
 //!

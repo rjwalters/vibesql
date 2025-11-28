@@ -26,6 +26,7 @@ use vibesql_storage::Row;
 /// - Table scans (streaming from storage)
 /// - Materialized vectors (from joins, CTEs)
 /// - Transformed iterators (filtered, mapped)
+#[allow(dead_code)]
 pub trait RowIterator: Iterator<Item = Row> {
     /// Clone this iterator if possible (for operations that need multiple passes)
     ///
@@ -60,6 +61,7 @@ impl VecRowIterator {
     }
 
     /// Get the underlying rows (consuming the iterator)
+    #[allow(dead_code)]
     pub fn into_vec(self) -> Vec<Row> {
         self.rows
     }
@@ -195,6 +197,7 @@ impl FromIterator {
     }
 
     /// Get size hint
+    #[allow(dead_code)]
     pub fn size_hint(&self) -> (usize, Option<usize>) {
         match self {
             Self::Materialized(iter) => iter.size_hint(),

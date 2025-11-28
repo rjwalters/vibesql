@@ -19,7 +19,7 @@
 //! Note: This module is experimental/research code. Some functions are not yet
 //! integrated into the main execution path.
 
-use std::sync::Arc;
+#![allow(dead_code)]
 
 use crate::errors::ExecutorError;
 use crate::select::columnar::{ColumnArray, ColumnarBatch};
@@ -284,7 +284,7 @@ pub fn columnar_hash_join_inner(
 
 /// Check if a value is NULL according to the null bitmap
 #[inline]
-fn is_null(nulls: &Option<Arc<Vec<bool>>>, idx: usize) -> bool {
+fn is_null(nulls: &Option<std::sync::Arc<Vec<bool>>>, idx: usize) -> bool {
     nulls.as_ref().map_or(false, |n| n.get(idx).copied().unwrap_or(false))
 }
 

@@ -104,6 +104,7 @@ pub struct JoinOrderAnalyzer {
     /// List of equijoin edges discovered
     edges: Vec<JoinEdge>,
     /// Selectivity information for each predicate
+    #[allow(dead_code)]
     selectivity: HashMap<String, Selectivity>,
     /// Schema-based column-to-table mapping for resolving unqualified columns
     column_to_table: HashMap<String, String>,

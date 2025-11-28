@@ -1,5 +1,7 @@
 //! Lazy nested loop join iterator implementation
 
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
