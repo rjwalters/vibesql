@@ -42,6 +42,10 @@ mod type_ddl;
 mod update;
 mod view_ddl;
 
+// SIMD-accelerated operations for columnar execution
+#[cfg(feature = "simd")]
+pub mod simd;
+
 pub use alter::AlterTableExecutor;
 pub use cache::{CacheManager, CacheStats, CachedQueryContext, QueryPlanCache, QuerySignature};
 pub use constraint_validator::ConstraintValidator;

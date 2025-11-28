@@ -58,6 +58,8 @@ pub use filter::{
     PredicateTree,
 };
 pub use aggregate::{columnar_group_by, compute_multiple_aggregates, extract_aggregates, AggregateOp, AggregateSpec, AggregateSource};
+#[cfg(feature = "simd")]
+pub use aggregate::columnar_group_by_batch;
 
 pub use aggregate::compute_aggregates_from_batch;
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
