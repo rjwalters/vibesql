@@ -3,6 +3,7 @@
 //! This module provides the `ColumnBuilder` struct for efficiently building
 //! column data with pre-allocated capacity.
 
+use std::sync::Arc;
 use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 
 use super::data::ColumnData;
@@ -210,32 +211,33 @@ impl ColumnBuilder {
 
     /// Build the final column data from accumulated values
     ///
-    /// Consumes the builder and returns the typed column data.
+    /// Consumes the builder and returns the typed column data wrapped in Arc
+    /// for zero-copy sharing with the executor layer.
     pub fn build(self) -> ColumnData {
         match self.type_class {
             ColumnTypeClass::Int64 | ColumnTypeClass::Null => {
-                ColumnData::Int64 { values: self.int64_values, nulls: self.nulls }
+                ColumnData::Int64 { values: Arc::new(self.int64_values), nulls: Arc::new(self.nulls) }
             }
             ColumnTypeClass::Float64 => {
-                ColumnData::Float64 { values: self.float64_values, nulls: self.nulls }
+                ColumnData::Float64 { values: Arc::new(self.float64_values), nulls: Arc::new(self.nulls) }
             }
             ColumnTypeClass::String => {
-                ColumnData::String { values: self.string_values, nulls: self.nulls }
+                ColumnData::String { values: Arc::new(self.string_values), nulls: Arc::new(self.nulls) }
             }
             ColumnTypeClass::Bool => {
-                ColumnData::Bool { values: self.bool_values, nulls: self.nulls }
+                ColumnData::Bool { values: Arc::new(self.bool_values), nulls: Arc::new(self.nulls) }
             }
             ColumnTypeClass::Date => {
-                ColumnData::Date { values: self.date_values, nulls: self.nulls }
+                ColumnData::Date { values: Arc::new(self.date_values), nulls: Arc::new(self.nulls) }
             }
             ColumnTypeClass::Time => {
-                ColumnData::Time { values: self.time_values, nulls: self.nulls }
+                ColumnData::Time { values: Arc::new(self.time_values), nulls: Arc::new(self.nulls) }
             }
             ColumnTypeClass::Timestamp => {
-                ColumnData::Timestamp { values: self.timestamp_values, nulls: self.nulls }
+                ColumnData::Timestamp { values: Arc::new(self.timestamp_values), nulls: Arc::new(self.nulls) }
             }
             ColumnTypeClass::Interval => {
-                ColumnData::Interval { values: self.interval_values, nulls: self.nulls }
+                ColumnData::Interval { values: Arc::new(self.interval_values), nulls: Arc::new(self.nulls) }
             }
         }
     }

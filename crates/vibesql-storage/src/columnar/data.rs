@@ -2,7 +2,15 @@
 //!
 //! This module provides the `ColumnData` enum for storing typed column data
 //! with NULL bitmap.
+//!
+//! ## Zero-Copy Design
+//!
+//! Column data uses `Arc<Vec<T>>` for all arrays, enabling:
+//! - Zero-copy sharing between storage and executor layers
+//! - O(1) clone operations (reference count bump instead of data copy)
+//! - Cache-friendly columnar data that can be shared across query executions
 
+use std::sync::Arc;
 use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 
 /// Typed column data with NULL bitmap
@@ -12,24 +20,25 @@ use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 /// - Avoids Option<T> overhead (16 bytes vs 8 bytes for f64)
 /// - Enables direct SIMD operations on value vectors
 /// - Provides O(1) NULL checks via bitmap
+/// - Uses Arc for zero-copy sharing with executor layer
 #[derive(Debug, Clone)]
 pub enum ColumnData {
     /// 64-bit signed integers
-    Int64 { values: Vec<i64>, nulls: Vec<bool> },
+    Int64 { values: Arc<Vec<i64>>, nulls: Arc<Vec<bool>> },
     /// 64-bit floating point
-    Float64 { values: Vec<f64>, nulls: Vec<bool> },
+    Float64 { values: Arc<Vec<f64>>, nulls: Arc<Vec<bool>> },
     /// Variable-length strings
-    String { values: Vec<String>, nulls: Vec<bool> },
+    String { values: Arc<Vec<String>>, nulls: Arc<Vec<bool>> },
     /// Boolean values
-    Bool { values: Vec<bool>, nulls: Vec<bool> },
+    Bool { values: Arc<Vec<bool>>, nulls: Arc<Vec<bool>> },
     /// Date values
-    Date { values: Vec<Date>, nulls: Vec<bool> },
+    Date { values: Arc<Vec<Date>>, nulls: Arc<Vec<bool>> },
     /// Time values
-    Time { values: Vec<Time>, nulls: Vec<bool> },
+    Time { values: Arc<Vec<Time>>, nulls: Arc<Vec<bool>> },
     /// Timestamp values
-    Timestamp { values: Vec<Timestamp>, nulls: Vec<bool> },
+    Timestamp { values: Arc<Vec<Timestamp>>, nulls: Arc<Vec<bool>> },
     /// Interval values
-    Interval { values: Vec<Interval>, nulls: Vec<bool> },
+    Interval { values: Arc<Vec<Interval>>, nulls: Arc<Vec<bool>> },
 }
 
 impl ColumnData {
@@ -144,6 +153,70 @@ impl ColumnData {
             ColumnData::Time { values, .. } => SqlValue::Time(values[index]),
             ColumnData::Timestamp { values, .. } => SqlValue::Timestamp(values[index]),
             ColumnData::Interval { values, .. } => SqlValue::Interval(values[index].clone()),
+        }
+    }
+
+    /// Get the underlying Arc for i64 values (zero-copy sharing with executor)
+    pub fn as_i64_arc(&self) -> Option<(&Arc<Vec<i64>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::Int64 { values, nulls } => Some((values, nulls)),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying Arc for f64 values (zero-copy sharing with executor)
+    pub fn as_f64_arc(&self) -> Option<(&Arc<Vec<f64>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::Float64 { values, nulls } => Some((values, nulls)),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying Arc for string values (zero-copy sharing with executor)
+    pub fn as_string_arc(&self) -> Option<(&Arc<Vec<String>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::String { values, nulls } => Some((values, nulls)),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying Arc for bool values (zero-copy sharing with executor)
+    pub fn as_bool_arc(&self) -> Option<(&Arc<Vec<bool>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::Bool { values, nulls } => Some((values, nulls)),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying Arc for date values (zero-copy sharing with executor)
+    pub fn as_date_arc(&self) -> Option<(&Arc<Vec<Date>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::Date { values, nulls } => Some((values, nulls)),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying Arc for timestamp values (zero-copy sharing with executor)
+    pub fn as_timestamp_arc(&self) -> Option<(&Arc<Vec<Timestamp>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::Timestamp { values, nulls } => Some((values, nulls)),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying Arc for time values (zero-copy sharing with executor)
+    pub fn as_time_arc(&self) -> Option<(&Arc<Vec<Time>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::Time { values, nulls } => Some((values, nulls)),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying Arc for interval values (zero-copy sharing with executor)
+    pub fn as_interval_arc(&self) -> Option<(&Arc<Vec<Interval>>, &Arc<Vec<bool>>)> {
+        match self {
+            ColumnData::Interval { values, nulls } => Some((values, nulls)),
+            _ => None,
         }
     }
 }

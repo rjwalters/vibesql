@@ -12,6 +12,7 @@
 //!
 //! ~6-7x speedup for expression aggregates.
 
+use std::sync::Arc;
 use crate::errors::ExecutorError;
 use crate::schema::CombinedSchema;
 use vibesql_ast::Expression;
@@ -113,20 +114,20 @@ fn evaluate_batch_expression(
 fn create_literal_column_array(value: &SqlValue, len: usize) -> Result<ColumnArray, ExecutorError> {
     match value {
         SqlValue::Integer(i) | SqlValue::Bigint(i) => {
-            Ok(ColumnArray::Int64(vec![*i; len], None))
+            Ok(ColumnArray::Int64(Arc::new(vec![*i; len]), None))
         }
         SqlValue::Smallint(i) => {
-            Ok(ColumnArray::Int64(vec![*i as i64; len], None))
+            Ok(ColumnArray::Int64(Arc::new(vec![*i as i64; len]), None))
         }
         SqlValue::Float(f) | SqlValue::Real(f) => {
-            Ok(ColumnArray::Float64(vec![*f as f64; len], None))
+            Ok(ColumnArray::Float64(Arc::new(vec![*f as f64; len]), None))
         }
         SqlValue::Double(f) | SqlValue::Numeric(f) => {
-            Ok(ColumnArray::Float64(vec![*f; len], None))
+            Ok(ColumnArray::Float64(Arc::new(vec![*f; len]), None))
         }
         SqlValue::Null => {
             // Create array of nulls (represented as Float64 with all nulls)
-            Ok(ColumnArray::Float64(vec![0.0; len], Some(vec![true; len])))
+            Ok(ColumnArray::Float64(Arc::new(vec![0.0; len]), Some(Arc::new(vec![true; len]))))
         }
         _ => Err(ExecutorError::UnsupportedExpression(format!(
             "Cannot create literal column array for {:?}", value
@@ -151,15 +152,15 @@ fn apply_binary_op_to_columns(
         (ColumnArray::Mixed(left_vals), ColumnArray::Mixed(right_vals)) => {
             let left_f64 = try_extract_f64_from_mixed(left_vals)?;
             let right_f64 = try_extract_f64_from_mixed(right_vals)?;
-            (ColumnArray::Float64(left_f64, None), ColumnArray::Float64(right_f64, None))
+            (ColumnArray::Float64(Arc::new(left_f64), None), ColumnArray::Float64(Arc::new(right_f64), None))
         }
         (ColumnArray::Mixed(left_vals), other) => {
             let left_f64 = try_extract_f64_from_mixed(left_vals)?;
-            (ColumnArray::Float64(left_f64, None), other.clone())
+            (ColumnArray::Float64(Arc::new(left_f64), None), other.clone())
         }
         (other, ColumnArray::Mixed(right_vals)) => {
             let right_f64 = try_extract_f64_from_mixed(right_vals)?;
-            (other.clone(), ColumnArray::Float64(right_f64, None))
+            (other.clone(), ColumnArray::Float64(Arc::new(right_f64), None))
         }
         _ => (left.clone(), right.clone()),
     };
@@ -168,24 +169,24 @@ fn apply_binary_op_to_columns(
         // Both Float64 - direct SIMD operations
         (ColumnArray::Float64(left_vals, left_nulls), ColumnArray::Float64(right_vals, right_nulls)) => {
             let result = apply_float64_binary_op(left_vals, right_vals, op)?;
-            let nulls = merge_null_bitmaps(left_nulls.as_deref(), right_nulls.as_deref(), left_vals.len());
-            Ok(ColumnArray::Float64(result, nulls))
+            let nulls = merge_null_bitmaps(left_nulls.as_ref().map(|a| a.as_slice()), right_nulls.as_ref().map(|a| a.as_slice()), left_vals.len());
+            Ok(ColumnArray::Float64(Arc::new(result), nulls.map(Arc::new)))
         }
         // Both Int64 - SIMD operations (result type depends on operation)
         (ColumnArray::Int64(left_vals, left_nulls), ColumnArray::Int64(right_vals, right_nulls)) => {
             match op {
                 Plus | Minus | Multiply => {
                     let result = apply_int64_binary_op(left_vals, right_vals, op)?;
-                    let nulls = merge_null_bitmaps(left_nulls.as_deref(), right_nulls.as_deref(), left_vals.len());
-                    Ok(ColumnArray::Int64(result, nulls))
+                    let nulls = merge_null_bitmaps(left_nulls.as_ref().map(|a| a.as_slice()), right_nulls.as_ref().map(|a| a.as_slice()), left_vals.len());
+                    Ok(ColumnArray::Int64(Arc::new(result), nulls.map(Arc::new)))
                 }
                 Divide => {
                     // Division always produces Float64
                     let left_f64: Vec<f64> = left_vals.iter().map(|&v| v as f64).collect();
                     let right_f64: Vec<f64> = right_vals.iter().map(|&v| v as f64).collect();
                     let result = apply_float64_binary_op(&left_f64, &right_f64, op)?;
-                    let nulls = merge_null_bitmaps(left_nulls.as_deref(), right_nulls.as_deref(), left_vals.len());
-                    Ok(ColumnArray::Float64(result, nulls))
+                    let nulls = merge_null_bitmaps(left_nulls.as_ref().map(|a| a.as_slice()), right_nulls.as_ref().map(|a| a.as_slice()), left_vals.len());
+                    Ok(ColumnArray::Float64(Arc::new(result), nulls.map(Arc::new)))
                 }
                 _ => Err(ExecutorError::UnsupportedExpression(format!(
                     "Unsupported binary operator for Int64: {:?}", op
@@ -196,14 +197,14 @@ fn apply_binary_op_to_columns(
         (ColumnArray::Int64(left_vals, left_nulls), ColumnArray::Float64(right_vals, right_nulls)) => {
             let left_f64: Vec<f64> = left_vals.iter().map(|&v| v as f64).collect();
             let result = apply_float64_binary_op(&left_f64, right_vals, op)?;
-            let nulls = merge_null_bitmaps(left_nulls.as_deref(), right_nulls.as_deref(), left_vals.len());
-            Ok(ColumnArray::Float64(result, nulls))
+            let nulls = merge_null_bitmaps(left_nulls.as_ref().map(|a| a.as_slice()), right_nulls.as_ref().map(|a| a.as_slice()), left_vals.len());
+            Ok(ColumnArray::Float64(Arc::new(result), nulls.map(Arc::new)))
         }
         (ColumnArray::Float64(left_vals, left_nulls), ColumnArray::Int64(right_vals, right_nulls)) => {
             let right_f64: Vec<f64> = right_vals.iter().map(|&v| v as f64).collect();
             let result = apply_float64_binary_op(left_vals, &right_f64, op)?;
-            let nulls = merge_null_bitmaps(left_nulls.as_deref(), right_nulls.as_deref(), left_vals.len());
-            Ok(ColumnArray::Float64(result, nulls))
+            let nulls = merge_null_bitmaps(left_nulls.as_ref().map(|a| a.as_slice()), right_nulls.as_ref().map(|a| a.as_slice()), left_vals.len());
+            Ok(ColumnArray::Float64(Arc::new(result), nulls.map(Arc::new)))
         }
         // Fallback for other types - signal to caller to use row-based path
         _ => Err(ExecutorError::UnsupportedExpression(
@@ -318,10 +319,10 @@ fn aggregate_column_array(
 ) -> Result<SqlValue, ExecutorError> {
     match array {
         ColumnArray::Float64(values, nulls) => {
-            aggregate_f64_array(values, nulls.as_deref(), op)
+            aggregate_f64_array(values, nulls.as_ref().map(|n| n.as_slice()), op)
         }
         ColumnArray::Int64(values, nulls) => {
-            aggregate_i64_array(values, nulls.as_deref(), op)
+            aggregate_i64_array(values, nulls.as_ref().map(|n| n.as_slice()), op)
         }
         _ => Err(ExecutorError::UnsupportedExpression(
             "Non-numeric columns not supported for aggregation".to_string()

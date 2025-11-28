@@ -2,6 +2,7 @@
 //!
 //! Uses the centralized simd_ops module for consistent, optimized operations.
 
+use std::sync::Arc;
 use super::batch::{ColumnArray, ColumnarBatch};
 use super::filter::ColumnPredicate;
 use super::simd_ops;
@@ -206,22 +207,22 @@ fn evaluate_predicate_simd(
     match column {
         // SIMD path for i64 columns
         ColumnArray::Int64(values, nulls) => {
-            evaluate_predicate_i64_simd(predicate, values, nulls.as_ref())
+            evaluate_predicate_i64_simd(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
         // SIMD path for f64 columns
         ColumnArray::Float64(values, nulls) => {
-            evaluate_predicate_f64_simd(predicate, values, nulls.as_ref())
+            evaluate_predicate_f64_simd(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
         // SIMD path for Date columns (i32 - days since epoch)
         ColumnArray::Date(values, nulls) => {
-            evaluate_predicate_i32_simd(predicate, values, nulls.as_ref())
+            evaluate_predicate_i32_simd(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
         // SIMD path for Timestamp columns (i64 - microseconds since epoch)
         ColumnArray::Timestamp(values, nulls) => {
-            evaluate_predicate_i64_simd(predicate, values, nulls.as_ref())
+            evaluate_predicate_i64_simd(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
         // Scalar fallback for other column types
@@ -233,7 +234,7 @@ fn evaluate_predicate_simd(
 fn evaluate_predicate_i64_simd(
     predicate: &ColumnPredicate,
     values: &[i64],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
 ) -> Result<Vec<bool>, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
@@ -396,7 +397,7 @@ fn evaluate_predicate_i64_simd(
 fn evaluate_predicate_i32_simd(
     predicate: &ColumnPredicate,
     values: &[i32],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
 ) -> Result<Vec<bool>, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
@@ -501,7 +502,7 @@ fn evaluate_predicate_i32_simd(
 fn evaluate_predicate_f64_simd(
     predicate: &ColumnPredicate,
     values: &[f64],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
 ) -> Result<Vec<bool>, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
@@ -680,14 +681,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::Int64(new_values, new_nulls))
+            Ok(ColumnArray::Int64(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::Int32(values, nulls) => {
@@ -698,14 +699,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::Int32(new_values, new_nulls))
+            Ok(ColumnArray::Int32(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::Float64(values, nulls) => {
@@ -716,14 +717,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::Float64(new_values, new_nulls))
+            Ok(ColumnArray::Float64(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::Float32(values, nulls) => {
@@ -734,14 +735,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::Float32(new_values, new_nulls))
+            Ok(ColumnArray::Float32(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::String(values, nulls) => {
@@ -752,14 +753,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::String(new_values, new_nulls))
+            Ok(ColumnArray::String(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::FixedString(values, nulls) => {
@@ -770,14 +771,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::FixedString(new_values, new_nulls))
+            Ok(ColumnArray::FixedString(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::Date(values, nulls) => {
@@ -788,14 +789,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::Date(new_values, new_nulls))
+            Ok(ColumnArray::Date(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::Timestamp(values, nulls) => {
@@ -806,14 +807,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::Timestamp(new_values, new_nulls))
+            Ok(ColumnArray::Timestamp(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::Boolean(values, nulls) => {
@@ -824,14 +825,14 @@ fn filter_column(
                 .collect();
 
             let new_nulls = nulls.as_ref().map(|null_mask| {
-                null_mask
+                Arc::new(null_mask
                     .iter()
                     .zip(mask.iter())
                     .filter_map(|(&n, &keep)| if keep { Some(n) } else { None })
-                    .collect()
+                    .collect::<Vec<bool>>())
             });
 
-            Ok(ColumnArray::Boolean(new_values, new_nulls))
+            Ok(ColumnArray::Boolean(Arc::new(new_values), new_nulls))
         }
 
         ColumnArray::Mixed(values) => {
@@ -841,7 +842,7 @@ fn filter_column(
                 .filter_map(|(v, &keep)| if keep { Some(v.clone()) } else { None })
                 .collect();
 
-            Ok(ColumnArray::Mixed(new_values))
+            Ok(ColumnArray::Mixed(Arc::new(new_values)))
         }
     }
 }
