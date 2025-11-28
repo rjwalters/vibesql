@@ -432,11 +432,10 @@ impl ColumnarBatch {
         let row_count = storage_columnar.row_count();
         let mut columns = Vec::with_capacity(column_names.len());
 
-        for (col_idx, col_name) in column_names.iter().enumerate() {
+        for col_name in column_names.iter() {
             let storage_col = storage_columnar.get_column(col_name).ok_or_else(|| {
-                ExecutorError::ColumnarColumnNotFound {
-                    column_index: col_idx,
-                    batch_columns: column_names.len(),
+                ExecutorError::ColumnarColumnNotFoundByName {
+                    column_name: col_name.clone(),
                 }
             })?;
 

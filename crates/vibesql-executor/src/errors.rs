@@ -186,6 +186,8 @@ pub enum ExecutorError {
         column_index: usize,
         batch_columns: usize,
     },
+    /// Column not found in batch by name
+    ColumnarColumnNotFoundByName { column_name: String },
     /// Column length mismatch in batch operations
     ColumnarLengthMismatch {
         context: String,
@@ -596,6 +598,9 @@ impl std::fmt::Display for ExecutorError {
                     "Column index {} out of bounds (batch has {} columns)",
                     column_index, batch_columns
                 )
+            }
+            ExecutorError::ColumnarColumnNotFoundByName { column_name } => {
+                write!(f, "Column not found: {}", column_name)
             }
             ExecutorError::ColumnarLengthMismatch { context, expected, actual } => {
                 write!(
