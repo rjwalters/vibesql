@@ -27,6 +27,7 @@ pub fn try_simd_aggregate(
     op: AggregateOp,
     schema: &CombinedSchema,
 ) -> Result<SqlValue, ExecutorError> {
+    log::debug!("[SIMD-Arrow] try_simd_aggregate called: {} rows, op={:?}", rows.len(), op);
     use crate::select::vectorized::{
         evaluate_arithmetic_simd, rows_to_record_batch,
     };

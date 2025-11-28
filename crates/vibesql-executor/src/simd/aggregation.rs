@@ -10,6 +10,7 @@ use wide::*;
 /// SIMD sum for f64 columns
 #[cfg(feature = "simd")]
 pub fn simd_sum_f64(column: &[f64]) -> f64 {
+    log::debug!("[SIMD] simd_sum_f64 called with {} elements", column.len());
     let mut sum = 0.0;
 
     // Process chunks of 4 elements with SIMD
@@ -127,6 +128,7 @@ pub fn simd_count(len: usize) -> usize {
 /// SIMD sum for i64 columns
 #[cfg(feature = "simd")]
 pub fn simd_sum_i64(column: &[i64]) -> i64 {
+    log::debug!("[SIMD] simd_sum_i64 called with {} elements", column.len());
     let mut sum = 0i64;
 
     // Process chunks of 4 elements with SIMD
