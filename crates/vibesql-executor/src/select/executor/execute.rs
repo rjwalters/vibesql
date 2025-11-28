@@ -224,26 +224,40 @@ impl SelectExecutor<'_> {
         // Pipeline execution returns Option<Vec<Row>> - None means fallback needed
         let mut results = match strategy {
             ExecutionStrategy::NativeColumnar { .. } => {
-                // Try native columnar execution via pipeline
-                match self.execute_via_pipeline(
-                    stmt,
-                    cte_results,
-                    || NativeColumnarPipeline::new(),
-                    "NativeColumnar",
-                )? {
-                    Some(result) => result,
-                    None => {
-                        // Fall back to row-oriented if native columnar fails
-                        log::debug!("Native columnar runtime fallback to row-oriented");
-                        #[cfg(feature = "profile-q6")]
-                        eprintln!("[PROFILE-Q6] Native columnar fallback to row-oriented");
-                        self.execute_row_oriented(stmt, cte_results)?
+                // First try the optimized zero-copy native columnar path
+                // This uses ColumnarBatch::from_storage_columnar() for zero-copy conversion
+                // and executes filter+aggregate in a single pass without row materialization
+                if let Some(result) = self.try_native_columnar_execution(stmt, cte_results)? {
+                    #[cfg(feature = "profile-q6")]
+                    eprintln!("[PROFILE-Q6] Native columnar: zero-copy path succeeded");
+                    result
+                } else {
+                    // Fall back to pipeline-based execution if zero-copy path is not applicable
+                    // (e.g., complex predicates, multiple tables, unsupported aggregates)
+                    log::debug!("Native columnar: zero-copy path not applicable, trying pipeline");
+                    match self.execute_via_pipeline(
+                        stmt,
+                        cte_results,
+                        || NativeColumnarPipeline::new(),
+                        "NativeColumnar",
+                    )? {
+                        Some(result) => result,
+                        None => {
+                            // Fall back to row-oriented if pipeline also fails
+                            log::debug!("Native columnar runtime fallback to row-oriented");
+                            #[cfg(feature = "profile-q6")]
+                            eprintln!("[PROFILE-Q6] Native columnar fallback to row-oriented");
+                            self.execute_row_oriented(stmt, cte_results)?
+                        }
                     }
                 }
             }
 
             ExecutionStrategy::StandardColumnar { .. } => {
-                // Try standard columnar execution via pipeline
+                // StandardColumnar uses the pipeline-based execution path
+                // Note: We don't use try_native_columnar_execution here because row tables
+                // go through the pipeline which correctly handles all data types including dates.
+                // The native columnar zero-copy path has known limitations with certain date comparisons.
                 match self.execute_via_pipeline(
                     stmt,
                     cte_results,
