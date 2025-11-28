@@ -34,9 +34,9 @@
 // Experimental module - allow dead code warnings for future optimization work
 #![allow(dead_code)]
 
-mod batch;
+pub mod batch;
 mod scan;
-mod filter;
+pub mod filter;
 mod aggregate;
 mod executor;
 
@@ -45,7 +45,7 @@ mod executor;
 pub mod simd_ops;
 
 mod simd_aggregate;
-mod simd_filter;
+pub mod simd_filter;
 mod simd_join;
 
 pub use batch::{ColumnarBatch, ColumnArray};
