@@ -417,7 +417,8 @@ fn create_filter_bitmap_for_batch(
                 | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
                 | ColumnPredicate::Equal { column_idx, .. }
                 | ColumnPredicate::NotEqual { column_idx, .. }
-                | ColumnPredicate::Between { column_idx, .. } => *column_idx,
+                | ColumnPredicate::Between { column_idx, .. }
+                | ColumnPredicate::Like { column_idx, .. } => *column_idx,
             };
 
             let value = batch.get_value(row_idx, col_idx)?;

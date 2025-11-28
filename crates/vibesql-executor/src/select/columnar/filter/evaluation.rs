@@ -57,7 +57,8 @@ where
                 | ColumnPredicate::LessThanOrEqual { column_idx, .. }
                 | ColumnPredicate::Equal { column_idx, .. }
                 | ColumnPredicate::NotEqual { column_idx, .. }
-                | ColumnPredicate::Between { column_idx, .. } => *column_idx,
+                | ColumnPredicate::Between { column_idx, .. }
+                | ColumnPredicate::Like { column_idx, .. } => *column_idx,
             };
 
             if let Some(value) = get_value(column_idx) {
@@ -103,5 +104,58 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             let passes_high = compare_values(value, high).matches(&[Ordering::Less, Ordering::Equal]);
             passes_low && passes_high
         }
+        ColumnPredicate::Like { pattern, negated, .. } => {
+            // Extract string value
+            let text = match value {
+                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Null => return false,
+                _ => return false, // Non-string types don't match LIKE patterns
+            };
+
+            let matches = like_match(text, pattern);
+            if *negated { !matches } else { matches }
+        }
     }
+}
+
+/// Match a string against a SQL LIKE pattern
+///
+/// Uses dynamic programming for pattern matching with `%` and `_` wildcards.
+fn like_match(text: &str, pattern: &str) -> bool {
+    let text_chars: Vec<char> = text.chars().collect();
+    let pattern_chars: Vec<char> = pattern.chars().collect();
+
+    let m = text_chars.len();
+    let n = pattern_chars.len();
+
+    // dp[i][j] = true if text[0..i] matches pattern[0..j]
+    let mut dp = vec![vec![false; n + 1]; m + 1];
+
+    // Empty pattern matches empty text
+    dp[0][0] = true;
+
+    // Handle leading % in pattern (can match empty string)
+    for j in 1..=n {
+        if pattern_chars[j - 1] == '%' {
+            dp[0][j] = dp[0][j - 1];
+        }
+    }
+
+    // Fill the DP table
+    for i in 1..=m {
+        for j in 1..=n {
+            let pc = pattern_chars[j - 1];
+            let tc = text_chars[i - 1];
+
+            if pc == '%' {
+                // % matches zero or more characters
+                dp[i][j] = dp[i][j - 1] || dp[i - 1][j];
+            } else if pc == '_' || pc == tc {
+                // _ matches any single character, or exact match
+                dp[i][j] = dp[i - 1][j - 1];
+            }
+        }
+    }
+
+    dp[m][n]
 }
