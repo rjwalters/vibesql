@@ -254,6 +254,7 @@ pub fn columnar_group_by(
 /// - Uses auto-vectorized SIMD for per-group aggregation (SUM, MIN, MAX)
 /// - Avoids row materialization within groups
 /// - Direct typed array access (no SqlValue pattern matching in hot path)
+/// - Reuses buffers to minimize heap allocations
 /// - Provides 3-5x improvement over scalar GROUP BY for TPC-H Q1
 ///
 /// # Arguments
@@ -295,8 +296,11 @@ pub fn columnar_group_by_batch(
     // Phase 2: Compute SIMD aggregates for each group
     let mut result_rows = Vec::with_capacity(groups.len());
 
-    // Reuse a single bitmap buffer to avoid repeated allocations
+    // Reuse buffers to avoid repeated allocations:
+    // - group_bitmap: marks which rows belong to current group
+    // - effective_mask: combined group + null mask (reused across aggregates)
     let mut group_bitmap = vec![false; row_count];
+    let mut effective_mask = vec![false; row_count];
 
     for (group_key, row_indices) in groups {
         // Set bits for this group's rows
@@ -312,7 +316,13 @@ pub fn columnar_group_by_batch(
 
         // Then, compute each aggregate using SIMD on typed arrays
         for (col_idx, agg_op) in agg_cols {
-            let agg_result = compute_group_aggregate_simd(batch, *col_idx, *agg_op, &group_bitmap)?;
+            let agg_result = compute_group_aggregate_simd_reuse(
+                batch,
+                *col_idx,
+                *agg_op,
+                &group_bitmap,
+                &mut effective_mask,
+            )?;
             result_values.push(agg_result);
         }
 
@@ -327,14 +337,17 @@ pub fn columnar_group_by_batch(
     Ok(result_rows)
 }
 
-/// Compute a single aggregate for a group using auto-vectorized SIMD
+/// Compute a single aggregate for a group using SIMD with buffer reuse
 ///
 /// Uses masked SIMD operations on typed column arrays for optimal performance.
-fn compute_group_aggregate_simd(
+/// The `effective_mask` buffer is reused across calls to avoid allocations.
+#[cfg(feature = "simd")]
+fn compute_group_aggregate_simd_reuse(
     batch: &ColumnarBatch,
     col_idx: usize,
     op: AggregateOp,
     group_bitmap: &[bool],
+    effective_mask: &mut Vec<bool>,
 ) -> Result<SqlValue, ExecutorError> {
     let column = batch.column(col_idx).ok_or_else(|| {
         ExecutorError::ColumnarColumnNotFound {
@@ -346,19 +359,19 @@ fn compute_group_aggregate_simd(
     match column {
         // SIMD path for i64 columns
         ColumnArray::Int64(values, nulls) => {
-            // Combine group bitmap with null mask
-            let effective_mask = if let Some(null_mask) = nulls {
+            // Combine group bitmap with null mask, reusing the buffer
+            let mask_ref = if let Some(null_mask) = nulls {
                 // true = valid (in group AND not null)
-                group_bitmap
-                    .iter()
-                    .zip(null_mask.iter())
-                    .map(|(&in_group, &is_null)| in_group && !is_null)
-                    .collect::<Vec<bool>>()
+                for (i, (&in_group, &is_null)) in group_bitmap.iter().zip(null_mask.iter()).enumerate() {
+                    effective_mask[i] = in_group && !is_null;
+                }
+                effective_mask.as_slice()
             } else {
-                group_bitmap.to_vec()
+                // No nulls - use group_bitmap directly (zero-copy)
+                group_bitmap
             };
 
-            let count = simd_count_masked(&effective_mask);
+            let count = simd_count_masked(mask_ref);
             if count == 0 {
                 return Ok(match op {
                     AggregateOp::Count => SqlValue::Integer(0),
@@ -367,14 +380,14 @@ fn compute_group_aggregate_simd(
             }
 
             match op {
-                AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64_masked(values, &effective_mask))),
+                AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64_masked(values, mask_ref))),
                 AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
                 AggregateOp::Avg => {
-                    let sum = simd_sum_i64_masked(values, &effective_mask);
+                    let sum = simd_sum_i64_masked(values, mask_ref);
                     Ok(SqlValue::Double(sum as f64 / count as f64))
                 }
                 AggregateOp::Min => {
-                    simd_min_i64_masked(values, &effective_mask)
+                    simd_min_i64_masked(values, mask_ref)
                         .map(SqlValue::Integer)
                         .ok_or_else(|| ExecutorError::SimdOperationFailed {
                             operation: "MIN".to_string(),
@@ -382,7 +395,7 @@ fn compute_group_aggregate_simd(
                         })
                 }
                 AggregateOp::Max => {
-                    simd_max_i64_masked(values, &effective_mask)
+                    simd_max_i64_masked(values, mask_ref)
                         .map(SqlValue::Integer)
                         .ok_or_else(|| ExecutorError::SimdOperationFailed {
                             operation: "MAX".to_string(),
@@ -394,18 +407,18 @@ fn compute_group_aggregate_simd(
 
         // SIMD path for f64 columns
         ColumnArray::Float64(values, nulls) => {
-            // Combine group bitmap with null mask
-            let effective_mask = if let Some(null_mask) = nulls {
-                group_bitmap
-                    .iter()
-                    .zip(null_mask.iter())
-                    .map(|(&in_group, &is_null)| in_group && !is_null)
-                    .collect::<Vec<bool>>()
+            // Combine group bitmap with null mask, reusing the buffer
+            let mask_ref = if let Some(null_mask) = nulls {
+                for (i, (&in_group, &is_null)) in group_bitmap.iter().zip(null_mask.iter()).enumerate() {
+                    effective_mask[i] = in_group && !is_null;
+                }
+                effective_mask.as_slice()
             } else {
-                group_bitmap.to_vec()
+                // No nulls - use group_bitmap directly (zero-copy)
+                group_bitmap
             };
 
-            let count = simd_count_masked(&effective_mask);
+            let count = simd_count_masked(mask_ref);
             if count == 0 {
                 return Ok(match op {
                     AggregateOp::Count => SqlValue::Integer(0),
@@ -414,14 +427,14 @@ fn compute_group_aggregate_simd(
             }
 
             match op {
-                AggregateOp::Sum => Ok(SqlValue::Double(simd_sum_f64_masked(values, &effective_mask))),
+                AggregateOp::Sum => Ok(SqlValue::Double(simd_sum_f64_masked(values, mask_ref))),
                 AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
                 AggregateOp::Avg => {
-                    let sum = simd_sum_f64_masked(values, &effective_mask);
+                    let sum = simd_sum_f64_masked(values, mask_ref);
                     Ok(SqlValue::Double(sum / count as f64))
                 }
                 AggregateOp::Min => {
-                    simd_min_f64_masked(values, &effective_mask)
+                    simd_min_f64_masked(values, mask_ref)
                         .map(SqlValue::Double)
                         .ok_or_else(|| ExecutorError::SimdOperationFailed {
                             operation: "MIN".to_string(),
@@ -429,7 +442,7 @@ fn compute_group_aggregate_simd(
                         })
                 }
                 AggregateOp::Max => {
-                    simd_max_f64_masked(values, &effective_mask)
+                    simd_max_f64_masked(values, mask_ref)
                         .map(SqlValue::Double)
                         .ok_or_else(|| ExecutorError::SimdOperationFailed {
                             operation: "MAX".to_string(),
