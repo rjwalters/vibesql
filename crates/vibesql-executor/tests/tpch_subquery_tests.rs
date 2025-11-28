@@ -245,3 +245,59 @@ fn test_q18_in_subquery_with_having() {
         assert!(q18_count > 0, "Q18 should return rows if subquery found matching orders");
     }
 }
+
+#[test]
+fn test_q7_volume_shipping() {
+    // Q7: Volume Shipping
+    // Tests SUBSTR(l_shipdate, 1, 4) to extract year from DATE column
+    // Issue #2955: This query was failing because SUBSTRING didn't support Date type
+    // Pattern: 6-table JOIN with SUBSTR and date filtering
+
+    let db = load_vibesql(0.01);
+
+    let result = execute_tpch_query(&db, TPCH_Q7);
+
+    match result {
+        Ok(count) => {
+            println!("Q7 executed successfully: {} rows", count);
+            // Q7 may return 0 rows on small dataset if no orders match criteria
+            // The important thing is that it doesn't fail with "SUBSTRING requires string argument"
+            println!("Q7 completed without errors (row count: {})", count);
+        }
+        Err(e) => {
+            // Specifically check that the error is NOT about SUBSTRING type mismatch
+            if e.contains("SUBSTRING requires string argument") {
+                panic!("Q7 failed with SUBSTRING type error - Issue #2955 not fixed: {}", e);
+            }
+            panic!("Q7 failed to execute: {}", e);
+        }
+    }
+}
+
+#[test]
+fn test_q9_product_type_profit() {
+    // Q9: Product Type Profit Measure
+    // Tests SUBSTR(o_orderdate, 1, 4) to extract year from DATE column
+    // Issue #2955: This query was failing because SUBSTRING didn't support Date type
+    // Pattern: 6-table JOIN with LIKE and SUBSTR on date
+
+    let db = load_vibesql(0.01);
+
+    let result = execute_tpch_query(&db, TPCH_Q9);
+
+    match result {
+        Ok(count) => {
+            println!("Q9 executed successfully: {} rows", count);
+            // Q9 may return 0 rows on small dataset if no parts match LIKE '%green%'
+            // The important thing is that it doesn't fail with "SUBSTRING requires string argument"
+            println!("Q9 completed without errors (row count: {})", count);
+        }
+        Err(e) => {
+            // Specifically check that the error is NOT about SUBSTRING type mismatch
+            if e.contains("SUBSTRING requires string argument") {
+                panic!("Q9 failed with SUBSTRING type error - Issue #2955 not fixed: {}", e);
+            }
+            panic!("Q9 failed to execute: {}", e);
+        }
+    }
+}
