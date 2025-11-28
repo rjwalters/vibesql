@@ -356,5 +356,27 @@ fn main() {
         eprintln!("{:<12} {:>12.2} {:>12.2}", "DuckDB", duckdb_results.transactions_per_second, compute_avg(&duckdb_results));
     }
 
+    #[cfg(not(feature = "benchmark-comparison"))]
+    {
+        // Without comparison feature, just show VibeSQL summary
+        fn compute_avg(results: &TPCCBenchmarkResults) -> f64 {
+            if results.total_transactions > 0 {
+                let total_time = results.new_order_avg_us * results.new_order_count as f64
+                    + results.payment_avg_us * results.payment_count as f64
+                    + results.order_status_avg_us * results.order_status_count as f64
+                    + results.delivery_avg_us * results.delivery_count as f64
+                    + results.stock_level_avg_us * results.stock_level_count as f64;
+                total_time / results.total_transactions as f64
+            } else {
+                0.0
+            }
+        }
+        eprintln!("\n=== Summary ===");
+        eprintln!("Transaction type: {}", transaction_type.name());
+        eprintln!("{:<12} {:>12} {:>12}", "Database", "TPS", "Avg (us)");
+        eprintln!("{:-<12} {:->12} {:->12}", "", "", "");
+        eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, compute_avg(&vibesql_results));
+    }
+
     eprintln!("\n=== Done ===");
 }
