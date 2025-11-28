@@ -3,13 +3,14 @@
 //! This module provides generic monomorphic execution plans for GROUP BY
 //! aggregation queries with support for multiple aggregation functions.
 
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use vibesql_ast::{BinaryOperator, Expression, SelectStmt};
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
 use crate::{errors::ExecutorError, schema::CombinedSchema};
+use crate::select::grouping::{GroupKey, GroupKeySpec};
 
 use super::super::pattern::has_no_joins;
 use super::super::MonomorphicPlan;
@@ -107,6 +108,9 @@ pub struct GenericGroupedAggregationPlan {
     /// GROUP BY columns (for grouping key)
     group_by_columns: Vec<GroupByColumnSpec>,
 
+    /// Specialized key extraction strategy (for optimized hashing)
+    key_spec: GroupKeySpec,
+
     /// Aggregations to compute for each group
     aggregates: Vec<GroupAggregateSpec>,
 
@@ -157,16 +161,36 @@ impl GenericGroupedAggregationPlan {
             _ => "unknown".to_string(),
         };
 
+        // Build specialized key extraction strategy based on column types
+        let key_columns: Vec<(usize, DataType)> = group_by_columns
+            .iter()
+            .map(|c| (c.col_idx, c.col_type.clone()))
+            .collect();
+        let key_spec = GroupKeySpec::from_columns(&key_columns);
+
+        // Get key strategy name for description
+        let key_strategy = match &key_spec {
+            GroupKeySpec::SingleI64 { .. } => "SingleI64",
+            GroupKeySpec::SingleString { .. } => "SingleString",
+            GroupKeySpec::TwoChars { .. } => "TwoChars",
+            GroupKeySpec::TwoI64 { .. } => "TwoI64",
+            GroupKeySpec::I64String { .. } => "I64String",
+            GroupKeySpec::ThreeI64 { .. } => "ThreeI64",
+            GroupKeySpec::Generic { .. } => "Generic",
+        };
+
         Some(Self {
             description: format!(
-                "Generic Grouped Aggregation on {} ({} groups, {} aggregates, {} filters)",
+                "Generic Grouped Aggregation on {} ({} groups [{}], {} aggregates, {} filters)",
                 table_name,
                 group_by_columns.len(),
+                key_strategy,
                 aggregates.len(),
                 optimized_filters.len()
             ),
             filters: optimized_filters,
             group_by_columns,
+            key_spec,
             aggregates,
         })
     }
@@ -336,15 +360,16 @@ impl GenericGroupedAggregationPlan {
         }
     }
 
-    /// Execute using type-specialized fast path
+    /// Execute using type-specialized fast path with optimized key hashing
     ///
     /// # Safety
     ///
     /// Uses unchecked accessors for performance. Safe because column indices
     /// and types are validated at plan creation time.
     #[inline(never)] // Don't inline to make profiling easier
-    unsafe fn execute_unsafe(&self, rows: &[Row]) -> HashMap<Vec<SqlValue>, Vec<f64>> {
-        let mut groups: HashMap<Vec<SqlValue>, Vec<f64>> = HashMap::new();
+    unsafe fn execute_unsafe(&self, rows: &[Row]) -> AHashMap<GroupKey, Vec<f64>> {
+        // Use AHashMap with specialized GroupKey for fast hashing
+        let mut groups: AHashMap<GroupKey, Vec<f64>> = AHashMap::new();
 
         for row in rows {
             // Evaluate all filters
@@ -360,25 +385,8 @@ impl GenericGroupedAggregationPlan {
                 continue;
             }
 
-            // Extract group key
-            let mut key = Vec::with_capacity(self.group_by_columns.len());
-            for group_col in &self.group_by_columns {
-                let value = match &group_col.col_type {
-                    DataType::Varchar { .. } => {
-                        SqlValue::Varchar(row.get_string_unchecked(group_col.col_idx).to_string())
-                    }
-                    DataType::Integer | DataType::Bigint => {
-                        SqlValue::Integer(row.get_i64_unchecked(group_col.col_idx))
-                    }
-                    DataType::DoublePrecision | DataType::Real | DataType::Decimal { .. } => {
-                        SqlValue::Double(row.get_f64_unchecked(group_col.col_idx))
-                    }
-                    DataType::Date => SqlValue::Date(row.get_date_unchecked(group_col.col_idx)),
-                    DataType::Boolean => SqlValue::Boolean(row.get_bool_unchecked(group_col.col_idx)),
-                    _ => continue,
-                };
-                key.push(value);
-            }
+            // Extract group key using specialized key extractor
+            let key = self.key_spec.extract_key(row);
 
             // Get or create group aggregates
             let agg_values = groups
@@ -408,8 +416,9 @@ impl GenericGroupedAggregationPlan {
     unsafe fn execute_stream_unsafe(
         &self,
         rows: Box<dyn Iterator<Item = Row>>,
-    ) -> HashMap<Vec<SqlValue>, Vec<f64>> {
-        let mut groups: HashMap<Vec<SqlValue>, Vec<f64>> = HashMap::new();
+    ) -> AHashMap<GroupKey, Vec<f64>> {
+        // Use AHashMap with specialized GroupKey for fast hashing
+        let mut groups: AHashMap<GroupKey, Vec<f64>> = AHashMap::new();
 
         // Stream through rows, filtering inline
         for row in rows {
@@ -426,25 +435,8 @@ impl GenericGroupedAggregationPlan {
                 continue;
             }
 
-            // Extract group key
-            let mut key = Vec::with_capacity(self.group_by_columns.len());
-            for group_col in &self.group_by_columns {
-                let value = match &group_col.col_type {
-                    DataType::Varchar { .. } => {
-                        SqlValue::Varchar(row.get_string_unchecked(group_col.col_idx).to_string())
-                    }
-                    DataType::Integer | DataType::Bigint => {
-                        SqlValue::Integer(row.get_i64_unchecked(group_col.col_idx))
-                    }
-                    DataType::DoublePrecision | DataType::Real | DataType::Decimal { .. } => {
-                        SqlValue::Double(row.get_f64_unchecked(group_col.col_idx))
-                    }
-                    DataType::Date => SqlValue::Date(row.get_date_unchecked(group_col.col_idx)),
-                    DataType::Boolean => SqlValue::Boolean(row.get_bool_unchecked(group_col.col_idx)),
-                    _ => continue,
-                };
-                key.push(value);
-            }
+            // Extract group key using specialized key extractor
+            let key = self.key_spec.extract_key(&row);
 
             // Get or create group aggregates
             let agg_values = groups
@@ -470,7 +462,8 @@ impl MonomorphicPlan for GenericGroupedAggregationPlan {
         let mut results: Vec<Row> = groups
             .into_iter()
             .map(|(key, agg_values)| {
-                let mut values = key;
+                // Convert GroupKey back to Vec<SqlValue>
+                let mut values = self.key_spec.key_to_values(&key);
 
                 // Add aggregate results, converting AVG to actual average
                 for (i, spec) in self.aggregates.iter().enumerate() {
@@ -531,7 +524,8 @@ impl MonomorphicPlan for GenericGroupedAggregationPlan {
         let mut results: Vec<Row> = groups
             .into_iter()
             .map(|(key, agg_values)| {
-                let mut values = key;
+                // Convert GroupKey back to Vec<SqlValue>
+                let mut values = self.key_spec.key_to_values(&key);
 
                 // Add aggregate results, converting AVG to actual average
                 for (i, spec) in self.aggregates.iter().enumerate() {
@@ -645,8 +639,8 @@ mod tests {
             plan.description
         );
         assert!(
-            plan.description.contains("2 groups"),
-            "Description should mention 2 group columns: {}",
+            plan.description.contains("2 groups") && plan.description.contains("TwoChars"),
+            "Description should mention 2 group columns with TwoChars strategy: {}",
             plan.description
         );
     }

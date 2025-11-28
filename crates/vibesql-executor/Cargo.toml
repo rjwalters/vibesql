@@ -26,6 +26,7 @@ rstar = { version = "0.12", optional = true }
 lru = "0.16"
 log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
+ahash = "0.8"
 
 # SIMD dependencies for columnar acceleration
 wide = { version = "0.8", optional = true }
