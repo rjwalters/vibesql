@@ -387,10 +387,10 @@ impl ColumnarPipeline {
         let mut results = Vec::new();
         for item in select_items {
             if let SelectItem::Expression { expr, .. } = item {
-                // Simple evaluation - doesn't handle aggregates properly
-                // Real implementation would need aggregate accumulation
                 if rows.is_empty() {
-                    results.push(vibesql_types::SqlValue::Null);
+                    // SQL standard: aggregates over empty set have defined behavior
+                    let value = Self::evaluate_empty_aggregate(expr, &evaluator)?;
+                    results.push(value);
                 } else {
                     let value = evaluator.eval(expr, &rows[0])?;
                     results.push(value);
@@ -399,6 +399,57 @@ impl ColumnarPipeline {
         }
 
         Ok(PipelineOutput::from_rows(vec![Row::new(results)]))
+    }
+
+    /// Evaluate an expression over an empty result set per SQL standard.
+    fn evaluate_empty_aggregate(
+        expr: &Expression,
+        evaluator: &crate::evaluator::CombinedExpressionEvaluator<'_>,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        match expr {
+            Expression::Literal(val) => Ok(val.clone()),
+            Expression::AggregateFunction { name, .. } => {
+                match name.to_uppercase().as_str() {
+                    "COUNT" => Ok(vibesql_types::SqlValue::Integer(0)),
+                    _ => Ok(vibesql_types::SqlValue::Null),
+                }
+            }
+            Expression::UnaryOp { op, expr: inner } => {
+                let inner_val = Self::evaluate_empty_aggregate(inner, evaluator)?;
+                let dummy_row = vibesql_storage::Row::new(vec![]);
+                let unary_expr = Expression::UnaryOp {
+                    op: *op,
+                    expr: Box::new(Expression::Literal(inner_val)),
+                };
+                evaluator.eval(&unary_expr, &dummy_row)
+            }
+            Expression::BinaryOp { left, op, right } => {
+                let left_val = Self::evaluate_empty_aggregate(left, evaluator)?;
+                let right_val = Self::evaluate_empty_aggregate(right, evaluator)?;
+                let dummy_row = vibesql_storage::Row::new(vec![]);
+                let binary_expr = Expression::BinaryOp {
+                    left: Box::new(Expression::Literal(left_val)),
+                    op: *op,
+                    right: Box::new(Expression::Literal(right_val)),
+                };
+                evaluator.eval(&binary_expr, &dummy_row)
+            }
+            Expression::Function { name, .. } => {
+                match name.to_uppercase().as_str() {
+                    "COUNT" => Ok(vibesql_types::SqlValue::Integer(0)),
+                    _ => Ok(vibesql_types::SqlValue::Null),
+                }
+            }
+            Expression::Cast { expr: inner, data_type } => {
+                let inner_val = Self::evaluate_empty_aggregate(inner, evaluator)?;
+                crate::evaluator::casting::cast_value(
+                    &inner_val,
+                    data_type,
+                    &vibesql_types::SqlMode::default(),
+                )
+            }
+            _ => Ok(vibesql_types::SqlValue::Null),
+        }
     }
 }
 
@@ -479,5 +530,174 @@ mod tests {
     fn test_columnar_pipeline_default() {
         let pipeline = ColumnarPipeline::default();
         assert!(pipeline.name().starts_with("ColumnarPipeline"));
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_count_returns_zero() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        // COUNT(*) should return 0 for empty set
+        let count_expr = Expression::AggregateFunction {
+            name: "COUNT".to_string(),
+            args: vec![Expression::Wildcard],
+            distinct: false,
+            filter: None,
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&count_expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+
+        // count (lowercase) should also return 0
+        let count_lower = Expression::AggregateFunction {
+            name: "count".to_string(),
+            args: vec![Expression::Wildcard],
+            distinct: false,
+            filter: None,
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&count_lower, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_sum_returns_null() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        let sum_expr = Expression::AggregateFunction {
+            name: "SUM".to_string(),
+            args: vec![Expression::ColumnRef {
+                table: None,
+                column: "x".to_string(),
+            }],
+            distinct: false,
+            filter: None,
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&sum_expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Null);
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_avg_min_max_return_null() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        for agg_name in &["AVG", "MIN", "MAX"] {
+            let expr = Expression::AggregateFunction {
+                name: agg_name.to_string(),
+                args: vec![Expression::ColumnRef {
+                    table: None,
+                    column: "x".to_string(),
+                }],
+                distinct: false,
+                filter: None,
+            };
+            let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
+            assert_eq!(result, SqlValue::Null, "{} should return NULL for empty set", agg_name);
+        }
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_literal_returns_value() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        let literal_expr = Expression::Literal(SqlValue::Integer(42));
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&literal_expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Integer(42));
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_binary_op_with_count() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        // COUNT(*) + 10 should return 0 + 10 = 10
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::AggregateFunction {
+                name: "COUNT".to_string(),
+                args: vec![Expression::Wildcard],
+                distinct: false,
+                filter: None,
+            }),
+            op: vibesql_ast::BinaryOperator::Plus,
+            right: Box::new(Expression::Literal(SqlValue::Integer(10))),
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Integer(10));
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_unary_op() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        // -COUNT(*) should return -0 = 0
+        let expr = Expression::UnaryOp {
+            op: vibesql_ast::UnaryOperator::Minus,
+            expr: Box::new(Expression::AggregateFunction {
+                name: "COUNT".to_string(),
+                args: vec![Expression::Wildcard],
+                distinct: false,
+                filter: None,
+            }),
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_cast() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        // CAST(COUNT(*) AS TEXT) should return "0"
+        let expr = Expression::Cast {
+            expr: Box::new(Expression::AggregateFunction {
+                name: "COUNT".to_string(),
+                args: vec![Expression::Wildcard],
+                distinct: false,
+                filter: None,
+            }),
+            data_type: vibesql_ast::DataType::Text,
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Text("0".to_string()));
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_function_count() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        // Some parsers may represent COUNT as Expression::Function instead of AggregateFunction
+        let expr = Expression::Function {
+            name: "COUNT".to_string(),
+            args: vec![Expression::Wildcard],
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn test_evaluate_empty_aggregate_column_ref_returns_null() {
+        let (database, schema) = create_test_setup();
+        let ctx = ExecutionContext::new(&schema, &database);
+        let evaluator = ctx.create_evaluator();
+
+        // Column reference without aggregate should return NULL
+        let expr = Expression::ColumnRef {
+            table: None,
+            column: "x".to_string(),
+        };
+        let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
+        assert_eq!(result, SqlValue::Null);
     }
 }
