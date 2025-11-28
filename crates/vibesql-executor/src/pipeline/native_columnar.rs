@@ -80,6 +80,12 @@ impl Default for NativeColumnarPipeline {
 }
 
 impl ExecutionPipeline for NativeColumnarPipeline {
+    /// Create an evaluator with context for native columnar execution.
+    #[inline]
+    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
+        ctx.create_evaluator()
+    }
+
     /// Apply WHERE clause filtering using SIMD-accelerated columnar operations.
     ///
     /// This is the most optimized path:

@@ -83,6 +83,12 @@ impl Default for ColumnarPipeline {
 }
 
 impl ExecutionPipeline for ColumnarPipeline {
+    /// Create an evaluator with context for columnar execution.
+    #[inline]
+    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
+        ctx.create_evaluator()
+    }
+
     /// Apply WHERE clause filtering using columnar operations.
     ///
     /// When SIMD is enabled:

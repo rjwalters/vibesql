@@ -76,6 +76,12 @@ impl<'a> RowOrientedPipeline<'a> {
 }
 
 impl ExecutionPipeline for RowOrientedPipeline<'_> {
+    /// Create an evaluator with context for row-oriented execution.
+    #[inline]
+    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
+        ctx.create_evaluator()
+    }
+
     /// Apply WHERE clause filtering row-by-row.
     ///
     /// Uses `apply_where_filter_combined_auto` which automatically selects
