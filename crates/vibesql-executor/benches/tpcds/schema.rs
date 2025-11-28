@@ -71,6 +71,8 @@ use std::str::FromStr;
 // =============================================================================
 
 pub fn load_vibesql(scale_factor: f64) -> VibeDB {
+    use std::io::Write;
+
     let mut db = VibeDB::new();
     let mut data = TPCDSData::new(scale_factor);
 
@@ -81,50 +83,147 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     db.catalog.set_case_sensitive_identifiers(false);
 
     // Create schema
+    eprint!("  Creating schema... ");
+    std::io::stderr().flush().ok();
     create_tpcds_schema_vibesql(&mut db);
+    eprintln!("done");
 
     // Load dimension tables first (fact tables reference them)
+    eprint!("  Loading date_dim ({} rows)... ", data.date_dim_count);
+    std::io::stderr().flush().ok();
     load_date_dim_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading time_dim... ");
+    std::io::stderr().flush().ok();
     load_time_dim_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading item ({} rows)... ", data.item_count);
+    std::io::stderr().flush().ok();
     load_item_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading customer_address ({} rows)... ", data.customer_address_count);
+    std::io::stderr().flush().ok();
     load_customer_address_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading customer ({} rows)... ", data.customer_count);
+    std::io::stderr().flush().ok();
     load_customer_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading store ({} rows)... ", data.store_count);
+    std::io::stderr().flush().ok();
     load_store_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Phase 2 dimension tables
+    eprint!("  Loading promotion ({} rows)... ", data.promotion_count);
+    std::io::stderr().flush().ok();
     load_promotion_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading warehouse... ");
+    std::io::stderr().flush().ok();
     load_warehouse_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading ship_mode... ");
+    std::io::stderr().flush().ok();
     load_ship_mode_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading reason... ");
+    std::io::stderr().flush().ok();
     load_reason_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Phase 3 dimension tables
+    eprint!("  Loading catalog_page ({} rows)... ", data.catalog_page_count);
+    std::io::stderr().flush().ok();
     load_catalog_page_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_page ({} rows)... ", data.web_page_count);
+    std::io::stderr().flush().ok();
     load_web_page_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_site ({} rows)... ", data.web_site_count);
+    std::io::stderr().flush().ok();
     load_web_site_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Phase 4 dimension tables (demographics and call center)
+    eprint!("  Loading customer_demographics ({} rows)... ", data.customer_demographics_count);
+    std::io::stderr().flush().ok();
     load_customer_demographics_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading household_demographics ({} rows)... ", data.household_demographics_count);
+    std::io::stderr().flush().ok();
     load_household_demographics_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading income_band... ");
+    std::io::stderr().flush().ok();
     load_income_band_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading call_center ({} rows)... ", data.call_center_count);
+    std::io::stderr().flush().ok();
     load_call_center_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Load fact tables
+    eprint!("  Loading store_sales ({} rows)... ", data.store_sales_count);
+    std::io::stderr().flush().ok();
     load_store_sales_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading store_returns ({} rows)... ", data.store_returns_count);
+    std::io::stderr().flush().ok();
     load_store_returns_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Phase 3 fact tables
+    eprint!("  Loading catalog_sales ({} rows)... ", data.catalog_sales_count);
+    std::io::stderr().flush().ok();
     load_catalog_sales_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading catalog_returns ({} rows)... ", data.catalog_returns_count);
+    std::io::stderr().flush().ok();
     load_catalog_returns_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_sales ({} rows)... ", data.web_sales_count);
+    std::io::stderr().flush().ok();
     load_web_sales_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_returns ({} rows)... ", data.web_returns_count);
+    std::io::stderr().flush().ok();
     load_web_returns_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Phase 4 fact table (inventory)
+    eprint!("  Loading inventory ({} rows)... ", data.inventory_count);
+    std::io::stderr().flush().ok();
     load_inventory_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Create indexes for join optimization
+    eprint!("  Creating indexes... ");
+    std::io::stderr().flush().ok();
     create_tpcds_indexes_vibesql(&mut db);
+    eprintln!("done");
 
     // Compute statistics for query optimization
+    eprint!("  Computing statistics... ");
+    std::io::stderr().flush().ok();
     for table_name in [
         "date_dim",
         "time_dim",
@@ -155,6 +254,7 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
             table.analyze();
         }
     }
+    eprintln!("done");
 
     db
 }
