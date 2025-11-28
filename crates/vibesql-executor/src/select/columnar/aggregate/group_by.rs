@@ -13,8 +13,9 @@ use crate::errors::ExecutorError;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::scan::ColumnarScan;
+#[cfg(feature = "simd")]
+use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::functions::compute_columnar_aggregate_impl;
 use super::AggregateOp;
 

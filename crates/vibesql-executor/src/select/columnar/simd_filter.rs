@@ -234,12 +234,12 @@ fn evaluate_predicate_simd(
 
         // Batch string operations for String columns
         ColumnArray::String(values, nulls) => {
-            evaluate_predicate_string_batch(predicate, values, nulls.as_ref())
+            evaluate_predicate_string_batch(predicate, values, nulls.as_ref().map(|n| n.as_ref()))
         }
 
         // Batch string operations for FixedString columns
         ColumnArray::FixedString(values, nulls) => {
-            evaluate_predicate_string_batch(predicate, values, nulls.as_ref())
+            evaluate_predicate_string_batch(predicate, values, nulls.as_ref().map(|n| n.as_ref()))
         }
 
         // Scalar fallback for other column types
