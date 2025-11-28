@@ -89,11 +89,11 @@ pub fn try_batch_project_simd(
             SelectItem::QualifiedWildcard { qualifier, .. } => {
                 // SELECT table.* - include columns from specific table
                 let result = schema.table_schemas.get(qualifier).cloned().or_else(|| {
-                    let qualifier_lower = qualifier.to_lowercase();
+                    // Case-insensitive lookup without allocation
                     schema
                         .table_schemas
                         .iter()
-                        .find(|(key, _)| key.to_lowercase() == qualifier_lower)
+                        .find(|(key, _)| key.eq_ignore_ascii_case(qualifier))
                         .map(|(_, value)| value.clone())
                 });
 

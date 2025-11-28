@@ -64,7 +64,7 @@ pub(super) fn apply_order_by(
         // If all ORDER BY expressions were evaluated with SIMD, use those results
         if all_simd && !simd_results.is_empty() {
             for (row_idx, (_, sort_keys)) in rows.iter_mut().enumerate() {
-                let mut keys = Vec::new();
+                let mut keys = Vec::with_capacity(order_by.len());
                 for (expr_idx, order_item) in order_by.iter().enumerate() {
                     if let Some(ref values) = simd_results[expr_idx] {
                         keys.push((values[row_idx].clone(), order_item.direction.clone()));
@@ -81,7 +81,7 @@ pub(super) fn apply_order_by(
                 // to prevent stale cached column values from previous rows
                 evaluator.clear_cse_cache();
 
-                let mut keys = Vec::new();
+                let mut keys = Vec::with_capacity(order_by.len());
                 for order_item in order_by {
                     // Check if ORDER BY expression is a SELECT list alias
                     // Evaluator handles window functions via window_mapping if present
@@ -102,7 +102,7 @@ pub(super) fn apply_order_by(
             // to prevent stale cached column values from previous rows
             evaluator.clear_cse_cache();
 
-            let mut keys = Vec::new();
+            let mut keys = Vec::with_capacity(order_by.len());
             for order_item in order_by {
                 // Check if ORDER BY expression is a SELECT list alias
                 // Evaluator handles window functions via window_mapping if present

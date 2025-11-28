@@ -32,11 +32,10 @@ pub(crate) fn execute_table_scan(
 ) -> Result<super::FromResult, ExecutorError> {
     // Check if table is a CTE first (with case-insensitive lookup)
     let cte_result = cte_results.get(table_name).or_else(|| {
-        // Fall back to case-insensitive lookup if exact match fails
-        let table_name_lower = table_name.to_lowercase();
+        // Fall back to case-insensitive lookup without allocation
         cte_results
             .iter()
-            .find(|(key, _)| key.to_lowercase() == table_name_lower)
+            .find(|(key, _)| key.eq_ignore_ascii_case(table_name))
             .map(|(_, value)| value)
     });
 

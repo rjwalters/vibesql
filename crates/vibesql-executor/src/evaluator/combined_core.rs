@@ -3,7 +3,8 @@
 //! This module provides the CombinedExpressionEvaluator for evaluating expressions
 //! in the context of combined schemas (e.g., JOINs with multiple tables).
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, hash::{Hash, Hasher}, rc::Rc};
+use ahash::AHasher;
 use lru::LruCache;
 use crate::{errors::ExecutorError, schema::CombinedSchema, select::WindowFunctionKey};
 
@@ -19,7 +20,8 @@ pub struct CombinedExpressionEvaluator<'a> {
     /// CTE (Common Table Expression) context for accessing WITH clause results
     pub(super) cte_context: Option<&'a HashMap<String, crate::select::cte::CteResult>>,
     /// Cache for column lookups to avoid repeated schema traversals
-    column_cache: RefCell<HashMap<(Option<String>, String), usize>>,
+    /// Uses pre-computed hash of (table, column) as key to avoid string allocations
+    column_cache: RefCell<HashMap<u64, usize>>,
     /// Cache for non-correlated subquery results with LRU eviction (key = subquery hash, value = result rows)
     /// Shared via Rc across child evaluators within a single statement execution.
     /// Cache lifetime is tied to the evaluator instance - each new evaluator gets a fresh cache.
@@ -240,13 +242,22 @@ impl<'a> CombinedExpressionEvaluator<'a> {
         self.cse_cache.borrow_mut().clear();
     }
 
+    /// Compute hash key for column cache without allocating strings
+    #[inline]
+    fn column_cache_key(table: Option<&str>, column: &str) -> u64 {
+        let mut hasher = AHasher::default();
+        table.hash(&mut hasher);
+        column.hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// Get column index with caching to avoid repeated schema lookups
     pub(crate) fn get_column_index_cached(
         &self,
         table: Option<&str>,
         column: &str,
     ) -> Option<usize> {
-        let key = (table.map(|s| s.to_string()), column.to_string());
+        let key = Self::column_cache_key(table, column);
 
         // Check cache first
         if let Some(&idx) = self.column_cache.borrow().get(&key) {
