@@ -3,6 +3,7 @@
 //! SQL:1999 Section 6.29: String value functions
 
 use crate::errors::ExecutorError;
+use std::borrow::Cow;
 
 /// SUBSTRING(string, start [, length]) - Extract substring
 /// SQL:1999 Section 6.29: String value functions
@@ -29,13 +30,16 @@ pub(in crate::evaluator::functions) fn substring(
         return Ok(vibesql_types::SqlValue::Null);
     }
 
-    // Extract string
-    let s = match string_val {
-        vibesql_types::SqlValue::Varchar(s) => s.as_str(),
-        vibesql_types::SqlValue::Character(s) => s.as_str(),
+    // Extract string - supports implicit coercion from Date/Timestamp to string
+    // This enables TPC-H Q9 pattern: SUBSTR(o_orderdate, 1, 4) to extract year
+    let s: Cow<str> = match string_val {
+        vibesql_types::SqlValue::Varchar(s) => Cow::Borrowed(s.as_str()),
+        vibesql_types::SqlValue::Character(s) => Cow::Borrowed(s.as_str()),
+        vibesql_types::SqlValue::Date(d) => Cow::Owned(d.to_string()),
+        vibesql_types::SqlValue::Timestamp(ts) => Cow::Owned(ts.to_string()),
         _ => {
             return Err(ExecutorError::UnsupportedFeature(format!(
-                "SUBSTRING requires string argument, got {:?}",
+                "SUBSTRING requires string or date/timestamp argument, got {:?}",
                 string_val
             )))
         }
