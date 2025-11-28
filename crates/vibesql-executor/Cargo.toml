@@ -26,6 +26,7 @@ rstar = { version = "0.12", optional = true }
 lru = "0.16"
 log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
+ahash = "0.8"
 
 # SIMD dependencies for columnar acceleration
 wide = { version = "0.8", optional = true }
@@ -70,7 +71,7 @@ benchmark-comparison = ["rusqlite", "duckdb"]
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
 # Enable native columnar execution (Phase 2b - zero row materialization)
-# Can also be enabled at runtime via VIBESQL_NATIVE_COLUMNAR environment variable
+# Now enabled by default for eligible queries. Set VIBESQL_DISABLE_COLUMNAR=1 to opt-out.
 native-columnar = []
 # Enable JIT compilation support using Cranelift (research/experimental)
 # Usage: cargo bench --features jit,benchmark-comparison
@@ -171,4 +172,12 @@ required-features = ["benchmark-comparison"]
 
 [[bench]]
 name = "sysbench_oltp"
+harness = false
+
+[[bench]]
+name = "columnar_storage_benchmark"
+harness = false
+
+[[bench]]
+name = "tpcds_runner"
 harness = false

@@ -56,10 +56,13 @@ pub enum SqlMode {
 
 impl Default for SqlMode {
     fn default() -> Self {
-        // Default to SQLite mode for SQLLogicTest compatibility
-        // The SQLLogicTest suite is derived from SQLite and expects SQLite semantics
-        // including integer division (INTEGER / INTEGER → INTEGER, truncated)
-        SqlMode::SQLite
+        // Default to MySQL mode for SQLLogicTest compatibility
+        // The dolthub/sqllogictest corpus was regenerated against MySQL 8.x
+        // and expects MySQL semantics including decimal division
+        // (INTEGER / INTEGER → DECIMAL)
+        SqlMode::MySQL {
+            flags: MySqlModeFlags::default(),
+        }
     }
 }
 
@@ -97,18 +100,6 @@ impl std::str::FromStr for SqlMode {
 }
 
 impl SqlMode {
-    /// Check if division should return floating-point (true) or integer (false)
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use TypeBehavior::division_result_type() instead for more precise type information"
-    )]
-    pub fn division_returns_float(&self) -> bool {
-        match self {
-            SqlMode::MySQL { .. } => true,
-            SqlMode::SQLite => false,
-        }
-    }
-
     /// Get the MySQL mode flags, if in MySQL mode
     pub fn mysql_flags(&self) -> Option<&MySqlModeFlags> {
         match self {

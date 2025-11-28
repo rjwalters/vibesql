@@ -2,104 +2,11 @@
 
 use std::collections::HashMap;
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
-use super::FromResult;
+use super::hash_join::build_existence_hash_table_parallel;
+use super::{combine_rows, FromResult};
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
 use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
-
-/// Build hash table sequentially for anti-join (stores only keys, not indices)
-///
-/// For anti-join, we only need to know if a key exists, not track all matching rows.
-/// This saves memory compared to inner join's Vec<usize> storage.
-fn build_hash_table_sequential(
-    build_rows: &[vibesql_storage::Row],
-    build_col_idx: usize,
-    timeout_ctx: &TimeoutContext,
-) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
-    let mut hash_table: HashMap<vibesql_types::SqlValue, ()> = HashMap::new();
-    for (idx, row) in build_rows.iter().enumerate() {
-        // Check timeout periodically during build phase
-        if idx % CHECK_INTERVAL == 0 {
-            timeout_ctx.check()?;
-        }
-        let key = row.values[build_col_idx].clone();
-        // Skip NULL values - they never match in equi-joins
-        if key != vibesql_types::SqlValue::Null {
-            hash_table.insert(key, ());
-        }
-    }
-    Ok(hash_table)
-}
-
-/// Build hash table in parallel for anti-join
-///
-/// Algorithm (when parallel feature enabled):
-/// 1. Divide build_rows into chunks (one per thread)
-/// 2. Each thread builds a local hash table from its chunk (no synchronization)
-/// 3. Merge partial hash tables sequentially (fast because we only store keys)
-///
-/// Performance: 3-6x speedup on large joins (50k+ rows) with 4+ cores
-/// Note: Falls back to sequential when parallel feature is disabled
-fn build_hash_table_parallel(
-    build_rows: &[vibesql_storage::Row],
-    build_col_idx: usize,
-    timeout_ctx: &TimeoutContext,
-) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
-    #[cfg(feature = "parallel")]
-    {
-        let config = ParallelConfig::global();
-
-        // Use sequential fallback for small inputs
-        if !config.should_parallelize_join(build_rows.len()) {
-            return build_hash_table_sequential(build_rows, build_col_idx, timeout_ctx);
-        }
-
-        // Check timeout before parallel execution (can't check mid-parallel easily)
-        timeout_ctx.check()?;
-
-        // Phase 1: Parallel build of partial hash tables
-        // Each thread processes a chunk and builds its own hash table
-        let chunk_size = (build_rows.len() / config.num_threads).max(1000);
-        let partial_tables: Vec<HashMap<_, ()>> = build_rows
-            .par_chunks(chunk_size)
-            .map(|chunk| {
-                let mut local_table: HashMap<vibesql_types::SqlValue, ()> = HashMap::new();
-                for row in chunk.iter() {
-                    let key = row.values[build_col_idx].clone();
-                    if key != vibesql_types::SqlValue::Null {
-                        local_table.insert(key, ());
-                    }
-                }
-                local_table
-            })
-            .collect();
-
-        // Check timeout after parallel build
-        timeout_ctx.check()?;
-
-        // Phase 2: Sequential merge of partial tables
-        // This is fast because we only need to insert keys, not append vectors
-        let result = partial_tables.into_iter().fold(HashMap::new(), |mut acc, partial| {
-            for (key, _) in partial {
-                acc.insert(key, ());
-            }
-            acc
-        });
-        Ok(result)
-    }
-
-    #[cfg(not(feature = "parallel"))]
-    {
-        // Always use sequential build when parallel feature is disabled
-        build_hash_table_sequential(build_rows, build_col_idx, timeout_ctx)
-    }
-}
 
 /// Hash anti-join implementation
 ///
@@ -121,30 +28,30 @@ fn build_hash_table_parallel(
 /// - Space: O(n) where n is the size of the right table (smaller than inner join because we don't store indices)
 /// - Expected speedup: 100-10,000x for large anti-joins
 pub(super) fn hash_anti_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     left_col_idx: usize,
     right_col_idx: usize,
 ) -> Result<FromResult, ExecutorError> {
     // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
     let timeout_ctx = TimeoutContext::new_default();
 
-    // Get left and right row data
-    let left_rows = left.rows();
-    let right_rows = right.rows();
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
 
     // Build phase: Create hash table from right side (using parallel algorithm)
     // Key: join column value
     // Value: () (we only need to know if the key exists, not store row indices)
     // Automatically uses parallel build when beneficial (based on row count and hardware)
-    let hash_table = build_hash_table_parallel(right_rows, right_col_idx, &timeout_ctx)?;
+    let hash_table = build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
 
     // Probe phase: Check each left row for absence of a match
     // We only emit left rows that have NO match in the right table
-    let estimated_capacity = left_rows.len().min(100_000);
+    let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
 
-    for (idx, left_row) in left_rows.iter().enumerate() {
+    for (idx, left_row) in left_slice.iter().enumerate() {
         // Check timeout periodically during probe phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
@@ -193,8 +100,8 @@ pub(super) fn hash_anti_join(
 ///
 /// Performance: Still O(n + m) average case, much faster than nested loop O(n*m)
 pub(super) fn hash_anti_join_with_filter(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     left_col_idx: usize,
     right_col_idx: usize,
     additional_filter: Option<&vibesql_ast::Expression>,
@@ -211,15 +118,15 @@ pub(super) fn hash_anti_join_with_filter(
 
     let filter = additional_filter.unwrap();
 
-    // Get left and right row data
-    let left_rows = left.rows();
-    let right_rows = right.rows();
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
 
     // Build phase: Create hash table from right side
     // Unlike simple hash_anti_join, we need to store row indices to check the filter
     let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
 
-    for (idx, row) in right_rows.iter().enumerate() {
+    for (idx, row) in right_slice.iter().enumerate() {
         // Check timeout periodically during build phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
@@ -232,21 +139,14 @@ pub(super) fn hash_anti_join_with_filter(
     }
 
     // Probe phase: Check each left row for absence of a match that passes the filter
-    let estimated_capacity = left_rows.len().min(100_000);
+    let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
 
     // Create evaluator for filter evaluation
     let evaluator = CombinedExpressionEvaluator::with_database(combined_schema, database);
     let mut probe_iterations = 0;
 
-    // Helper to create combined row (same as in hash_semi_join_with_filter)
-    let create_combined_row = |left_row: &vibesql_storage::Row, right_row: &vibesql_storage::Row| {
-        let mut combined_values = left_row.values.clone();
-        combined_values.extend_from_slice(&right_row.values);
-        vibesql_storage::Row::new(combined_values)
-    };
-
-    for left_row in left_rows.iter() {
+    for left_row in left_slice.iter() {
         // Check timeout periodically during probe phase
         probe_iterations += 1;
         if probe_iterations % CHECK_INTERVAL == 0 {
@@ -267,10 +167,10 @@ pub(super) fn hash_anti_join_with_filter(
             // Check if ANY matching right row passes the additional filter
             let mut found_match = false;
             for &right_idx in right_indices {
-                let right_row = &right_rows[right_idx];
+                let right_row = &right_slice[right_idx];
 
                 // Create combined row for filter evaluation
-                let combined_row = create_combined_row(left_row, right_row);
+                let combined_row = combine_rows(left_row, right_row);
 
                 // Clear CSE cache before evaluation
                 evaluator.clear_cse_cache();

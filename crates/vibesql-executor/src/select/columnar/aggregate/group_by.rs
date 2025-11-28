@@ -3,7 +3,7 @@
 //! This module implements efficient hash-based grouping for columnar data,
 //! enabling queries like TPC-H Q1 to use the columnar execution path.
 
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use crate::errors::ExecutorError;
 use vibesql_storage::Row;
@@ -71,9 +71,9 @@ pub fn columnar_group_by(
     let scan = ColumnarScan::new(rows);
 
     // Phase 1: Build hash table mapping group keys to row indices
-    // HashMap<Vec<SqlValue>, Vec<usize>>
+    // AHashMap<Vec<SqlValue>, Vec<usize>> - faster hashing
     // Key: group key values, Value: indices of rows in that group
-    let mut groups: HashMap<Vec<SqlValue>, Vec<usize>> = HashMap::new();
+    let mut groups: AHashMap<Vec<SqlValue>, Vec<usize>> = AHashMap::new();
 
     for row_idx in 0..rows.len() {
         // Check filter bitmap

@@ -24,6 +24,7 @@ pub mod limits;
 pub mod memory;
 mod optimizer;
 pub mod persistence;
+pub mod pipeline;
 mod privilege_checker;
 pub mod procedural;
 pub mod profiling;
@@ -60,6 +61,7 @@ pub use index_ddl::{
 pub use insert::InsertExecutor;
 pub use memory::QueryArena;
 pub use persistence::load_sql_dump;
+pub use pipeline::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
 pub use privilege_checker::PrivilegeChecker;
 pub use revoke::RevokeExecutor;
 pub use trigger_execution::TriggerFirer;

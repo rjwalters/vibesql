@@ -421,6 +421,131 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
     assert_eq!(result.len(), 3, "Expected 3 rows");
 }
 
+/// Test that multi-column hash join works with composite keys
+/// This is the key test for issue #2842 - TPC-H Q3, Q7, Q10 optimization
+#[test]
+fn test_multi_column_hash_join_composite_keys() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create sales table with (region_id, product_id)
+    let sales_schema = vibesql_catalog::TableSchema::new(
+        "sales".to_string(),
+        vec![
+            vibesql_catalog::ColumnSchema::new("region_id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new("product_id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new("amount".to_string(), vibesql_types::DataType::Integer, false),
+        ],
+    );
+    db.create_table(sales_schema).unwrap();
+
+    // Insert sales data
+    for region in 1..=3 {
+        for product in 1..=4 {
+            db.insert_row(
+                "sales",
+                vibesql_storage::Row::new(vec![
+                    vibesql_types::SqlValue::Integer(region),
+                    vibesql_types::SqlValue::Integer(product),
+                    vibesql_types::SqlValue::Integer(region * 100 + product),
+                ]),
+            )
+            .unwrap();
+        }
+    }
+
+    // Create inventory table with (region_id, product_id)
+    let inventory_schema = vibesql_catalog::TableSchema::new(
+        "inventory".to_string(),
+        vec![
+            vibesql_catalog::ColumnSchema::new("region_id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new("product_id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new("stock".to_string(), vibesql_types::DataType::Integer, false),
+        ],
+    );
+    db.create_table(inventory_schema).unwrap();
+
+    // Insert inventory data (only some combinations exist)
+    // region 1, products 1,2
+    // region 2, products 2,3
+    // region 3, products 3,4
+    for (region, products) in [(1, vec![1, 2]), (2, vec![2, 3]), (3, vec![3, 4])] {
+        for product in products {
+            db.insert_row(
+                "inventory",
+                vibesql_storage::Row::new(vec![
+                    vibesql_types::SqlValue::Integer(region),
+                    vibesql_types::SqlValue::Integer(product),
+                    vibesql_types::SqlValue::Integer(region * 10 + product),
+                ]),
+            )
+            .unwrap();
+        }
+    }
+
+    // Query with composite key join: region_id AND product_id
+    let executor = SelectExecutor::new(&db);
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+        from: Some(vibesql_ast::FromClause::Join {
+            left: Box::new(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "inventory".to_string(), alias: None }),
+            join_type: vibesql_ast::JoinType::Inner,
+            // ON clause with composite key
+            condition: Some(vibesql_ast::Expression::BinaryOp {
+                left: Box::new(vibesql_ast::Expression::BinaryOp {
+                    left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        table: Some("sales".to_string()),
+                        column: "region_id".to_string(),
+                    }),
+                    op: vibesql_ast::BinaryOperator::Equal,
+                    right: Box::new(vibesql_ast::Expression::ColumnRef {
+                        table: Some("inventory".to_string()),
+                        column: "region_id".to_string(),
+                    }),
+                }),
+                op: vibesql_ast::BinaryOperator::And,
+                right: Box::new(vibesql_ast::Expression::BinaryOp {
+                    left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        table: Some("sales".to_string()),
+                        column: "product_id".to_string(),
+                    }),
+                    op: vibesql_ast::BinaryOperator::Equal,
+                    right: Box::new(vibesql_ast::Expression::ColumnRef {
+                        table: Some("inventory".to_string()),
+                        column: "product_id".to_string(),
+                    }),
+                }),
+            }),
+            natural: false,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+    };
+
+    let result = executor.execute(&stmt).unwrap();
+
+    // Expected matches:
+    // (1,1), (1,2), (2,2), (2,3), (3,3), (3,4) = 6 matches
+    assert_eq!(result.len(), 6, "Expected 6 rows from composite key join");
+
+    // Verify row structure (6 columns total)
+    for row in result.iter() {
+        assert_eq!(row.values.len(), 6, "Expected 6 columns");
+        // Verify the join keys match
+        assert_eq!(row.values[0], row.values[3], "region_id should match");  // sales.region_id = inventory.region_id
+        assert_eq!(row.values[1], row.values[4], "product_id should match"); // sales.product_id = inventory.product_id
+    }
+}
+
 /// Test star join pattern that mimics select5.test memory issues
 ///
 /// This demonstrates the REAL value of join reordering for select5.test:

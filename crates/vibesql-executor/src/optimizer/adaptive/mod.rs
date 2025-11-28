@@ -53,9 +53,13 @@ mod expression;
 mod hints;
 mod patterns;
 mod query;
+pub mod strategy;
 
 use hints::extract_query_hint;
 use patterns::has_analytical_pattern;
+
+// Re-export strategy types for external use
+pub use strategy::{choose_execution_strategy, ExecutionStrategy, StrategyContext};
 
 /// Execution model for query processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

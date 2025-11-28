@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
+    optimizer::adaptive::{
+        choose_execution_strategy, ExecutionStrategy, StrategyContext,
+    },
     select::{
         cte::{execute_ctes, CteResult},
         helpers::apply_limit_offset,
@@ -144,6 +147,12 @@ impl SelectExecutor<'_> {
     }
 
     /// Execute SELECT statement with CTE context
+    ///
+    /// Uses unified strategy selection to determine the optimal execution path:
+    /// - NativeColumnar: Zero-copy SIMD execution from columnar storage
+    /// - StandardColumnar: SIMD execution with row-to-batch conversion
+    /// - RowOriented: Traditional row-by-row execution
+    /// - ExpressionOnly: SELECT without FROM clause
     pub(super) fn execute_with_ctes(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -152,117 +161,99 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let execute_ctes_start = std::time::Instant::now();
 
-        // Try NATIVE columnar execution path FIRST (Phase 2b - zero row materialization)
-        // This path operates on ColumnarBatch from storage directly without row conversion
-        #[cfg(feature = "profile-q6")]
-        let native_columnar_start = std::time::Instant::now();
+        // Check if native columnar is enabled via feature flag or env var
+        let native_columnar_enabled =
+            cfg!(feature = "native-columnar") || std::env::var("VIBESQL_NATIVE_COLUMNAR").is_ok();
 
-        log::debug!("Checking if native columnar execution is possible...");
-        #[cfg(feature = "profile-q6")]
-        eprintln!("[PROFILE-Q6] Checking native columnar execution eligibility...");
+        // Use unified strategy selection for the execution path
+        let ctx = StrategyContext::new(stmt, cte_results, native_columnar_enabled);
+        let strategy = choose_execution_strategy(&ctx);
 
-        if let Some(result) = self.try_native_columnar_execution(stmt, cte_results)? {
-            log::debug!("✓ Using NATIVE COLUMNAR execution path (zero-copy, SIMD-accelerated)");
-            #[cfg(feature = "profile-q6")]
-            {
-                let total_execute_ctes = execute_ctes_start.elapsed();
-                let native_columnar_time = native_columnar_start.elapsed();
-                eprintln!("[PROFILE-Q6] ✓ USING NATIVE COLUMNAR EXECUTION (zero-copy)");
-                eprintln!("[PROFILE-Q6]   Native columnar check time: {:?}", native_columnar_time);
-                eprintln!("[PROFILE-Q6]   Total execution time: {:?}", total_execute_ctes);
+        log::debug!(
+            "Execution strategy selected: {} (reason: {})",
+            strategy.name(),
+            strategy.score().reason
+        );
+
+        #[cfg(feature = "profile-q6")]
+        eprintln!(
+            "[PROFILE-Q6] Execution strategy: {} ({})",
+            strategy.name(),
+            strategy.score().reason
+        );
+
+        // Dispatch based on selected strategy
+        let mut results = match strategy {
+            ExecutionStrategy::NativeColumnar { .. } => {
+                // Try native columnar execution path (zero-copy, SIMD-accelerated)
+                #[cfg(feature = "profile-q6")]
+                let native_start = std::time::Instant::now();
+
+                if let Some(result) = self.try_native_columnar_execution(stmt, cte_results)? {
+                    log::debug!("✓ Native columnar execution succeeded");
+                    #[cfg(feature = "profile-q6")]
+                    {
+                        eprintln!(
+                            "[PROFILE-Q6] ✓ NATIVE COLUMNAR execution: {:?}",
+                            native_start.elapsed()
+                        );
+                    }
+                    return Ok(result);
+                }
+
+                // Fall back to row-oriented if native columnar fails at runtime
+                // (e.g., table not in columnar cache, unsupported predicate)
+                log::debug!("Native columnar runtime fallback to row-oriented");
+                #[cfg(feature = "profile-q6")]
+                eprintln!("[PROFILE-Q6] Native columnar fallback to row-oriented");
+
+                self.execute_row_oriented(stmt, cte_results)?
             }
-            return Ok(result);
-        }
-        log::debug!("✗ Native columnar execution not used, trying standard columnar path");
-        #[cfg(feature = "profile-q6")]
-        eprintln!("[PROFILE-Q6] ✗ NATIVE COLUMNAR NOT USED - Trying standard columnar path");
 
-        // Try columnar execution path for compatible queries
-        // Phase 5: SIMD-accelerated columnar execution provides 6-10x speedup
-        // This path converts rows to batch format before processing
-        #[cfg(feature = "profile-q6")]
-        let columnar_check_start = std::time::Instant::now();
+            ExecutionStrategy::StandardColumnar { .. } => {
+                // Try standard columnar execution path (row-to-batch conversion)
+                #[cfg(feature = "profile-q6")]
+                let columnar_start = std::time::Instant::now();
 
-        log::debug!("Checking if columnar execution is possible...");
-        #[cfg(feature = "profile-q6")]
-        eprintln!("[PROFILE-Q6] Checking columnar execution eligibility...");
+                if let Some(result) = self.try_columnar_execution(stmt, cte_results)? {
+                    log::debug!("✓ Standard columnar execution succeeded");
+                    #[cfg(feature = "profile-q6")]
+                    {
+                        eprintln!(
+                            "[PROFILE-Q6] ✓ STANDARD COLUMNAR execution: {:?}",
+                            columnar_start.elapsed()
+                        );
+                    }
+                    return Ok(result);
+                }
 
-        if let Some(result) = self.try_columnar_execution(stmt, cte_results)? {
-            log::debug!("✓ Using COLUMNAR execution path (SIMD-accelerated)");
-            #[cfg(feature = "profile-q6")]
-            {
-                let total_execute_ctes = execute_ctes_start.elapsed();
-                let columnar_check_time = columnar_check_start.elapsed();
-                eprintln!("[PROFILE-Q6] ✓ USING COLUMNAR EXECUTION (SIMD-accelerated)");
-                eprintln!("[PROFILE-Q6]   Columnar check time: {:?}", columnar_check_time);
-                eprintln!("[PROFILE-Q6]   Total execution time: {:?}", total_execute_ctes);
+                // Fall back to row-oriented if columnar fails at runtime
+                log::debug!("Standard columnar runtime fallback to row-oriented");
+                #[cfg(feature = "profile-q6")]
+                eprintln!("[PROFILE-Q6] Standard columnar fallback to row-oriented");
+
+                self.execute_row_oriented(stmt, cte_results)?
             }
-            return Ok(result);
-        }
-        log::debug!("✗ Columnar execution not used, falling back to row-based execution");
-        #[cfg(feature = "profile-q6")]
-        eprintln!("[PROFILE-Q6] ✗ COLUMNAR NOT USED - Falling back to row-based execution");
 
-        // Try monomorphic execution path for known query patterns (TEMPORARILY DISABLED)
-        // NOTE: Monomorphic execution currently has issues with complex aggregate expressions
-        // For Phase 5, we're prioritizing columnar execution over monomorphic
-        // TODO: Re-enable monomorphic execution after fixing complex aggregate handling
-        let mono_result: Option<Vec<vibesql_storage::Row>> = None; // Disabled
-
-        #[cfg(feature = "profile-q6")]
-        let mono_check_start = std::time::Instant::now();
-
-        if let Some(result) = mono_result {
-            #[cfg(feature = "profile-q6")]
-            {
-                let total_execute_ctes = execute_ctes_start.elapsed();
-                let mono_check_time = mono_check_start.elapsed();
+            ExecutionStrategy::RowOriented { .. } => {
+                // Use traditional row-by-row execution
+                self.execute_row_oriented(stmt, cte_results)?
             }
-            return Ok(result);
-        }
 
-        // Execute the left-hand side query
-        let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
-        let has_group_by = stmt.group_by.is_some();
+            ExecutionStrategy::ExpressionOnly { .. } => {
+                // SELECT without FROM - but may still have aggregates
+                // (e.g., SELECT COUNT(*), SELECT MAX(1))
+                let has_aggregates =
+                    self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
 
-        let mut results = if has_aggregates || has_group_by {
-            self.execute_with_aggregation(stmt, cte_results)?
-        } else if let Some(from_clause) = &stmt.from {
-
-
-            // Re-enabled predicate pushdown for all queries (issue #1902)
-            //
-            // Previously, predicate pushdown was selectively disabled for multi-column IN clauses
-            // because index optimization happened in execute_without_aggregation() on row indices
-            // from the FROM result. When predicate pushdown filtered rows early, the indices no
-            // longer matched the original table, causing incorrect results.
-            //
-            // Now that all index optimization has been moved to the scan level (execute_index_scan),
-            // it happens BEFORE predicate pushdown, avoiding the row-index mismatch problem.
-            // This allows predicate pushdown to work correctly for all queries, improving performance.
-            //
-            // Fixes issues #1807, #1895, #1896, and #1902.
-
-            // Pass WHERE and ORDER BY to execute_from for optimization
-            let from_result =
-                self.execute_from_with_where(from_clause, cte_results, stmt.where_clause.as_ref(), stmt.order_by.as_deref())?;
-
-            // Validate column references BEFORE processing rows (issue #2654)
-            // This ensures column errors are caught even when tables are empty
-            // Pass procedural context to allow procedure variables in WHERE clause
-            // Pass outer_schema for correlated subqueries (#2694)
-            super::validation::validate_select_columns_with_context(
-                &stmt.select_list,
-                stmt.where_clause.as_ref(),
-                &from_result.schema,
-                self.procedural_context,
-                self.outer_schema,
-            )?;
-
-            self.execute_without_aggregation(stmt, from_result, cte_results)?
-        } else {
-            // SELECT without FROM - evaluate expressions as a single row
-            self.execute_select_without_from(stmt)?
+                if has_aggregates {
+                    // Aggregates without FROM need the aggregation path
+                    self.execute_with_aggregation(stmt, cte_results)?
+                } else {
+                    // Simple expression evaluation (e.g., SELECT 1 + 1)
+                    self.execute_select_without_from(stmt)?
+                }
+            }
         };
 
         // Handle set operations (UNION, INTERSECT, EXCEPT)
@@ -277,6 +268,60 @@ impl SelectExecutor<'_> {
         }
 
         Ok(results)
+    }
+
+    /// Execute using traditional row-oriented path
+    ///
+    /// This is the fallback path when columnar execution is not available or not beneficial.
+    fn execute_row_oriented(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+        cte_results: &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
+        let has_group_by = stmt.group_by.is_some();
+
+        if has_aggregates || has_group_by {
+            self.execute_with_aggregation(stmt, cte_results)
+        } else if let Some(from_clause) = &stmt.from {
+            // Re-enabled predicate pushdown for all queries (issue #1902)
+            //
+            // Previously, predicate pushdown was selectively disabled for multi-column IN clauses
+            // because index optimization happened in execute_without_aggregation() on row indices
+            // from the FROM result. When predicate pushdown filtered rows early, the indices no
+            // longer matched the original table, causing incorrect results.
+            //
+            // Now that all index optimization has been moved to the scan level (execute_index_scan),
+            // it happens BEFORE predicate pushdown, avoiding the row-index mismatch problem.
+            // This allows predicate pushdown to work correctly for all queries, improving performance.
+            //
+            // Fixes issues #1807, #1895, #1896, and #1902.
+
+            // Pass WHERE and ORDER BY to execute_from for optimization
+            let from_result = self.execute_from_with_where(
+                from_clause,
+                cte_results,
+                stmt.where_clause.as_ref(),
+                stmt.order_by.as_deref(),
+            )?;
+
+            // Validate column references BEFORE processing rows (issue #2654)
+            // This ensures column errors are caught even when tables are empty
+            // Pass procedural context to allow procedure variables in WHERE clause
+            // Pass outer_schema for correlated subqueries (#2694)
+            super::validation::validate_select_columns_with_context(
+                &stmt.select_list,
+                stmt.where_clause.as_ref(),
+                &from_result.schema,
+                self.procedural_context,
+                self.outer_schema,
+            )?;
+
+            self.execute_without_aggregation(stmt, from_result, cte_results)
+        } else {
+            // SELECT without FROM - evaluate expressions as a single row
+            self.execute_select_without_from(stmt)
+        }
     }
 
     /// Execute a chain of set operations left-to-right

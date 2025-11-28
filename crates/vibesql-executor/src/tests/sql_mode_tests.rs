@@ -35,17 +35,17 @@ mod tests {
     fn test_set_sql_mode_mysql() {
         let mut db = Database::new();
 
-        // Default is SQLite mode (for SQLLogicTest compatibility)
+        // Default is MySQL mode (for SQLLogicTest compatibility - dolthub corpus was regenerated against MySQL 8.x)
+        assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
+
+        // Set to sqlite
+        execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
         assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
-        // Set to mysql
+        // Set back to mysql
         let result = execute_set_variable(&mut db, "SET sql_mode = 'mysql'").unwrap();
         assert!(result.contains("mysql"));
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
-
-        // Set back to sqlite
-        execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
-        assert!(matches!(db.sql_mode(), SqlMode::SQLite));
     }
 
     #[test]
