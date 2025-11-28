@@ -5,7 +5,7 @@
 
 #![allow(clippy::manual_is_multiple_of)]
 
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use super::{combine_rows, FromResult};
 use crate::{
@@ -32,7 +32,7 @@ pub struct HashJoinIterator<L: RowIterator> {
     /// Lazy probe side (left)
     left: L,
     /// Materialized build side (right) - hash table mapping join key to rows
-    right_hash_table: HashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>>,
+    right_hash_table: AHashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>>,
     /// Combined schema for output rows
     schema: CombinedSchema,
     /// Column index in left table for join key
@@ -102,7 +102,7 @@ impl<L: RowIterator> HashJoinIterator<L> {
 
         // Build phase: Create hash table from right side
         // This is the one-time materialization cost
-        let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>> = HashMap::new();
+        let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>> = AHashMap::new();
         let mut build_iterations = 0;
 
         for row in right.into_rows() {

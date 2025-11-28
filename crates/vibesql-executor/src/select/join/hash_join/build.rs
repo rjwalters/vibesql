@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -40,8 +40,8 @@ impl CompositeKey {
 pub(crate) fn build_hash_table_composite_sequential(
     build_rows: &[vibesql_storage::Row],
     build_col_indices: &[usize],
-) -> HashMap<CompositeKey, Vec<usize>> {
-    let mut hash_table: HashMap<CompositeKey, Vec<usize>> = HashMap::with_capacity(build_rows.len());
+) -> AHashMap<CompositeKey, Vec<usize>> {
+    let mut hash_table: AHashMap<CompositeKey, Vec<usize>> = AHashMap::with_capacity(build_rows.len());
     for (idx, row) in build_rows.iter().enumerate() {
         let key = CompositeKey::from_row(row, build_col_indices);
         // Skip rows with any NULL key values - they never match in equi-joins
@@ -59,7 +59,7 @@ pub(crate) fn build_hash_table_composite_sequential(
 pub(crate) fn build_hash_table_composite_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_indices: &[usize],
-) -> HashMap<CompositeKey, Vec<usize>> {
+) -> AHashMap<CompositeKey, Vec<usize>> {
     let config = ParallelConfig::global();
 
     // Use sequential fallback for small inputs
@@ -69,12 +69,12 @@ pub(crate) fn build_hash_table_composite_parallel(
 
     // Phase 1: Parallel build of partial hash tables with indices
     let chunk_size = (build_rows.len() / config.num_threads).max(1000);
-    let partial_tables: Vec<(usize, HashMap<CompositeKey, Vec<usize>>)> = build_rows
+    let partial_tables: Vec<(usize, AHashMap<CompositeKey, Vec<usize>>)> = build_rows
         .par_chunks(chunk_size)
         .enumerate()
         .map(|(chunk_idx, chunk)| {
             let base_idx = chunk_idx * chunk_size;
-            let mut local_table: HashMap<CompositeKey, Vec<usize>> = HashMap::new();
+            let mut local_table: AHashMap<CompositeKey, Vec<usize>> = AHashMap::new();
             for (i, row) in chunk.iter().enumerate() {
                 let key = CompositeKey::from_row(row, build_col_indices);
                 if !key.has_null() {
@@ -87,7 +87,7 @@ pub(crate) fn build_hash_table_composite_parallel(
 
     // Phase 2: Sequential merge of partial tables
     partial_tables.into_iter()
-        .fold(HashMap::new(), |mut acc, (_chunk_idx, partial)| {
+        .fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
             for (key, mut indices) in partial {
                 acc.entry(key).or_default().append(&mut indices);
             }
@@ -99,7 +99,7 @@ pub(crate) fn build_hash_table_composite_parallel(
 pub(crate) fn build_hash_table_composite_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_indices: &[usize],
-) -> HashMap<CompositeKey, Vec<usize>> {
+) -> AHashMap<CompositeKey, Vec<usize>> {
     build_hash_table_composite_sequential(build_rows, build_col_indices)
 }
 
@@ -111,8 +111,8 @@ pub(crate) fn build_hash_table_composite_parallel(
 pub(super) fn build_hash_table_sequential(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
-) -> HashMap<vibesql_types::SqlValue, Vec<usize>> {
-    let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
+) -> AHashMap<vibesql_types::SqlValue, Vec<usize>> {
+    let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
     for (idx, row) in build_rows.iter().enumerate() {
         let key = row.values[build_col_idx].clone();
         // Skip NULL values - they never match in equi-joins
@@ -136,7 +136,7 @@ pub(super) fn build_hash_table_sequential(
 pub(crate) fn build_hash_table_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
-) -> HashMap<vibesql_types::SqlValue, Vec<usize>> {
+) -> AHashMap<vibesql_types::SqlValue, Vec<usize>> {
     #[cfg(feature = "parallel")]
     {
         let config = ParallelConfig::global();
@@ -149,12 +149,12 @@ pub(crate) fn build_hash_table_parallel(
         // Phase 1: Parallel build of partial hash tables with indices
         // Each thread processes a chunk and builds its own hash table
         let chunk_size = (build_rows.len() / config.num_threads).max(1000);
-        let partial_tables: Vec<(usize, HashMap<_, _>)> = build_rows
+        let partial_tables: Vec<(usize, AHashMap<_, _>)> = build_rows
             .par_chunks(chunk_size)
             .enumerate()
             .map(|(chunk_idx, chunk)| {
                 let base_idx = chunk_idx * chunk_size;
-                let mut local_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
+                let mut local_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
                 for (i, row) in chunk.iter().enumerate() {
                     let key = row.values[build_col_idx].clone();
                     if key != vibesql_types::SqlValue::Null {
@@ -168,7 +168,7 @@ pub(crate) fn build_hash_table_parallel(
         // Phase 2: Sequential merge of partial tables
         // This is fast because we only touch keys that appear in multiple partitions
         partial_tables.into_iter()
-            .fold(HashMap::new(), |mut acc, (_chunk_idx, partial)| {
+            .fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
                 for (key, mut indices) in partial {
                     acc.entry(key).or_default().append(&mut indices);
                 }
@@ -187,7 +187,7 @@ pub(crate) fn build_hash_table_parallel(
 // Existence Hash Table Builders (for semi-join and anti-join)
 // ============================================================================
 //
-// These functions build hash tables that only track key existence (HashMap<SqlValue, ()>)
+// These functions build hash tables that only track key existence (AHashMap<SqlValue, ()>)
 // rather than storing row indices. This is more memory-efficient for semi-join and
 // anti-join operations where we only need to know if a key exists, not which rows match.
 
@@ -199,8 +199,8 @@ pub(crate) fn build_existence_hash_table_sequential(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
     timeout_ctx: &TimeoutContext,
-) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
-    let mut hash_table: HashMap<vibesql_types::SqlValue, ()> = HashMap::new();
+) -> Result<AHashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
+    let mut hash_table: AHashMap<vibesql_types::SqlValue, ()> = AHashMap::new();
     for (idx, row) in build_rows.iter().enumerate() {
         // Check timeout periodically during build phase
         if idx % CHECK_INTERVAL == 0 {
@@ -228,7 +228,7 @@ pub(crate) fn build_existence_hash_table_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
     timeout_ctx: &TimeoutContext,
-) -> Result<HashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
+) -> Result<AHashMap<vibesql_types::SqlValue, ()>, ExecutorError> {
     #[cfg(feature = "parallel")]
     {
         let config = ParallelConfig::global();
@@ -244,10 +244,10 @@ pub(crate) fn build_existence_hash_table_parallel(
         // Phase 1: Parallel build of partial hash tables
         // Each thread processes a chunk and builds its own hash table
         let chunk_size = (build_rows.len() / config.num_threads).max(1000);
-        let partial_tables: Vec<HashMap<_, ()>> = build_rows
+        let partial_tables: Vec<AHashMap<_, ()>> = build_rows
             .par_chunks(chunk_size)
             .map(|chunk| {
-                let mut local_table: HashMap<vibesql_types::SqlValue, ()> = HashMap::new();
+                let mut local_table: AHashMap<vibesql_types::SqlValue, ()> = AHashMap::new();
                 for row in chunk.iter() {
                     let key = row.values[build_col_idx].clone();
                     if key != vibesql_types::SqlValue::Null {
@@ -263,7 +263,7 @@ pub(crate) fn build_existence_hash_table_parallel(
 
         // Phase 2: Sequential merge of partial tables
         // This is fast because we only need to insert keys, not append vectors
-        let result = partial_tables.into_iter().fold(HashMap::new(), |mut acc, partial| {
+        let result = partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
             for (key, _) in partial {
                 acc.insert(key, ());
             }
