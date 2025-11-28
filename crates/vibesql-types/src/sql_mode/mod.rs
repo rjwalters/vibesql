@@ -56,10 +56,13 @@ pub enum SqlMode {
 
 impl Default for SqlMode {
     fn default() -> Self {
-        // Default to SQLite mode for SQLLogicTest compatibility
-        // The SQLLogicTest suite is derived from SQLite and expects SQLite semantics
-        // including integer division (INTEGER / INTEGER → INTEGER, truncated)
-        SqlMode::SQLite
+        // Default to MySQL mode for SQLLogicTest compatibility
+        // The dolthub/sqllogictest corpus was regenerated against MySQL 8.x
+        // and expects MySQL semantics including decimal division
+        // (INTEGER / INTEGER → DECIMAL)
+        SqlMode::MySQL {
+            flags: MySqlModeFlags::default(),
+        }
     }
 }
 

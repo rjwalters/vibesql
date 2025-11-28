@@ -28,9 +28,9 @@ pub fn get_pooled_database() -> Database {
                 db
             }
             None => {
-                // First use - create new database with SQLite mode (default)
-                // The SQLLogicTest suite is derived from SQLite and expects SQLite semantics
-                // including integer division (INTEGER / INTEGER → INTEGER, truncated)
+                // First use - create new database with MySQL mode (default)
+                // The dolthub/sqllogictest corpus was regenerated against MySQL 8.x
+                // and expects MySQL semantics including decimal division
                 vibesql_storage::Database::new()
             }
         }
