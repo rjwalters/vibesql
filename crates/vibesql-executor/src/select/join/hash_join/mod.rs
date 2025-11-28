@@ -4,8 +4,8 @@
 // offering O(n+m) time complexity compared to O(n*m) for nested loop joins.
 //
 // Module structure:
-// - build.rs: Hash table building (sequential and parallel)
-// - inner.rs: INNER JOIN implementation
+// - build.rs: Hash table building (sequential, parallel, and composite key)
+// - inner.rs: INNER JOIN implementation (single and multi-column)
 // - outer.rs: LEFT/RIGHT/FULL OUTER JOIN implementations
 // - tests.rs: Comprehensive test suite
 
@@ -18,6 +18,7 @@ mod tests;
 
 // Re-export public API
 pub(super) use inner::hash_join_inner;
+pub(super) use inner::hash_join_inner_multi;
 pub(super) use outer::hash_join_left_outer;
 
 // Re-export existence hash table builders for semi-join and anti-join

@@ -19,7 +19,7 @@ mod tests;
 
 // Re-export join reorder analyzer for public tests
 // Re-export hash_join functions for internal use
-use hash_join::{hash_join_inner, hash_join_left_outer};
+use hash_join::{hash_join_inner, hash_join_inner_multi, hash_join_left_outer};
 use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 use hash_anti_join::{hash_anti_join, hash_anti_join_with_filter};
 // Re-export hash join iterator for public use
@@ -271,11 +271,61 @@ pub(super) fn nested_loop_join(
             CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
 
         // Phase 3.1: Try ON condition first (preferred for hash join)
-        // Now supports compound AND conditions for queries like TPC-H Q3
+        // Now supports multi-column composite keys for better performance
         if let Some(cond) = condition {
-            if let Some(compound_result) =
-                join_analyzer::analyze_compound_equi_join(cond, &temp_schema, left_col_count)
+            // First try multi-column hash join for composite keys (2+ equi-join conditions)
+            if let Some(multi_result) =
+                join_analyzer::analyze_multi_column_equi_join(cond, &temp_schema, left_col_count)
             {
+                // Use multi-column hash join if there are 2+ join columns
+                if multi_result.equi_joins.left_col_indices.len() >= 2 {
+                    // Save schemas for NATURAL JOIN processing before moving left/right
+                    let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
+
+                    let mut result = hash_join_inner_multi(
+                        left,
+                        right,
+                        &multi_result.equi_joins.left_col_indices,
+                        &multi_result.equi_joins.right_col_indices,
+                    )?;
+
+                    // Apply remaining conditions as post-join filter
+                    if !multi_result.remaining_conditions.is_empty() {
+                        if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
+                            result = apply_post_join_filter(result, &filter_expr, database)?;
+                        }
+                    }
+
+                    // For NATURAL JOIN, remove duplicate columns from the result
+                    if natural {
+                        if let (Some(left_schema), Some(right_schema_orig)) =
+                            (left_schema_for_natural, right_schema_for_natural)
+                        {
+                            let right_schema_for_removal = CombinedSchema {
+                                table_schemas: vec![(
+                                    right_table_name_for_natural.clone(),
+                                    (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                )]
+                                .into_iter()
+                                .collect(),
+                                total_columns: right_schema_orig.total_columns,
+                            };
+                            result = remove_duplicate_columns_for_natural_join(
+                                result,
+                                &left_schema,
+                                &right_schema_for_removal,
+                            )?;
+                        }
+                    }
+
+                    return Ok(result);
+                }
+
+                // Single-column equi-join: use standard hash join (more efficient for single key)
                 // Save schemas for NATURAL JOIN processing before moving left/right
                 let (left_schema_for_natural, right_schema_for_natural) = if natural {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
@@ -286,13 +336,13 @@ pub(super) fn nested_loop_join(
                 let mut result = hash_join_inner(
                     left,
                     right,
-                    compound_result.equi_join.left_col_idx,
-                    compound_result.equi_join.right_col_idx,
+                    multi_result.equi_joins.left_col_indices[0],
+                    multi_result.equi_joins.right_col_indices[0],
                 )?;
 
-                // Apply remaining conditions from compound AND as post-join filter
-                if !compound_result.remaining_conditions.is_empty() {
-                    if let Some(filter_expr) = combine_with_and(compound_result.remaining_conditions) {
+                // Apply remaining conditions as post-join filter
+                if !multi_result.remaining_conditions.is_empty() {
+                    if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
                         result = apply_post_join_filter(result, &filter_expr, database)?;
                     }
                 }

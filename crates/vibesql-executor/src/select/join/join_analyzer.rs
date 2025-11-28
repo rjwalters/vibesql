@@ -2,18 +2,39 @@
 //!
 //! This module analyzes join conditions to identify equi-joins (equality-based joins)
 //! which can be optimized using hash join algorithms instead of nested loop joins.
+//!
+//! ## Multi-Column Join Keys
+//!
+//! For queries with multiple equi-join conditions between the same table pair
+//! (e.g., `A.x = B.x AND A.y = B.y`), this module extracts ALL conditions to enable
+//! composite-key hash joins. This dramatically improves performance for:
+//! - TPC-H Q3, Q7, Q10 with multi-way joins
+//! - Queries with composite foreign keys
+//! - Any join with multiple equality conditions
 
 use vibesql_ast::{BinaryOperator, Expression};
 
 use crate::schema::CombinedSchema;
 
-/// Information about an equi-join condition
+/// Information about an equi-join condition (single column)
 #[derive(Debug, Clone)]
 pub struct EquiJoinInfo {
     /// Column index in the left table
     pub left_col_idx: usize,
     /// Column index in the right table
     pub right_col_idx: usize,
+}
+
+/// Information about a multi-column equi-join (composite key)
+///
+/// Used when there are multiple equality conditions between the same table pair,
+/// enabling composite-key hash join for better performance.
+#[derive(Debug, Clone)]
+pub struct MultiColumnEquiJoinInfo {
+    /// Column indices in the left table (in order)
+    pub left_col_indices: Vec<usize>,
+    /// Column indices in the right table (in order, matching left)
+    pub right_col_indices: Vec<usize>,
 }
 
 /// Analyze a join condition to detect if it's a simple equi-join
@@ -74,6 +95,79 @@ pub struct CompoundEquiJoinResult {
     pub equi_join: EquiJoinInfo,
     /// Remaining conditions to apply as post-join filter
     pub remaining_conditions: Vec<Expression>,
+}
+
+/// Result of analyzing a compound condition for multi-column equi-join opportunities
+#[derive(Debug)]
+pub struct MultiColumnEquiJoinResult {
+    /// All equi-join column pairs found (for composite key hash join)
+    pub equi_joins: MultiColumnEquiJoinInfo,
+    /// Remaining conditions to apply as post-join filter
+    pub remaining_conditions: Vec<Expression>,
+}
+
+/// Analyze a compound condition to extract ALL equi-join conditions for multi-column hash join
+///
+/// For compound conditions like `a.x = b.x AND a.y = b.y AND a.z > 5`, this will:
+/// 1. Extract ALL equi-join conditions (`a.x = b.x`, `a.y = b.y`) for composite key hash join
+/// 2. Return remaining conditions (`a.z > 5`) as post-join filters
+///
+/// This enables composite-key hash join for queries with multiple join columns,
+/// providing significant performance improvements for TPC-H Q3, Q7, Q10 and similar queries.
+///
+/// Returns None if no equi-join conditions are found.
+pub fn analyze_multi_column_equi_join(
+    condition: &Expression,
+    schema: &CombinedSchema,
+    left_column_count: usize,
+) -> Option<MultiColumnEquiJoinResult> {
+    // First try as a simple equi-join
+    if let Some(equi_join) = analyze_single_equi_join(condition, schema, left_column_count) {
+        return Some(MultiColumnEquiJoinResult {
+            equi_joins: MultiColumnEquiJoinInfo {
+                left_col_indices: vec![equi_join.left_col_idx],
+                right_col_indices: vec![equi_join.right_col_idx],
+            },
+            remaining_conditions: vec![],
+        });
+    }
+
+    // Try to extract from AND conditions
+    match condition {
+        Expression::BinaryOp { op: BinaryOperator::And, .. } => {
+            // Flatten all AND conditions
+            let mut conditions = Vec::new();
+            flatten_and_conditions(condition, &mut conditions);
+
+            // Collect ALL equi-join conditions
+            let mut left_indices = Vec::new();
+            let mut right_indices = Vec::new();
+            let mut remaining = Vec::new();
+
+            for cond in conditions {
+                if let Some(equi_join) = analyze_single_equi_join(cond, schema, left_column_count) {
+                    left_indices.push(equi_join.left_col_idx);
+                    right_indices.push(equi_join.right_col_idx);
+                } else {
+                    remaining.push(cond.clone());
+                }
+            }
+
+            // Return if we found at least one equi-join
+            if !left_indices.is_empty() {
+                return Some(MultiColumnEquiJoinResult {
+                    equi_joins: MultiColumnEquiJoinInfo {
+                        left_col_indices: left_indices,
+                        right_col_indices: right_indices,
+                    },
+                    remaining_conditions: remaining,
+                });
+            }
+
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Analyze a potentially compound (AND) condition to extract equi-join opportunities
