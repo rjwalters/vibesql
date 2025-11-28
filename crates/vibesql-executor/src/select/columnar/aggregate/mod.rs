@@ -84,8 +84,7 @@ pub fn compute_columnar_aggregate(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
-    // Try SIMD path for numeric columns (5-10x speedup)
-    #[cfg(feature = "simd")]
+    // Try SIMD path for numeric columns (5-10x speedup via LLVM auto-vectorization)
     {
         use super::simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
 
@@ -166,7 +165,6 @@ pub fn compute_multiple_aggregates(
 /// # Returns
 ///
 /// Vector of aggregate results in the same order as the input aggregates
-#[cfg(feature = "simd")]
 pub fn compute_aggregates_from_batch(
     batch: &ColumnarBatch,
     aggregates: &[AggregateSpec],

@@ -1,6 +1,4 @@
-use super::{build, combine_rows, FromResult};
-
-#[cfg(all(feature = "parallel", not(feature = "simd")))]
+use super::{combine_rows, FromResult};
 use super::build::build_hash_table_parallel;
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
@@ -59,18 +57,8 @@ pub(in crate::select::join) fn hash_join_left_outer(
 
     // Build hash table on the RIGHT side (we need to preserve ALL left rows)
     // For LEFT OUTER JOIN, we always probe with left, so build on right
-    // Uses SIMD-accelerated hashing when available
-    #[cfg(all(feature = "parallel", feature = "simd"))]
-    let hash_table = build::build_hash_table_parallel_simd(right_slice, right_col_idx);
-
-    #[cfg(all(feature = "simd", not(feature = "parallel")))]
-    let hash_table = build::build_hash_table_simd(right_slice, right_col_idx);
-
-    #[cfg(all(feature = "parallel", not(feature = "simd")))]
+    // Uses parallel hashing when available for large tables
     let hash_table = build_hash_table_parallel(right_slice, right_col_idx);
-
-    #[cfg(not(any(feature = "parallel", feature = "simd")))]
-    let hash_table = build::build_hash_table_sequential(right_slice, right_col_idx);
 
     // Probe with LEFT side, preserving unmatched left rows
     let mut result_rows = Vec::new();

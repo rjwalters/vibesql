@@ -56,6 +56,7 @@ where
                 | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
                 | ColumnPredicate::LessThanOrEqual { column_idx, .. }
                 | ColumnPredicate::Equal { column_idx, .. }
+                | ColumnPredicate::NotEqual { column_idx, .. }
                 | ColumnPredicate::Between { column_idx, .. } => *column_idx,
             };
 
@@ -91,6 +92,10 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
         }
         ColumnPredicate::Equal { value: target, .. } => {
             compare_values(value, target).equals(Ordering::Equal)
+        }
+        ColumnPredicate::NotEqual { value: target, .. } => {
+            // NotEqual returns true for any ordering that is NOT Equal
+            compare_values(value, target).matches(&[Ordering::Less, Ordering::Greater])
         }
         ColumnPredicate::Between { low, high, .. } => {
             // Both bounds must pass - if either comparison involves NULL, it returns false

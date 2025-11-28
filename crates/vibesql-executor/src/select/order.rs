@@ -10,9 +10,6 @@ use super::parallel::ParallelConfig;
 use super::grouping::compare_sql_values;
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
-#[cfg(feature = "simd")]
-use crate::simd::expression::{can_use_simd_for_expression, eval_expression_batch_simd};
-
 /// Row with optional sort keys for ORDER BY
 pub(super) type RowWithSortKeys =
     (vibesql_storage::Row, Option<Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection)>>);
@@ -32,86 +29,21 @@ pub(super) fn apply_order_by(
     evaluator: &CombinedExpressionEvaluator,
     select_list: &[vibesql_ast::SelectItem],
 ) -> Result<Vec<RowWithSortKeys>, ExecutorError> {
-    // Try batch SIMD evaluation for ORDER BY expressions if applicable
-    #[cfg(feature = "simd")]
-    {
-        // Collect just the Row part (without sort keys) for batch evaluation
-        let raw_rows: Vec<_> = rows.iter().map(|(r, _)| r.clone()).collect();
+    // Evaluate ORDER BY expressions for each row
+    for (row, sort_keys) in &mut rows {
+        // Clear CSE cache before evaluating this row's ORDER BY expressions
+        // to prevent stale cached column values from previous rows
+        evaluator.clear_cse_cache();
 
-        // Try to batch evaluate each ORDER BY expression using SIMD
-        let mut simd_results: Vec<Option<Vec<vibesql_types::SqlValue>>> = Vec::with_capacity(order_by.len());
-        let mut all_simd = true;
-
+        let mut keys = Vec::new();
         for order_item in order_by {
+            // Check if ORDER BY expression is a SELECT list alias
+            // Evaluator handles window functions via window_mapping if present
             let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list);
-
-            if can_use_simd_for_expression(expr_to_eval, &raw_rows, evaluator) {
-                match eval_expression_batch_simd(expr_to_eval, &raw_rows, evaluator) {
-                    Ok(values) => simd_results.push(Some(values)),
-                    Err(_) => {
-                        // SIMD failed for this expression, fall back to scalar for all
-                        all_simd = false;
-                        break;
-                    }
-                }
-            } else {
-                // Expression not SIMD-compatible, fall back to scalar for all
-                all_simd = false;
-                break;
-            }
+            let key_value = evaluator.eval(expr_to_eval, row)?;
+            keys.push((key_value, order_item.direction.clone()));
         }
-
-        // If all ORDER BY expressions were evaluated with SIMD, use those results
-        if all_simd && !simd_results.is_empty() {
-            for (row_idx, (_, sort_keys)) in rows.iter_mut().enumerate() {
-                let mut keys = Vec::new();
-                for (expr_idx, order_item) in order_by.iter().enumerate() {
-                    if let Some(ref values) = simd_results[expr_idx] {
-                        keys.push((values[row_idx].clone(), order_item.direction.clone()));
-                    }
-                }
-                *sort_keys = Some(keys);
-            }
-
-            // Skip row-by-row evaluation below
-        } else {
-            // Fall back to row-by-row evaluation
-            for (row, sort_keys) in &mut rows {
-                // Clear CSE cache before evaluating this row's ORDER BY expressions
-                // to prevent stale cached column values from previous rows
-                evaluator.clear_cse_cache();
-
-                let mut keys = Vec::new();
-                for order_item in order_by {
-                    // Check if ORDER BY expression is a SELECT list alias
-                    // Evaluator handles window functions via window_mapping if present
-                    let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list);
-                    let key_value = evaluator.eval(expr_to_eval, row)?;
-                    keys.push((key_value, order_item.direction.clone()));
-                }
-                *sort_keys = Some(keys);
-            }
-        }
-    }
-
-    #[cfg(not(feature = "simd"))]
-    {
-        // Evaluate ORDER BY expressions for each row (no SIMD)
-        for (row, sort_keys) in &mut rows {
-            // Clear CSE cache before evaluating this row's ORDER BY expressions
-            // to prevent stale cached column values from previous rows
-            evaluator.clear_cse_cache();
-
-            let mut keys = Vec::new();
-            for order_item in order_by {
-                // Check if ORDER BY expression is a SELECT list alias
-                // Evaluator handles window functions via window_mapping if present
-                let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list);
-                let key_value = evaluator.eval(expr_to_eval, row)?;
-                keys.push((key_value, order_item.direction.clone()));
-            }
-            *sort_keys = Some(keys);
-        }
+        *sort_keys = Some(keys);
     }
 
     // Sort by the evaluated keys (with automatic parallelism based on row count when feature enabled)

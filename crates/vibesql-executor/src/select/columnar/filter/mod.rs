@@ -96,6 +96,7 @@ where
                 ColumnPredicate::GreaterThanOrEqual { column_idx, .. } => *column_idx,
                 ColumnPredicate::LessThanOrEqual { column_idx, .. } => *column_idx,
                 ColumnPredicate::Equal { column_idx, .. } => *column_idx,
+                ColumnPredicate::NotEqual { column_idx, .. } => *column_idx,
                 ColumnPredicate::Between { column_idx, .. } => *column_idx,
             };
 

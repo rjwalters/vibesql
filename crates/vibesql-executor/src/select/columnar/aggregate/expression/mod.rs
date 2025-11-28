@@ -22,7 +22,6 @@
 mod evaluator;
 mod vectorized;
 mod simd;
-#[cfg(feature = "simd")]
 mod batch;
 
 #[cfg(test)]
@@ -35,7 +34,6 @@ use super::{AggregateOp, AggregateSource, AggregateSpec};
 
 // Re-export public API
 pub(super) use vectorized::compute_expression_aggregate;
-#[cfg(feature = "simd")]
 pub(super) use batch::compute_batch_expression_aggregate;
 
 /// Extract aggregate operations from AST expressions

@@ -1,17 +1,106 @@
-//! SIMD-accelerated filtering for columnar batches
+//! Auto-vectorized filtering for columnar batches
+//!
+//! Uses the centralized simd_ops module for consistent, optimized operations.
 
 use super::batch::{ColumnArray, ColumnarBatch};
 use super::filter::ColumnPredicate;
+use super::simd_ops;
 use crate::errors::ExecutorError;
-
-#[cfg(feature = "simd")]
-use crate::simd::comparison::{
-    simd_eq_f64, simd_eq_i32, simd_eq_i64, simd_ge_f64, simd_ge_i32, simd_ge_i64, simd_gt_f64,
-    simd_gt_i32, simd_gt_i64, simd_le_f64, simd_le_i32, simd_le_i64, simd_lt_f64, simd_lt_i32,
-    simd_lt_i64,
-};
-
 use vibesql_types::SqlValue;
+
+// Re-export comparison functions from simd_ops module for consistency
+// Note: comparisons vectorize well even with simple iterator patterns,
+// but we centralize them in simd_ops to prevent accidental regressions.
+
+#[inline]
+fn simd_lt_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    simd_ops::lt_i64(values, threshold)
+}
+
+#[inline]
+fn simd_gt_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    simd_ops::gt_i64(values, threshold)
+}
+
+#[inline]
+fn simd_le_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    simd_ops::le_i64(values, threshold)
+}
+
+#[inline]
+fn simd_ge_i64(values: &[i64], threshold: i64) -> Vec<bool> {
+    simd_ops::ge_i64(values, threshold)
+}
+
+#[inline]
+fn simd_eq_i64(values: &[i64], target: i64) -> Vec<bool> {
+    simd_ops::eq_i64(values, target)
+}
+
+#[inline]
+fn simd_lt_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    simd_ops::lt_i32(values, threshold)
+}
+
+#[inline]
+fn simd_gt_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    simd_ops::gt_i32(values, threshold)
+}
+
+#[inline]
+fn simd_le_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    simd_ops::le_i32(values, threshold)
+}
+
+#[inline]
+fn simd_ge_i32(values: &[i32], threshold: i32) -> Vec<bool> {
+    simd_ops::ge_i32(values, threshold)
+}
+
+#[inline]
+fn simd_eq_i32(values: &[i32], target: i32) -> Vec<bool> {
+    simd_ops::eq_i32(values, target)
+}
+
+#[inline]
+fn simd_lt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    simd_ops::lt_f64(values, threshold)
+}
+
+#[inline]
+fn simd_gt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    simd_ops::gt_f64(values, threshold)
+}
+
+#[inline]
+fn simd_le_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    simd_ops::le_f64(values, threshold)
+}
+
+#[inline]
+fn simd_ge_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    simd_ops::ge_f64(values, threshold)
+}
+
+#[inline]
+fn simd_eq_f64(values: &[f64], target: f64) -> Vec<bool> {
+    simd_ops::eq_f64(values, target)
+}
+
+#[inline]
+fn simd_ne_i64(values: &[i64], target: i64) -> Vec<bool> {
+    simd_ops::ne_i64(values, target)
+}
+
+#[inline]
+fn simd_ne_i32(values: &[i32], target: i32) -> Vec<bool> {
+    simd_ops::ne_i32(values, target)
+}
+
+#[inline]
+fn simd_ne_f64(values: &[f64], target: f64) -> Vec<bool> {
+    simd_ops::ne_f64(values, target)
+}
 
 /// Check if any value in a predicate is NULL
 /// Per SQL standard, any comparison with NULL returns UNKNOWN (treated as false in WHERE)
@@ -21,7 +110,8 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         | ColumnPredicate::GreaterThan { value, .. }
         | ColumnPredicate::GreaterThanOrEqual { value, .. }
         | ColumnPredicate::LessThanOrEqual { value, .. }
-        | ColumnPredicate::Equal { value, .. } => matches!(value, SqlValue::Null),
+        | ColumnPredicate::Equal { value, .. }
+        | ColumnPredicate::NotEqual { value, .. } => matches!(value, SqlValue::Null),
         ColumnPredicate::Between { low, high, .. } => {
             matches!(low, SqlValue::Null) || matches!(high, SqlValue::Null)
         }
@@ -102,6 +192,7 @@ fn evaluate_predicate_simd(
         | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
         | ColumnPredicate::LessThanOrEqual { column_idx, .. }
         | ColumnPredicate::Equal { column_idx, .. }
+        | ColumnPredicate::NotEqual { column_idx, .. }
         | ColumnPredicate::Between { column_idx, .. } => *column_idx,
     };
 
@@ -270,6 +361,23 @@ fn evaluate_predicate_i64_simd(
                 simd_le_f64(&f64_values, threshold)
             }
         }
+
+        ColumnPredicate::NotEqual { value, .. } => {
+            if let SqlValue::Integer(target) = value {
+                simd_ne_i64(values, *target)
+            } else if let SqlValue::Bigint(target) = value {
+                simd_ne_i64(values, *target)
+            } else {
+                let target = value_to_f64(value)
+                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "comparison".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", value)),
+                    })?;
+                let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
+                simd_ne_f64(&f64_values, target)
+            }
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -365,6 +473,16 @@ fn evaluate_predicate_i32_simd(
                 .map(|(&a, &b)| a && b)
                 .collect()
         }
+
+        ColumnPredicate::NotEqual { value, .. } => {
+            let target = value_to_date_i32(value)
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "date comparison".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: None,
+                })?;
+            simd_ne_i32(values, target)
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -459,6 +577,16 @@ fn evaluate_predicate_f64_simd(
                 .zip(le_high.iter())
                 .map(|(&a, &b)| a && b)
                 .collect()
+        }
+
+        ColumnPredicate::NotEqual { value, .. } => {
+            let target = value_to_f64(value)
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "comparison".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", value)),
+                })?;
+            simd_ne_f64(values, target)
         }
     };
 

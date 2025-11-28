@@ -22,14 +22,45 @@
 use super::batch::{ColumnArray, ColumnarBatch};
 use super::aggregate::{AggregateOp, AggregateSource, AggregateSpec};
 use super::filter::ColumnPredicate;
+use super::simd_filter::simd_filter_batch;
+use super::simd_ops;
 use crate::errors::ExecutorError;
 use crate::schema::CombinedSchema;
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-#[cfg(feature = "simd")]
-use super::simd_filter::simd_filter_batch;
+// Re-export optimized SIMD operations from simd_ops module
+// See simd_ops.rs for documentation on why the 4-accumulator pattern is used
+#[inline]
+fn simd_sum_i64(values: &[i64]) -> i64 {
+    simd_ops::sum_i64(values)
+}
+
+#[inline]
+fn simd_min_i64(values: &[i64]) -> Option<i64> {
+    simd_ops::min_i64(values)
+}
+
+#[inline]
+fn simd_max_i64(values: &[i64]) -> Option<i64> {
+    simd_ops::max_i64(values)
+}
+
+#[inline]
+fn simd_sum_f64(values: &[f64]) -> f64 {
+    simd_ops::sum_f64(values)
+}
+
+#[inline]
+fn simd_min_f64(values: &[f64]) -> Option<f64> {
+    simd_ops::min_f64(values)
+}
+
+#[inline]
+fn simd_max_f64(values: &[f64]) -> Option<f64> {
+    simd_ops::max_f64(values)
+}
 
 /// Execute a columnar query end-to-end on a ColumnarBatch
 ///
@@ -65,23 +96,14 @@ pub fn execute_columnar_batch(
         return Ok(vec![Row::new(values)]);
     }
 
-    // Phase 1: Apply SIMD filtering
+    // Phase 1: Apply auto-vectorized filtering
     #[cfg(feature = "profile-q6")]
     let filter_start = std::time::Instant::now();
 
     let filtered_batch = if predicates.is_empty() {
         batch.clone()
     } else {
-        #[cfg(feature = "simd")]
-        {
-            simd_filter_batch(batch, predicates)?
-        }
-        #[cfg(not(feature = "simd"))]
-        {
-            // Scalar fallback - create filter bitmap and apply
-            let filter_bitmap = create_filter_bitmap_for_batch(batch, predicates)?;
-            apply_filter_bitmap_to_batch(batch, &filter_bitmap)?
-        }
+        simd_filter_batch(batch, predicates)?
     };
 
     #[cfg(feature = "profile-q6")]
@@ -171,13 +193,7 @@ fn compute_column_aggregate(
     }
 }
 
-/// Compute aggregate on i64 column using SIMD
-///
-/// Two paths are used depending on NULL presence:
-/// - Fast path (no NULLs): Direct SIMD on slice, zero allocation
-/// - Masked path (with NULLs): Allocates a `Vec<bool>` validity mask instead of
-///   copying values to a `Vec<i64>`. This trades a large `Vec<i64>` allocation
-///   for a smaller `Vec<bool>` (1 byte vs 8 bytes per element).
+/// Compute aggregate on i64 column using auto-vectorized operations
 fn compute_i64_aggregate(
     values: &[i64],
     nulls: Option<&Vec<bool>>,
@@ -191,138 +207,53 @@ fn compute_i64_aggregate(
         });
     }
 
-    #[cfg(feature = "simd")]
-    {
-        use crate::simd::aggregation::{
-            simd_sum_i64, simd_min_i64, simd_max_i64,
-            simd_sum_i64_masked, simd_min_i64_masked, simd_max_i64_masked,
-            simd_count_masked,
-        };
+    // Filter out NULL values
+    let valid_values: Vec<i64> = if let Some(null_mask) = nulls {
+        values
+            .iter()
+            .zip(null_mask.iter())
+            .filter_map(|(&v, &is_null)| if !is_null { Some(v) } else { None })
+            .collect()
+    } else {
+        values.to_vec()
+    };
 
-        // Fast path: no NULLs - use regular SIMD directly on the slice
-        if nulls.is_none() {
-            log::debug!("[SIMD] Using fast path (no NULLs) for i64 aggregate");
-            return match op {
-                AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64(values))),
-                AggregateOp::Count => Ok(SqlValue::Integer(values.len() as i64)),
-                AggregateOp::Avg => {
-                    let sum = simd_sum_i64(values);
-                    Ok(SqlValue::Double(sum as f64 / values.len() as f64))
-                }
-                AggregateOp::Min => {
-                    simd_min_i64(values)
-                        .map(SqlValue::Integer)
-                        .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                            operation: "MIN".to_string(),
-                            reason: "empty set".to_string(),
-                        })
-                }
-                AggregateOp::Max => {
-                    simd_max_i64(values)
-                        .map(SqlValue::Integer)
-                        .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                            operation: "MAX".to_string(),
-                            reason: "empty set".to_string(),
-                        })
-                }
-            };
-        }
-
-        // Masked path: use SIMD with null mask to avoid Vec allocation
-        // Create a validity mask where true = valid (non-null)
-        let null_mask = nulls.unwrap();
-        let validity_mask: Vec<bool> = null_mask.iter().map(|&is_null| !is_null).collect();
-        let valid_count = simd_count_masked(&validity_mask);
-
-        log::debug!("[SIMD] Using masked SIMD path for i64 aggregate with {} valid values", valid_count);
-
-        if valid_count == 0 {
-            return Ok(match op {
-                AggregateOp::Count => SqlValue::Integer(0),
-                _ => SqlValue::Null,
-            });
-        }
-
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64_masked(values, &validity_mask))),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_count as i64)),
-            AggregateOp::Avg => {
-                let sum = simd_sum_i64_masked(values, &validity_mask);
-                Ok(SqlValue::Double(sum as f64 / valid_count as f64))
-            }
-            AggregateOp::Min => {
-                simd_min_i64_masked(values, &validity_mask)
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                simd_max_i64_masked(values, &validity_mask)
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-        }
+    if valid_values.is_empty() {
+        return Ok(match op {
+            AggregateOp::Count => SqlValue::Integer(0),
+            _ => SqlValue::Null,
+        });
     }
 
-    #[cfg(not(feature = "simd"))]
-    {
-        // Scalar fallback - still needs to filter values
-        let valid_values: Vec<i64> = if let Some(null_mask) = nulls {
-            values
-                .iter()
-                .zip(null_mask.iter())
-                .filter_map(|(&v, &is_null)| if !is_null { Some(v) } else { None })
-                .collect()
-        } else {
-            values.to_vec()
-        };
+    log::debug!("[SIMD] Using auto-vectorized path for i64 aggregate with {} valid values", valid_values.len());
 
-        if valid_values.is_empty() {
-            return Ok(match op {
-                AggregateOp::Count => SqlValue::Integer(0),
-                _ => SqlValue::Null,
-            });
+    match op {
+        AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64(&valid_values))),
+        AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
+        AggregateOp::Avg => {
+            let sum = simd_sum_i64(&valid_values);
+            Ok(SqlValue::Double(sum as f64 / valid_values.len() as f64))
         }
-
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Integer(valid_values.iter().sum())),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
-            AggregateOp::Avg => {
-                let sum: i64 = valid_values.iter().sum();
-                Ok(SqlValue::Double(sum as f64 / valid_values.len() as f64))
-            }
-            AggregateOp::Min => {
-                valid_values.iter().min().copied()
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                valid_values.iter().max().copied()
-                    .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
+        AggregateOp::Min => {
+            simd_min_i64(&valid_values)
+                .map(SqlValue::Integer)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MIN".to_string(),
+                    reason: "empty set".to_string(),
+                })
+        }
+        AggregateOp::Max => {
+            simd_max_i64(&valid_values)
+                .map(SqlValue::Integer)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MAX".to_string(),
+                    reason: "empty set".to_string(),
+                })
         }
     }
 }
 
-/// Compute aggregate on f64 column using SIMD
-///
-/// Two paths are used depending on NULL presence:
-/// - Fast path (no NULLs): Direct SIMD on slice, zero allocation
-/// - Masked path (with NULLs): Allocates a `Vec<bool>` validity mask instead of
-///   copying values to a `Vec<f64>`. This trades a large `Vec<f64>` allocation
-///   for a smaller `Vec<bool>` (1 byte vs 8 bytes per element).
+/// Compute aggregate on f64 column using auto-vectorized operations
 fn compute_f64_aggregate(
     values: &[f64],
     nulls: Option<&Vec<bool>>,
@@ -336,129 +267,48 @@ fn compute_f64_aggregate(
         });
     }
 
-    #[cfg(feature = "simd")]
-    {
-        use crate::simd::aggregation::{
-            simd_sum_f64, simd_min_f64, simd_max_f64,
-            simd_sum_f64_masked, simd_min_f64_masked, simd_max_f64_masked,
-            simd_count_masked,
-        };
+    // Filter out NULL values
+    let valid_values: Vec<f64> = if let Some(null_mask) = nulls {
+        values
+            .iter()
+            .zip(null_mask.iter())
+            .filter_map(|(&v, &is_null)| if !is_null { Some(v) } else { None })
+            .collect()
+    } else {
+        values.to_vec()
+    };
 
-        // Fast path: no NULLs - use regular SIMD directly on the slice
-        if nulls.is_none() {
-            log::debug!("[SIMD] Using fast path (no NULLs) for f64 aggregate");
-            return match op {
-                AggregateOp::Sum => Ok(SqlValue::Double(simd_sum_f64(values))),
-                AggregateOp::Count => Ok(SqlValue::Integer(values.len() as i64)),
-                AggregateOp::Avg => {
-                    let sum = simd_sum_f64(values);
-                    Ok(SqlValue::Double(sum / values.len() as f64))
-                }
-                AggregateOp::Min => {
-                    simd_min_f64(values)
-                        .map(SqlValue::Double)
-                        .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                            operation: "MIN".to_string(),
-                            reason: "empty set".to_string(),
-                        })
-                }
-                AggregateOp::Max => {
-                    simd_max_f64(values)
-                        .map(SqlValue::Double)
-                        .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                            operation: "MAX".to_string(),
-                            reason: "empty set".to_string(),
-                        })
-                }
-            };
-        }
-
-        // Masked path: use SIMD with null mask to avoid Vec allocation
-        // Create a validity mask where true = valid (non-null)
-        let null_mask = nulls.unwrap();
-        let validity_mask: Vec<bool> = null_mask.iter().map(|&is_null| !is_null).collect();
-        let valid_count = simd_count_masked(&validity_mask);
-
-        log::debug!("[SIMD] Using masked SIMD path for f64 aggregate with {} valid values", valid_count);
-
-        if valid_count == 0 {
-            return Ok(match op {
-                AggregateOp::Count => SqlValue::Integer(0),
-                _ => SqlValue::Null,
-            });
-        }
-
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Double(simd_sum_f64_masked(values, &validity_mask))),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_count as i64)),
-            AggregateOp::Avg => {
-                let sum = simd_sum_f64_masked(values, &validity_mask);
-                Ok(SqlValue::Double(sum / valid_count as f64))
-            }
-            AggregateOp::Min => {
-                simd_min_f64_masked(values, &validity_mask)
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                simd_max_f64_masked(values, &validity_mask)
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-        }
+    if valid_values.is_empty() {
+        return Ok(match op {
+            AggregateOp::Count => SqlValue::Integer(0),
+            _ => SqlValue::Null,
+        });
     }
 
-    #[cfg(not(feature = "simd"))]
-    {
-        // Scalar fallback - still needs to filter values
-        let valid_values: Vec<f64> = if let Some(null_mask) = nulls {
-            values
-                .iter()
-                .zip(null_mask.iter())
-                .filter_map(|(&v, &is_null)| if !is_null { Some(v) } else { None })
-                .collect()
-        } else {
-            values.to_vec()
-        };
+    log::debug!("[SIMD] Using auto-vectorized path for f64 aggregate with {} valid values", valid_values.len());
 
-        if valid_values.is_empty() {
-            return Ok(match op {
-                AggregateOp::Count => SqlValue::Integer(0),
-                _ => SqlValue::Null,
-            });
+    match op {
+        AggregateOp::Sum => Ok(SqlValue::Double(simd_sum_f64(&valid_values))),
+        AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
+        AggregateOp::Avg => {
+            let sum = simd_sum_f64(&valid_values);
+            Ok(SqlValue::Double(sum / valid_values.len() as f64))
         }
-
-        match op {
-            AggregateOp::Sum => Ok(SqlValue::Double(valid_values.iter().sum())),
-            AggregateOp::Count => Ok(SqlValue::Integer(valid_values.len() as i64)),
-            AggregateOp::Avg => {
-                let sum: f64 = valid_values.iter().sum();
-                Ok(SqlValue::Double(sum / valid_values.len() as f64))
-            }
-            AggregateOp::Min => {
-                valid_values.iter().cloned()
-                    .min_by(|a, b| a.partial_cmp(b).unwrap())
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MIN".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
-            AggregateOp::Max => {
-                valid_values.iter().cloned()
-                    .max_by(|a, b| a.partial_cmp(b).unwrap())
-                    .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                        operation: "MAX".to_string(),
-                        reason: "empty set".to_string(),
-                    })
-            }
+        AggregateOp::Min => {
+            simd_min_f64(&valid_values)
+                .map(SqlValue::Double)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MIN".to_string(),
+                    reason: "empty set".to_string(),
+                })
+        }
+        AggregateOp::Max => {
+            simd_max_f64(&valid_values)
+                .map(SqlValue::Double)
+                .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                    operation: "MAX".to_string(),
+                    reason: "empty set".to_string(),
+                })
         }
     }
 }
@@ -566,6 +416,7 @@ fn create_filter_bitmap_for_batch(
                 | ColumnPredicate::LessThanOrEqual { column_idx, .. }
                 | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
                 | ColumnPredicate::Equal { column_idx, .. }
+                | ColumnPredicate::NotEqual { column_idx, .. }
                 | ColumnPredicate::Between { column_idx, .. } => *column_idx,
             };
 
