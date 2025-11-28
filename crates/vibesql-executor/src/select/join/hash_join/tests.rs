@@ -2,7 +2,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
-use super::{build::*, inner::hash_join_inner, outer::hash_join_left_outer, FromResult};
+use super::{build::*, inner::{hash_join_inner, hash_join_inner_multi}, outer::hash_join_left_outer, FromResult};
 use crate::schema::CombinedSchema;
 
 /// Helper to create a simple FromResult for testing
@@ -609,4 +609,193 @@ fn test_hash_join_left_outer_empty_left_table() {
 
     // Should produce empty result (no left rows to preserve)
     assert_eq!(result.rows().len(), 0);
+}
+
+// Tests for multi-column hash join
+
+#[test]
+fn test_hash_join_inner_multi_two_columns() {
+    // Test multi-column hash join with composite key (2 columns)
+    // Left table: sales(region_id, product_id, amount)
+    let left = create_test_from_result(
+        "sales",
+        vec![
+            ("region_id", DataType::Integer),
+            ("product_id", DataType::Integer),
+            ("amount", DataType::Integer),
+        ],
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(100), SqlValue::Integer(500)],
+            vec![SqlValue::Integer(1), SqlValue::Integer(200), SqlValue::Integer(300)],
+            vec![SqlValue::Integer(2), SqlValue::Integer(100), SqlValue::Integer(400)],
+            vec![SqlValue::Integer(2), SqlValue::Integer(300), SqlValue::Integer(200)],
+        ],
+    );
+
+    // Right table: inventory(region_id, product_id, stock)
+    let right = create_test_from_result(
+        "inventory",
+        vec![
+            ("region_id", DataType::Integer),
+            ("product_id", DataType::Integer),
+            ("stock", DataType::Integer),
+        ],
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(100), SqlValue::Integer(50)],
+            vec![SqlValue::Integer(1), SqlValue::Integer(200), SqlValue::Integer(30)],
+            vec![SqlValue::Integer(2), SqlValue::Integer(200), SqlValue::Integer(20)],  // No match
+        ],
+    );
+
+    // Join on (region_id, product_id)
+    let mut result = hash_join_inner_multi(
+        left,
+        right,
+        &[0, 1],  // left column indices
+        &[0, 1],  // right column indices
+    ).unwrap();
+
+    // Should have 2 matches:
+    // (1, 100) from left matches (1, 100) from right
+    // (1, 200) from left matches (1, 200) from right
+    assert_eq!(result.rows().len(), 2);
+
+    // Verify combined row structure (6 columns total)
+    for row in result.rows() {
+        assert_eq!(row.values.len(), 6);
+    }
+
+    // Verify the (1, 100) match
+    let match_1_100: Vec<_> = result
+        .rows()
+        .iter()
+        .filter(|r| r.values[0] == SqlValue::Integer(1) && r.values[1] == SqlValue::Integer(100))
+        .collect();
+    assert_eq!(match_1_100.len(), 1);
+    assert_eq!(match_1_100[0].values[2], SqlValue::Integer(500)); // amount from left
+    assert_eq!(match_1_100[0].values[5], SqlValue::Integer(50));  // stock from right
+
+    // Verify the (1, 200) match
+    let match_1_200: Vec<_> = result
+        .rows()
+        .iter()
+        .filter(|r| r.values[0] == SqlValue::Integer(1) && r.values[1] == SqlValue::Integer(200))
+        .collect();
+    assert_eq!(match_1_200.len(), 1);
+    assert_eq!(match_1_200[0].values[2], SqlValue::Integer(300)); // amount from left
+    assert_eq!(match_1_200[0].values[5], SqlValue::Integer(30));  // stock from right
+}
+
+#[test]
+fn test_hash_join_inner_multi_null_in_composite_key() {
+    // Test that NULLs in composite keys don't match
+    let left = create_test_from_result(
+        "left",
+        vec![("a", DataType::Integer), ("b", DataType::Integer)],
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(2)],
+            vec![SqlValue::Integer(1), SqlValue::Null],  // NULL in second key
+            vec![SqlValue::Null, SqlValue::Integer(2)],  // NULL in first key
+        ],
+    );
+
+    let right = create_test_from_result(
+        "right",
+        vec![("x", DataType::Integer), ("y", DataType::Integer)],
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(2)],
+            vec![SqlValue::Integer(1), SqlValue::Null],  // NULL shouldn't match
+            vec![SqlValue::Null, SqlValue::Integer(2)],  // NULL shouldn't match
+        ],
+    );
+
+    let mut result = hash_join_inner_multi(left, right, &[0, 1], &[0, 1]).unwrap();
+
+    // Only one match: (1, 2) = (1, 2)
+    // NULLs don't match
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0].values[0], SqlValue::Integer(1));
+    assert_eq!(result.rows()[0].values[1], SqlValue::Integer(2));
+}
+
+#[test]
+fn test_hash_join_inner_multi_duplicate_composite_keys() {
+    // Test composite keys with duplicates
+    let left = create_test_from_result(
+        "left",
+        vec![("a", DataType::Integer), ("b", DataType::Integer), ("data", DataType::Varchar { max_length: Some(10) })],
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("L1".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("L2".to_string())],  // Duplicate key
+        ],
+    );
+
+    let right = create_test_from_result(
+        "right",
+        vec![("x", DataType::Integer), ("y", DataType::Integer), ("info", DataType::Varchar { max_length: Some(10) })],
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("R1".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("R2".to_string())],  // Duplicate key
+        ],
+    );
+
+    let mut result = hash_join_inner_multi(left, right, &[0, 1], &[0, 1]).unwrap();
+
+    // Should have 4 results (2 left rows × 2 right rows for matching composite key)
+    assert_eq!(result.rows().len(), 4);
+
+    // Verify all combinations exist
+    let result_data: Vec<_> = result.rows().iter().map(|r| {
+        (r.values[2].clone(), r.values[5].clone())
+    }).collect();
+
+    assert!(result_data.contains(&(SqlValue::Varchar("L1".to_string()), SqlValue::Varchar("R1".to_string()))));
+    assert!(result_data.contains(&(SqlValue::Varchar("L1".to_string()), SqlValue::Varchar("R2".to_string()))));
+    assert!(result_data.contains(&(SqlValue::Varchar("L2".to_string()), SqlValue::Varchar("R1".to_string()))));
+    assert!(result_data.contains(&(SqlValue::Varchar("L2".to_string()), SqlValue::Varchar("R2".to_string()))));
+}
+
+#[test]
+fn test_composite_key_build_and_hash() {
+    // Test composite key building and hashing
+    let rows = vec![
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("a".to_string()), SqlValue::Integer(100)]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("b".to_string()), SqlValue::Integer(200)]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("a".to_string()), SqlValue::Integer(300)]),  // Duplicate key
+    ];
+
+    // Build hash table with composite key (columns 0 and 1)
+    let hash_table = build_hash_table_composite_sequential(&rows, &[0, 1]);
+
+    // Should have 2 unique composite keys
+    assert_eq!(hash_table.len(), 2);
+
+    // Key (1, "a") should have 2 row indices
+    let key_1_a = CompositeKey(vec![SqlValue::Integer(1), SqlValue::Varchar("a".to_string())]);
+    let indices = hash_table.get(&key_1_a).unwrap();
+    assert_eq!(indices.len(), 2);
+    assert!(indices.contains(&0));
+    assert!(indices.contains(&2));
+
+    // Key (2, "b") should have 1 row index
+    let key_2_b = CompositeKey(vec![SqlValue::Integer(2), SqlValue::Varchar("b".to_string())]);
+    let indices = hash_table.get(&key_2_b).unwrap();
+    assert_eq!(indices.len(), 1);
+    assert!(indices.contains(&1));
+}
+
+#[test]
+fn test_composite_key_with_nulls() {
+    // Test that rows with NULL in composite key are skipped
+    let rows = vec![
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("a".to_string())]),
+        Row::new(vec![SqlValue::Null, SqlValue::Varchar("b".to_string())]),  // NULL in first column
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Null]),  // NULL in second column
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("c".to_string())]),
+    ];
+
+    let hash_table = build_hash_table_composite_sequential(&rows, &[0, 1]);
+
+    // Only 2 keys should be in the hash table (rows with NULLs skipped)
+    assert_eq!(hash_table.len(), 2);
 }
