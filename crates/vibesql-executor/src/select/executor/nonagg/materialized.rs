@@ -16,6 +16,7 @@ use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
     optimizer::optimize_where_clause,
+    pipeline::ExecutionContext,
     select::{
         filter::apply_where_filter_combined_auto,
         helpers::{apply_distinct, apply_limit_offset},
@@ -84,53 +85,24 @@ impl SelectExecutor<'_> {
             + rows.iter().map(|r| std::mem::size_of_val(r.values.as_slice())).sum::<usize>();
         self.track_memory_allocation(from_memory_bytes)?;
 
-        // Create evaluator with procedural context and CTE context support
-        // Priority: 1) outer context (for subqueries) 2) procedural context 3) just database
-        // Also pass CTE context if available (from outer query or from current query's CTEs)
+        // Create evaluator using consolidated ExecutionContext
+        // Handles: outer context (subqueries), procedural context, CTE context
         let cte_ctx = if !cte_results.is_empty() {
             Some(cte_results)
         } else {
             self.cte_context
         };
 
-        let evaluator =
-            if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
-                if let Some(cte_ctx) = cte_ctx {
-                    CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
-                        &schema,
-                        self.database,
-                        outer_row,
-                        outer_schema,
-                        cte_ctx,
-                    )
-                } else {
-                    CombinedExpressionEvaluator::with_database_and_outer_context(
-                        &schema,
-                        self.database,
-                        outer_row,
-                        outer_schema,
-                    )
-                }
-            } else if let Some(proc_ctx) = self.procedural_context {
-                if let Some(cte_ctx) = cte_ctx {
-                    CombinedExpressionEvaluator::with_database_and_procedural_context_and_cte(
-                        &schema,
-                        self.database,
-                        proc_ctx,
-                        cte_ctx,
-                    )
-                } else {
-                    CombinedExpressionEvaluator::with_database_and_procedural_context(
-                        &schema,
-                        self.database,
-                        proc_ctx,
-                    )
-                }
-            } else if let Some(cte_ctx) = cte_ctx {
-                CombinedExpressionEvaluator::with_database_and_cte(&schema, self.database, cte_ctx)
-            } else {
-                CombinedExpressionEvaluator::with_database(&schema, self.database)
-            };
+        let mut ctx = ExecutionContext::new(&schema, self.database);
+        if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+            ctx = ctx.with_outer_context(outer_row, outer_schema);
+        } else if let Some(proc_ctx) = self.procedural_context {
+            ctx = ctx.with_procedural_context(proc_ctx);
+        }
+        if let Some(cte_ctx) = cte_ctx {
+            ctx = ctx.with_cte_context(cte_ctx);
+        }
+        let evaluator = ctx.create_evaluator();
 
         // Skip WHERE filtering if already applied during scan (e.g., by index scan)
         // This prevents redundant evaluation that can cause incorrect results
@@ -310,61 +282,20 @@ impl SelectExecutor<'_> {
             let already_sorted = self.check_if_already_sorted(sorted_by, order_by);
 
             if !already_sorted {
-                // Create evaluator for ORDER BY with procedural context and CTE context support
+                // Create evaluator for ORDER BY using consolidated ExecutionContext
                 // Priority: 1) window mapping 2) outer context 3) procedural context 4) database only
-                // Also pass CTE context if available (from outer query or from current query's CTEs)
-                let order_by_evaluator = if let Some(ref mapping) = window_mapping {
-                    if let Some(cte_ctx) = cte_ctx {
-                        CombinedExpressionEvaluator::with_database_and_windows_and_cte(
-                            schema,
-                            self.database,
-                            mapping,
-                            cte_ctx,
-                        )
-                    } else {
-                        CombinedExpressionEvaluator::with_database_and_windows(
-                            schema,
-                            self.database,
-                            mapping,
-                        )
-                    }
+                let mut ctx = ExecutionContext::new(schema, self.database);
+                if let Some(ref mapping) = window_mapping {
+                    ctx = ctx.with_window_mapping(mapping);
                 } else if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
-                    if let Some(cte_ctx) = cte_ctx {
-                        CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
-                            schema,
-                            self.database,
-                            outer_row,
-                            outer_schema,
-                            cte_ctx,
-                        )
-                    } else {
-                        CombinedExpressionEvaluator::with_database_and_outer_context(
-                            schema,
-                            self.database,
-                            outer_row,
-                            outer_schema,
-                        )
-                    }
+                    ctx = ctx.with_outer_context(outer_row, outer_schema);
                 } else if let Some(proc_ctx) = self.procedural_context {
-                    if let Some(cte_ctx) = cte_ctx {
-                        CombinedExpressionEvaluator::with_database_and_procedural_context_and_cte(
-                            schema,
-                            self.database,
-                            proc_ctx,
-                            cte_ctx,
-                        )
-                    } else {
-                        CombinedExpressionEvaluator::with_database_and_procedural_context(
-                            schema,
-                            self.database,
-                            proc_ctx,
-                        )
-                    }
-                } else if let Some(cte_ctx) = cte_ctx {
-                    CombinedExpressionEvaluator::with_database_and_cte(schema, self.database, cte_ctx)
-                } else {
-                    CombinedExpressionEvaluator::with_database(schema, self.database)
-                };
+                    ctx = ctx.with_procedural_context(proc_ctx);
+                }
+                if let Some(cte_ctx) = cte_ctx {
+                    ctx = ctx.with_cte_context(cte_ctx);
+                }
+                let order_by_evaluator = ctx.create_evaluator();
                 *result_rows = apply_order_by(
                     std::mem::take(result_rows),
                     order_by,

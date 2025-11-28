@@ -8,8 +8,8 @@
 use super::{builder::SelectExecutor, validation::validate_where_clause_subqueries};
 use crate::{
     errors::ExecutorError,
-    evaluator::CombinedExpressionEvaluator,
     optimizer::optimize_where_clause,
+    pipeline::ExecutionContext,
     select::{
         iterator::{FilterIterator, RowIterator, TableScanIterator},
         join::FromResult,
@@ -68,52 +68,24 @@ impl SelectExecutor<'_> {
         let sorted_by = from_result.sorted_by.clone();
         let rows = from_result.into_rows();
 
-        // Create evaluator for WHERE clause with CTE context support
-        // Priority: 1) outer context (for subqueries) 2) procedural context 3) just database
-        // Also pass CTE context if available (from outer query or from current query's CTEs)
+        // Create evaluator using consolidated ExecutionContext
+        // Handles: outer context (subqueries), procedural context, CTE context
         let cte_ctx = if !cte_results.is_empty() {
             Some(cte_results)
         } else {
             self.cte_context
         };
 
-        let evaluator = if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
-            if let Some(cte_ctx) = cte_ctx {
-                CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
-                    &schema,
-                    self.database,
-                    outer_row,
-                    outer_schema,
-                    cte_ctx,
-                )
-            } else {
-                CombinedExpressionEvaluator::with_database_and_outer_context(
-                    &schema,
-                    self.database,
-                    outer_row,
-                    outer_schema,
-                )
-            }
+        let mut ctx = ExecutionContext::new(&schema, self.database);
+        if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+            ctx = ctx.with_outer_context(outer_row, outer_schema);
         } else if let Some(proc_ctx) = self.procedural_context {
-            if let Some(cte_ctx) = cte_ctx {
-                CombinedExpressionEvaluator::with_database_and_procedural_context_and_cte(
-                    &schema,
-                    self.database,
-                    proc_ctx,
-                    cte_ctx,
-                )
-            } else {
-                CombinedExpressionEvaluator::with_database_and_procedural_context(
-                    &schema,
-                    self.database,
-                    proc_ctx,
-                )
-            }
-        } else if let Some(cte_ctx) = cte_ctx {
-            CombinedExpressionEvaluator::with_database_and_cte(&schema, self.database, cte_ctx)
-        } else {
-            CombinedExpressionEvaluator::with_database(&schema, self.database)
-        };
+            ctx = ctx.with_procedural_context(proc_ctx);
+        }
+        if let Some(cte_ctx) = cte_ctx {
+            ctx = ctx.with_cte_context(cte_ctx);
+        }
+        let evaluator = ctx.create_evaluator();
 
         // Validate WHERE clause subqueries upfront (before row iteration)
         // This ensures schema validation happens even for empty result sets
