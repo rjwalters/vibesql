@@ -18,20 +18,21 @@
 //!    - Combine columns from both sides
 //!    - Return columnar batch
 
+use super::simd_ops;
 use super::{ColumnArray, ColumnarBatch};
 use crate::errors::ExecutorError;
 use std::collections::HashMap;
 
-// Auto-vectorized comparison functions
+// Re-export comparison functions from simd_ops module for consistency
 
 #[inline]
 fn simd_eq_i64(values: &[i64], target: i64) -> Vec<bool> {
-    values.iter().map(|&v| v == target).collect()
+    simd_ops::eq_i64(values, target)
 }
 
 #[inline]
 fn simd_eq_f64(values: &[f64], target: f64) -> Vec<bool> {
-    values.iter().map(|&v| v == target).collect()
+    simd_ops::eq_f64(values, target)
 }
 
 /// Hash table for join operations

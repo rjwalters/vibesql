@@ -40,6 +40,10 @@ mod filter;
 mod aggregate;
 mod executor;
 
+// Auto-vectorized SIMD operations - replaces the `wide` crate dependency
+// See simd_ops.rs for documentation on why these patterns are structured this way
+pub mod simd_ops;
+
 mod simd_aggregate;
 mod simd_filter;
 mod simd_join;

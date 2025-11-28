@@ -1,43 +1,47 @@
 //! Auto-vectorized columnar aggregation operations
 //!
 //! This module provides high-performance aggregate computations for Int64 and Float64
-//! columns using auto-vectorized operations. LLVM automatically generates SIMD
-//! instructions for the iterator patterns used here.
+//! columns using auto-vectorized operations that achieve equivalent performance to
+//! explicit SIMD (e.g., the `wide` crate).
+//!
+//! See `simd_ops.rs` for documentation on why the 4-accumulator pattern is used.
 
 use crate::errors::ExecutorError;
 use super::aggregate::AggregateOp;
 use super::scan::ColumnarScan;
+use super::simd_ops;
 use vibesql_types::SqlValue;
 
-// Auto-vectorized aggregation functions (LLVM will vectorize these iterator patterns)
+// Re-export optimized SIMD operations from simd_ops module
+// DO NOT replace these with .iter().sum() - see simd_ops.rs for why
 #[inline]
 fn simd_sum_i64(values: &[i64]) -> i64 {
-    values.iter().sum()
+    simd_ops::sum_i64(values)
 }
 
 #[inline]
 fn simd_min_i64(values: &[i64]) -> Option<i64> {
-    values.iter().copied().min()
+    simd_ops::min_i64(values)
 }
 
 #[inline]
 fn simd_max_i64(values: &[i64]) -> Option<i64> {
-    values.iter().copied().max()
+    simd_ops::max_i64(values)
 }
 
 #[inline]
 fn simd_sum_f64(values: &[f64]) -> f64 {
-    values.iter().sum()
+    simd_ops::sum_f64(values)
 }
 
 #[inline]
 fn simd_min_f64(values: &[f64]) -> Option<f64> {
-    values.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    simd_ops::min_f64(values)
 }
 
 #[inline]
 fn simd_max_f64(values: &[f64]) -> Option<f64> {
-    values.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    simd_ops::max_f64(values)
 }
 
 /// Compute aggregate for Int64 columns using streaming batches

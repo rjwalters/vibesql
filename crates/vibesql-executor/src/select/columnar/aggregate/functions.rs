@@ -10,37 +10,39 @@ use vibesql_types::SqlValue;
 
 use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::scan::ColumnarScan;
+use super::super::simd_ops;
 use super::AggregateOp;
 
-// Auto-vectorized aggregation functions (LLVM will vectorize these iterator patterns)
+// Re-export optimized SIMD operations from simd_ops module
+// See simd_ops.rs for documentation on why the 4-accumulator pattern is used
 #[inline]
 fn simd_sum_i64(values: &[i64]) -> i64 {
-    values.iter().sum()
+    simd_ops::sum_i64(values)
 }
 
 #[inline]
 fn simd_min_i64(values: &[i64]) -> Option<i64> {
-    values.iter().copied().min()
+    simd_ops::min_i64(values)
 }
 
 #[inline]
 fn simd_max_i64(values: &[i64]) -> Option<i64> {
-    values.iter().copied().max()
+    simd_ops::max_i64(values)
 }
 
 #[inline]
 fn simd_sum_f64(values: &[f64]) -> f64 {
-    values.iter().sum()
+    simd_ops::sum_f64(values)
 }
 
 #[inline]
 fn simd_min_f64(values: &[f64]) -> Option<f64> {
-    values.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    simd_ops::min_f64(values)
 }
 
 #[inline]
 fn simd_max_f64(values: &[f64]) -> Option<f64> {
-    values.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    simd_ops::max_f64(values)
 }
 
 /// Compute SUM aggregate on a column

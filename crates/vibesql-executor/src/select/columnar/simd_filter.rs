@@ -1,85 +1,90 @@
 //! Auto-vectorized filtering for columnar batches
+//!
+//! Uses the centralized simd_ops module for consistent, optimized operations.
 
 use super::batch::{ColumnArray, ColumnarBatch};
 use super::filter::ColumnPredicate;
+use super::simd_ops;
 use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
 
-// Auto-vectorized comparison functions (LLVM will vectorize these iterator patterns)
+// Re-export comparison functions from simd_ops module for consistency
+// Note: comparisons vectorize well even with simple iterator patterns,
+// but we centralize them in simd_ops to prevent accidental regressions.
 
 #[inline]
 fn simd_lt_i64(values: &[i64], threshold: i64) -> Vec<bool> {
-    values.iter().map(|&v| v < threshold).collect()
+    simd_ops::lt_i64(values, threshold)
 }
 
 #[inline]
 fn simd_gt_i64(values: &[i64], threshold: i64) -> Vec<bool> {
-    values.iter().map(|&v| v > threshold).collect()
+    simd_ops::gt_i64(values, threshold)
 }
 
 #[inline]
 fn simd_le_i64(values: &[i64], threshold: i64) -> Vec<bool> {
-    values.iter().map(|&v| v <= threshold).collect()
+    simd_ops::le_i64(values, threshold)
 }
 
 #[inline]
 fn simd_ge_i64(values: &[i64], threshold: i64) -> Vec<bool> {
-    values.iter().map(|&v| v >= threshold).collect()
+    simd_ops::ge_i64(values, threshold)
 }
 
 #[inline]
 fn simd_eq_i64(values: &[i64], target: i64) -> Vec<bool> {
-    values.iter().map(|&v| v == target).collect()
+    simd_ops::eq_i64(values, target)
 }
 
 #[inline]
 fn simd_lt_i32(values: &[i32], threshold: i32) -> Vec<bool> {
-    values.iter().map(|&v| v < threshold).collect()
+    simd_ops::lt_i32(values, threshold)
 }
 
 #[inline]
 fn simd_gt_i32(values: &[i32], threshold: i32) -> Vec<bool> {
-    values.iter().map(|&v| v > threshold).collect()
+    simd_ops::gt_i32(values, threshold)
 }
 
 #[inline]
 fn simd_le_i32(values: &[i32], threshold: i32) -> Vec<bool> {
-    values.iter().map(|&v| v <= threshold).collect()
+    simd_ops::le_i32(values, threshold)
 }
 
 #[inline]
 fn simd_ge_i32(values: &[i32], threshold: i32) -> Vec<bool> {
-    values.iter().map(|&v| v >= threshold).collect()
+    simd_ops::ge_i32(values, threshold)
 }
 
 #[inline]
 fn simd_eq_i32(values: &[i32], target: i32) -> Vec<bool> {
-    values.iter().map(|&v| v == target).collect()
+    simd_ops::eq_i32(values, target)
 }
 
 #[inline]
 fn simd_lt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
-    values.iter().map(|&v| v < threshold).collect()
+    simd_ops::lt_f64(values, threshold)
 }
 
 #[inline]
 fn simd_gt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
-    values.iter().map(|&v| v > threshold).collect()
+    simd_ops::gt_f64(values, threshold)
 }
 
 #[inline]
 fn simd_le_f64(values: &[f64], threshold: f64) -> Vec<bool> {
-    values.iter().map(|&v| v <= threshold).collect()
+    simd_ops::le_f64(values, threshold)
 }
 
 #[inline]
 fn simd_ge_f64(values: &[f64], threshold: f64) -> Vec<bool> {
-    values.iter().map(|&v| v >= threshold).collect()
+    simd_ops::ge_f64(values, threshold)
 }
 
 #[inline]
 fn simd_eq_f64(values: &[f64], target: f64) -> Vec<bool> {
-    values.iter().map(|&v| v == target).collect()
+    simd_ops::eq_f64(values, target)
 }
 
 /// Check if any value in a predicate is NULL
