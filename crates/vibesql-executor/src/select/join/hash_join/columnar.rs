@@ -500,6 +500,473 @@ pub fn hash_join_indices_columnar(
     Some(join_pairs)
 }
 
+/// Execute a columnar LEFT OUTER hash join
+///
+/// This function operates entirely on columnar data without materializing rows.
+/// LEFT OUTER JOIN preserves all rows from the left (probe) side, outputting
+/// NULL values for right columns when there's no match.
+///
+/// # Arguments
+/// * `left_batch` - Left (probe) side columnar batch - all rows preserved
+/// * `right_batch` - Right (build) side columnar batch
+/// * `left_key_idx` - Column index of join key in left batch
+/// * `right_key_idx` - Column index of join key in right batch
+///
+/// # Returns
+/// A new ColumnarBatch containing joined columns with left rows preserved
+pub fn columnar_hash_join_left_outer(
+    left_batch: &ColumnarBatch,
+    right_batch: &ColumnarBatch,
+    left_key_idx: usize,
+    right_key_idx: usize,
+) -> Result<ColumnarBatch, ExecutorError> {
+    // Get key columns
+    let left_key = left_batch.column(left_key_idx)
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: left_key_idx,
+            batch_columns: left_batch.column_count(),
+        })?;
+    let right_key = right_batch.column(right_key_idx)
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: right_key_idx,
+            batch_columns: right_batch.column_count(),
+        })?;
+
+    // Build hash table on right side
+    let hash_table = ColumnarHashTable::build_from_column(right_key)?;
+
+    // Probe and collect matching indices, tracking unmatched left rows
+    let join_indices = probe_columnar_left_outer(&hash_table, left_key, right_key, left_batch.row_count())?;
+
+    // Gather result columns with NULL handling for unmatched rows
+    gather_left_outer_result(left_batch, right_batch, &join_indices)
+}
+
+/// Execute a columnar RIGHT OUTER hash join
+///
+/// This function operates entirely on columnar data without materializing rows.
+/// RIGHT OUTER JOIN preserves all rows from the right (build) side, outputting
+/// NULL values for left columns when there's no match.
+///
+/// # Arguments
+/// * `left_batch` - Left (probe) side columnar batch
+/// * `right_batch` - Right (build) side columnar batch - all rows preserved
+/// * `left_key_idx` - Column index of join key in left batch
+/// * `right_key_idx` - Column index of join key in right batch
+///
+/// # Returns
+/// A new ColumnarBatch containing joined columns with right rows preserved
+pub fn columnar_hash_join_right_outer(
+    left_batch: &ColumnarBatch,
+    right_batch: &ColumnarBatch,
+    left_key_idx: usize,
+    right_key_idx: usize,
+) -> Result<ColumnarBatch, ExecutorError> {
+    // Get key columns
+    let left_key = left_batch.column(left_key_idx)
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: left_key_idx,
+            batch_columns: left_batch.column_count(),
+        })?;
+    let right_key = right_batch.column(right_key_idx)
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: right_key_idx,
+            batch_columns: right_batch.column_count(),
+        })?;
+
+    // Build hash table on left side (reverse of inner join)
+    let hash_table = ColumnarHashTable::build_from_column(left_key)?;
+
+    // Probe with right side and track unmatched right rows
+    let join_indices = probe_columnar_right_outer(&hash_table, right_key, left_key, right_batch.row_count())?;
+
+    // Gather result columns with NULL handling for unmatched rows
+    gather_right_outer_result(left_batch, right_batch, &join_indices)
+}
+
+/// Result indices for LEFT OUTER join
+pub struct LeftOuterJoinIndices {
+    /// Indices into left (probe) batch - always valid
+    pub left_indices: Vec<u32>,
+    /// Indices into right (build) batch - u32::MAX means no match (NULL row)
+    pub right_indices: Vec<u32>,
+}
+
+/// Result indices for RIGHT OUTER join
+pub struct RightOuterJoinIndices {
+    /// Indices into left (probe) batch - u32::MAX means no match (NULL row)
+    pub left_indices: Vec<u32>,
+    /// Indices into right (build) batch - always valid
+    pub right_indices: Vec<u32>,
+}
+
+/// Probe phase for LEFT OUTER join: find matches and preserve unmatched left rows
+fn probe_columnar_left_outer(
+    hash_table: &ColumnarHashTable,
+    left_key: &ColumnArray,
+    right_key: &ColumnArray,
+    left_row_count: usize,
+) -> Result<LeftOuterJoinIndices, ExecutorError> {
+    let mut left_indices = Vec::new();
+    let mut right_indices = Vec::new();
+    let mut left_matched = vec![false; left_row_count];
+
+    match (left_key, right_key) {
+        (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, _)) => {
+            for (left_idx, &key) in left_values.iter().enumerate() {
+                // Skip NULL keys - they never match but still output with NULLs
+                let is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
+                if is_null {
+                    continue; // Will be handled as unmatched
+                }
+
+                let mut found_match = false;
+                for right_idx in hash_table.probe_i64(key, right_values) {
+                    left_indices.push(left_idx as u32);
+                    right_indices.push(right_idx);
+                    found_match = true;
+                }
+                if found_match {
+                    left_matched[left_idx] = true;
+                }
+            }
+        }
+        (ColumnArray::String(left_values, left_nulls), ColumnArray::String(right_values, _)) => {
+            for (left_idx, key) in left_values.iter().enumerate() {
+                let is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
+                if is_null {
+                    continue;
+                }
+
+                let mut found_match = false;
+                for right_idx in hash_table.probe_string(key, right_values) {
+                    left_indices.push(left_idx as u32);
+                    right_indices.push(right_idx);
+                    found_match = true;
+                }
+                if found_match {
+                    left_matched[left_idx] = true;
+                }
+            }
+        }
+        _ => {
+            return Err(ExecutorError::UnsupportedFeature(
+                "Columnar LEFT OUTER hash join probe not supported for this column type combination".to_string()
+            ));
+        }
+    }
+
+    // Add unmatched left rows with NULL marker for right side
+    for (left_idx, &matched) in left_matched.iter().enumerate() {
+        if !matched {
+            left_indices.push(left_idx as u32);
+            right_indices.push(u32::MAX); // NULL marker
+        }
+    }
+
+    Ok(LeftOuterJoinIndices { left_indices, right_indices })
+}
+
+/// Probe phase for RIGHT OUTER join: find matches and preserve unmatched right rows
+fn probe_columnar_right_outer(
+    hash_table: &ColumnarHashTable,
+    right_key: &ColumnArray,
+    left_key: &ColumnArray,
+    right_row_count: usize,
+) -> Result<RightOuterJoinIndices, ExecutorError> {
+    let mut left_indices = Vec::new();
+    let mut right_indices = Vec::new();
+    let mut right_matched = vec![false; right_row_count];
+
+    match (right_key, left_key) {
+        (ColumnArray::Int64(right_values, right_nulls), ColumnArray::Int64(left_values, _)) => {
+            for (right_idx, &key) in right_values.iter().enumerate() {
+                let is_null = right_nulls.as_ref().map(|n| n[right_idx]).unwrap_or(false);
+                if is_null {
+                    continue;
+                }
+
+                let mut found_match = false;
+                for left_idx in hash_table.probe_i64(key, left_values) {
+                    left_indices.push(left_idx);
+                    right_indices.push(right_idx as u32);
+                    found_match = true;
+                }
+                if found_match {
+                    right_matched[right_idx] = true;
+                }
+            }
+        }
+        (ColumnArray::String(right_values, right_nulls), ColumnArray::String(left_values, _)) => {
+            for (right_idx, key) in right_values.iter().enumerate() {
+                let is_null = right_nulls.as_ref().map(|n| n[right_idx]).unwrap_or(false);
+                if is_null {
+                    continue;
+                }
+
+                let mut found_match = false;
+                for left_idx in hash_table.probe_string(key, left_values) {
+                    left_indices.push(left_idx);
+                    right_indices.push(right_idx as u32);
+                    found_match = true;
+                }
+                if found_match {
+                    right_matched[right_idx] = true;
+                }
+            }
+        }
+        _ => {
+            return Err(ExecutorError::UnsupportedFeature(
+                "Columnar RIGHT OUTER hash join probe not supported for this column type combination".to_string()
+            ));
+        }
+    }
+
+    // Add unmatched right rows with NULL marker for left side
+    for (right_idx, &matched) in right_matched.iter().enumerate() {
+        if !matched {
+            left_indices.push(u32::MAX); // NULL marker
+            right_indices.push(right_idx as u32);
+        }
+    }
+
+    Ok(RightOuterJoinIndices { left_indices, right_indices })
+}
+
+/// Gather result columns for LEFT OUTER join with NULL handling
+fn gather_left_outer_result(
+    left_batch: &ColumnarBatch,
+    right_batch: &ColumnarBatch,
+    indices: &LeftOuterJoinIndices,
+) -> Result<ColumnarBatch, ExecutorError> {
+    let mut result_columns = Vec::new();
+
+    // Gather left columns (all indices are valid)
+    for col_idx in 0..left_batch.column_count() {
+        let column = left_batch.column(col_idx).unwrap();
+        let gathered = gather_column(column, &indices.left_indices)?;
+        result_columns.push(gathered);
+    }
+
+    // Gather right columns with NULL handling for unmatched rows
+    for col_idx in 0..right_batch.column_count() {
+        let column = right_batch.column(col_idx).unwrap();
+        let gathered = gather_column_with_nulls(column, &indices.right_indices)?;
+        result_columns.push(gathered);
+    }
+
+    // Combine column names
+    let column_names = match (left_batch.column_names(), right_batch.column_names()) {
+        (Some(left_names), Some(right_names)) => {
+            let mut names = left_names.to_vec();
+            names.extend(right_names.iter().cloned());
+            Some(names)
+        }
+        _ => None,
+    };
+
+    ColumnarBatch::from_columns(result_columns, column_names)
+}
+
+/// Gather result columns for RIGHT OUTER join with NULL handling
+fn gather_right_outer_result(
+    left_batch: &ColumnarBatch,
+    right_batch: &ColumnarBatch,
+    indices: &RightOuterJoinIndices,
+) -> Result<ColumnarBatch, ExecutorError> {
+    let mut result_columns = Vec::new();
+
+    // Gather left columns with NULL handling for unmatched rows
+    for col_idx in 0..left_batch.column_count() {
+        let column = left_batch.column(col_idx).unwrap();
+        let gathered = gather_column_with_nulls(column, &indices.left_indices)?;
+        result_columns.push(gathered);
+    }
+
+    // Gather right columns (all indices are valid)
+    for col_idx in 0..right_batch.column_count() {
+        let column = right_batch.column(col_idx).unwrap();
+        let gathered = gather_column(column, &indices.right_indices)?;
+        result_columns.push(gathered);
+    }
+
+    // Combine column names
+    let column_names = match (left_batch.column_names(), right_batch.column_names()) {
+        (Some(left_names), Some(right_names)) => {
+            let mut names = left_names.to_vec();
+            names.extend(right_names.iter().cloned());
+            Some(names)
+        }
+        _ => None,
+    };
+
+    ColumnarBatch::from_columns(result_columns, column_names)
+}
+
+/// Gather values from a column with NULL handling for outer joins
+///
+/// u32::MAX indices are converted to NULL values
+fn gather_column_with_nulls(column: &ColumnArray, indices: &[u32]) -> Result<ColumnArray, ExecutorError> {
+    match column {
+        ColumnArray::Int64(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(0); // placeholder
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize]);
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::Int64(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::Int32(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(0);
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize]);
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::Int32(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::Float64(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(0.0);
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize]);
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::Float64(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::Float32(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(0.0);
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize]);
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::Float32(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::String(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(String::new());
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize].clone());
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::String(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::FixedString(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(String::new());
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize].clone());
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::FixedString(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::Date(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(0);
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize]);
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::Date(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::Timestamp(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(0);
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize]);
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::Timestamp(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::Boolean(values, _existing_nulls) => {
+            let mut gathered = Vec::with_capacity(indices.len());
+            let mut nulls = Vec::with_capacity(indices.len());
+
+            for &idx in indices {
+                if idx == u32::MAX {
+                    gathered.push(0);
+                    nulls.push(true);
+                } else {
+                    gathered.push(values[idx as usize]);
+                    nulls.push(false);
+                }
+            }
+
+            Ok(ColumnArray::Boolean(std::sync::Arc::new(gathered), Some(std::sync::Arc::new(nulls))))
+        }
+        ColumnArray::Mixed(values) => {
+            let gathered: Vec<vibesql_types::SqlValue> = indices.iter()
+                .map(|&idx| {
+                    if idx == u32::MAX {
+                        vibesql_types::SqlValue::Null
+                    } else {
+                        values[idx as usize].clone()
+                    }
+                })
+                .collect();
+            Ok(ColumnArray::Mixed(std::sync::Arc::new(gathered)))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,5 +1018,141 @@ mod tests {
 
         // Should have 5 columns (2 from left + 3 from right)
         assert_eq!(result.column_count(), 5);
+    }
+
+    #[test]
+    fn test_columnar_hash_join_left_outer() {
+        // Create left batch: customer_id, name (4 customers)
+        let left_columns = vec![
+            ColumnArray::Int64(Arc::new(vec![1, 2, 3, 4]), None),
+            ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into(), "Dave".into()]), None),
+        ];
+        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["customer_id".into(), "name".into()])).unwrap();
+
+        // Create right batch: order_id, customer_id (only customers 1, 2, 3 have orders)
+        let right_columns = vec![
+            ColumnArray::Int64(Arc::new(vec![101, 102, 103]), None),
+            ColumnArray::Int64(Arc::new(vec![1, 2, 1]), None), // Dave (id=4) has no orders
+        ];
+        let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["order_id".into(), "customer_id".into()])).unwrap();
+
+        // LEFT OUTER JOIN on customer_id (left col 0 = right col 1)
+        let result = columnar_hash_join_left_outer(&left_batch, &right_batch, 0, 1).unwrap();
+
+        // Should have 5 result rows:
+        // - Alice (1): 2 matches (101, 103)
+        // - Bob (2): 1 match (102)
+        // - Carol (3): 0 matches, but preserved with NULLs
+        // - Dave (4): 0 matches, but preserved with NULLs
+        assert_eq!(result.row_count(), 5);
+        assert_eq!(result.column_count(), 4); // 2 left + 2 right
+
+        // Verify that all left rows are preserved
+        let rows = result.to_rows().unwrap();
+
+        // Count customers preserved
+        let mut customer_counts = std::collections::HashMap::new();
+        for row in &rows {
+            if let Some(vibesql_types::SqlValue::Integer(id)) = row.get(0) {
+                *customer_counts.entry(*id).or_insert(0) += 1;
+            }
+        }
+
+        // Alice should appear 2 times, Bob 1 time, Carol 1 time, Dave 1 time
+        assert_eq!(customer_counts.get(&1), Some(&2)); // Alice
+        assert_eq!(customer_counts.get(&2), Some(&1)); // Bob
+        assert_eq!(customer_counts.get(&3), Some(&1)); // Carol (preserved with NULL)
+        assert_eq!(customer_counts.get(&4), Some(&1)); // Dave (preserved with NULL)
+    }
+
+    #[test]
+    fn test_columnar_hash_join_right_outer() {
+        // Create left batch: customer_id, name (2 customers)
+        let left_columns = vec![
+            ColumnArray::Int64(Arc::new(vec![1, 2]), None),
+            ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into()]), None),
+        ];
+        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["customer_id".into(), "name".into()])).unwrap();
+
+        // Create right batch: order_id, customer_id (customer 3 has no matching left row)
+        let right_columns = vec![
+            ColumnArray::Int64(Arc::new(vec![101, 102, 103, 104]), None),
+            ColumnArray::Int64(Arc::new(vec![1, 2, 3, 1]), None), // Order 103 has customer_id=3, not in left
+        ];
+        let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["order_id".into(), "customer_id".into()])).unwrap();
+
+        // RIGHT OUTER JOIN on customer_id (left col 0 = right col 1)
+        let result = columnar_hash_join_right_outer(&left_batch, &right_batch, 0, 1).unwrap();
+
+        // Should have 4 result rows (all right rows preserved):
+        // - Order 101 (customer 1): matches Alice
+        // - Order 102 (customer 2): matches Bob
+        // - Order 103 (customer 3): no match, left columns are NULL
+        // - Order 104 (customer 1): matches Alice
+        assert_eq!(result.row_count(), 4);
+        assert_eq!(result.column_count(), 4); // 2 left + 2 right
+
+        // Verify that all right rows are preserved
+        let rows = result.to_rows().unwrap();
+
+        // Count by order_id (column 2 in result)
+        let mut order_found = std::collections::HashSet::new();
+        let mut null_customer_count = 0;
+
+        for row in &rows {
+            if let Some(vibesql_types::SqlValue::Integer(order_id)) = row.get(2) {
+                order_found.insert(*order_id);
+            }
+            if let Some(vibesql_types::SqlValue::Null) = row.get(0) {
+                null_customer_count += 1;
+            }
+        }
+
+        // All 4 orders should be present
+        assert!(order_found.contains(&101));
+        assert!(order_found.contains(&102));
+        assert!(order_found.contains(&103));
+        assert!(order_found.contains(&104));
+
+        // One row should have NULL customer (order 103)
+        assert_eq!(null_customer_count, 1);
+    }
+
+    #[test]
+    fn test_columnar_hash_join_with_nulls() {
+        // Create left batch with NULL key
+        let left_columns = vec![
+            ColumnArray::Int64(
+                Arc::new(vec![1, 0, 3]), // 0 is placeholder for NULL
+                Some(Arc::new(vec![false, true, false])), // Index 1 is NULL
+            ),
+            ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into()]), None),
+        ];
+        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["id".into(), "name".into()])).unwrap();
+
+        // Create right batch
+        let right_columns = vec![
+            ColumnArray::Int64(Arc::new(vec![1, 3]), None),
+            ColumnArray::String(Arc::new(vec!["Order1".into(), "Order3".into()]), None),
+        ];
+        let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["id".into(), "desc".into()])).unwrap();
+
+        // LEFT OUTER JOIN - Bob (NULL key) should be preserved with NULL right columns
+        let result = columnar_hash_join_left_outer(&left_batch, &right_batch, 0, 0).unwrap();
+
+        // Should have 3 rows: Alice matches, Bob (NULL key) preserved, Carol matches
+        assert_eq!(result.row_count(), 3);
+
+        // Verify Bob's row has NULL for right side
+        let rows = result.to_rows().unwrap();
+        let bob_row = rows.iter().find(|r| {
+            matches!(r.get(1), Some(vibesql_types::SqlValue::Varchar(s)) if s == "Bob")
+        });
+
+        assert!(bob_row.is_some());
+        let bob = bob_row.unwrap();
+        // Bob's right-side columns should be NULL
+        assert!(matches!(bob.get(2), Some(vibesql_types::SqlValue::Null)));
+        assert!(matches!(bob.get(3), Some(vibesql_types::SqlValue::Null)));
     }
 }
