@@ -41,7 +41,10 @@ pub fn try_simd_aggregate(
 
     // Convert rows to RecordBatch
     let batch = rows_to_record_batch(rows, &column_names)
-        .map_err(|_| ExecutorError::Other("Failed to convert to RecordBatch".to_string()))?;
+        .map_err(|e| ExecutorError::ArrowDowncastError {
+            expected_type: "RecordBatch".to_string(),
+            context: format!("rows_to_record_batch: {:?}", e),
+        })?;
 
     // Evaluate expression using SIMD
     let result_array = evaluate_arithmetic_simd(&batch, expr)?;
@@ -67,10 +70,16 @@ fn aggregate_sum(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 .as_any()
                 .downcast_ref::<Int64Array>()
                 .ok_or_else(|| {
-                    ExecutorError::Other("Failed to downcast Int64Array".to_string())
+                    ExecutorError::ArrowDowncastError {
+                    expected_type: "Int64Array".to_string(),
+                    context: "SIMD aggregate".to_string(),
+                }
                 })?;
             let sum_val = sum(arr).ok_or_else(|| {
-                ExecutorError::Other("SIMD sum returned None".to_string())
+                ExecutorError::SimdOperationFailed {
+                operation: "SUM".to_string(),
+                reason: "returned None".to_string(),
+            }
             })?;
             Ok(SqlValue::Integer(sum_val))
         }
@@ -79,14 +88,23 @@ fn aggregate_sum(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 .as_any()
                 .downcast_ref::<Float64Array>()
                 .ok_or_else(|| {
-                    ExecutorError::Other("Failed to downcast Float64Array".to_string())
+                    ExecutorError::ArrowDowncastError {
+                    expected_type: "Float64Array".to_string(),
+                    context: "SIMD aggregate".to_string(),
+                }
                 })?;
             let sum_val = sum(arr).ok_or_else(|| {
-                ExecutorError::Other("SIMD sum returned None".to_string())
+                ExecutorError::SimdOperationFailed {
+                operation: "SUM".to_string(),
+                reason: "returned None".to_string(),
+            }
             })?;
             Ok(SqlValue::Double(sum_val))
         }
-        _ => Err(ExecutorError::Other("Unsupported array type for SUM".to_string())),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "SUM".to_string(),
+            array_type: format!("{:?}", result_array.data_type()),
+        }),
     }
 }
 
@@ -127,10 +145,16 @@ fn aggregate_min(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 .as_any()
                 .downcast_ref::<Int64Array>()
                 .ok_or_else(|| {
-                    ExecutorError::Other("Failed to downcast Int64Array".to_string())
+                    ExecutorError::ArrowDowncastError {
+                    expected_type: "Int64Array".to_string(),
+                    context: "SIMD aggregate".to_string(),
+                }
                 })?;
             let min_val = min(arr).ok_or_else(|| {
-                ExecutorError::Other("SIMD min returned None".to_string())
+                ExecutorError::SimdOperationFailed {
+                operation: "MIN".to_string(),
+                reason: "returned None".to_string(),
+            }
             })?;
             Ok(SqlValue::Integer(min_val))
         }
@@ -139,14 +163,23 @@ fn aggregate_min(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 .as_any()
                 .downcast_ref::<Float64Array>()
                 .ok_or_else(|| {
-                    ExecutorError::Other("Failed to downcast Float64Array".to_string())
+                    ExecutorError::ArrowDowncastError {
+                    expected_type: "Float64Array".to_string(),
+                    context: "SIMD aggregate".to_string(),
+                }
                 })?;
             let min_val = min(arr).ok_or_else(|| {
-                ExecutorError::Other("SIMD min returned None".to_string())
+                ExecutorError::SimdOperationFailed {
+                operation: "MIN".to_string(),
+                reason: "returned None".to_string(),
+            }
             })?;
             Ok(SqlValue::Double(min_val))
         }
-        _ => Err(ExecutorError::Other("Unsupported array type for MIN".to_string())),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "MIN".to_string(),
+            array_type: format!("{:?}", result_array.data_type()),
+        }),
     }
 }
 
@@ -161,10 +194,16 @@ fn aggregate_max(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 .as_any()
                 .downcast_ref::<Int64Array>()
                 .ok_or_else(|| {
-                    ExecutorError::Other("Failed to downcast Int64Array".to_string())
+                    ExecutorError::ArrowDowncastError {
+                    expected_type: "Int64Array".to_string(),
+                    context: "SIMD aggregate".to_string(),
+                }
                 })?;
             let max_val = max(arr).ok_or_else(|| {
-                ExecutorError::Other("SIMD max returned None".to_string())
+                ExecutorError::SimdOperationFailed {
+                operation: "MAX".to_string(),
+                reason: "returned None".to_string(),
+            }
             })?;
             Ok(SqlValue::Integer(max_val))
         }
@@ -173,13 +212,22 @@ fn aggregate_max(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 .as_any()
                 .downcast_ref::<Float64Array>()
                 .ok_or_else(|| {
-                    ExecutorError::Other("Failed to downcast Float64Array".to_string())
+                    ExecutorError::ArrowDowncastError {
+                    expected_type: "Float64Array".to_string(),
+                    context: "SIMD aggregate".to_string(),
+                }
                 })?;
             let max_val = max(arr).ok_or_else(|| {
-                ExecutorError::Other("SIMD max returned None".to_string())
+                ExecutorError::SimdOperationFailed {
+                operation: "MAX".to_string(),
+                reason: "returned None".to_string(),
+            }
             })?;
             Ok(SqlValue::Double(max_val))
         }
-        _ => Err(ExecutorError::Other("Unsupported array type for MAX".to_string())),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "MAX".to_string(),
+            array_type: format!("{:?}", result_array.data_type()),
+        }),
     }
 }

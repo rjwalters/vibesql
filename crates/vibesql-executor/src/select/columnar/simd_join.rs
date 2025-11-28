@@ -54,7 +54,10 @@ impl HashTable {
     fn build(right: &ColumnarBatch, right_key_col: usize) -> Result<Self, ExecutorError> {
         let key_column = right
             .column(right_key_col)
-            .ok_or_else(|| ExecutorError::Other("Right key column not found".to_string()))?;
+            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+                column_index: right_key_col,
+                batch_columns: right.column_count(),
+            })?;
 
         match key_column {
             ColumnArray::Int64(values, nulls) => {
@@ -95,10 +98,10 @@ impl HashTable {
 
                 Ok(HashTable::Float64(table))
             }
-            _ => Err(ExecutorError::Other(
-                "Unsupported key type for columnar join (only Int64 and Float64 supported)"
-                    .to_string(),
-            )),
+            _ => Err(ExecutorError::UnsupportedArrayType {
+                operation: "columnar hash join".to_string(),
+                array_type: format!("{:?}", std::mem::discriminant(key_column)),
+            }),
         }
     }
 
@@ -112,7 +115,10 @@ impl HashTable {
     ) -> Result<Vec<(usize, usize)>, ExecutorError> {
         let key_column = left
             .column(left_key_col)
-            .ok_or_else(|| ExecutorError::Other("Left key column not found".to_string()))?;
+            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+                column_index: left_key_col,
+                batch_columns: left.column_count(),
+            })?;
 
         match (self, key_column) {
             (HashTable::Int64(table), ColumnArray::Int64(left_values, left_nulls)) => {
@@ -121,9 +127,11 @@ impl HashTable {
             (HashTable::Float64(table), ColumnArray::Float64(left_values, left_nulls)) => {
                 Self::probe_f64_simd(table, left_values, left_nulls)
             }
-            _ => Err(ExecutorError::Other(
-                "Type mismatch between left and right key columns".to_string(),
-            )),
+            _ => Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "hash join probe".to_string(),
+                left_type: format!("{:?}", std::mem::discriminant(key_column)),
+                right_type: None,
+            }),
         }
     }
 
@@ -226,7 +234,10 @@ fn materialize_join_results(
     // Process left columns
     for col_idx in 0..left.column_count() {
         let left_col = left.column(col_idx)
-            .ok_or_else(|| ExecutorError::Other("Left column missing".to_string()))?;
+            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+                column_index: col_idx,
+                batch_columns: left.column_count(),
+            })?;
 
         let output_col = gather_column(left_col, &matches, |&(left_row, _)| left_row)?;
         output.add_column(output_col)?;
@@ -235,7 +246,10 @@ fn materialize_join_results(
     // Process right columns
     for col_idx in 0..right.column_count() {
         let right_col = right.column(col_idx)
-            .ok_or_else(|| ExecutorError::Other("Right column missing".to_string()))?;
+            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+                column_index: col_idx,
+                batch_columns: right.column_count(),
+            })?;
 
         let output_col = gather_column(right_col, &matches, |&(_, right_row)| right_row)?;
         output.add_column(output_col)?;
