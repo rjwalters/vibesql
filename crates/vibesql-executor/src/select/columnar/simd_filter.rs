@@ -638,8 +638,8 @@ fn value_to_f64(value: &SqlValue) -> Option<f64> {
         SqlValue::Smallint(n) => Some(*n as f64),
         SqlValue::Float(n) => Some(*n as f64),
         SqlValue::Double(n) => Some(*n),
-        // SqlValue::Numeric contains an f64 internally (not a String),
-        // so we can extract it directly without the lossy string round-trip
+        // SqlValue::Numeric contains an f64 internally, extract directly
+        // without lossy string round-trip (fixes #2857)
         SqlValue::Numeric(n) => Some(*n),
         SqlValue::Real(n) => Some(*n as f64),
         _ => None,
