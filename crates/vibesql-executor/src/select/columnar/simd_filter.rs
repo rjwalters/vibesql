@@ -1039,14 +1039,12 @@ mod tests {
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
 
-        // Debug: print what passed
-        eprintln!("Filtered batch has {} rows", filtered.row_count());
-        for i in 0..filtered.row_count() {
-            eprintln!("  Row {}: {:?}", i, filtered.get_value(i, 0));
-        }
-
         // All 3 rows should pass
-        assert_eq!(filtered.row_count(), 3, "All rows should pass BETWEEN 0.02 AND 0.03");
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass BETWEEN 0.02 AND 0.03"
+        );
     }
 
     /// Reproduce the exact issue #2857 scenario
@@ -1104,22 +1102,14 @@ mod tests {
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
 
-        // Debug: print what passed
-        eprintln!("Issue 2857 scenario:");
-        eprintln!("  Input batch has {} rows", batch.row_count());
-        eprintln!("  Filtered batch has {} rows", filtered.row_count());
-        for i in 0..filtered.row_count() {
-            eprintln!("  Row {}: date={:?}, amount={:?}, fee={:?}",
-                i,
-                filtered.get_value(i, 0),
-                filtered.get_value(i, 1),
-                filtered.get_value(i, 2));
-        }
-
         // All 3 rows should pass all predicates:
         // - All dates are in Jan 2024
         // - All fees are in [0.02, 0.03] range
-        assert_eq!(filtered.row_count(), 3, "All rows should pass all predicates");
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass all predicates"
+        );
     }
 
     /// Test with SqlValue::Numeric predicates (what the parser generates)
@@ -1168,19 +1158,12 @@ mod tests {
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
 
-        eprintln!("Issue 2857 with Numeric predicates:");
-        eprintln!("  Input batch has {} rows", batch.row_count());
-        eprintln!("  Filtered batch has {} rows", filtered.row_count());
-        for i in 0..filtered.row_count() {
-            eprintln!("  Row {}: date={:?}, amount={:?}, fee={:?}",
-                i,
-                filtered.get_value(i, 0),
-                filtered.get_value(i, 1),
-                filtered.get_value(i, 2));
-        }
-
         // All 3 rows should pass
-        assert_eq!(filtered.row_count(), 3, "All rows should pass (Numeric predicate on Double column)");
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass (Numeric predicate on Double column)"
+        );
     }
 
     /// Test using from_storage_columnar which is the path used by native columnar execution
@@ -1213,20 +1196,6 @@ mod tests {
         // This is the path used by try_native_columnar_execution
         let batch = ColumnarBatch::from_storage_columnar(&storage_columnar).unwrap();
 
-        // Check what column types we got
-        eprintln!("Column types from from_storage_columnar:");
-        for i in 0..batch.column_count() {
-            let col = batch.column(i).unwrap();
-            let type_name = match col {
-                ColumnArray::Int64(_, _) => "Int64",
-                ColumnArray::Float64(_, _) => "Float64",
-                ColumnArray::Date(_, _) => "Date",
-                ColumnArray::Mixed(_) => "Mixed",
-                _ => "Other",
-            };
-            eprintln!("  Column {}: {}", i, type_name);
-        }
-
         // Predicates exactly like what the parser would generate
         // Note: Date predicates come from 'YYYY-MM-DD' string literals parsed to SqlValue::Date
         let predicates = vec![
@@ -1247,18 +1216,11 @@ mod tests {
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
 
-        eprintln!("\nIssue 2857 from_storage_columnar test:");
-        eprintln!("  Input batch has {} rows", batch.row_count());
-        eprintln!("  Filtered batch has {} rows", filtered.row_count());
-        for i in 0..filtered.row_count() {
-            eprintln!("  Row {}: date={:?}, amount={:?}, fee={:?}",
-                i,
-                filtered.get_value(i, 0),
-                filtered.get_value(i, 1),
-                filtered.get_value(i, 2));
-        }
-
         // All 3 rows should pass all predicates
-        assert_eq!(filtered.row_count(), 3, "All rows should pass from_storage_columnar path");
+        assert_eq!(
+            filtered.row_count(),
+            3,
+            "All rows should pass from_storage_columnar path"
+        );
     }
 }
