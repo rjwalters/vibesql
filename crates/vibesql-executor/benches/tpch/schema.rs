@@ -1344,6 +1344,13 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 // Data Loading (LINEITEM - generated data, largest table)
 // =============================================================================
 
+/// Returns one of the 4 valid supplier keys for a given part_key.
+/// This matches the supplier generation logic in load_partsupp.
+fn get_valid_supplier_for_part(part_key: usize, supplier_count: usize, supplier_idx: usize) -> usize {
+    let j = supplier_idx % 4;  // 0-3
+    ((part_key + (j * (supplier_count / 4 + (part_key - 1) / supplier_count))) % supplier_count) + 1
+}
+
 fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
@@ -1356,6 +1363,10 @@ fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
                 break;
             }
 
+            let part_key = (line_id * 13) % data.part_count + 1;
+            // Use a valid supplier for this part (must match partsupp FK constraint)
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, line_id);
+
             let quantity = ((line_id * 11) % 50 + 1) as f64;
             let extendedprice = quantity * ((line_id * 97) as f64 % 100000.0 + 900.0);
             let discount = ((line_id * 7) % 10) as f64 / 100.0;
@@ -1366,8 +1377,8 @@ fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
 
             let row = Row::new(vec![
                 SqlValue::Integer(order_num as i64),
-                SqlValue::Integer(((line_id * 13) % 200000 + 1) as i64),
-                SqlValue::Integer(((line_id * 17) % data.supplier_count + 1) as i64),
+                SqlValue::Integer(part_key as i64),
+                SqlValue::Integer(supp_key as i64),
                 SqlValue::Integer(line_num as i64),
                 SqlValue::Numeric(quantity as f64),
                 SqlValue::Numeric(extendedprice as f64),
@@ -1404,6 +1415,10 @@ fn load_lineitem_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
                 break;
             }
 
+            let part_key = (line_id * 13) % data.part_count + 1;
+            // Use a valid supplier for this part (must match partsupp FK constraint)
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, line_id);
+
             let quantity = ((line_id * 11) % 50 + 1) as f64;
             let extendedprice = quantity * ((line_id * 97) as f64 % 100000.0 + 900.0);
             let discount = ((line_id * 7) % 10) as f64 / 100.0;
@@ -1414,8 +1429,8 @@ fn load_lineitem_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
 
             stmt.execute(rusqlite::params![
                 order_num as i64,
-                ((line_id * 13) % 200000 + 1) as i64,
-                ((line_id * 17) % data.supplier_count + 1) as i64,
+                part_key as i64,
+                supp_key as i64,
                 line_num as i64,
                 quantity,
                 extendedprice,
@@ -1452,6 +1467,10 @@ fn load_lineitem_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
                 break;
             }
 
+            let part_key = (line_id * 13) % data.part_count + 1;
+            // Use a valid supplier for this part (must match partsupp FK constraint)
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, line_id);
+
             let quantity = ((line_id * 11) % 50 + 1) as f64;
             let extendedprice = quantity * ((line_id * 97) as f64 % 100000.0 + 900.0);
             let discount = ((line_id * 7) % 10) as f64 / 100.0;
@@ -1462,8 +1481,8 @@ fn load_lineitem_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 
             stmt.execute(duckdb::params![
                 order_num as i64,
-                ((line_id * 13) % 200000 + 1) as i64,
-                ((line_id * 17) % data.supplier_count + 1) as i64,
+                part_key as i64,
+                supp_key as i64,
                 line_num as i64,
                 quantity,
                 extendedprice,
