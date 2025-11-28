@@ -41,8 +41,8 @@ pub fn evaluate_arithmetic_simd(
             // Create array filled with literal value
             create_literal_array(value, batch.num_rows())
         }
-        _ => Err(ExecutorError::Other(format!(
-            "Unsupported SIMD arithmetic expression: {:?}",
+        _ => Err(ExecutorError::UnsupportedFeature(format!(
+            "SIMD arithmetic expression: {:?}",
             expr
         ))),
     }
@@ -85,29 +85,35 @@ fn apply_int64_op(
     let left_arr = left
         .as_any()
         .downcast_ref::<Int64Array>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast Int64Array".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "Int64Array".to_string(),
+            context: "apply_int64_op (left)".to_string(),
+        })?;
     let right_arr = right
         .as_any()
         .downcast_ref::<Int64Array>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast Int64Array".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "Int64Array".to_string(),
+            context: "apply_int64_op (right)".to_string(),
+        })?;
 
     let result: ArrayRef = match op {
         BinaryOperator::Plus => add(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD add failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "add".to_string(), reason: e.to_string() })?,
         BinaryOperator::Minus => sub(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD subtract failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "subtract".to_string(), reason: e.to_string() })?,
         BinaryOperator::Multiply => mul(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD multiply failed: {}", e)))?,
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "multiply".to_string(), reason: e.to_string() })?,
         BinaryOperator::Divide => {
             // For integer division, cast to float64 first
             let left_f64 = cast_int64_to_float64(left_arr)?;
             let right_f64 = cast_int64_to_float64(right_arr)?;
             div(&left_f64, &right_f64)
-                .map_err(|e| ExecutorError::Other(format!("SIMD divide failed: {}", e)))?
+                .map_err(|e| ExecutorError::SimdOperationFailed { operation: "divide".to_string(), reason: e.to_string() })?
         }
         _ => {
-            return Err(ExecutorError::Other(format!(
-                "Unsupported arithmetic operator: {:?}",
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "arithmetic operator {:?}",
                 op
             )))
         }
@@ -125,28 +131,34 @@ fn apply_float64_op(
     let left_arr = left
         .as_any()
         .downcast_ref::<Float64Array>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast Float64Array".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "Float64Array".to_string(),
+            context: "apply_float64_op (left)".to_string(),
+        })?;
     let right_arr = right
         .as_any()
         .downcast_ref::<Float64Array>()
-        .ok_or_else(|| ExecutorError::Other("Failed to downcast Float64Array".to_string()))?;
+        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            expected_type: "Float64Array".to_string(),
+            context: "apply_float64_op (right)".to_string(),
+        })?;
 
     let result: ArrayRef = match op {
         BinaryOperator::Plus => add(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD add failed: {}", e)))?
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "add".to_string(), reason: e.to_string() })?
             .into(),
         BinaryOperator::Minus => sub(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD subtract failed: {}", e)))?
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "subtract".to_string(), reason: e.to_string() })?
             .into(),
         BinaryOperator::Multiply => mul(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD multiply failed: {}", e)))?
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "multiply".to_string(), reason: e.to_string() })?
             .into(),
         BinaryOperator::Divide => div(left_arr, right_arr)
-            .map_err(|e| ExecutorError::Other(format!("SIMD divide failed: {}", e)))?
+            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "divide".to_string(), reason: e.to_string() })?
             .into(),
         _ => {
-            return Err(ExecutorError::Other(format!(
-                "Unsupported arithmetic operator: {:?}",
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "arithmetic operator {:?}",
                 op
             )))
         }
@@ -160,7 +172,10 @@ fn get_numeric_column(batch: &RecordBatch, col_name: &str) -> Result<ArrayRef, E
     let schema = batch.schema();
     let (col_idx, _) = schema
         .column_with_name(col_name)
-        .ok_or_else(|| ExecutorError::Other(format!("Column not found: {}", col_name)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: 0, // Column referenced by name
+            batch_columns: schema.fields().len(),
+        })?;
     let column = batch.column(col_idx);
 
     // Verify it's a numeric type
@@ -169,11 +184,10 @@ fn get_numeric_column(batch: &RecordBatch, col_name: &str) -> Result<ArrayRef, E
         | arrow::datatypes::DataType::Float64
         | arrow::datatypes::DataType::Int32
         | arrow::datatypes::DataType::Float32 => Ok(column.clone()),
-        _ => Err(ExecutorError::Other(format!(
-            "Column {} is not numeric: {:?}",
-            col_name,
-            column.data_type()
-        ))),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: format!("arithmetic on column {}", col_name),
+            array_type: format!("{:?}", column.data_type()),
+        }),
     }
 }
 
@@ -196,10 +210,11 @@ fn create_literal_array(value: &SqlValue, len: usize) -> Result<ArrayRef, Execut
             // Create array of nulls
             Ok(Arc::new(Int64Array::from(vec![None; len])) as ArrayRef)
         }
-        _ => Err(ExecutorError::Other(format!(
-            "Cannot create literal array for {:?}",
-            value
-        ))),
+        _ => Err(ExecutorError::ColumnarTypeMismatch {
+            operation: "literal array creation".to_string(),
+            left_type: format!("{:?}", value),
+            right_type: Some("numeric".to_string()),
+        }),
     }
 }
 
@@ -210,14 +225,17 @@ fn cast_to_float64(array: &ArrayRef) -> Result<ArrayRef, ExecutorError> {
             let int_arr = array
                 .as_any()
                 .downcast_ref::<Int64Array>()
-                .ok_or_else(|| ExecutorError::Other("Downcast failed".to_string()))?;
+                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                    expected_type: "Int64Array".to_string(),
+                    context: "cast_to_float64".to_string(),
+                })?;
             Ok(Arc::new(cast_int64_to_float64(int_arr)?) as ArrayRef)
         }
         arrow::datatypes::DataType::Float64 => Ok(array.clone()),
-        _ => Err(ExecutorError::Other(format!(
-            "Unsupported type for float64 cast: {:?}",
-            array.data_type()
-        ))),
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "float64 cast".to_string(),
+            array_type: format!("{:?}", array.data_type()),
+        }),
     }
 }
 
