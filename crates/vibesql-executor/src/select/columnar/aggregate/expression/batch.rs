@@ -87,9 +87,10 @@ fn evaluate_batch_expression(
 
             batch.column(col_idx)
                 .cloned()
-                .ok_or_else(|| ExecutorError::Other(format!(
-                    "Column index {} out of bounds in batch", col_idx
-                )))
+                .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+                    column_index: col_idx,
+                    batch_columns: batch.column_count(),
+                })
         }
         Expression::Literal(val) => {
             // Create an array filled with the literal value
@@ -236,9 +237,11 @@ fn apply_float64_binary_op(
     use vibesql_ast::BinaryOperator::*;
 
     if left.len() != right.len() {
-        return Err(ExecutorError::Other(format!(
-            "Array length mismatch: {} vs {}", left.len(), right.len()
-        )));
+        return Err(ExecutorError::ColumnarLengthMismatch {
+            context: "binary_op".to_string(),
+            expected: left.len(),
+            actual: right.len(),
+        });
     }
 
     // SIMD-friendly iteration (compiler will auto-vectorize)
@@ -264,9 +267,11 @@ fn apply_int64_binary_op(
     use vibesql_ast::BinaryOperator::*;
 
     if left.len() != right.len() {
-        return Err(ExecutorError::Other(format!(
-            "Array length mismatch: {} vs {}", left.len(), right.len()
-        )));
+        return Err(ExecutorError::ColumnarLengthMismatch {
+            context: "binary_op".to_string(),
+            expected: left.len(),
+            actual: right.len(),
+        });
     }
 
     // SIMD-friendly iteration (compiler will auto-vectorize)

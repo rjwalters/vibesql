@@ -128,10 +128,11 @@ impl ColumnarBatch {
         // Verify column has correct length
         let col_len = column.len();
         if self.row_count > 0 && col_len != self.row_count {
-            return Err(ExecutorError::Other(format!(
-                "Column length mismatch: expected {}, got {}",
-                self.row_count, col_len
-            )));
+            return Err(ExecutorError::ColumnarLengthMismatch {
+                context: "add_column".to_string(),
+                expected: self.row_count,
+                actual: col_len,
+            });
         }
 
         if self.row_count == 0 {
@@ -245,7 +246,10 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<Int64Array>()
-                    .ok_or_else(|| ExecutorError::Other("Failed to downcast Int64Array".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "Int64Array".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    })?;
 
                 let values: Vec<i64> = (0..arr.len()).map(|i| arr.value(i)).collect();
                 let nulls = if arr.null_count() > 0 {
@@ -261,7 +265,10 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<Int32Array>()
-                    .ok_or_else(|| ExecutorError::Other("Failed to downcast Int32Array".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "Int32Array".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    })?;
 
                 let values: Vec<i32> = (0..arr.len()).map(|i| arr.value(i)).collect();
                 let nulls = if arr.null_count() > 0 {
@@ -277,7 +284,10 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<Float64Array>()
-                    .ok_or_else(|| ExecutorError::Other("Failed to downcast Float64Array".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "Float64Array".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    })?;
 
                 let values: Vec<f64> = (0..arr.len()).map(|i| arr.value(i)).collect();
                 let nulls = if arr.null_count() > 0 {
@@ -293,7 +303,10 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<Float32Array>()
-                    .ok_or_else(|| ExecutorError::Other("Failed to downcast Float32Array".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "Float32Array".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    })?;
 
                 let values: Vec<f32> = (0..arr.len()).map(|i| arr.value(i)).collect();
                 let nulls = if arr.null_count() > 0 {
@@ -309,7 +322,10 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<StringArray>()
-                    .ok_or_else(|| ExecutorError::Other("Failed to downcast StringArray".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "StringArray".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    })?;
 
                 let values: Vec<String> = (0..arr.len()).map(|i| arr.value(i).to_string()).collect();
                 let nulls = if arr.null_count() > 0 {
@@ -325,7 +341,10 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<BooleanArray>()
-                    .ok_or_else(|| ExecutorError::Other("Failed to downcast BooleanArray".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "BooleanArray".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    })?;
 
                 let values: Vec<u8> = (0..arr.len())
                     .map(|i| if arr.value(i) { 1 } else { 0 })
@@ -343,7 +362,10 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<Date32Array>()
-                    .ok_or_else(|| ExecutorError::Other("Failed to downcast Date32Array".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "Date32Array".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    })?;
 
                 let values: Vec<i32> = (0..arr.len()).map(|i| arr.value(i)).collect();
                 let nulls = if arr.null_count() > 0 {
@@ -359,8 +381,9 @@ impl ColumnarBatch {
                 let arr = array
                     .as_any()
                     .downcast_ref::<TimestampMicrosecondArray>()
-                    .ok_or_else(|| {
-                        ExecutorError::Other("Failed to downcast TimestampMicrosecondArray".to_string())
+                    .ok_or_else(|| ExecutorError::ArrowDowncastError {
+                        expected_type: "TimestampMicrosecondArray".to_string(),
+                        context: "Arrow batch conversion".to_string(),
                     })?;
 
                 let values: Vec<i64> = (0..arr.len()).map(|i| arr.value(i)).collect();
@@ -373,10 +396,10 @@ impl ColumnarBatch {
                 Ok(ColumnArray::Timestamp(values, nulls))
             }
 
-            _ => Err(ExecutorError::Other(format!(
-                "Unsupported Arrow data type for columnar conversion: {:?}",
-                data_type
-            ))),
+            _ => Err(ExecutorError::UnsupportedArrayType {
+                operation: "Arrow batch conversion".to_string(),
+                array_type: format!("{:?}", data_type),
+            }),
         }
     }
 
@@ -409,9 +432,12 @@ impl ColumnarBatch {
         let row_count = storage_columnar.row_count();
         let mut columns = Vec::with_capacity(column_names.len());
 
-        for col_name in &column_names {
+        for (col_idx, col_name) in column_names.iter().enumerate() {
             let storage_col = storage_columnar.get_column(col_name).ok_or_else(|| {
-                ExecutorError::Other(format!("Column '{}' not found in storage", col_name))
+                ExecutorError::ColumnarColumnNotFound {
+                    column_index: col_idx,
+                    batch_columns: column_names.len(),
+                }
             })?;
 
             let column_array = match storage_col {
@@ -541,7 +567,10 @@ impl ColumnarBatch {
     /// Get a value at a specific (row, column) position
     pub fn get_value(&self, row_idx: usize, col_idx: usize) -> Result<SqlValue, ExecutorError> {
         let column = self.column(col_idx)
-            .ok_or_else(|| ExecutorError::Other(format!("Column index {} out of bounds", col_idx).to_string()))?;
+            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+                column_index: col_idx,
+                batch_columns: self.columns.len(),
+            })?;
         column.get_value(row_idx)
     }
 
@@ -571,12 +600,11 @@ impl ColumnarBatch {
         let row_count = columns[0].len();
         for (idx, column) in columns.iter().enumerate() {
             if column.len() != row_count {
-                return Err(ExecutorError::Other(format!(
-                    "Column {} length mismatch: expected {}, got {}",
-                    idx,
-                    row_count,
-                    column.len()
-                )));
+                return Err(ExecutorError::ColumnarLengthMismatch {
+                    context: format!("from_columns (column {})", idx),
+                    expected: row_count,
+                    actual: column.len(),
+                });
             }
         }
 
@@ -611,10 +639,11 @@ impl ColumnarBatch {
                             has_nulls = true;
                         }
                         Some(other) => {
-                            return Err(ExecutorError::Other(format!(
-                                "Type mismatch: expected Integer, got {:?}",
-                                other
-                            )));
+                            return Err(ExecutorError::ColumnarTypeMismatch {
+                                operation: "extract_column".to_string(),
+                                left_type: "Integer".to_string(),
+                                right_type: Some(format!("{:?}", other)),
+                            });
                         }
                         None => {
                             values.push(0);
@@ -644,10 +673,11 @@ impl ColumnarBatch {
                             has_nulls = true;
                         }
                         Some(other) => {
-                            return Err(ExecutorError::Other(format!(
-                                "Type mismatch: expected Double, got {:?}",
-                                other
-                            )));
+                            return Err(ExecutorError::ColumnarTypeMismatch {
+                                operation: "extract_column".to_string(),
+                                left_type: "Double".to_string(),
+                                right_type: Some(format!("{:?}", other)),
+                            });
                         }
                         None => {
                             values.push(0.0);
@@ -677,10 +707,11 @@ impl ColumnarBatch {
                             has_nulls = true;
                         }
                         Some(other) => {
-                            return Err(ExecutorError::Other(format!(
-                                "Type mismatch: expected Varchar, got {:?}",
-                                other
-                            )));
+                            return Err(ExecutorError::ColumnarTypeMismatch {
+                                operation: "extract_column".to_string(),
+                                left_type: "Varchar".to_string(),
+                                right_type: Some(format!("{:?}", other)),
+                            });
                         }
                         None => {
                             values.push(String::new());
@@ -722,10 +753,11 @@ impl ColumnarBatch {
                             has_nulls = true;
                         }
                         Some(other) => {
-                            return Err(ExecutorError::Other(format!(
-                                "Type mismatch: expected Boolean, got {:?}",
-                                other
-                            )));
+                            return Err(ExecutorError::ColumnarTypeMismatch {
+                                operation: "extract_column".to_string(),
+                                left_type: "Boolean".to_string(),
+                                right_type: Some(format!("{:?}", other)),
+                            });
                         }
                         None => {
                             values.push(0);
@@ -804,7 +836,7 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Integer(*v))
-                    .ok_or_else(|| ExecutorError::Other("Index out of bounds".to_string()))
+                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::Float64(values, nulls) => {
@@ -815,7 +847,7 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Double(*v))
-                    .ok_or_else(|| ExecutorError::Other("Index out of bounds".to_string()))
+                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::String(values, nulls) => {
@@ -826,7 +858,7 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Varchar(v.clone()))
-                    .ok_or_else(|| ExecutorError::Other("Index out of bounds".to_string()))
+                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::Boolean(values, nulls) => {
@@ -837,16 +869,19 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Boolean(*v != 0))
-                    .ok_or_else(|| ExecutorError::Other("Index out of bounds".to_string()))
+                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::Mixed(values) => {
                 values.get(index)
                     .cloned()
-                    .ok_or_else(|| ExecutorError::Other("Index out of bounds".to_string()))
+                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
-            _ => Err(ExecutorError::Other("Unsupported column type".to_string())),
+            _ => Err(ExecutorError::UnsupportedArrayType {
+                operation: "get_value".to_string(),
+                array_type: format!("{:?}", std::mem::discriminant(self)),
+            }),
         }
     }
 

@@ -107,7 +107,10 @@ fn evaluate_predicate_simd(
 
     let column = batch
         .column(column_idx)
-        .ok_or_else(|| ExecutorError::Other(format!("Column index {} out of bounds", column_idx).to_string()))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: column_idx,
+            batch_columns: batch.column_count(),
+        })?;
 
     match column {
         // SIMD path for i64 columns
@@ -152,7 +155,11 @@ fn evaluate_predicate_i64_simd(
             } else {
                 // Type mismatch: convert to f64 and use f64 SIMD
                 let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "comparison".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", value)),
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_lt_f64(&f64_values, threshold)
             }
@@ -165,7 +172,11 @@ fn evaluate_predicate_i64_simd(
                 simd_gt_i64(values, *threshold)
             } else {
                 let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "comparison".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", value)),
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_gt_f64(&f64_values, threshold)
             }
@@ -178,7 +189,11 @@ fn evaluate_predicate_i64_simd(
                 simd_eq_i64(values, *target)
             } else {
                 let target = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "comparison".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", value)),
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_eq_f64(&f64_values, target)
             }
@@ -191,18 +206,22 @@ fn evaluate_predicate_i64_simd(
                 SqlValue::Integer(v) => *v,
                 SqlValue::Bigint(v) => *v,
                 _ => {
-                    return Err(ExecutorError::Other(
-                        "Incompatible types for BETWEEN".to_string(),
-                    ))
+                    return Err(ExecutorError::ColumnarTypeMismatch {
+                        operation: "BETWEEN".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: None,
+                    })
                 }
             };
             let high_i64 = match high {
                 SqlValue::Integer(v) => *v,
                 SqlValue::Bigint(v) => *v,
                 _ => {
-                    return Err(ExecutorError::Other(
-                        "Incompatible types for BETWEEN".to_string(),
-                    ))
+                    return Err(ExecutorError::ColumnarTypeMismatch {
+                        operation: "BETWEEN".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: None,
+                    })
                 }
             };
 
@@ -225,7 +244,11 @@ fn evaluate_predicate_i64_simd(
                 simd_ge_i64(values, *threshold)
             } else {
                 let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "comparison".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", value)),
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_ge_f64(&f64_values, threshold)
             }
@@ -238,7 +261,11 @@ fn evaluate_predicate_i64_simd(
                 simd_le_i64(values, *threshold)
             } else {
                 let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "comparison".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", value)),
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_le_f64(&f64_values, threshold)
             }
@@ -266,39 +293,67 @@ fn evaluate_predicate_i32_simd(
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
             let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "date comparison".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: None,
+                })?;
             simd_lt_i32(values, threshold)
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
             let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "date comparison".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: None,
+                })?;
             simd_gt_i32(values, threshold)
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
             let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "date comparison".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: None,
+                })?;
             simd_ge_i32(values, threshold)
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
             let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "date comparison".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: None,
+                })?;
             simd_le_i32(values, threshold)
         }
 
         ColumnPredicate::Equal { value, .. } => {
             let target = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for date comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "date comparison".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: None,
+                })?;
             simd_eq_i32(values, target)
         }
 
         ColumnPredicate::Between { low, high, ..} => {
             let low_i32 = value_to_date_i32(low)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for BETWEEN".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "BETWEEN".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: Some(format!("{:?}", low)),
+                })?;
             let high_i32 = value_to_date_i32(high)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for BETWEEN".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "BETWEEN".to_string(),
+                    left_type: "Date".to_string(),
+                    right_type: Some(format!("{:?}", high)),
+                })?;
 
             let ge_low = simd_ge_i32(values, low_i32);
             let le_high = simd_le_i32(values, high_i32);
@@ -333,39 +388,67 @@ fn evaluate_predicate_f64_simd(
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
             let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "comparison".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", value)),
+                })?;
             simd_lt_f64(values, threshold)
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
             let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "comparison".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", value)),
+                })?;
             simd_gt_f64(values, threshold)
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
             let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "comparison".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", value)),
+                })?;
             simd_ge_f64(values, threshold)
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
             let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "comparison".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", value)),
+                })?;
             simd_le_f64(values, threshold)
         }
 
         ColumnPredicate::Equal { value, .. } => {
             let target = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for comparison".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "comparison".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", value)),
+                })?;
             simd_eq_f64(values, target)
         }
 
         ColumnPredicate::Between { low, high, .. } => {
             let low_f64 = value_to_f64(low)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for BETWEEN".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "BETWEEN".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", low)),
+                })?;
             let high_f64 = value_to_f64(high)
-                .ok_or_else(|| ExecutorError::Other("Incompatible types for BETWEEN".to_string()))?;
+                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                    operation: "BETWEEN".to_string(),
+                    left_type: "Float64".to_string(),
+                    right_type: Some(format!("{:?}", high)),
+                })?;
 
             let ge_low = simd_ge_f64(values, low_f64);
             let le_high = simd_le_f64(values, high_f64);
@@ -422,9 +505,11 @@ fn apply_filter_mask(
     mask: &[bool],
 ) -> Result<ColumnarBatch, ExecutorError> {
     if mask.len() != batch.row_count() {
-        return Err(ExecutorError::Other(
-            "Filter mask length does not match batch row count".to_string(),
-        ));
+        return Err(ExecutorError::ColumnarLengthMismatch {
+            context: "filter mask".to_string(),
+            expected: batch.row_count(),
+            actual: mask.len(),
+        });
     }
 
     // Count how many rows will pass
@@ -441,7 +526,10 @@ fn apply_filter_mask(
     for col_idx in 0..batch.column_count() {
         let column = batch
             .column(col_idx)
-            .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", col_idx).to_string()))?;
+            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+                column_index: col_idx,
+                batch_columns: batch.column_count(),
+            })?;
 
         let new_column = filter_column(column, mask)?;
         new_columns.push(new_column);

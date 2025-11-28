@@ -165,6 +165,38 @@ pub enum ExecutorError {
         field: String,
         value_type: String,
     },
+    /// Arrow array downcast failed (columnar execution)
+    ArrowDowncastError {
+        expected_type: String,
+        context: String,
+    },
+    /// Type mismatch in columnar operations
+    ColumnarTypeMismatch {
+        operation: String,
+        left_type: String,
+        right_type: Option<String>,
+    },
+    /// SIMD operation failed (returned None or error)
+    SimdOperationFailed {
+        operation: String,
+        reason: String,
+    },
+    /// Column not found in batch by index
+    ColumnarColumnNotFound {
+        column_index: usize,
+        batch_columns: usize,
+    },
+    /// Column length mismatch in batch operations
+    ColumnarLengthMismatch {
+        context: String,
+        expected: usize,
+        actual: usize,
+    },
+    /// Unsupported array type for columnar operation
+    UnsupportedArrayType {
+        operation: String,
+        array_type: String,
+    },
     Other(String),
 }
 
@@ -515,6 +547,52 @@ impl std::fmt::Display for ExecutorError {
                     f,
                     "Cannot extract {} from {} value",
                     field, value_type
+                )
+            }
+            ExecutorError::ArrowDowncastError { expected_type, context } => {
+                write!(
+                    f,
+                    "Failed to downcast Arrow array to {} ({})",
+                    expected_type, context
+                )
+            }
+            ExecutorError::ColumnarTypeMismatch { operation, left_type, right_type } => {
+                if let Some(right) = right_type {
+                    write!(
+                        f,
+                        "Incompatible types for {}: {} vs {}",
+                        operation, left_type, right
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Incompatible type for {}: {}",
+                        operation, left_type
+                    )
+                }
+            }
+            ExecutorError::SimdOperationFailed { operation, reason } => {
+                write!(f, "SIMD {} failed: {}", operation, reason)
+            }
+            ExecutorError::ColumnarColumnNotFound { column_index, batch_columns } => {
+                write!(
+                    f,
+                    "Column index {} out of bounds (batch has {} columns)",
+                    column_index, batch_columns
+                )
+            }
+            ExecutorError::ColumnarLengthMismatch { context, expected, actual } => {
+                write!(
+                    f,
+                    "Column length mismatch in {}: expected {}, got {}",
+                    context, expected, actual
+                )
+            }
+            ExecutorError::UnsupportedArrayType { operation, array_type } => {
+                write!(
+                    f,
+                    "Unsupported array type for {}: {}",
+                    operation, array_type
                 )
             }
             ExecutorError::Other(msg) => write!(f, "{}", msg),

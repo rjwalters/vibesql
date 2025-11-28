@@ -151,7 +151,10 @@ fn compute_column_aggregate(
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
     let column = batch.column(col_idx).ok_or_else(|| {
-        ExecutorError::Other(format!("Column index {} out of bounds", col_idx))
+        ExecutorError::ColumnarColumnNotFound {
+            column_index: col_idx,
+            batch_columns: batch.column_count(),
+        }
     })?;
 
     match column {
@@ -215,12 +218,18 @@ fn compute_i64_aggregate(
             AggregateOp::Min => {
                 simd_min_i64(&valid_values)
                     .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::Other("MIN on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MIN".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
             AggregateOp::Max => {
                 simd_max_i64(&valid_values)
                     .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::Other("MAX on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MAX".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
         }
     }
@@ -237,12 +246,18 @@ fn compute_i64_aggregate(
             AggregateOp::Min => {
                 valid_values.iter().min().copied()
                     .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::Other("MIN on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MIN".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
             AggregateOp::Max => {
                 valid_values.iter().max().copied()
                     .map(SqlValue::Integer)
-                    .ok_or_else(|| ExecutorError::Other("MAX on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MAX".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
         }
     }
@@ -295,12 +310,18 @@ fn compute_f64_aggregate(
             AggregateOp::Min => {
                 simd_min_f64(&valid_values)
                     .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::Other("MIN on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MIN".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
             AggregateOp::Max => {
                 simd_max_f64(&valid_values)
                     .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::Other("MAX on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MAX".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
         }
     }
@@ -318,13 +339,19 @@ fn compute_f64_aggregate(
                 valid_values.iter().cloned()
                     .min_by(|a, b| a.partial_cmp(b).unwrap())
                     .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::Other("MIN on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MIN".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
             AggregateOp::Max => {
                 valid_values.iter().cloned()
                     .max_by(|a, b| a.partial_cmp(b).unwrap())
                     .map(SqlValue::Double)
-                    .ok_or_else(|| ExecutorError::Other("MAX on empty set".to_string()))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MAX".to_string(),
+                        reason: "empty set".to_string(),
+                    })
             }
         }
     }
@@ -544,10 +571,16 @@ fn compute_multiply_aggregate(
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
     let left_col = batch.column(left_idx).ok_or_else(|| {
-        ExecutorError::Other(format!("Column {} not found", left_idx))
+        ExecutorError::ColumnarColumnNotFound {
+            column_index: left_idx,
+            batch_columns: batch.column_count(),
+        }
     })?;
     let right_col = batch.column(right_idx).ok_or_else(|| {
-        ExecutorError::Other(format!("Column {} not found", right_idx))
+        ExecutorError::ColumnarColumnNotFound {
+            column_index: right_idx,
+            batch_columns: batch.column_count(),
+        }
     })?;
 
     // Extract f64 arrays from both columns
@@ -555,7 +588,11 @@ fn compute_multiply_aggregate(
     let right_f64 = column_to_f64_vec(right_col)?;
 
     if left_f64.len() != right_f64.len() {
-        return Err(ExecutorError::Other("Column length mismatch".to_string()));
+        return Err(ExecutorError::ColumnarLengthMismatch {
+            context: "multiply_aggregate".to_string(),
+            expected: left_f64.len(),
+            actual: right_f64.len(),
+        });
     }
 
     // Vectorized multiply and aggregate
@@ -613,7 +650,10 @@ fn column_to_f64_vec(column: &ColumnArray) -> Result<Vec<Option<f64>>, ExecutorE
                 }
             }).collect())
         }
-        _ => Err(ExecutorError::Other("Cannot convert column to f64".to_string()))
+        _ => Err(ExecutorError::UnsupportedArrayType {
+            operation: "column_to_f64".to_string(),
+            array_type: format!("{:?}", std::mem::discriminant(column)),
+        })
     }
 }
 
@@ -641,10 +681,18 @@ fn eval_expr_on_batch(
                 (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
                 (l, r) => {
                     let l_f64 = sql_value_to_f64(&l).ok_or_else(|| {
-                        ExecutorError::Other("Cannot convert to f64".to_string())
+                        ExecutorError::ColumnarTypeMismatch {
+                            operation: "binary_op".to_string(),
+                            left_type: format!("{:?}", l),
+                            right_type: None,
+                        }
                     })?;
                     let r_f64 = sql_value_to_f64(&r).ok_or_else(|| {
-                        ExecutorError::Other("Cannot convert to f64".to_string())
+                        ExecutorError::ColumnarTypeMismatch {
+                            operation: "binary_op".to_string(),
+                            left_type: format!("{:?}", r),
+                            right_type: None,
+                        }
                     })?;
 
                     let result = match op {
@@ -652,7 +700,9 @@ fn eval_expr_on_batch(
                         BinaryOperator::Minus => l_f64 - r_f64,
                         BinaryOperator::Multiply => l_f64 * r_f64,
                         BinaryOperator::Divide => l_f64 / r_f64,
-                        _ => return Err(ExecutorError::Other("Unsupported operator".to_string()))
+                        _ => return Err(ExecutorError::UnsupportedExpression(
+                            format!("Unsupported binary operator: {:?}", op)
+                        ))
                     };
                     Ok(SqlValue::Double(result))
                 }

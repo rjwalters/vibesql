@@ -263,7 +263,10 @@ pub(super) fn compute_batch_sum(
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
     let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: column_idx,
+            batch_columns: batch.column_count(),
+        })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
@@ -330,7 +333,10 @@ pub(super) fn compute_batch_avg(
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
     let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: column_idx,
+            batch_columns: batch.column_count(),
+        })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
@@ -391,7 +397,10 @@ pub(super) fn compute_batch_min(
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
     let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: column_idx,
+            batch_columns: batch.column_count(),
+        })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
@@ -444,7 +453,10 @@ pub(super) fn compute_batch_max(
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
     let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::Other(format!("Column {} not found", column_idx)))?;
+        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: column_idx,
+            batch_columns: batch.column_count(),
+        })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
