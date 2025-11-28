@@ -182,10 +182,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_is_sqlite() {
-        // Default is SQLite for SQLLogicTest compatibility (SQLite-derived test suite)
+    fn test_default_is_mysql() {
+        // Default is MySQL for SQLLogicTest compatibility (MySQL 8.x test suite)
         let mode = SqlMode::default();
-        assert!(matches!(mode, SqlMode::SQLite));
+        assert!(matches!(mode, SqlMode::MySQL { .. }));
     }
 
     #[test]
