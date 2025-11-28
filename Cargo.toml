@@ -383,6 +383,10 @@ path = "tests/regression/issue_990.rs"
 name = "issue_2783"
 path = "tests/regression/issue_2783.rs"
 
+[[test]]
+name = "issue_2852"
+path = "tests/regression/issue_2852.rs"
+
 # Parser tests - SQL parsing and syntax
 [[test]]
 name = "coverage_improvements"
