@@ -229,104 +229,75 @@ impl<'a> ExecutionContext<'a> {
     }
 }
 
-/// Builder for creating ExecutionContext from SelectExecutor fields.
-///
-/// This helper extracts common context-building logic that's repeated
-/// across multiple execution methods.
-pub struct ExecutionContextBuilder<'a> {
-    schema: &'a CombinedSchema,
-    database: &'a vibesql_storage::Database,
-    outer_row: Option<&'a vibesql_storage::Row>,
-    outer_schema: Option<&'a CombinedSchema>,
-    procedural_context: Option<&'a procedural::ExecutionContext>,
-    cte_context: Option<&'a HashMap<String, CteResult>>,
-    executor_cte_context: Option<&'a HashMap<String, CteResult>>,
-}
-
-impl<'a> ExecutionContextBuilder<'a> {
-    /// Create a new builder with required parameters.
-    pub fn new(schema: &'a CombinedSchema, database: &'a vibesql_storage::Database) -> Self {
-        Self {
-            schema,
-            database,
-            outer_row: None,
-            outer_schema: None,
-            procedural_context: None,
-            cte_context: None,
-            executor_cte_context: None,
-        }
-    }
-
-    /// Set outer context from SelectExecutor fields.
-    #[must_use]
-    pub fn outer_context(
-        mut self,
-        outer_row: Option<&'a vibesql_storage::Row>,
-        outer_schema: Option<&'a CombinedSchema>,
-    ) -> Self {
-        self.outer_row = outer_row;
-        self.outer_schema = outer_schema;
-        self
-    }
-
-    /// Set procedural context from SelectExecutor.
-    #[must_use]
-    pub fn procedural(mut self, proc_ctx: Option<&'a procedural::ExecutionContext>) -> Self {
-        self.procedural_context = proc_ctx;
-        self
-    }
-
-    /// Set CTE context from query-level CTEs.
-    #[must_use]
-    pub fn cte_from_query(mut self, cte_results: &'a HashMap<String, CteResult>) -> Self {
-        if !cte_results.is_empty() {
-            self.cte_context = Some(cte_results);
-        }
-        self
-    }
-
-    /// Set CTE context from SelectExecutor's outer CTE context.
-    #[must_use]
-    pub fn cte_from_executor(
-        mut self,
-        executor_cte_context: Option<&'a HashMap<String, CteResult>>,
-    ) -> Self {
-        self.executor_cte_context = executor_cte_context;
-        self
-    }
-
-    /// Build the ExecutionContext.
-    ///
-    /// CTE context priority: query-level CTEs take precedence over executor-level.
-    pub fn build(self) -> ExecutionContext<'a> {
-        let mut ctx = ExecutionContext::new(self.schema, self.database);
-
-        // Set outer context if both row and schema are present
-        if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
-            ctx = ctx.with_outer_context(outer_row, outer_schema);
-        }
-
-        // Set procedural context if present
-        if let Some(proc_ctx) = self.procedural_context {
-            ctx = ctx.with_procedural_context(proc_ctx);
-        }
-
-        // Set CTE context (query-level takes precedence)
-        if let Some(cte_ctx) = self.cte_context {
-            ctx = ctx.with_cte_context(cte_ctx);
-        } else if let Some(executor_cte) = self.executor_cte_context {
-            ctx = ctx.with_cte_context(executor_cte);
-        }
-
-        ctx
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::schema::CombinedSchema;
     use vibesql_catalog::TableSchema;
+
+    /// Builder for creating ExecutionContext from SelectExecutor fields.
+    ///
+    /// This helper extracts common context-building logic that's repeated
+    /// across multiple execution methods.
+    struct ExecutionContextBuilder<'a> {
+        schema: &'a CombinedSchema,
+        database: &'a vibesql_storage::Database,
+        outer_row: Option<&'a vibesql_storage::Row>,
+        outer_schema: Option<&'a CombinedSchema>,
+        procedural_context: Option<&'a procedural::ExecutionContext>,
+        cte_context: Option<&'a HashMap<String, CteResult>>,
+        executor_cte_context: Option<&'a HashMap<String, CteResult>>,
+    }
+
+    impl<'a> ExecutionContextBuilder<'a> {
+        /// Create a new builder with required parameters.
+        fn new(schema: &'a CombinedSchema, database: &'a vibesql_storage::Database) -> Self {
+            Self {
+                schema,
+                database,
+                outer_row: None,
+                outer_schema: None,
+                procedural_context: None,
+                cte_context: None,
+                executor_cte_context: None,
+            }
+        }
+
+        /// Set CTE context from query-level CTEs.
+        #[must_use]
+        fn cte_from_query(mut self, cte_results: &'a HashMap<String, CteResult>) -> Self {
+            if !cte_results.is_empty() {
+                self.cte_context = Some(cte_results);
+            }
+            self
+        }
+
+        /// Build the ExecutionContext.
+        ///
+        /// CTE context priority: query-level CTEs take precedence over executor-level.
+        fn build(self) -> ExecutionContext<'a> {
+            let mut ctx = ExecutionContext::new(self.schema, self.database);
+
+            // Set outer context if both row and schema are present
+            if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+                ctx = ctx.with_outer_context(outer_row, outer_schema);
+            }
+
+            // Set procedural context if present
+            if let Some(proc_ctx) = self.procedural_context {
+                ctx = ctx.with_procedural_context(proc_ctx);
+            }
+
+            // Set CTE context (query-level takes precedence)
+            if let Some(cte_ctx) = self.cte_context {
+                ctx = ctx.with_cte_context(cte_ctx);
+            } else if let Some(executor_cte) = self.executor_cte_context {
+                ctx = ctx.with_cte_context(executor_cte);
+            }
+
+            ctx
+        }
+    }
 
     fn create_test_schema() -> CombinedSchema {
         let table_schema = TableSchema::new("test".to_string(), vec![]);
