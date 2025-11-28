@@ -179,12 +179,13 @@ mod tests {
 
     #[test]
     fn test_integer_division_sqlite() {
-        // SQLite mode (default): Division returns Integer for integer operands (truncated)
-        let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(3), vibesql_types::SqlMode::default()).unwrap();
+        // SQLite mode: Division returns Integer for integer operands (truncated)
+        let sqlite_mode = vibesql_types::SqlMode::SQLite;
+        let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(3), sqlite_mode.clone()).unwrap();
         assert_eq!(result, SqlValue::Integer(5));
 
         // Test truncation behavior
-        let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(4), vibesql_types::SqlMode::default()).unwrap();
+        let result = ArithmeticOps::divide(&SqlValue::Integer(15), &SqlValue::Integer(4), sqlite_mode).unwrap();
         assert_eq!(result, SqlValue::Integer(3)); // 15/4 = 3.75 truncates to 3
     }
 
@@ -280,14 +281,15 @@ mod tests {
 
     #[test]
     fn test_boolean_division() {
-        // SQLite mode (default): 10 / TRUE = 10 (integer division)
+        // SQLite mode: 10 / TRUE = 10 (integer division)
+        let sqlite_mode = vibesql_types::SqlMode::SQLite;
         let result =
-            ArithmeticOps::divide(&SqlValue::Integer(10), &SqlValue::Boolean(true), vibesql_types::SqlMode::default()).unwrap();
+            ArithmeticOps::divide(&SqlValue::Integer(10), &SqlValue::Boolean(true), sqlite_mode.clone()).unwrap();
         assert_eq!(result, SqlValue::Integer(10));
 
         // TRUE / TRUE = 1
         let result =
-            ArithmeticOps::divide(&SqlValue::Boolean(true), &SqlValue::Boolean(true), vibesql_types::SqlMode::default()).unwrap();
+            ArithmeticOps::divide(&SqlValue::Boolean(true), &SqlValue::Boolean(true), sqlite_mode).unwrap();
         assert_eq!(result, SqlValue::Integer(1));
     }
 

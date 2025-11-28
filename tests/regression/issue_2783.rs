@@ -11,7 +11,7 @@
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
-use vibesql_types::SqlValue;
+use vibesql_types::{SqlMode, SqlValue};
 
 /// Helper to execute SQL and return results
 fn execute_select(db: &mut Database, sql: &str) -> Vec<vibesql_storage::Row> {
@@ -29,7 +29,8 @@ fn execute_select(db: &mut Database, sql: &str) -> Vec<vibesql_storage::Row> {
 fn test_issue_2783_sqlite_mode_division_with_cast_signed() {
     // This is the exact query from slt_good_6.test that was failing
     let mut db = Database::new();
-    // Default mode is SQLite (integer division)
+    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    db.set_sql_mode(SqlMode::SQLite);
 
     let sql = r#"
         SELECT DISTINCT + 54 AS col0,
@@ -65,7 +66,8 @@ fn test_issue_2783_sqlite_mode_division_with_cast_signed() {
 fn test_issue_2783_integer_division_with_avg() {
     // Simpler test case isolating the division behavior
     let mut db = Database::new();
-    // Default mode is SQLite (integer division)
+    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    db.set_sql_mode(SqlMode::SQLite);
 
     // In SQLite mode: 82 / -42 = -1 (truncated integer division)
     // In MySQL mode: 82 / -42 = -1.952... (decimal division)
@@ -85,6 +87,8 @@ fn test_issue_2783_integer_division_with_avg() {
 fn test_issue_2783_division_by_avg_preserves_sqlite_semantics() {
     // Test that division by AVG() works correctly in SQLite mode
     let mut db = Database::new();
+    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    db.set_sql_mode(SqlMode::SQLite);
 
     // AVG(97) returns 97.0 (Numeric), but the whole expression should
     // still respect SQLite semantics for the final CAST
@@ -113,6 +117,8 @@ fn test_issue_2783_division_by_avg_preserves_sqlite_semantics() {
 fn test_issue_2783_cast_as_signed_works_in_sqlite_mode() {
     // Verify that CAST AS SIGNED (MySQL syntax) works in SQLite mode
     let mut db = Database::new();
+    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    db.set_sql_mode(SqlMode::SQLite);
 
     let sql = "SELECT CAST(151.99 AS SIGNED) AS result";
     let rows = execute_select(&mut db, sql);
