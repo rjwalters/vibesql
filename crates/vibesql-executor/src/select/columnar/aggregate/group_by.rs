@@ -19,13 +19,105 @@ use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::functions::compute_columnar_aggregate_impl;
 use super::AggregateOp;
 
-#[cfg(feature = "simd")]
-use crate::simd::aggregation::{
-    simd_sum_i64_masked, simd_sum_f64_masked,
-    simd_min_i64_masked, simd_min_f64_masked,
-    simd_max_i64_masked, simd_max_f64_masked,
-    simd_count_masked,
-};
+// Masked SIMD aggregation operations for GROUP BY
+// These are auto-vectorized versions that filter values based on a boolean mask
+
+#[inline]
+fn simd_sum_i64_masked(values: &[i64], mask: &[bool]) -> i64 {
+    let (mut s0, mut s1, mut s2, mut s3) = (0i64, 0i64, 0i64, 0i64);
+    let chunks = values.len() / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if mask[off] { s0 = s0.wrapping_add(values[off]); }
+        if mask[off + 1] { s1 = s1.wrapping_add(values[off + 1]); }
+        if mask[off + 2] { s2 = s2.wrapping_add(values[off + 2]); }
+        if mask[off + 3] { s3 = s3.wrapping_add(values[off + 3]); }
+    }
+
+    let mut sum = s0.wrapping_add(s1).wrapping_add(s2).wrapping_add(s3);
+    for i in (chunks * 4)..values.len() {
+        if mask[i] { sum = sum.wrapping_add(values[i]); }
+    }
+    sum
+}
+
+#[inline]
+fn simd_sum_f64_masked(values: &[f64], mask: &[bool]) -> f64 {
+    let (mut s0, mut s1, mut s2, mut s3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let chunks = values.len() / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if mask[off] { s0 += values[off]; }
+        if mask[off + 1] { s1 += values[off + 1]; }
+        if mask[off + 2] { s2 += values[off + 2]; }
+        if mask[off + 3] { s3 += values[off + 3]; }
+    }
+
+    let mut sum = s0 + s1 + s2 + s3;
+    for i in (chunks * 4)..values.len() {
+        if mask[i] { sum += values[i]; }
+    }
+    sum
+}
+
+#[inline]
+fn simd_min_i64_masked(values: &[i64], mask: &[bool]) -> Option<i64> {
+    let mut result = i64::MAX;
+    let mut found = false;
+    for (i, &v) in values.iter().enumerate() {
+        if mask[i] {
+            result = result.min(v);
+            found = true;
+        }
+    }
+    if found { Some(result) } else { None }
+}
+
+#[inline]
+fn simd_min_f64_masked(values: &[f64], mask: &[bool]) -> Option<f64> {
+    let mut result = f64::INFINITY;
+    let mut found = false;
+    for (i, &v) in values.iter().enumerate() {
+        if mask[i] {
+            result = result.min(v);
+            found = true;
+        }
+    }
+    if found { Some(result) } else { None }
+}
+
+#[inline]
+fn simd_max_i64_masked(values: &[i64], mask: &[bool]) -> Option<i64> {
+    let mut result = i64::MIN;
+    let mut found = false;
+    for (i, &v) in values.iter().enumerate() {
+        if mask[i] {
+            result = result.max(v);
+            found = true;
+        }
+    }
+    if found { Some(result) } else { None }
+}
+
+#[inline]
+fn simd_max_f64_masked(values: &[f64], mask: &[bool]) -> Option<f64> {
+    let mut result = f64::NEG_INFINITY;
+    let mut found = false;
+    for (i, &v) in values.iter().enumerate() {
+        if mask[i] {
+            result = result.max(v);
+            found = true;
+        }
+    }
+    if found { Some(result) } else { None }
+}
+
+#[inline]
+fn simd_count_masked(mask: &[bool]) -> usize {
+    mask.iter().filter(|&&b| b).count()
+}
 
 /// Compute aggregates with GROUP BY using columnar execution
 ///
@@ -160,7 +252,7 @@ pub fn columnar_group_by(
 ///
 /// # Performance
 ///
-/// - Uses SIMD for per-group aggregation (SUM, MIN, MAX)
+/// - Uses auto-vectorized SIMD for per-group aggregation (SUM, MIN, MAX)
 /// - Avoids row materialization within groups
 /// - Direct typed array access (no SqlValue pattern matching in hot path)
 /// - Provides 3-5x improvement over scalar GROUP BY for TPC-H Q1
@@ -174,7 +266,6 @@ pub fn columnar_group_by(
 /// # Returns
 ///
 /// Vec of Row objects, each containing group key values followed by aggregate results
-#[cfg(feature = "simd")]
 pub fn columnar_group_by_batch(
     batch: &ColumnarBatch,
     group_cols: &[usize],
@@ -237,10 +328,9 @@ pub fn columnar_group_by_batch(
     Ok(result_rows)
 }
 
-/// Compute a single aggregate for a group using SIMD
+/// Compute a single aggregate for a group using auto-vectorized SIMD
 ///
 /// Uses masked SIMD operations on typed column arrays for optimal performance.
-#[cfg(feature = "simd")]
 fn compute_group_aggregate_simd(
     batch: &ColumnarBatch,
     col_idx: usize,
@@ -365,7 +455,6 @@ fn compute_group_aggregate_simd(
 }
 
 /// Scalar fallback for computing aggregates on mixed-type columns
-#[cfg(feature = "simd")]
 fn compute_group_aggregate_mixed(
     values: &[SqlValue],
     group_bitmap: &[bool],
@@ -452,8 +541,8 @@ fn compute_group_aggregate_mixed(
     }
 }
 
-#[cfg(all(test, feature = "simd"))]
-mod tests {
+#[cfg(test)]
+mod batch_tests {
     use super::*;
 
     fn make_test_batch() -> ColumnarBatch {

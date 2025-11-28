@@ -452,17 +452,9 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let group_start = std::time::Instant::now();
 
-        // Phase 4: Execute SIMD-accelerated batch GROUP BY (no row conversion!)
-        // This provides 3-5x speedup over the row-based path for TPC-H Q1
-        #[cfg(feature = "simd")]
+        // Phase 4: Execute SIMD-accelerated GROUP BY aggregation directly on batch
+        // Uses columnar_group_by_batch for 3-5x improvement over scalar path
         let result = columnar::columnar_group_by_batch(&filtered_batch, &group_cols, &agg_cols)?;
-
-        // Fallback to row-based GROUP BY when SIMD feature is disabled
-        #[cfg(not(feature = "simd"))]
-        let result = {
-            let rows = filtered_batch.to_rows()?;
-            columnar::columnar_group_by(&rows, &group_cols, &agg_cols, None)?
-        };
 
         #[cfg(feature = "profile-q6")]
         {
