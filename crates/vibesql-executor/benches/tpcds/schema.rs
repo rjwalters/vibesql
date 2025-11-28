@@ -5522,6 +5522,23 @@ fn create_tpcds_schema_duckdb(conn: &DuckDBConn) {
     .unwrap();
 }
 
+/// Returns true if the given year is a leap year
+#[cfg(feature = "benchmark-comparison")]
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Returns the number of days in the given month for the given year
+#[cfg(feature = "benchmark-comparison")]
+fn days_in_month(year: i32, month: i32) -> i32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => if is_leap_year(year) { 29 } else { 28 },
+        _ => 30, // fallback
+    }
+}
+
 #[cfg(feature = "benchmark-comparison")]
 fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -5537,7 +5554,9 @@ fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
         let year = start_year + (days_since_base / 365) as i32;
         let day_of_year = (days_since_base % 365) as i32;
         let month = (day_of_year / 30).min(11) + 1;
-        let day = (day_of_year % 30) + 1;
+        let raw_day = (day_of_year % 30) + 1;
+        // Clamp day to valid range for this month/year (handles Feb 29 in non-leap years)
+        let day = raw_day.min(days_in_month(year, month));
         let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
         let d_date_id = format!("AAAAAA{:010}", d_date_sk);
         let d_dow = (days_since_base % 7) as i32;

@@ -465,12 +465,8 @@ impl NativeColumnarPipeline {
             ));
         }
 
-        // Convert batch to rows for columnar_group_by
-        // TODO: Implement native batch-based GROUP BY to avoid this conversion
-        let rows = batch.to_rows()?;
-
-        // Execute hash-based GROUP BY
-        let result = crate::select::columnar::columnar_group_by(&rows, &group_cols, &agg_cols, None)?;
+        // Execute SIMD-accelerated hash-based GROUP BY directly on batch
+        let result = crate::select::columnar::columnar_group_by_batch(batch, &group_cols, &agg_cols)?;
 
         Ok(PipelineOutput::from_rows(result))
     }
