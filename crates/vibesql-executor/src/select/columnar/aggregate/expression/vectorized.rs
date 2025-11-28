@@ -31,8 +31,11 @@ fn try_vectorized_binary_aggregate(
     filter_bitmap: Option<&[bool]>,
     schema: &CombinedSchema,
 ) -> Result<Option<SqlValue>, ExecutorError> {
+    log::trace!("[VecBinary] Checking vectorized binary aggregate for {} rows, op={:?}", rows.len(), op);
+
     // Only optimize SUM and AVG for now
     if !matches!(op, AggregateOp::Sum | AggregateOp::Avg) {
+        log::trace!("[VecBinary] Op {:?} not supported for vectorized binary", op);
         return Ok(None);
     }
 
@@ -134,22 +137,37 @@ pub fn compute_expression_aggregate(
     filter_bitmap: Option<&[bool]>,
     schema: &CombinedSchema,
 ) -> Result<SqlValue, ExecutorError> {
+    log::debug!(
+        "[ExprAgg] compute_expression_aggregate: {} rows, op={:?}, has_filter={}, threshold={}",
+        rows.len(),
+        op,
+        filter_bitmap.is_some(),
+        SIMD_THRESHOLD
+    );
+
     // Try main branch's vectorized path first for simple binary operations
     // This is optimized for column × column multiplication with optional filtering
     if let Some(result) = try_vectorized_binary_aggregate(rows, expr, op, filter_bitmap, schema)? {
+        log::debug!("[ExprAgg] Used vectorized binary aggregate path");
         return Ok(result);
     }
 
     // Try SIMD path for large datasets (more general than vectorized binary)
     // Only when no filter bitmap (vectorized binary handles filtered case)
     if rows.len() >= SIMD_THRESHOLD && filter_bitmap.is_none() {
+        log::debug!("[ExprAgg] Attempting Arrow SIMD path ({} >= {} rows)", rows.len(), SIMD_THRESHOLD);
         if let Ok(result) = try_simd_aggregate(rows, expr, op, schema) {
+            log::debug!("[ExprAgg] Arrow SIMD path succeeded");
             return Ok(result);
         }
+        log::debug!("[ExprAgg] Arrow SIMD path failed, falling back to scalar");
         // Fall through to scalar path if SIMD fails
+    } else if rows.len() < SIMD_THRESHOLD {
+        log::debug!("[ExprAgg] Below SIMD threshold ({} < {}), using vectorized/scalar path", rows.len(), SIMD_THRESHOLD);
     }
 
     // Scalar path (for small datasets, complex expressions, or when SIMD not applicable)
+    log::debug!("[ExprAgg] Using scalar aggregate path");
     compute_scalar_aggregate(rows, expr, op, filter_bitmap, schema)
 }
 

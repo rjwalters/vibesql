@@ -45,8 +45,15 @@ pub fn compute_batch_expression_aggregate(
     op: AggregateOp,
     schema: &CombinedSchema,
 ) -> Result<SqlValue, ExecutorError> {
+    log::debug!(
+        "[BatchExpr] compute_batch_expression_aggregate: {} rows, op={:?}",
+        batch.row_count(),
+        op
+    );
+
     // Empty batch handling
     if batch.row_count() == 0 {
+        log::debug!("[BatchExpr] Empty batch, returning default");
         return Ok(match op {
             AggregateOp::Count => SqlValue::Integer(0),
             _ => SqlValue::Null,
@@ -54,9 +61,11 @@ pub fn compute_batch_expression_aggregate(
     }
 
     // Evaluate expression on batch columns using SIMD
+    log::debug!("[BatchExpr] Evaluating expression on batch columns (SIMD-enabled)");
     let result_array = evaluate_batch_expression(batch, expr, schema)?;
 
     // Aggregate the result array using SIMD
+    log::debug!("[BatchExpr] Aggregating result array with SIMD");
     aggregate_column_array(&result_array, op)
 }
 

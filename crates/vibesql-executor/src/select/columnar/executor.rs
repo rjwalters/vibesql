@@ -174,6 +174,7 @@ fn compute_i64_aggregate(
     nulls: Option<&Vec<bool>>,
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
+    log::debug!("[SIMD] compute_i64_aggregate: {} values, op={:?}", values.len(), op);
     if values.is_empty() {
         return Ok(match op {
             AggregateOp::Count => SqlValue::Integer(0),
@@ -201,6 +202,7 @@ fn compute_i64_aggregate(
 
     #[cfg(feature = "simd")]
     {
+        log::debug!("[SIMD] Using SIMD path for i64 aggregate with {} valid values", valid_values.len());
         use crate::simd::aggregation::{simd_sum_i64, simd_min_i64, simd_max_i64};
 
         match op {
@@ -252,6 +254,7 @@ fn compute_f64_aggregate(
     nulls: Option<&Vec<bool>>,
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
+    log::debug!("[SIMD] compute_f64_aggregate: {} values, op={:?}", values.len(), op);
     if values.is_empty() {
         return Ok(match op {
             AggregateOp::Count => SqlValue::Integer(0),
@@ -279,6 +282,7 @@ fn compute_f64_aggregate(
 
     #[cfg(feature = "simd")]
     {
+        log::debug!("[SIMD] Using SIMD path for f64 aggregate with {} valid values", valid_values.len());
         use crate::simd::aggregation::{simd_sum_f64, simd_min_f64, simd_max_f64};
 
         match op {
