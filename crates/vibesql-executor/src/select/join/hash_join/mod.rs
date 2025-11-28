@@ -26,8 +26,7 @@ pub(super) use outer::hash_join_left_outer;
 // Re-export existence hash table builders for semi-join and anti-join
 pub(super) use build::build_existence_hash_table_parallel;
 
-// Re-export columnar hash join for fast integer equi-joins
-pub(super) use columnar::hash_join_indices_columnar;
+// columnar hash join is used directly in inner.rs
 
 // Re-export FromResult type for use in submodules
 pub(super) use super::FromResult;
