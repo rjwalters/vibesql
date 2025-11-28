@@ -501,3 +501,140 @@ fn test_right_character_type() {
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar("llo".to_string()));
 }
+
+// ============================================================================
+// SUBSTRING with Date/Timestamp Tests (TPC-H Q7/Q9 pattern)
+// ============================================================================
+
+#[test]
+fn test_substring_date_extract_year() {
+    // TPC-H Q7/Q9 pattern: SUBSTR(l_shipdate, 1, 4) to extract year from date
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "SUBSTRING".to_string(),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "1995-06-15".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(4)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("1995".to_string()));
+}
+
+#[test]
+fn test_substring_date_extract_month() {
+    // Extract month from date using SUBSTRING
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "SUBSTRING".to_string(),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "1995-06-15".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(6)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("06".to_string()));
+}
+
+#[test]
+fn test_substring_date_extract_day() {
+    // Extract day from date using SUBSTRING
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "SUBSTRING".to_string(),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "1995-06-15".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(9)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("15".to_string()));
+}
+
+#[test]
+fn test_substring_timestamp_extract_year() {
+    // Extract year from timestamp using SUBSTRING
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "SUBSTRING".to_string(),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
+                "1996-12-25 14:30:45".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(4)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("1996".to_string()));
+}
+
+#[test]
+fn test_substring_timestamp_extract_time() {
+    // Extract time portion from timestamp using SUBSTRING
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "SUBSTRING".to_string(),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
+                "1996-12-25 14:30:45".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(12)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(8)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("14:30:45".to_string()));
+}
+
+#[test]
+fn test_substr_alias_with_date() {
+    // Test SUBSTR alias (commonly used in TPC-H queries)
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "SUBSTR".to_string(),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "1995-01-01".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(4)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("1995".to_string()));
+}
+
+#[test]
+fn test_substring_date_without_length() {
+    // SUBSTRING on date without explicit length - returns rest of string
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "SUBSTRING".to_string(),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "1995-06-15".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(6)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // From position 6 to end: "06-15"
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("06-15".to_string()));
+}
