@@ -282,7 +282,16 @@ pub fn columnar_hash_join_inner(
     gather_join_result(left_batch, right_batch, &join_indices)
 }
 
+/// Check if a value is NULL according to the null bitmap
+#[inline]
+fn is_null(nulls: &Option<Arc<Vec<bool>>>, idx: usize) -> bool {
+    nulls.as_ref().map_or(false, |n| n.get(idx).copied().unwrap_or(false))
+}
+
 /// Probe phase: find all matching pairs
+///
+/// NULL handling: NULL keys never match in equi-joins (NULL = NULL is NULL, not true).
+/// Both left and right NULL keys are skipped during probe.
 fn probe_columnar(
     hash_table: &ColumnarHashTable,
     left_key: &ColumnArray,
@@ -292,17 +301,33 @@ fn probe_columnar(
     let mut right_indices = Vec::new();
 
     match (left_key, right_key) {
-        (ColumnArray::Int64(left_values, _), ColumnArray::Int64(right_values, _)) => {
+        (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, right_nulls)) => {
             for (left_idx, &key) in left_values.iter().enumerate() {
+                // Skip NULL left keys - NULLs never match in equi-joins
+                if is_null(left_nulls, left_idx) {
+                    continue;
+                }
                 for right_idx in hash_table.probe_i64(key, right_values) {
+                    // Skip NULL right keys
+                    if is_null(right_nulls, right_idx as usize) {
+                        continue;
+                    }
                     left_indices.push(left_idx as u32);
                     right_indices.push(right_idx);
                 }
             }
         }
-        (ColumnArray::String(left_values, _), ColumnArray::String(right_values, _)) => {
+        (ColumnArray::String(left_values, left_nulls), ColumnArray::String(right_values, right_nulls)) => {
             for (left_idx, key) in left_values.iter().enumerate() {
+                // Skip NULL left keys - NULLs never match in equi-joins
+                if is_null(left_nulls, left_idx) {
+                    continue;
+                }
                 for right_idx in hash_table.probe_string(key, right_values) {
+                    // Skip NULL right keys
+                    if is_null(right_nulls, right_idx as usize) {
+                        continue;
+                    }
                     left_indices.push(left_idx as u32);
                     right_indices.push(right_idx);
                 }

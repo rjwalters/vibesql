@@ -5,7 +5,7 @@ use crate::{
 use super::from_iterator::FromIterator;
 
 mod expression_mapper;
-mod hash_join;
+pub(crate) mod hash_join;
 mod hash_join_iterator;
 mod hash_semi_join;
 mod hash_anti_join;
