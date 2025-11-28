@@ -144,9 +144,9 @@ impl ExecutionPipeline for NativeColumnarPipeline {
                 simd_filter_batch(&batch, &predicates)?
             };
 
-            // Convert to rows for output
-            let rows = filtered_batch.to_rows()?;
-            return Ok(PipelineOutput::from_rows(rows));
+            // Return batch directly - avoid row conversion overhead
+            // The batch will stay in columnar format through the pipeline
+            return Ok(PipelineOutput::from_batch(filtered_batch));
         }
 
         // For row-based input, convert to columnar and filter
@@ -180,27 +180,49 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             simd_filter_batch(&batch, &predicates)?
         };
 
-        // Convert back to rows
-        let filtered_rows = filtered_batch.to_rows()?;
-        Ok(PipelineOutput::from_rows(filtered_rows))
+        // Return batch directly - keep data in columnar format
+        Ok(PipelineOutput::from_batch(filtered_batch))
     }
 
     /// Apply SELECT projection using columnar operations.
     ///
     /// In native columnar execution, projection is typically implicit -
     /// we only compute the required columns. For explicit projection,
-    /// we fall back to row-oriented processing.
+    /// we fall back to row-oriented processing only when necessary.
     fn apply_projection(
         &self,
         input: PipelineInput<'_>,
         select_items: &[SelectItem],
         ctx: &ExecutionContext<'_>,
     ) -> Result<PipelineOutput, ExecutorError> {
-        let rows = input.into_rows();
-
-        if rows.is_empty() {
-            return Ok(PipelineOutput::Empty);
-        }
+        // For batch input, convert to rows for projection then convert back
+        // This is less efficient but ensures correctness for complex projections
+        // TODO: Implement native columnar projection for simple column selections
+        let rows = match input {
+            PipelineInput::Batch(batch) => {
+                if batch.row_count() == 0 {
+                    return Ok(PipelineOutput::Empty);
+                }
+                batch.to_rows()?
+            }
+            PipelineInput::Rows(rows) => {
+                if rows.is_empty() {
+                    return Ok(PipelineOutput::Empty);
+                }
+                rows.to_vec()
+            }
+            PipelineInput::RowsOwned(rows) => {
+                if rows.is_empty() {
+                    return Ok(PipelineOutput::Empty);
+                }
+                rows
+            }
+            PipelineInput::Empty => return Ok(PipelineOutput::Empty),
+            PipelineInput::NativeColumnar { .. } => {
+                // Should not reach here - native columnar goes through filter first
+                return Ok(PipelineOutput::Empty);
+            }
+        };
 
         // Use row-oriented projection for now
         // Native columnar projection would require computing column indices
@@ -238,8 +260,6 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         _having: Option<&Expression>,
         ctx: &ExecutionContext<'_>,
     ) -> Result<PipelineOutput, ExecutorError> {
-        let rows = input.into_rows();
-
         // Extract aggregate expressions from select items
         let agg_exprs: Vec<Expression> = select_items
             .iter()
@@ -262,8 +282,65 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             }
         };
 
-        // Handle empty input per SQL standard
-        if rows.is_empty() {
+        // Get batch directly if input is already columnar, otherwise convert
+        // This is the key optimization: avoid row conversion if data is already in batch format
+        let batch = match input {
+            PipelineInput::Batch(batch) => batch,
+            PipelineInput::Rows(rows) => {
+                if rows.is_empty() {
+                    // Handle empty input per SQL standard
+                    let values: Vec<vibesql_types::SqlValue> = agg_specs
+                        .iter()
+                        .map(|spec| match spec.op {
+                            AggregateOp::Count => vibesql_types::SqlValue::Integer(0),
+                            _ => vibesql_types::SqlValue::Null,
+                        })
+                        .collect();
+                    return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
+                }
+                ColumnarBatch::from_rows(rows)?
+            }
+            PipelineInput::RowsOwned(rows) => {
+                if rows.is_empty() {
+                    // Handle empty input per SQL standard
+                    let values: Vec<vibesql_types::SqlValue> = agg_specs
+                        .iter()
+                        .map(|spec| match spec.op {
+                            AggregateOp::Count => vibesql_types::SqlValue::Integer(0),
+                            _ => vibesql_types::SqlValue::Null,
+                        })
+                        .collect();
+                    return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
+                }
+                ColumnarBatch::from_rows(&rows)?
+            }
+            PipelineInput::Empty => {
+                // Handle empty input per SQL standard
+                let values: Vec<vibesql_types::SqlValue> = agg_specs
+                    .iter()
+                    .map(|spec| match spec.op {
+                        AggregateOp::Count => vibesql_types::SqlValue::Integer(0),
+                        _ => vibesql_types::SqlValue::Null,
+                    })
+                    .collect();
+                return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
+            }
+            PipelineInput::NativeColumnar { table_name, .. } => {
+                // Get columnar data directly from storage
+                let columnar_table = match ctx.database.get_columnar(&table_name) {
+                    Ok(Some(ct)) => ct,
+                    Ok(None) | Err(_) => {
+                        return Err(ExecutorError::Other(
+                            format!("Table '{}' not found for columnar aggregation", table_name)
+                        ));
+                    }
+                };
+                ColumnarBatch::from_storage_columnar(&columnar_table)?
+            }
+        };
+
+        // Handle empty batch
+        if batch.row_count() == 0 {
             let values: Vec<vibesql_types::SqlValue> = agg_specs
                 .iter()
                 .map(|spec| match spec.op {
@@ -273,9 +350,6 @@ impl ExecutionPipeline for NativeColumnarPipeline {
                 .collect();
             return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
         }
-
-        // Convert to columnar batch
-        let batch = ColumnarBatch::from_rows(&rows)?;
 
         // Check if we have GROUP BY
         if let Some(group_exprs) = group_by {
