@@ -2,11 +2,10 @@
 
 use crate::schema::CombinedSchema;
 use vibesql_catalog::{ColumnSchema, TableSchema};
-use vibesql_types::{DataType, SqlValue};
-use vibesql_ast::{BinaryOperator, Expression};
+use vibesql_types::DataType;
+use vibesql_ast::BinaryOperator;
 
 use crate::select::columnar::batch::{ColumnarBatch, ColumnArray};
-use crate::select::columnar::aggregate::AggregateOp;
 
 fn make_test_schema() -> CombinedSchema {
     let schema = TableSchema::new(
@@ -42,8 +41,10 @@ fn make_test_batch() -> ColumnarBatch {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_multiply() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
@@ -75,8 +76,10 @@ fn test_batch_expression_aggregate_multiply() {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_avg() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
@@ -108,8 +111,10 @@ fn test_batch_expression_aggregate_avg() {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_mixed_types() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
@@ -141,8 +146,10 @@ fn test_batch_expression_aggregate_mixed_types() {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_with_literal() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
@@ -171,8 +178,10 @@ fn test_batch_expression_aggregate_with_literal() {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_nested() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
@@ -208,8 +217,10 @@ fn test_batch_expression_aggregate_nested() {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_min_max() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
@@ -251,8 +262,10 @@ fn test_batch_expression_aggregate_min_max() {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_empty_batch() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     let batch = ColumnarBatch::from_columns(
@@ -296,8 +309,10 @@ fn test_batch_expression_aggregate_empty_batch() {
 }
 
 #[test]
-#[cfg(feature = "simd")]
 fn test_batch_expression_aggregate_with_nulls() {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+    use crate::select::columnar::aggregate::AggregateOp;
     use super::batch::compute_batch_expression_aggregate;
 
     // Create a batch with some NULL values
