@@ -1,9 +1,9 @@
 pub mod columnar;
 pub(crate) mod cte;
 mod executor;
-mod filter;
+pub(crate) mod filter;
 mod from_iterator;
-mod grouping;
+pub(crate) mod grouping;
 mod helpers;
 mod iterator;
 pub mod join;
@@ -15,11 +15,11 @@ mod order;
 #[cfg(feature = "parallel")]
 mod parallel;
 mod vectorized;
-mod projection;
+pub(crate) mod projection;
 mod projection_simd;
 pub(crate) mod scan;
 mod set_operations;
-mod window;
+pub(crate) mod window;
 
 pub use cte::CteResult;
 pub use iterator::{RowIterator, TableScanIterator};

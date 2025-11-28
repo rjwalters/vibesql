@@ -61,7 +61,10 @@ pub use index_ddl::{
 pub use insert::InsertExecutor;
 pub use memory::QueryArena;
 pub use persistence::load_sql_dump;
-pub use pipeline::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
+pub use pipeline::{
+    ColumnarPipeline, ExecutionContext, ExecutionPipeline, NativeColumnarPipeline, PipelineInput,
+    PipelineOutput, RowOrientedPipeline,
+};
 pub use privilege_checker::PrivilegeChecker;
 pub use revoke::RevokeExecutor;
 pub use trigger_execution::TriggerFirer;
