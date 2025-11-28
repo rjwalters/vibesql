@@ -1,7 +1,5 @@
 //! Projection iterator implementation
 
-#![allow(dead_code)]
-
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 use super::RowIterator;

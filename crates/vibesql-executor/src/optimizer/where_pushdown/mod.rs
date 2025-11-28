@@ -4,7 +4,6 @@
 //! 1. **Table-local predicates**: Reference only one table (can be applied at scan time)
 //! 2. **Equijoin conditions**: Simple equality between two tables (apply during join)
 
-#![allow(dead_code)]
 //! 3. **Complex predicates**: Multiple tables or non-equality (apply after all joins)
 //!
 //! The goal is to filter rows as early as possible before intermediate Cartesian products

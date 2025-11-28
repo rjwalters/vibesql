@@ -2,8 +2,9 @@
 //!
 //! This module provides vectorized aggregation operations using Apache Arrow's
 //! compute kernels for SIMD acceleration.
+//!
+//! Note: This module is experimental/research code.
 
-// Experimental SIMD optimizations - allow dead code warnings for future use
 #![allow(dead_code)]
 
 use crate::errors::ExecutorError;

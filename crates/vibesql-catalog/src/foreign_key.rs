@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 /// Foreign key constraint definition.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForeignKeyConstraint {

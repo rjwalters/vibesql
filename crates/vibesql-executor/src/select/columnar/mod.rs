@@ -31,8 +31,6 @@
 //! - Compute aggregates (SUM, COUNT, AVG, MIN, MAX)
 //! - Don't use window functions or complex subqueries
 
-// Experimental module - allow dead code warnings for future optimization work
-#![allow(dead_code)]
 
 pub mod batch;
 mod scan;

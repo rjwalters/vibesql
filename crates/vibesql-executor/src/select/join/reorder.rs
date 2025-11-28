@@ -4,8 +4,6 @@
 //! The goal is to maximize row reduction early in the join chain to minimize
 //! intermediate result size during cascade joins.
 
-#![allow(clippy::only_used_in_recursion)]
-//!
 //! ## Example
 //!
 //! ```text
@@ -29,8 +27,6 @@
 //!
 //! Result: 10-row intermediates maximum (much better memory usage)
 //! ```
-
-#![allow(dead_code)]
 
 use std::{
     cmp::Ordering,

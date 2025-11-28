@@ -2,8 +2,9 @@
 //!
 //! This module provides conversion between vibesql's row-based format and Arrow's
 //! columnar RecordBatch format, enabling SIMD acceleration through Arrow compute kernels.
+//!
+//! Note: This module is experimental/research code.
 
-// Experimental batch size constants and utilities - allow dead code warnings for future use
 #![allow(dead_code)]
 
 use crate::errors::ExecutorError;

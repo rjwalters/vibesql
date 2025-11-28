@@ -19,8 +19,6 @@
 //! Note: This module is experimental/research code. Some functions are not yet
 //! integrated into the main execution path.
 
-#![allow(dead_code)]
-
 use crate::errors::ExecutorError;
 use crate::select::columnar::{ColumnArray, ColumnarBatch};
 
