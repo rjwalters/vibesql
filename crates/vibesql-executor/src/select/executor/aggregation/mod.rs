@@ -15,7 +15,10 @@ use crate::{
     select::{
         cte::CteResult,
         filter::apply_where_filter_combined_auto,
-        grouping::{expand_group_by_clause, get_base_expressions, group_rows, GroupingContext},
+        grouping::{
+            expand_group_by_clause, get_base_expressions, group_rows,
+            resolve_base_expressions_aliases, resolve_grouping_set_aliases, GroupingContext,
+        },
         helpers::{apply_distinct, apply_limit_offset},
     },
 };
@@ -136,14 +139,22 @@ impl SelectExecutor<'_> {
             let grouping_sets = expand_group_by_clause(group_by_clause);
             let base_expressions = get_base_expressions(group_by_clause);
 
+            // Resolve aliases in base expressions for GROUPING() function support
+            let resolved_base_expressions =
+                resolve_base_expressions_aliases(&base_expressions, &expanded_select_list);
+
             // For each grouping set, group rows and compute aggregates
             for resolved_set in grouping_sets {
+                // Resolve SELECT list aliases in GROUP BY expressions
+                // This allows: SELECT n_name AS nation ... GROUP BY nation
+                let resolved_set = resolve_grouping_set_aliases(&resolved_set, &expanded_select_list);
+
                 let grouping_context = GroupingContext {
-                    base_expressions: base_expressions.clone(),
+                    base_expressions: resolved_base_expressions.clone(),
                     rolled_up: resolved_set.rolled_up.clone(),
                 };
 
-                // Group rows by this grouping set's expressions
+                // Group rows by this grouping set's expressions (now with aliases resolved)
                 let groups = if resolved_set.group_by_exprs.is_empty() {
                     // Empty grouping set (grand total) - all rows in one group
                     vec![(Vec::new(), filtered_rows.clone())]
