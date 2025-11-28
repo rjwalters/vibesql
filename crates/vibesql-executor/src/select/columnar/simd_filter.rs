@@ -234,12 +234,12 @@ fn evaluate_predicate_simd(
 
         // Batch string operations for String columns
         ColumnArray::String(values, nulls) => {
-            evaluate_predicate_string_batch(predicate, values, nulls.as_ref().map(|n| n.as_ref()))
+            evaluate_predicate_string_batch(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
         // Batch string operations for FixedString columns
         ColumnArray::FixedString(values, nulls) => {
-            evaluate_predicate_string_batch(predicate, values, nulls.as_ref().map(|n| n.as_ref()))
+            evaluate_predicate_string_batch(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
         // Scalar fallback for other column types
@@ -651,7 +651,7 @@ fn evaluate_predicate_f64_simd(
 fn evaluate_predicate_string_batch(
     predicate: &ColumnPredicate,
     values: &[String],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
 ) -> Result<Vec<bool>, ExecutorError> {
     let result = match predicate {
         ColumnPredicate::Equal { value, .. } => {

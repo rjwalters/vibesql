@@ -6,7 +6,7 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 use vibesql_executor::select::columnar::{
-    execute_columnar_aggregate, AggregateOp, AggregateSource, AggregateSpec, ColumnPredicate,
+    execute_columnar_aggregate, fast_aggregate_on_rows, AggregateOp, AggregateSource, AggregateSpec, ColumnPredicate,
 };
 use vibesql_storage::Row;
 use vibesql_types::{Date, SqlValue};
@@ -147,7 +147,7 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
             },
         );
 
-        // Benchmark columnar execution
+        // Benchmark columnar execution (converts rows to batch first)
         group.bench_with_input(
             BenchmarkId::new("columnar", row_count),
             &row_count,
@@ -155,6 +155,18 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
                 b.iter(|| {
                     let _result =
                         black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
+                });
+            },
+        );
+
+        // Benchmark fast single-pass aggregate (no batch conversion)
+        group.bench_with_input(
+            BenchmarkId::new("fast_aggregate", row_count),
+            &row_count,
+            |b, _| {
+                b.iter(|| {
+                    let _result =
+                        black_box(fast_aggregate_on_rows(&rows, &predicates, &aggregates).unwrap());
                 });
             },
         );
@@ -206,6 +218,18 @@ fn bench_simple_aggregation(c: &mut Criterion) {
                 b.iter(|| {
                     let _result =
                         black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
+                });
+            },
+        );
+
+        // Benchmark fast single-pass aggregate (no batch conversion)
+        group.bench_with_input(
+            BenchmarkId::new("fast_aggregate", row_count),
+            &row_count,
+            |b, _| {
+                b.iter(|| {
+                    let _result =
+                        black_box(fast_aggregate_on_rows(&rows, &predicates, &aggregates).unwrap());
                 });
             },
         );
