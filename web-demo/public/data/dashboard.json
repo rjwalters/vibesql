@@ -1,13 +1,13 @@
 {
-  "generated_at": "2025-11-27T21:04:57.914924Z",
+  "generated_at": "2025-11-27T21:13:34.362426Z",
   "version": "2.0",
   "summary": {
     "conformance": {
-      "pass_rate": null,
-      "tests_passing": null,
-      "tests_total": null,
-      "files_passing": null,
-      "files_total": null
+      "pass_rate": 100.0,
+      "tests_passing": 13954,
+      "tests_total": 13954,
+      "files_passing": 628,
+      "files_total": 628
     },
     "tpch": {
       "queries_passing": 22,
@@ -1502,7 +1502,66 @@
       }
     }
   },
-  "conformance": {},
+  "conformance": {
+    "summary": {
+      "total_tests": 13954,
+      "passing": 13954,
+      "failing": 0,
+      "pass_rate": 100.0
+    },
+    "files": {
+      "total": 628,
+      "passing": 628,
+      "pass_rate": 100.0
+    },
+    "categories": {
+      "select": {
+        "total": 5,
+        "passing": 5,
+        "pass_rate": 100.0
+      },
+      "evidence": {
+        "total": 12,
+        "passing": 12,
+        "pass_rate": 100.0
+      },
+      "index": {
+        "total": 214,
+        "passing": 214,
+        "pass_rate": 100.0
+      },
+      "random": {
+        "total": 391,
+        "passing": 391,
+        "pass_rate": 100.0
+      },
+      "ddl": {
+        "total": 1,
+        "passing": 1,
+        "pass_rate": 100.0
+      },
+      "other": {
+        "total": 5,
+        "passing": 5,
+        "pass_rate": 100.0
+      }
+    },
+    "history": [],
+    "dialect_stats": {
+      "mysql": {
+        "failed": 0,
+        "pass_rate": 100.0,
+        "passed": 3941,
+        "total": 3941
+      },
+      "sqlite": {
+        "failed": 0,
+        "pass_rate": 100.0,
+        "passed": 10013,
+        "total": 10013
+      }
+    }
+  },
   "changes": [],
   "machine_info": {
     "system": "Darwin 25.1.0",
@@ -1513,8 +1572,8 @@
   "timeline": [
     {
       "date": "2025-11-27",
-      "commit": "a779206c",
-      "conformance_pass_rate": null,
+      "commit": "642bc111",
+      "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 66.99,
       "tpch_passing": 22,
       "tpcc_tps": null,

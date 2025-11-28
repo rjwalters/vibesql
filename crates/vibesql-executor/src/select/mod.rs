@@ -14,8 +14,6 @@ mod monomorphic;
 mod order;
 #[cfg(feature = "parallel")]
 mod parallel;
-#[cfg(feature = "parallel")]
-mod predicate_graph;
 mod vectorized;
 mod projection;
 mod projection_simd;

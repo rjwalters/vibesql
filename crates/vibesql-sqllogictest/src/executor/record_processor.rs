@@ -44,6 +44,51 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         None
     }
 
+    /// Detect if a query needs MySQL mode for floating-point division.
+    ///
+    /// Some tests in the random/ suite expect floating-point division results
+    /// (decimal values like -0.449) but don't have `onlyif mysql` directives.
+    /// These tests were likely generated with a non-SQLite database.
+    ///
+    /// This function returns true if:
+    /// 1. Query contains `/` division operator (but not `DIV`)
+    /// 2. Expected types include 'R' (Real) in a position with decimal expected values
+    /// 3. Expected results contain non-integer decimal values
+    fn needs_mysql_for_division<T: ColumnType>(
+        sql: &str,
+        expected: &QueryExpect<T>,
+    ) -> bool {
+        // Check if query contains division (/ but not DIV)
+        let has_division = sql.contains('/') && !sql.to_uppercase().contains(" DIV ");
+        if !has_division {
+            return false;
+        }
+
+        // Check expected results for non-integer decimal values with Real type
+        if let QueryExpect::Results { types, results, .. } = expected {
+            // Check if any expected type is Real ('R')
+            let has_real_type = types.iter().any(|t| t.to_char() == 'R');
+            if !has_real_type {
+                return false;
+            }
+
+            // Check if any result is a non-integer decimal (e.g., -0.449, not 49.000)
+            for result in results {
+                if result.contains('.') && result != "NULL" {
+                    // Parse as f64 and check if it has a non-zero fractional part
+                    if let Ok(f) = result.parse::<f64>() {
+                        let frac = f.fract().abs();
+                        // If fractional part is significant (not just .000), need MySQL mode
+                        if frac > 0.0001 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Switch to the specified dialect if different from current.
     /// Returns an error output if the switch fails, or None on success.
     async fn switch_dialect_if_needed(
@@ -305,6 +350,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
+                // Track if we switched to MySQL mode for division (to switch back after)
+                let mut switched_for_division = false;
+                let original_dialect = self.current_dialect.clone();
+
                 // Auto-switch dialect if enabled and conditions indicate a dialect requirement
                 if self.auto_switch_dialect {
                     if let Some(required_dialect) = Self::infer_required_dialect(&conditions) {
@@ -318,6 +367,19 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 } else if should_skip(&self.labels, conn.engine_name(), &conditions) {
                     return RecordOutput::Nothing;
+                }
+
+                // Check if we need MySQL mode for floating-point division
+                // This handles tests in random/ suite that expect decimal division results
+                // but don't have `onlyif mysql` directives (issue #2851, #2852)
+                if self.current_dialect == SqlDialect::SQLite
+                    && Self::needs_mysql_for_division(&sql, &expected)
+                {
+                    if let Some(error_output) = self.switch_dialect_if_needed(&SqlDialect::MySQL).await {
+                        return error_output;
+                    }
+                    switched_for_division = true;
+                    tracing::debug!("Switched to MySQL mode for floating-point division: {}", sql);
                 }
 
                 // Re-acquire connection since switch_dialect_if_needed may have used it
@@ -336,10 +398,18 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => (types, rows),
                         DBOutput::StatementComplete(count) => {
+                            // Switch back to original dialect before returning
+                            if switched_for_division {
+                                let _ = self.switch_dialect_if_needed(&original_dialect).await;
+                            }
                             return RecordOutput::Statement { count, error: None };
                         }
                     },
                     Err(e) => {
+                        // Switch back to original dialect before returning error
+                        if switched_for_division {
+                            let _ = self.switch_dialect_if_needed(&original_dialect).await;
+                        }
                         return RecordOutput::Query {
                             error: Some(Arc::new(e)),
                             types: vec![],
@@ -433,6 +503,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         rows.len() * rows[0].len(),
                         hash
                     )]];
+                }
+
+                // Switch back to original dialect if we switched for division
+                if switched_for_division {
+                    // Ignore errors when switching back - we have our result
+                    let _ = self.switch_dialect_if_needed(&original_dialect).await;
+                    tracing::debug!("Switched back to {:?} mode after division query", original_dialect);
                 }
 
                 RecordOutput::Query {

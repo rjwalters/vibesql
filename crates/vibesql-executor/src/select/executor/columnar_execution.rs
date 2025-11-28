@@ -345,18 +345,6 @@ impl SelectExecutor<'_> {
             }
         };
 
-        // Skip native columnar for expression aggregates (e.g., SUM(a * b)) as there's
-        // a known bug with predicate evaluation in this path. Fall back to standard
-        // columnar which handles these correctly. See issue for tracking.
-        // TODO: Remove this guard once the expression aggregate bug is fixed
-        let has_expression_aggregates = aggregates.iter().any(|agg| {
-            matches!(agg.source, columnar::AggregateSource::Expression(_))
-        });
-        if has_expression_aggregates {
-            log::debug!("Native columnar: skipping - has expression aggregates (known bug)");
-            return Ok(None);
-        }
-
         // Check if this query has GROUP BY
         let has_group_by = stmt.group_by.is_some();
 
