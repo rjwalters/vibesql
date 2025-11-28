@@ -19,6 +19,8 @@
 //! Note: This module is experimental/research code. Some functions are not yet
 //! integrated into the main execution path.
 
+use std::sync::Arc;
+
 use crate::errors::ExecutorError;
 use crate::select::columnar::{ColumnArray, ColumnarBatch};
 

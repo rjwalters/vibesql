@@ -26,10 +26,7 @@ use super::scan::ColumnarScan;
 // Re-export public types and functions to maintain API compatibility
 pub use expression::extract_aggregates;
 pub use group_by::columnar_group_by;
-// SIMD-accelerated GROUP BY for ColumnarBatch - exported for future integration
-// into the columnar execution path and for direct use by callers with batch data
-#[cfg(feature = "simd")]
-#[allow(unused_imports)]
+// SIMD-accelerated GROUP BY for ColumnarBatch - used in native columnar execution path
 pub use group_by::columnar_group_by_batch;
 
 /// Aggregate operation type
