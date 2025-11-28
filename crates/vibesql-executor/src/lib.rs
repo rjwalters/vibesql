@@ -35,8 +35,6 @@ mod schema_ddl;
 pub mod select;
 mod select_into;
 pub mod timeout;
-#[cfg(feature = "simd")]
-pub mod simd;
 mod transaction;
 mod trigger_ddl;
 mod trigger_execution;

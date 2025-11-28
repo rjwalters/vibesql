@@ -1,15 +1,50 @@
-//! SIMD-accelerated columnar aggregation operations
+//! Auto-vectorized columnar aggregation operations
 //!
 //! This module provides high-performance aggregate computations for Int64 and Float64
-//! columns using SIMD operations, achieving 5-10x speedup over scalar implementations.
+//! columns using auto-vectorized operations that achieve equivalent performance to
+//! explicit SIMD (e.g., the `wide` crate).
+//!
+//! See `simd_ops.rs` for documentation on why the 4-accumulator pattern is used.
 
 use crate::errors::ExecutorError;
-use crate::simd::aggregation::*;
 use super::aggregate::AggregateOp;
 use super::scan::ColumnarScan;
+use super::simd_ops;
 use vibesql_types::SqlValue;
 
-/// Compute SIMD aggregate for Int64 columns using streaming batches
+// Re-export optimized SIMD operations from simd_ops module
+// DO NOT replace these with .iter().sum() - see simd_ops.rs for why
+#[inline]
+fn simd_sum_i64(values: &[i64]) -> i64 {
+    simd_ops::sum_i64(values)
+}
+
+#[inline]
+fn simd_min_i64(values: &[i64]) -> Option<i64> {
+    simd_ops::min_i64(values)
+}
+
+#[inline]
+fn simd_max_i64(values: &[i64]) -> Option<i64> {
+    simd_ops::max_i64(values)
+}
+
+#[inline]
+fn simd_sum_f64(values: &[f64]) -> f64 {
+    simd_ops::sum_f64(values)
+}
+
+#[inline]
+fn simd_min_f64(values: &[f64]) -> Option<f64> {
+    simd_ops::min_f64(values)
+}
+
+#[inline]
+fn simd_max_f64(values: &[f64]) -> Option<f64> {
+    simd_ops::max_f64(values)
+}
+
+/// Compute aggregate for Int64 columns using streaming batches
 ///
 /// Processes values in fixed-size batches to avoid allocating entire column in memory.
 ///
@@ -23,7 +58,6 @@ use vibesql_types::SqlValue;
 /// # Returns
 ///
 /// The aggregated SqlValue or an error if the column contains non-i64 values
-#[cfg(feature = "simd")]
 pub fn simd_aggregate_i64(
     scan: &ColumnarScan,
     column_idx: usize,
@@ -175,7 +209,6 @@ pub fn simd_aggregate_i64(
 /// # Returns
 ///
 /// The aggregated SqlValue or an error if the column contains non-f64 values
-#[cfg(feature = "simd")]
 pub fn simd_aggregate_f64(
     scan: &ColumnarScan,
     column_idx: usize,
@@ -290,8 +323,7 @@ pub fn simd_aggregate_f64(
 ///
 /// - `Some(true)` if column is i64-compatible (Integer, Bigint, Smallint)
 /// - `Some(false)` if column is f64-compatible (Double, Float, Numeric)
-/// - `None` if column is not SIMD-compatible (String, Date, etc.) or all NULL
-#[cfg(feature = "simd")]
+/// - `None` if column is not numeric (String, Date, etc.) or all NULL
 pub fn can_use_simd_for_column(scan: &ColumnarScan, column_idx: usize) -> Option<bool> {
     // Check first non-NULL value to determine column type
     // IMPORTANT: Only check first 100 rows to avoid materializing huge columns
@@ -313,7 +345,7 @@ pub fn can_use_simd_for_column(scan: &ColumnarScan, column_idx: usize) -> Option
     None // All NULL or empty column
 }
 
-#[cfg(all(test, feature = "simd"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use vibesql_storage::Row;

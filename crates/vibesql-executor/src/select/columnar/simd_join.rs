@@ -1,7 +1,7 @@
-//! SIMD-accelerated columnar hash join implementation
+//! Auto-vectorized columnar hash join implementation
 //!
-//! This module implements hash join operations using columnar data format and SIMD
-//! operations for 4-6x performance improvement over row-based joins.
+//! This module implements hash join operations using columnar data format and
+//! auto-vectorized operations for improved performance over row-based joins.
 //!
 //! ## Algorithm
 //!
@@ -10,18 +10,30 @@
 //!    - Build hashmap: key → Vec<row_indices>
 //!    - Handle NULLs (NULL keys never match)
 //!
-//! 2. **Probe Phase**: Scan left (probe) batch using SIMD
-//!    - For each key value, use SIMD equality to find matches
+//! 2. **Probe Phase**: Scan left (probe) batch using vectorized equality
+//!    - For each key value, find all matching rows
 //!    - Build list of (left_row, right_row) pairs
 //!
 //! 3. **Materialize**: Construct output batch from matched pairs
 //!    - Combine columns from both sides
 //!    - Return columnar batch
 
+use super::simd_ops;
 use super::{ColumnArray, ColumnarBatch};
 use crate::errors::ExecutorError;
-use crate::simd::comparison::{simd_eq_f64, simd_eq_i64};
 use std::collections::HashMap;
+
+// Re-export comparison functions from simd_ops module for consistency
+
+#[inline]
+fn simd_eq_i64(values: &[i64], target: i64) -> Vec<bool> {
+    simd_ops::eq_i64(values, target)
+}
+
+#[inline]
+fn simd_eq_f64(values: &[f64], target: f64) -> Vec<bool> {
+    simd_ops::eq_f64(values, target)
+}
 
 /// Hash table for join operations
 ///
@@ -371,10 +383,8 @@ where
 ///
 /// # Performance
 ///
-/// - 4-6x faster than row-based hash join for numeric keys
 /// - Best for Int64 and Float64 join keys
 /// - Automatically handles NULL keys (NULL != NULL)
-#[cfg(feature = "simd")]
 pub fn columnar_hash_join_inner(
     left: &ColumnarBatch,
     right: &ColumnarBatch,
@@ -425,7 +435,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn test_inner_join_int64_basic() {
         // Left: [(1, 10), (2, 20), (3, 30)]
         let left = make_int64_batch(vec![1, 2, 3], vec![10, 20, 30]);
@@ -471,7 +480,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn test_inner_join_float64_basic() {
         // Left: [(1.5, 10), (2.5, 20), (3.5, 30)]
         let left = make_float64_batch(vec![1.5, 2.5, 3.5], vec![10, 20, 30]);
@@ -507,7 +515,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn test_inner_join_with_nulls() {
         // Left with NULL key: [(1, 10), (NULL, 20), (3, 30)]
         let mut left = ColumnarBatch::with_capacity(3, 2);
@@ -544,7 +551,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn test_inner_join_multi_match() {
         // Left: [(1, 10), (1, 11), (2, 20)]
         let left = make_int64_batch(vec![1, 1, 2], vec![10, 11, 20]);
@@ -560,7 +566,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn test_inner_join_empty_result() {
         // Left: [(1, 10), (2, 20)]
         let left = make_int64_batch(vec![1, 2], vec![10, 20]);
@@ -576,7 +581,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn test_inner_join_empty_batches() {
         let left = ColumnarBatch::with_capacity(0, 2);
         let right = ColumnarBatch::with_capacity(0, 2);
