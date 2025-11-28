@@ -173,8 +173,11 @@ fn compute_column_aggregate(
 
 /// Compute aggregate on i64 column using SIMD
 ///
-/// Uses masked SIMD operations to avoid allocating a temporary Vec for filtered values.
-/// This provides better performance by processing data in-place with SIMD masking.
+/// Two paths are used depending on NULL presence:
+/// - Fast path (no NULLs): Direct SIMD on slice, zero allocation
+/// - Masked path (with NULLs): Allocates a `Vec<bool>` validity mask instead of
+///   copying values to a `Vec<i64>`. This trades a large `Vec<i64>` allocation
+///   for a smaller `Vec<bool>` (1 byte vs 8 bytes per element).
 fn compute_i64_aggregate(
     values: &[i64],
     nulls: Option<&Vec<bool>>,
@@ -315,8 +318,11 @@ fn compute_i64_aggregate(
 
 /// Compute aggregate on f64 column using SIMD
 ///
-/// Uses masked SIMD operations to avoid allocating a temporary Vec for filtered values.
-/// This provides better performance by processing data in-place with SIMD masking.
+/// Two paths are used depending on NULL presence:
+/// - Fast path (no NULLs): Direct SIMD on slice, zero allocation
+/// - Masked path (with NULLs): Allocates a `Vec<bool>` validity mask instead of
+///   copying values to a `Vec<f64>`. This trades a large `Vec<f64>` allocation
+///   for a smaller `Vec<bool>` (1 byte vs 8 bytes per element).
 fn compute_f64_aggregate(
     values: &[f64],
     nulls: Option<&Vec<bool>>,

@@ -242,14 +242,21 @@ pub fn simd_max_i64(column: &[i64]) -> Option<i64> {
 //
 // These functions process data with a selection bitmap without copying values
 // to a temporary vector. This provides better performance by:
-// 1. Avoiding memory allocation for the filtered subset
-// 2. Processing data in a single pass with SIMD-accelerated masking
-// 3. Better cache utilization by streaming through contiguous memory
+// 1. Avoiding memory allocation for the filtered subset (no Vec<T> allocation)
+// 2. Processing data in a single pass with better cache locality
+// 3. SIMD-accelerated data loading for memory prefetching
+//
+// NOTE: Due to limitations of the `wide` crate, mask application uses scalar
+// conditionals after SIMD loading. The `wide` crate doesn't support native
+// masked SIMD operations (like AVX-512 mask registers). The SIMD benefit here
+// is primarily from vectorized memory loads and cache-friendly access patterns,
+// not from masked arithmetic operations.
 
-/// SIMD sum for f64 columns with mask (selection bitmap)
+/// Sum for f64 columns with mask (selection bitmap)
 ///
-/// Computes the sum of values where mask[i] == true, without copying values.
-/// Uses SIMD to process chunks of 4 values at a time.
+/// Computes the sum of values where mask[i] == true, without copying values
+/// to a temporary vector. Uses SIMD for vectorized memory loads; mask
+/// application is scalar due to `wide` crate limitations.
 #[cfg(feature = "simd")]
 pub fn simd_sum_f64_masked(column: &[f64], mask: &[bool]) -> f64 {
     debug_assert_eq!(column.len(), mask.len(), "Column and mask must have same length");
