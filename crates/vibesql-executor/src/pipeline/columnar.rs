@@ -543,7 +543,6 @@ mod tests {
             name: "COUNT".to_string(),
             args: vec![Expression::Wildcard],
             distinct: false,
-            filter: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -553,7 +552,6 @@ mod tests {
             name: "count".to_string(),
             args: vec![Expression::Wildcard],
             distinct: false,
-            filter: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_lower, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -572,7 +570,6 @@ mod tests {
                 column: "x".to_string(),
             }],
             distinct: false,
-            filter: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&sum_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Null);
@@ -592,7 +589,6 @@ mod tests {
                     column: "x".to_string(),
                 }],
                 distinct: false,
-                filter: None,
             };
             let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
             assert_eq!(result, SqlValue::Null, "{} should return NULL for empty set", agg_name);
@@ -622,7 +618,6 @@ mod tests {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
                 distinct: false,
-                filter: None,
             }),
             op: vibesql_ast::BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
@@ -644,7 +639,6 @@ mod tests {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
                 distinct: false,
-                filter: None,
             }),
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
@@ -657,18 +651,17 @@ mod tests {
         let ctx = ExecutionContext::new(&schema, &database);
         let evaluator = ctx.create_evaluator();
 
-        // CAST(COUNT(*) AS TEXT) should return "0"
+        // CAST(COUNT(*) AS VARCHAR) should return "0"
         let expr = Expression::Cast {
             expr: Box::new(Expression::AggregateFunction {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
                 distinct: false,
-                filter: None,
             }),
-            data_type: vibesql_ast::DataType::Text,
+            data_type: vibesql_types::DataType::Varchar { max_length: None },
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
-        assert_eq!(result, SqlValue::Text("0".to_string()));
+        assert_eq!(result, SqlValue::Varchar("0".to_string()));
     }
 
     #[test]
@@ -681,6 +674,7 @@ mod tests {
         let expr = Expression::Function {
             name: "COUNT".to_string(),
             args: vec![Expression::Wildcard],
+            character_unit: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
