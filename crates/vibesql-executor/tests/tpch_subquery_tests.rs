@@ -179,3 +179,69 @@ fn test_q11_q13_batch() {
     assert!(q13_result.is_ok(), "Q13 should execute: {:?}", q13_result);
     println!("Q13: {} rows", q13_result.unwrap());
 }
+
+#[test]
+fn test_q18_in_subquery_with_having() {
+    // Q18: Large Volume Customer
+    // Tests IN subquery with GROUP BY and HAVING clause
+    // Pattern: o_orderkey IN (SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300)
+    // Issue #2898: Query was crashing/returning 0 rows
+
+    let db = load_vibesql(0.01);
+
+    // First, test the inner subquery alone
+    let subquery = r#"
+        SELECT l_orderkey, SUM(l_quantity) as total_qty
+        FROM lineitem
+        GROUP BY l_orderkey
+        HAVING SUM(l_quantity) > 300
+    "#;
+
+    println!("\n=== Q18 Inner Subquery Test ===");
+    let subquery_result = execute_tpch_query(&db, subquery);
+    println!("Subquery result: {:?}", subquery_result);
+
+    // At SF 0.01, there might not be orders with > 300 quantity
+    // But the query should execute without errors
+    assert!(subquery_result.is_ok(), "Q18 subquery should execute: {:?}", subquery_result);
+    let subquery_count = subquery_result.unwrap();
+    println!("Q18 subquery returned {} rows (may be 0 at small scale factor)", subquery_count);
+
+    // Check the max quantity per order to understand the data
+    let max_qty_query = r#"
+        SELECT l_orderkey, SUM(l_quantity) as total_qty
+        FROM lineitem
+        GROUP BY l_orderkey
+        ORDER BY total_qty DESC
+        LIMIT 5
+    "#;
+
+    println!("\n=== Top 5 Orders by Quantity ===");
+    if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(max_qty_query) {
+        let executor = SelectExecutor::new(&db);
+        if let Ok(rows) = executor.execute(&select) {
+            for (i, row) in rows.iter().enumerate() {
+                println!("  Row {}: {:?}", i, row);
+            }
+        }
+    }
+
+    // Now test full Q18
+    println!("\n=== Full Q18 Test ===");
+    let q18_result = execute_tpch_query(&db, TPCH_Q18);
+    assert!(q18_result.is_ok(), "Q18 should execute: {:?}", q18_result);
+    let q18_count = q18_result.unwrap();
+    println!("Q18 returned {} rows", q18_count);
+
+    // Q18 has LIMIT 100, so should return at most 100 rows
+    assert!(q18_count <= 100, "Q18 has LIMIT 100");
+
+    // At SF 0.01, if no orders have quantity > 300, this will return 0 rows
+    // That's correct behavior - not a bug
+    if subquery_count == 0 {
+        assert_eq!(q18_count, 0, "Q18 should return 0 rows if subquery returns 0");
+        println!("Q18 correctly returns 0 rows because no orders have SUM(l_quantity) > 300 at SF 0.01");
+    } else {
+        assert!(q18_count > 0, "Q18 should return rows if subquery found matching orders");
+    }
+}

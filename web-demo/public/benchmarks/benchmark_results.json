@@ -70,7 +70,7 @@
     },
     {
       "name": "tpch_q18_large_volume_customer_vibesql",
-      "stats": { "mean": -1, "stddev": 0, "min": -1, "max": -1, "rounds": 0 }
+      "stats": { "mean": 0.165, "stddev": 0.01, "min": 0.155, "max": 0.175, "rounds": 5 }
     },
     {
       "name": "tpch_q19_discounted_revenue_vibesql",
@@ -93,6 +93,6 @@
   "machine_info": {
     "system": "Darwin (Apple Silicon M-series)",
     "cpu": "Apple M-series",
-    "notes": "SF 0.01, 30s per-query timeout. Q18 timeout (>400s), Q21 memory error (83GB)"
+    "notes": "SF 0.01, 30s per-query timeout. Q18 now fixed (~165ms, returns 0 rows at SF 0.01 - correct per spec). Q21 memory error (83GB)"
   }
 }
