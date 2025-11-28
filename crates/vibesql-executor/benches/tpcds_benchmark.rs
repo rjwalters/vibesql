@@ -13,7 +13,7 @@ mod tpcds;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::hint::black_box;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
@@ -52,30 +52,30 @@ fn get_vibesql_db() -> &'static VibeDB {
 }
 
 #[cfg(feature = "benchmark-comparison")]
-static SQLITE_CONN: OnceLock<SqliteConn> = OnceLock::new();
+static SQLITE_CONN: OnceLock<Mutex<SqliteConn>> = OnceLock::new();
 
 #[cfg(feature = "benchmark-comparison")]
-fn get_sqlite_conn() -> &'static SqliteConn {
+fn get_sqlite_conn() -> &'static Mutex<SqliteConn> {
     SQLITE_CONN.get_or_init(|| {
         eprintln!("Loading TPC-DS SQLite database (scale factor {})...", SCALE_FACTOR);
         let start = std::time::Instant::now();
         let conn = load_sqlite(SCALE_FACTOR);
         eprintln!("SQLite database loaded in {:?}", start.elapsed());
-        conn
+        Mutex::new(conn)
     })
 }
 
 #[cfg(feature = "benchmark-comparison")]
-static DUCKDB_CONN: OnceLock<DuckDBConn> = OnceLock::new();
+static DUCKDB_CONN: OnceLock<Mutex<DuckDBConn>> = OnceLock::new();
 
 #[cfg(feature = "benchmark-comparison")]
-fn get_duckdb_conn() -> &'static DuckDBConn {
+fn get_duckdb_conn() -> &'static Mutex<DuckDBConn> {
     DUCKDB_CONN.get_or_init(|| {
         eprintln!("Loading TPC-DS DuckDB database (scale factor {})...", SCALE_FACTOR);
         let start = std::time::Instant::now();
         let conn = load_duckdb(SCALE_FACTOR);
         eprintln!("DuckDB database loaded in {:?}", start.elapsed());
-        conn
+        Mutex::new(conn)
     })
 }
 
@@ -162,14 +162,16 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
             b.iter(|| {
-                let count = benchmark_sqlite_query(sqlite_conn, sql);
+                let conn = sqlite_conn.lock().unwrap();
+                let count = benchmark_sqlite_query(&conn, sql);
                 black_box(count);
             });
         });
 
         group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
             b.iter(|| {
-                let count = benchmark_duckdb_query(duckdb_conn, sql);
+                let conn = duckdb_conn.lock().unwrap();
+                let count = benchmark_duckdb_query(&conn, sql);
                 black_box(count);
             });
         });
