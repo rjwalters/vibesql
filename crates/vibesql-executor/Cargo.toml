@@ -158,7 +158,6 @@ harness = false
 [[bench]]
 name = "tpcc_benchmark"
 harness = false
-required-features = ["benchmark-comparison"]
 
 [[bench]]
 name = "tpch_deep_profiling"
