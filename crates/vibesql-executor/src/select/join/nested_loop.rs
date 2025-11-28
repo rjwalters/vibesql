@@ -213,8 +213,8 @@ fn execute_nested_loop_classic(
 
 /// Nested loop INNER JOIN implementation
 pub(super) fn nested_loop_inner_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
@@ -228,9 +228,14 @@ pub(super) fn nested_loop_inner_join(
         _ => false, // Has a meaningful condition - let it proceed
     };
 
+    // Use as_slice() for zero-cost access without triggering row materialization
+    // This avoids the 57% performance bottleneck from premature row collection
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
     if is_cartesian_like {
         // Apply same memory check as CROSS JOIN
-        check_cross_join_size_limit(left.rows().len(), right.rows().len())?;
+        check_cross_join_size_limit(left_slice.len(), right_slice.len())?;
     }
 
     // Extract right table name (assume single table for now)
@@ -274,8 +279,8 @@ pub(super) fn nested_loop_inner_join(
         EquijoinEvalStrategy::Simple { left_col_idx, right_col_idx, remaining_condition } => {
             // FAST PATH: Evaluate equijoin by direct value comparison before allocation
             execute_optimized_equijoin(
-                left.rows(),
-                right.rows(),
+                left_slice,
+                right_slice,
                 left_col_idx,
                 right_col_idx,
                 remaining_condition.as_ref(),
@@ -286,7 +291,7 @@ pub(super) fn nested_loop_inner_join(
         }
         EquijoinEvalStrategy::Complex => {
             // SLOW PATH: Use existing algorithm (allocate then evaluate)
-            execute_nested_loop_classic(left.rows(), right.rows(), condition, &combined_schema, database, timeout_ctx)?
+            execute_nested_loop_classic(left_slice, right_slice, condition, &combined_schema, database, timeout_ctx)?
         }
     };
 
@@ -295,8 +300,8 @@ pub(super) fn nested_loop_inner_join(
 
 /// Nested loop LEFT OUTER JOIN implementation
 pub(super) fn nested_loop_left_outer_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
@@ -327,15 +332,17 @@ pub(super) fn nested_loop_left_outer_join(
     let combined_schema = CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
-    // Note: No memory check here. Same reasoning as nested_loop_inner_join.
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
 
     // Nested loop LEFT OUTER JOIN algorithm
     let mut result_rows = Vec::new();
     let mut iterations = 0;
-    for left_row in left.rows() {
+    for left_row in left_slice {
         let mut matched = false;
 
-        for right_row in right.rows() {
+        for right_row in right_slice {
             // Check timeout periodically
             iterations += 1;
             if iterations % CHECK_INTERVAL == 0 {
@@ -410,15 +417,16 @@ pub(super) fn nested_loop_right_outer_join(
         .len();
 
     // Do LEFT OUTER JOIN with swapped sides
-    let mut swapped_result = nested_loop_left_outer_join(right, left, condition, database, timeout_ctx)?;
+    let swapped_result = nested_loop_left_outer_join(right, left, condition, database, timeout_ctx)?;
 
     // Now we need to reorder the columns in the result
     // The swapped result has right columns first, then left columns
     // We need to reverse this to left first, then right
 
     // Reorder rows: move left columns (currently at positions right_col_count..) to front
+    // Use as_slice() for zero-cost access
     let reordered_rows: Vec<vibesql_storage::Row> = swapped_result
-        .rows()
+        .as_slice()
         .iter()
         .map(|row| {
             let mut new_values = Vec::new();
@@ -435,8 +443,8 @@ pub(super) fn nested_loop_right_outer_join(
 
 /// Nested loop FULL OUTER JOIN implementation
 pub(super) fn nested_loop_full_outer_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
@@ -476,18 +484,20 @@ pub(super) fn nested_loop_full_outer_join(
     let combined_schema = CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
-    // Note: No memory check here. Same reasoning as nested_loop_inner_join.
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
 
     // FULL OUTER JOIN = LEFT OUTER JOIN + unmatched rows from right
     let mut result_rows = Vec::new();
-    let mut right_matched = vec![false; right.rows().len()];
+    let mut right_matched = vec![false; right_slice.len()];
     let mut iterations = 0;
 
     // First pass: LEFT OUTER JOIN logic
-    for left_row in left.rows() {
+    for left_row in left_slice {
         let mut matched = false;
 
-        for (right_idx, right_row) in right.rows().iter().enumerate() {
+        for (right_idx, right_row) in right_slice.iter().enumerate() {
             // Check timeout periodically
             iterations += 1;
             if iterations % CHECK_INTERVAL == 0 {
@@ -536,7 +546,7 @@ pub(super) fn nested_loop_full_outer_join(
     }
 
     // Second pass: Add unmatched right rows with NULLs for left columns
-    for (right_idx, right_row) in right.rows().iter().enumerate() {
+    for (right_idx, right_row) in right_slice.iter().enumerate() {
         if !right_matched[right_idx] {
             let mut combined_values =
                 Vec::with_capacity(left_column_count + right_row.values.len());
@@ -551,8 +561,8 @@ pub(super) fn nested_loop_full_outer_join(
 
 /// Nested loop CROSS JOIN implementation (Cartesian product)
 pub(super) fn nested_loop_cross_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     _database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
@@ -564,9 +574,13 @@ pub(super) fn nested_loop_cross_join(
         ));
     }
 
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
     // Check if cross join would exceed memory limits before executing
     // CROSS JOIN always creates Cartesian products, so this check is appropriate
-    check_cross_join_size_limit(left.rows().len(), right.rows().len())?;
+    check_cross_join_size_limit(left_slice.len(), right_slice.len())?;
 
     // Extract right table name and schema
     let right_table_name = right
@@ -591,8 +605,8 @@ pub(super) fn nested_loop_cross_join(
     // CROSS JOIN = Cartesian product (every row from left × every row from right)
     let mut result_rows = Vec::new();
     let mut iterations = 0;
-    for left_row in left.rows() {
-        for right_row in right.rows() {
+    for left_row in left_slice {
+        for right_row in right_slice {
             // Check timeout periodically
             iterations += 1;
             if iterations % CHECK_INTERVAL == 0 {
@@ -610,8 +624,8 @@ pub(super) fn nested_loop_cross_join(
 /// Semi-join returns left rows that have at least one match in the right table.
 /// Unlike INNER JOIN, each left row is returned at most once (no duplicates).
 pub(super) fn nested_loop_semi_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
@@ -642,14 +656,18 @@ pub(super) fn nested_loop_semi_join(
     // Create evaluator for condition
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
     let mut result_rows = Vec::new();
     let mut iterations = 0;
 
     // For each left row, check if there's at least one matching right row
-    for left_row in left.rows() {
+    for left_row in left_slice {
         let mut has_match = false;
 
-        for right_row in right.rows() {
+        for right_row in right_slice {
             // Check timeout periodically
             iterations += 1;
             if iterations % CHECK_INTERVAL == 0 {
@@ -694,8 +712,8 @@ pub(super) fn nested_loop_semi_join(
 ///
 /// Anti-join returns left rows that have NO matches in the right table.
 pub(super) fn nested_loop_anti_join(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
@@ -726,14 +744,18 @@ pub(super) fn nested_loop_anti_join(
     // Create evaluator for condition
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
     let mut result_rows = Vec::new();
     let mut iterations = 0;
 
     // For each left row, check if there are NO matching right rows
-    for left_row in left.rows() {
+    for left_row in left_slice {
         let mut has_match = false;
 
-        for right_row in right.rows() {
+        for right_row in right_slice {
             // Check timeout periodically
             iterations += 1;
             if iterations % CHECK_INTERVAL == 0 {

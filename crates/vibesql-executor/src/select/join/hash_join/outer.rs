@@ -25,8 +25,8 @@ pub(crate) fn create_null_row(col_count: usize) -> vibesql_storage::Row {
 /// Performance: Critical for Q13 where customer LEFT JOIN orders
 /// with 150k customers and 1.5M orders.
 pub(in crate::select::join) fn hash_join_left_outer(
-    mut left: FromResult,
-    mut right: FromResult,
+    left: FromResult,
+    right: FromResult,
     left_col_idx: usize,
     right_col_idx: usize,
 ) -> Result<FromResult, ExecutorError> {
@@ -53,28 +53,29 @@ pub(in crate::select::join) fn hash_join_left_outer(
     let combined_schema =
         CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
 
+    // Use as_slice() for zero-cost access without triggering row materialization
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
     // Build hash table on the RIGHT side (we need to preserve ALL left rows)
     // For LEFT OUTER JOIN, we always probe with left, so build on right
     // Uses SIMD-accelerated hashing when available
-    let right_rows = right.rows();
-
     #[cfg(all(feature = "parallel", feature = "simd"))]
-    let hash_table = build::build_hash_table_parallel_simd(right_rows, right_col_idx);
+    let hash_table = build::build_hash_table_parallel_simd(right_slice, right_col_idx);
 
     #[cfg(all(feature = "simd", not(feature = "parallel")))]
-    let hash_table = build::build_hash_table_simd(right_rows, right_col_idx);
+    let hash_table = build::build_hash_table_simd(right_slice, right_col_idx);
 
     #[cfg(all(feature = "parallel", not(feature = "simd")))]
-    let hash_table = build_hash_table_parallel(right_rows, right_col_idx);
+    let hash_table = build_hash_table_parallel(right_slice, right_col_idx);
 
     #[cfg(not(any(feature = "parallel", feature = "simd")))]
-    let hash_table = build::build_hash_table_sequential(right_rows, right_col_idx);
+    let hash_table = build::build_hash_table_sequential(right_slice, right_col_idx);
 
     // Probe with LEFT side, preserving unmatched left rows
     let mut result_rows = Vec::new();
-    let left_rows = left.rows();
 
-    for left_row in left_rows {
+    for left_row in left_slice {
         let key = &left_row.values[left_col_idx];
 
         // For NULL keys in left, still emit the row with NULL right side
@@ -88,7 +89,7 @@ pub(in crate::select::join) fn hash_join_left_outer(
         if let Some(right_indices) = hash_table.get(key) {
             // Found matches - emit all combinations
             for &right_idx in right_indices {
-                result_rows.push(combine_rows(left_row, &right_rows[right_idx]));
+                result_rows.push(combine_rows(left_row, &right_slice[right_idx]));
             }
         } else {
             // No match - emit left row with NULLs for right columns
