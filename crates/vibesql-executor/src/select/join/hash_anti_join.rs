@@ -1,6 +1,6 @@
 #![allow(clippy::doc_lazy_continuation)]
 
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use super::hash_join::build_existence_hash_table_parallel;
 use super::{combine_rows, FromResult};
@@ -124,7 +124,7 @@ pub(super) fn hash_anti_join_with_filter(
 
     // Build phase: Create hash table from right side
     // Unlike simple hash_anti_join, we need to store row indices to check the filter
-    let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
+    let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
 
     for (idx, row) in right_slice.iter().enumerate() {
         // Check timeout periodically during build phase

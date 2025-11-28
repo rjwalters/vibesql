@@ -120,8 +120,8 @@ pub(super) fn hash_semi_join_with_filter(
 
     // Build phase: Create hash table from right side
     // Unlike simple hash_semi_join, we need to store row indices to check the filter
-    use std::collections::HashMap;
-    let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> = HashMap::new();
+    use ahash::AHashMap;
+    let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
 
     for (idx, row) in right_slice.iter().enumerate() {
         // Check timeout periodically during build phase
