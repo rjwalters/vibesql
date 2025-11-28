@@ -177,3 +177,7 @@ harness = false
 [[bench]]
 name = "columnar_storage_benchmark"
 harness = false
+
+[[bench]]
+name = "tpcds_runner"
+harness = false
