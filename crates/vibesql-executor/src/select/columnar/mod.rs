@@ -39,6 +39,7 @@ mod scan;
 pub mod filter;
 mod aggregate;
 mod executor;
+mod string_ops;
 
 // Auto-vectorized SIMD operations - replaces the `wide` crate dependency
 // See simd_ops.rs for documentation on why these patterns are structured this way

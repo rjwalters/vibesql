@@ -56,6 +56,13 @@ pub enum ColumnPredicate {
         low: SqlValue,
         high: SqlValue,
     },
+
+    /// column LIKE pattern
+    Like {
+        column_idx: usize,
+        pattern: String,
+        negated: bool,
+    },
 }
 
 /// Extract column predicates as a tree from a WHERE clause expression
@@ -257,6 +264,29 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
             None
         }
 
+        // LIKE: column LIKE pattern
+        Expression::Like {
+            expr: inner,
+            pattern,
+            negated,
+            ..
+        } => {
+            if let Expression::ColumnRef { table, column } = inner.as_ref() {
+                // Extract pattern string from literal
+                if let Expression::Literal(SqlValue::Character(pattern_str))
+                | Expression::Literal(SqlValue::Varchar(pattern_str)) = pattern.as_ref()
+                {
+                    let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                    return Some(PredicateTree::Leaf(ColumnPredicate::Like {
+                        column_idx,
+                        pattern: pattern_str.clone(),
+                        negated: *negated,
+                    }));
+                }
+            }
+            None
+        }
+
         _ => None,
     }
 }
@@ -376,6 +406,30 @@ fn extract_predicates_recursive(
                         column_idx,
                         low: low_val.clone(),
                         high: high_val.clone(),
+                    });
+                    return Some(());
+                }
+            }
+            None
+        }
+
+        // LIKE: column LIKE pattern
+        Expression::Like {
+            expr: inner,
+            pattern,
+            negated,
+            ..
+        } => {
+            if let Expression::ColumnRef { table, column } = inner.as_ref() {
+                // Extract pattern string from literal
+                if let Expression::Literal(SqlValue::Character(pattern_str))
+                | Expression::Literal(SqlValue::Varchar(pattern_str)) = pattern.as_ref()
+                {
+                    let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                    predicates.push(ColumnPredicate::Like {
+                        column_idx,
+                        pattern: pattern_str.clone(),
+                        negated: *negated,
                     });
                     return Some(());
                 }
