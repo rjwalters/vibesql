@@ -182,11 +182,11 @@ fn compute_column_aggregate(
     match column {
         // SIMD path for i64 columns
         ColumnArray::Int64(values, nulls) => {
-            compute_i64_aggregate(values, nulls.as_ref(), op)
+            compute_i64_aggregate(values, nulls.as_ref().map(|n| n.as_slice()), op)
         }
         // SIMD path for f64 columns
         ColumnArray::Float64(values, nulls) => {
-            compute_f64_aggregate(values, nulls.as_ref(), op)
+            compute_f64_aggregate(values, nulls.as_ref().map(|n| n.as_slice()), op)
         }
         // Scalar fallback for other types
         _ => compute_mixed_aggregate(batch, col_idx, op),
@@ -196,7 +196,7 @@ fn compute_column_aggregate(
 /// Compute aggregate on i64 column using auto-vectorized operations
 fn compute_i64_aggregate(
     values: &[i64],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
     log::debug!("[SIMD] compute_i64_aggregate: {} values, op={:?}", values.len(), op);
@@ -256,7 +256,7 @@ fn compute_i64_aggregate(
 /// Compute aggregate on f64 column using auto-vectorized operations
 fn compute_f64_aggregate(
     values: &[f64],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
     log::debug!("[SIMD] compute_f64_aggregate: {} values, op={:?}", values.len(), op);

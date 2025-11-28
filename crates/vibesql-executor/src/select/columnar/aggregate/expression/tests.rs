@@ -1,5 +1,7 @@
 //! Tests for expression aggregate modules
 
+use std::sync::Arc;
+
 use crate::schema::CombinedSchema;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::DataType;
@@ -22,15 +24,15 @@ fn make_test_schema() -> CombinedSchema {
 fn make_test_batch() -> ColumnarBatch {
     // Create a batch with price, discount, and quantity columns
     let price_col = ColumnArray::Float64(
-        vec![100.0, 200.0, 300.0, 400.0],
+        Arc::new(vec![100.0, 200.0, 300.0, 400.0]),
         None,
     );
     let discount_col = ColumnArray::Float64(
-        vec![0.1, 0.2, 0.15, 0.05],
+        Arc::new(vec![0.1, 0.2, 0.15, 0.05]),
         None,
     );
     let quantity_col = ColumnArray::Int64(
-        vec![10, 20, 15, 25],
+        Arc::new(vec![10, 20, 15, 25]),
         None,
     );
 
@@ -270,8 +272,8 @@ fn test_batch_expression_aggregate_empty_batch() {
 
     let batch = ColumnarBatch::from_columns(
         vec![
-            ColumnArray::Float64(vec![], None),
-            ColumnArray::Float64(vec![], None),
+            ColumnArray::Float64(Arc::new(vec![]), None),
+            ColumnArray::Float64(Arc::new(vec![]), None),
         ],
         Some(vec!["price".to_string(), "discount".to_string()]),
     ).unwrap();
@@ -317,11 +319,11 @@ fn test_batch_expression_aggregate_with_nulls() {
 
     // Create a batch with some NULL values
     let price_col = ColumnArray::Float64(
-        vec![100.0, 200.0, 300.0, 400.0],
-        Some(vec![false, true, false, false]), // Second value is NULL
+        Arc::new(vec![100.0, 200.0, 300.0, 400.0]),
+        Some(Arc::new(vec![false, true, false, false])), // Second value is NULL
     );
     let discount_col = ColumnArray::Float64(
-        vec![0.1, 0.2, 0.15, 0.05],
+        Arc::new(vec![0.1, 0.2, 0.15, 0.05]),
         None,
     );
 

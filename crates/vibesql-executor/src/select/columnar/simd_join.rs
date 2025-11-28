@@ -18,6 +18,8 @@
 //!    - Combine columns from both sides
 //!    - Return columnar batch
 
+use std::sync::Arc;
+
 use super::simd_ops;
 use super::{ColumnArray, ColumnarBatch};
 use crate::errors::ExecutorError;
@@ -134,10 +136,10 @@ impl HashTable {
 
         match (self, key_column) {
             (HashTable::Int64(table), ColumnArray::Int64(left_values, left_nulls)) => {
-                Self::probe_i64_simd(table, left_values, left_nulls)
+                Self::probe_i64_simd(table, left_values, left_nulls.as_ref().map(|n| n.as_slice()))
             }
             (HashTable::Float64(table), ColumnArray::Float64(left_values, left_nulls)) => {
-                Self::probe_f64_simd(table, left_values, left_nulls)
+                Self::probe_f64_simd(table, left_values, left_nulls.as_ref().map(|n| n.as_slice()))
             }
             _ => Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "hash join probe".to_string(),
@@ -151,7 +153,7 @@ impl HashTable {
     fn probe_i64_simd(
         table: &HashMap<i64, Vec<usize>>,
         left_values: &[i64],
-        left_nulls: &Option<Vec<bool>>,
+        left_nulls: Option<&[bool]>,
     ) -> Result<Vec<(usize, usize)>, ExecutorError> {
         let mut matches = Vec::new();
 
@@ -190,7 +192,7 @@ impl HashTable {
     fn probe_f64_simd(
         table: &HashMap<OrderedFloat, Vec<usize>>,
         left_values: &[f64],
-        left_nulls: &Option<Vec<bool>>,
+        left_nulls: Option<&[bool]>,
     ) -> Result<Vec<(usize, usize)>, ExecutorError> {
         let mut matches = Vec::new();
 
@@ -300,7 +302,7 @@ where
                 }
             }
 
-            Ok(ColumnArray::Int64(output_values, output_nulls))
+            Ok(ColumnArray::Int64(Arc::new(output_values), output_nulls.map(Arc::new)))
         }
         ColumnArray::Float64(values, nulls) => {
             let mut output_values = Vec::with_capacity(indices.len());
@@ -320,7 +322,7 @@ where
                 }
             }
 
-            Ok(ColumnArray::Float64(output_values, output_nulls))
+            Ok(ColumnArray::Float64(Arc::new(output_values), output_nulls.map(Arc::new)))
         }
         ColumnArray::String(values, nulls) => {
             let mut output_values = Vec::with_capacity(indices.len());
@@ -340,7 +342,7 @@ where
                 }
             }
 
-            Ok(ColumnArray::String(output_values, output_nulls))
+            Ok(ColumnArray::String(Arc::new(output_values), output_nulls.map(Arc::new)))
         }
         _ => {
             // For other types, fall back to SqlValue extraction
@@ -352,7 +354,7 @@ where
                 output_values.push(value);
             }
 
-            Ok(ColumnArray::Mixed(output_values))
+            Ok(ColumnArray::Mixed(Arc::new(output_values)))
         }
     }
 }
@@ -411,10 +413,10 @@ mod tests {
         let mut batch = ColumnarBatch::with_capacity(row_count, 2);
 
         batch
-            .add_column(ColumnArray::Int64(key_values, None))
+            .add_column(ColumnArray::Int64(Arc::new(key_values), None))
             .unwrap();
         batch
-            .add_column(ColumnArray::Int64(data_values, None))
+            .add_column(ColumnArray::Int64(Arc::new(data_values), None))
             .unwrap();
 
         batch
@@ -425,10 +427,10 @@ mod tests {
         let mut batch = ColumnarBatch::with_capacity(row_count, 2);
 
         batch
-            .add_column(ColumnArray::Float64(key_values, None))
+            .add_column(ColumnArray::Float64(Arc::new(key_values), None))
             .unwrap();
         batch
-            .add_column(ColumnArray::Int64(data_values, None))
+            .add_column(ColumnArray::Int64(Arc::new(data_values), None))
             .unwrap();
 
         batch
@@ -519,23 +521,23 @@ mod tests {
         // Left with NULL key: [(1, 10), (NULL, 20), (3, 30)]
         let mut left = ColumnarBatch::with_capacity(3, 2);
         left.add_column(ColumnArray::Int64(
-            vec![1, 0, 3], // 0 is placeholder for NULL
-            Some(vec![false, true, false]),
+            Arc::new(vec![1, 0, 3]), // 0 is placeholder for NULL
+            Some(Arc::new(vec![false, true, false])),
         ))
         .unwrap();
-        left.add_column(ColumnArray::Int64(vec![10, 20, 30], None))
+        left.add_column(ColumnArray::Int64(Arc::new(vec![10, 20, 30]), None))
             .unwrap();
 
         // Right with NULL key: [(1, 100), (3, 300), (NULL, 400)]
         let mut right = ColumnarBatch::with_capacity(3, 2);
         right
             .add_column(ColumnArray::Int64(
-                vec![1, 3, 0],
-                Some(vec![false, false, true]),
+                Arc::new(vec![1, 3, 0]),
+                Some(Arc::new(vec![false, false, true])),
             ))
             .unwrap();
         right
-            .add_column(ColumnArray::Int64(vec![100, 300, 400], None))
+            .add_column(ColumnArray::Int64(Arc::new(vec![100, 300, 400]), None))
             .unwrap();
 
         let result = columnar_hash_join_inner(&left, &right, 0, 0).unwrap();
