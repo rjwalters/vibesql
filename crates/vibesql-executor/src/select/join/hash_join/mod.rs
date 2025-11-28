@@ -7,9 +7,11 @@
 // - build.rs: Hash table building (sequential, parallel, and composite key)
 // - inner.rs: INNER JOIN implementation (single and multi-column)
 // - outer.rs: LEFT/RIGHT/FULL OUTER JOIN implementations
+// - columnar.rs: Columnar hash join (high-performance, no row materialization)
 // - tests.rs: Comprehensive test suite
 
 mod build;
+pub mod columnar;
 mod inner;
 mod outer;
 
@@ -23,6 +25,9 @@ pub(super) use outer::hash_join_left_outer;
 
 // Re-export existence hash table builders for semi-join and anti-join
 pub(super) use build::build_existence_hash_table_parallel;
+
+// Re-export columnar hash join for fast integer equi-joins
+pub(super) use columnar::hash_join_indices_columnar;
 
 // Re-export FromResult type for use in submodules
 pub(super) use super::FromResult;
