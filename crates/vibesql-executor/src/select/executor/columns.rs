@@ -58,13 +58,12 @@ impl SelectExecutor<'_> {
                         // Try exact match first for performance
                         let result =
                             from_res.schema.table_schemas.get(qualifier).cloned().or_else(|| {
-                                // Fall back to case-insensitive lookup
-                                let qualifier_lower = qualifier.to_lowercase();
+                                // Fall back to case-insensitive lookup without allocation
                                 from_res
                                     .schema
                                     .table_schemas
                                     .iter()
-                                    .find(|(key, _)| key.to_lowercase() == qualifier_lower)
+                                    .find(|(key, _)| key.eq_ignore_ascii_case(qualifier))
                                     .map(|(_, value)| value.clone())
                             });
 

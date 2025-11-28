@@ -383,12 +383,11 @@ impl SelectExecutor<'_> {
                     // Expand SELECT table.* to all columns from that specific table
                     // Try exact match first
                     let table_result = schema.table_schemas.get(qualifier).cloned().or_else(|| {
-                        // Fall back to case-insensitive lookup
-                        let qualifier_lower = qualifier.to_lowercase();
+                        // Fall back to case-insensitive lookup without allocation
                         schema
                             .table_schemas
                             .iter()
-                            .find(|(key, _)| key.to_lowercase() == qualifier_lower)
+                            .find(|(key, _)| key.eq_ignore_ascii_case(qualifier))
                             .map(|(_key, value)| value.clone())
                     });
 
