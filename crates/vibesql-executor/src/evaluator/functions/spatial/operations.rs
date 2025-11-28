@@ -35,7 +35,10 @@ fn to_geo_geometry(geom: &Geometry) -> Result<geo::Geometry<f64>, ExecutorError>
         }
         Geometry::Polygon { rings } => {
             if rings.is_empty() {
-                return Err(ExecutorError::Other("Empty polygon".to_string()));
+                return Err(ExecutorError::SpatialGeometryError {
+                    function_name: "to_geo_geometry".to_string(),
+                    message: "empty polygon has no rings".to_string(),
+                });
             }
             
             let exterior: Vec<geo::Coord<f64>> = rings[0]
@@ -82,7 +85,10 @@ fn to_geo_geometry(geom: &Geometry) -> Result<geo::Geometry<f64>, ExecutorError>
                 .iter()
                 .map(|poly_rings| {
                     if poly_rings.is_empty() {
-                        Err(ExecutorError::Other("Empty polygon in multipolygon".to_string()))
+                        Err(ExecutorError::SpatialGeometryError {
+                            function_name: "to_geo_geometry".to_string(),
+                            message: "empty polygon in multipolygon".to_string(),
+                        })
                     } else {
                         let exterior: Vec<geo::Coord<f64>> = poly_rings[0]
                             .iter()
@@ -181,9 +187,11 @@ fn from_geo_geometry(geom: &geo::Geometry<f64>) -> Result<Geometry, ExecutorErro
 /// ST_Simplify(geom, tolerance) - Simplify geometry using Douglas-Peucker algorithm
 pub fn st_simplify(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
-        return Err(ExecutorError::Other(
-            "ST_Simplify expects exactly 2 arguments".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Simplify".to_string(),
+            expected: "exactly 2 arguments".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -192,15 +200,18 @@ pub fn st_simplify(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let tolerance = match tol {
                 SqlValue::Double(d) => *d,
                 SqlValue::Integer(i) => *i as f64,
-                _ => return Err(ExecutorError::Other(
-                    "ST_Simplify requires DOUBLE tolerance".to_string(),
-                )),
+                _ => return Err(ExecutorError::SpatialArgumentError {
+                    function_name: "ST_Simplify".to_string(),
+                    expected: "DOUBLE tolerance".to_string(),
+                    actual: format!("{:?}", tol),
+                }),
             };
 
             if tolerance < 0.0 {
-                return Err(ExecutorError::Other(
-                    "Tolerance must be non-negative".to_string(),
-                ));
+                return Err(ExecutorError::SpatialGeometryError {
+                    function_name: "ST_Simplify".to_string(),
+                    message: "tolerance must be non-negative".to_string(),
+                });
             }
 
             let geom = wkt_to_geo(wkt)?;
@@ -236,18 +247,22 @@ pub fn st_simplify(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let result_value = geometry_to_sql_value(result_geom, 0);
             Ok(result_value)
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Simplify requires VARCHAR geometry and DOUBLE tolerance arguments".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Simplify".to_string(),
+            expected: "VARCHAR geometry and DOUBLE tolerance".to_string(),
+            actual: format!("{:?}, {:?}", args[0], args[1]),
+        }),
     }
 }
 
 /// ST_Union(geom1, geom2) - Combine two geometries
 pub fn st_union(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
-        return Err(ExecutorError::Other(
-            "ST_Union expects exactly 2 arguments".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Union".to_string(),
+            expected: "exactly 2 arguments".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -274,18 +289,22 @@ pub fn st_union(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let result_value = geometry_to_sql_value(result_geom, 0);
             Ok(result_value)
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Union requires VARCHAR geometry arguments".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Union".to_string(),
+            expected: "VARCHAR geometry arguments".to_string(),
+            actual: format!("{:?}, {:?}", args[0], args[1]),
+        }),
     }
 }
 
 /// ST_Intersection(geom1, geom2) - Find intersection of two geometries
 pub fn st_intersection(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
-        return Err(ExecutorError::Other(
-            "ST_Intersection expects exactly 2 arguments".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Intersection".to_string(),
+            expected: "exactly 2 arguments".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -303,9 +322,10 @@ pub fn st_intersection(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     int_result.into()
                 }
                 _ => {
-                    return Err(ExecutorError::Other(
-                        "ST_Intersection currently only supports polygon-polygon intersection".to_string(),
-                    ));
+                    return Err(ExecutorError::SpatialGeometryError {
+                        function_name: "ST_Intersection".to_string(),
+                        message: "currently only supports polygon-polygon intersection".to_string(),
+                    });
                 }
             };
 
@@ -313,18 +333,22 @@ pub fn st_intersection(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let result_value = geometry_to_sql_value(result_geom, 0);
             Ok(result_value)
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Intersection requires VARCHAR geometry arguments".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Intersection".to_string(),
+            expected: "VARCHAR geometry arguments".to_string(),
+            actual: format!("{:?}, {:?}", args[0], args[1]),
+        }),
     }
 }
 
 /// ST_Difference(geom1, geom2) - Subtract geom2 from geom1
 pub fn st_difference(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
-        return Err(ExecutorError::Other(
-            "ST_Difference expects exactly 2 arguments".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Difference".to_string(),
+            expected: "exactly 2 arguments".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -342,9 +366,10 @@ pub fn st_difference(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     diff_result.into()
                 }
                 _ => {
-                    return Err(ExecutorError::Other(
-                        "ST_Difference currently only supports polygon-polygon difference".to_string(),
-                    ));
+                    return Err(ExecutorError::SpatialGeometryError {
+                        function_name: "ST_Difference".to_string(),
+                        message: "currently only supports polygon-polygon difference".to_string(),
+                    });
                 }
             };
 
@@ -352,18 +377,22 @@ pub fn st_difference(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let result_value = geometry_to_sql_value(result_geom, 0);
             Ok(result_value)
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Difference requires VARCHAR geometry arguments".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Difference".to_string(),
+            expected: "VARCHAR geometry arguments".to_string(),
+            actual: format!("{:?}, {:?}", args[0], args[1]),
+        }),
     }
 }
 
 /// ST_SymDifference(geom1, geom2) - Parts in either but not both (symmetric difference / XOR)
 pub fn st_sym_difference(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
-        return Err(ExecutorError::Other(
-            "ST_SymDifference expects exactly 2 arguments".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_SymDifference".to_string(),
+            expected: "exactly 2 arguments".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -386,9 +415,10 @@ pub fn st_sym_difference(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     geo::Geometry::MultiPolygon(union_result)
                 }
                 _ => {
-                    return Err(ExecutorError::Other(
-                        "ST_SymDifference currently only supports polygon-polygon symmetric difference".to_string(),
-                    ));
+                    return Err(ExecutorError::SpatialGeometryError {
+                        function_name: "ST_SymDifference".to_string(),
+                        message: "currently only supports polygon-polygon symmetric difference".to_string(),
+                    });
                 }
             };
 
@@ -396,9 +426,11 @@ pub fn st_sym_difference(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let result_value = geometry_to_sql_value(result_geom, 0);
             Ok(result_value)
         }
-        _ => Err(ExecutorError::Other(
-            "ST_SymDifference requires VARCHAR geometry arguments".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_SymDifference".to_string(),
+            expected: "VARCHAR geometry arguments".to_string(),
+            actual: format!("{:?}, {:?}", args[0], args[1]),
+        }),
     }
 }
 

@@ -197,6 +197,22 @@ pub enum ExecutorError {
         operation: String,
         array_type: String,
     },
+    /// Invalid or incompatible geometry type in spatial function
+    SpatialGeometryError {
+        function_name: String,
+        message: String,
+    },
+    /// Spatial operation failed (distance, intersection, etc.)
+    SpatialOperationFailed {
+        function_name: String,
+        message: String,
+    },
+    /// Spatial function argument count or type mismatch
+    SpatialArgumentError {
+        function_name: String,
+        expected: String,
+        actual: String,
+    },
     Other(String),
 }
 
@@ -594,6 +610,15 @@ impl std::fmt::Display for ExecutorError {
                     "Unsupported array type for {}: {}",
                     operation, array_type
                 )
+            }
+            ExecutorError::SpatialGeometryError { function_name, message } => {
+                write!(f, "{}: {}", function_name, message)
+            }
+            ExecutorError::SpatialOperationFailed { function_name, message } => {
+                write!(f, "{}: {}", function_name, message)
+            }
+            ExecutorError::SpatialArgumentError { function_name, expected, actual } => {
+                write!(f, "{} expects {}, got {}", function_name, expected, actual)
             }
             ExecutorError::Other(msg) => write!(f, "{}", msg),
         }

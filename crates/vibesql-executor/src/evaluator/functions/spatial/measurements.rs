@@ -36,7 +36,10 @@ fn to_geo_geometry(geom: &Geometry) -> Result<geo::Geometry<f64>, ExecutorError>
         }
         Geometry::Polygon { rings } => {
             if rings.is_empty() {
-                return Err(ExecutorError::Other("Empty polygon".to_string()));
+                return Err(ExecutorError::SpatialGeometryError {
+                    function_name: "to_geo_geometry".to_string(),
+                    message: "Empty polygon".to_string(),
+                });
             }
             
             let exterior: Vec<geo::Coord<f64>> = rings[0]
@@ -83,7 +86,10 @@ fn to_geo_geometry(geom: &Geometry) -> Result<geo::Geometry<f64>, ExecutorError>
                 .iter()
                 .map(|poly_rings| {
                     if poly_rings.is_empty() {
-                        Err(ExecutorError::Other("Empty polygon in multipolygon".to_string()))
+                        Err(ExecutorError::SpatialGeometryError {
+                            function_name: "to_geo_geometry".to_string(),
+                            message: "Empty polygon in multipolygon".to_string(),
+                        })
                     } else {
                         let exterior: Vec<geo::Coord<f64>> = poly_rings[0]
                             .iter()
@@ -182,9 +188,11 @@ fn from_geo_geometry(geom: &geo::Geometry<f64>) -> Result<Geometry, ExecutorErro
 /// ST_Distance(geom1, geom2) - Calculate Euclidean distance between geometries
 pub fn st_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
-        return Err(ExecutorError::Other(
-            "ST_Distance expects exactly 2 arguments".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Distance".to_string(),
+            expected: "exactly 2 arguments".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -222,9 +230,10 @@ pub fn st_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                                 .fold(f64::INFINITY, f64::min)
                         }
                         _ => {
-                            return Err(ExecutorError::Other(
-                                "ST_Distance not fully supported between these geometry types".to_string()
-                            ));
+                            return Err(ExecutorError::SpatialOperationFailed {
+                                function_name: "ST_Distance".to_string(),
+                                message: "not fully supported between these geometry types".to_string(),
+                            });
                         }
                     }
                 }
@@ -232,18 +241,22 @@ pub fn st_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
             Ok(SqlValue::Double(distance))
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Distance requires VARCHAR geometry arguments".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Distance".to_string(),
+            expected: "VARCHAR geometry arguments".to_string(),
+            actual: format!("{:?}, {:?}", args[0].type_name(), args[1].type_name()),
+        }),
     }
 }
 
 /// ST_Length(geom) - Calculate length of LineString
 pub fn st_length(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_Length expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Length".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -275,23 +288,28 @@ pub fn st_length(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     }
                     Ok(SqlValue::Double(total_length))
                 }
-                _ => Err(ExecutorError::Other(
-                    "ST_Length only works on LineString and MultiLineString".to_string(),
-                )),
+                _ => Err(ExecutorError::SpatialGeometryError {
+                    function_name: "ST_Length".to_string(),
+                    message: "only works on LineString and MultiLineString".to_string(),
+                }),
             }
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Length requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Length".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_Perimeter(geom) - Calculate perimeter of Polygon
 pub fn st_perimeter(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_Perimeter expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Perimeter".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -330,23 +348,28 @@ pub fn st_perimeter(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     }
                     Ok(SqlValue::Double(total_perimeter))
                 }
-                _ => Err(ExecutorError::Other(
-                    "ST_Perimeter only works on Polygon and MultiPolygon".to_string(),
-                )),
+                _ => Err(ExecutorError::SpatialGeometryError {
+                    function_name: "ST_Perimeter".to_string(),
+                    message: "only works on Polygon and MultiPolygon".to_string(),
+                }),
             }
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Perimeter requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Perimeter".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_Area(geom) - Calculate area of Polygon
 pub fn st_area(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_Area expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Area".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -363,23 +386,28 @@ pub fn st_area(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     let area = mp.unsigned_area();
                     Ok(SqlValue::Double(area))
                 }
-                _ => Err(ExecutorError::Other(
-                    "ST_Area only works on Polygon and MultiPolygon".to_string(),
-                )),
+                _ => Err(ExecutorError::SpatialGeometryError {
+                    function_name: "ST_Area".to_string(),
+                    message: "only works on Polygon and MultiPolygon".to_string(),
+                }),
             }
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Area requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Area".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_Centroid(geom) - Find center point (geometric center of mass)
 pub fn st_centroid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_Centroid expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Centroid".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -389,7 +417,7 @@ pub fn st_centroid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
             match geom.centroid() {
                 Some(centroid) => {
-                    let result_geom = Geometry::Point { 
+                    let result_geom = Geometry::Point {
                         x: centroid.x(),
                         y: centroid.y(),
                     };
@@ -402,18 +430,22 @@ pub fn st_centroid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 }
             }
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Centroid requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Centroid".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_Envelope(geom) - Get bounding box as a Polygon
 pub fn st_envelope(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_Envelope expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Envelope".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -444,18 +476,22 @@ pub fn st_envelope(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 None => Ok(SqlValue::Null),
             }
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Envelope requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Envelope".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_ConvexHull(geom) - Find smallest convex polygon containing geometry
 pub fn st_convex_hull(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_ConvexHull expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_ConvexHull".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -486,22 +522,26 @@ pub fn st_convex_hull(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 }
                 Geometry::Polygon { rings }
             };
-            
+
             let result_value = super::geometry_to_sql_value(result_geom, 0);
             Ok(result_value)
         }
-        _ => Err(ExecutorError::Other(
-            "ST_ConvexHull requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_ConvexHull".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_PointOnSurface(geom) - Get a point guaranteed to be on the geometry
 pub fn st_point_on_surface(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_PointOnSurface expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_PointOnSurface".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -540,23 +580,28 @@ pub fn st_point_on_surface(args: &[SqlValue]) -> Result<SqlValue, ExecutorError>
                         None => Ok(SqlValue::Null),
                     }
                 }
-                _ => Err(ExecutorError::Other(
-                    "ST_PointOnSurface not fully supported for this geometry type".to_string(),
-                )),
+                _ => Err(ExecutorError::SpatialGeometryError {
+                    function_name: "ST_PointOnSurface".to_string(),
+                    message: "not fully supported for this geometry type".to_string(),
+                }),
             }
         }
-        _ => Err(ExecutorError::Other(
-            "ST_PointOnSurface requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_PointOnSurface".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_Boundary(geom) - Get boundary of geometry (exterior ring for polygons, endpoints for lines)
 pub fn st_boundary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::Other(
-            "ST_Boundary expects exactly 1 argument".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Boundary".to_string(),
+            expected: "exactly 1 argument".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match &args[0] {
@@ -614,18 +659,22 @@ pub fn st_boundary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
             Ok(super::geometry_to_sql_value(boundary_geom, geom_with_srid.srid))
         }
-        _ => Err(ExecutorError::Other(
-            "ST_Boundary requires a VARCHAR geometry argument".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_Boundary".to_string(),
+            expected: "VARCHAR geometry argument".to_string(),
+            actual: format!("{:?}", args[0].type_name()),
+        }),
     }
 }
 
 /// ST_HausdorffDistance(geom1, geom2) - Maximum distance between any point in geom1 to nearest point in geom2
 pub fn st_hausdorff_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
-        return Err(ExecutorError::Other(
-            "ST_HausdorffDistance expects exactly 2 arguments".to_string(),
-        ));
+        return Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_HausdorffDistance".to_string(),
+            expected: "exactly 2 arguments".to_string(),
+            actual: format!("{} arguments", args.len()),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -642,9 +691,11 @@ pub fn st_hausdorff_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorErro
             let distance = calculate_hausdorff_distance(&geom1, &geom2)?;
             Ok(SqlValue::Double(distance))
         }
-        _ => Err(ExecutorError::Other(
-            "ST_HausdorffDistance requires VARCHAR geometry arguments".to_string(),
-        )),
+        _ => Err(ExecutorError::SpatialArgumentError {
+            function_name: "ST_HausdorffDistance".to_string(),
+            expected: "VARCHAR geometry arguments".to_string(),
+            actual: format!("{:?}, {:?}", args[0].type_name(), args[1].type_name()),
+        }),
     }
 }
 
