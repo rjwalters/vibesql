@@ -411,8 +411,27 @@ def query_sysbench_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
+def get_conformance_json_paths() -> List[Path]:
+    """Get paths to conformance JSON files in priority order."""
+    repo_root = get_repo_root()
+    return [
+        # Local test results (freshest)
+        Path.home() / ".vibesql" / "test_results" / "sqllogictest_results.json",
+        # Cumulative results in web-demo (comprehensive)
+        repo_root / "web-demo" / "public" / "badges" / "sqllogictest_cumulative.json",
+        # Summary results
+        repo_root / "web-demo" / "public" / "badges" / "sqllogictest_summary.json",
+    ]
+
+
 def query_conformance_results(conn: sqlite3.Connection) -> Dict[str, Any]:
-    """Query SQLLogicTest conformance results from the database."""
+    """Query SQLLogicTest conformance results from JSON files or database."""
+    # First try to load from JSON files (preferred source)
+    conformance_data = load_conformance_from_json()
+    if conformance_data:
+        return conformance_data
+
+    # Fall back to database query if JSON not available
     cursor = conn.cursor()
 
     # Check if test_results table exists
@@ -464,9 +483,183 @@ def query_conformance_results(conn: sqlite3.Connection) -> Dict[str, Any]:
             "passing": files_passing,
             "pass_rate": round(files_passing / total_files * 100, 2) if total_files > 0 else 0
         },
-        "categories": {},  # Could be populated from file paths
+        "categories": {},
         "history": []
     }
+
+
+def load_conformance_from_json() -> Optional[Dict[str, Any]]:
+    """Load conformance data from JSON files.
+
+    Attempts to merge data from multiple sources:
+    - Local test results provide fresh dialect stats
+    - Cumulative results provide comprehensive file-level data
+    """
+    local_data = None
+    cumulative_data = None
+
+    for json_path in get_conformance_json_paths():
+        if not json_path.exists():
+            continue
+
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+
+            # Handle sqllogictest_results.json format (from local test runs)
+            if "dialect_stats" in data and local_data is None:
+                local_data = data
+
+            # Handle sqllogictest_cumulative.json format
+            elif "tested_files" in data and cumulative_data is None:
+                cumulative_data = data
+
+            # Handle sqllogictest_summary.json format as fallback
+            elif "by_category" in data and cumulative_data is None:
+                cumulative_data = data
+
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+
+    # Build result by merging data sources
+    result: Dict[str, Any] = {
+        "summary": {},
+        "files": {},
+        "categories": {},
+        "history": []
+    }
+
+    # Use cumulative data for file-level stats (most comprehensive)
+    if cumulative_data:
+        if "tested_files" in cumulative_data:
+            summary = cumulative_data.get("summary", {})
+            categories = cumulative_data.get("categories", {})
+
+            total_files = summary.get("total_available_files", 0)
+            passed_files = summary.get("passed", 0)
+            failed_files = summary.get("failed", 0)
+            pass_rate = summary.get("pass_rate", 0)
+
+            result["files"] = {
+                "total": total_files,
+                "passing": passed_files,
+                "pass_rate": round(pass_rate, 2)
+            }
+
+            # Use file counts as test counts if no better data
+            result["summary"] = {
+                "total_tests": total_files,
+                "passing": passed_files,
+                "failing": failed_files,
+                "pass_rate": round(pass_rate, 2)
+            }
+
+            # Build categories (use "passing" to match DashboardConformanceCategory type)
+            for cat_name, cat_info in categories.items():
+                if cat_info:
+                    cat_total = cat_info.get("total", 0)
+                    cat_passed = cat_info.get("passed", 0)
+                    result["categories"][cat_name] = {
+                        "total": cat_total,
+                        "passing": cat_passed,
+                        "pass_rate": round(cat_passed / cat_total * 100, 2) if cat_total > 0 else 0
+                    }
+
+        elif "by_category" in cumulative_data:
+            summary = cumulative_data.get("summary", {})
+            by_category = cumulative_data.get("by_category", {})
+            total_files = cumulative_data.get("total_files", 0)
+
+            passed_files = summary.get("passed", 0)
+            failed_files = summary.get("failed", 0)
+            pass_rate = (passed_files / total_files * 100) if total_files > 0 else 0
+
+            result["files"] = {
+                "total": total_files,
+                "passing": passed_files,
+                "pass_rate": round(pass_rate, 2)
+            }
+
+            result["summary"] = {
+                "total_tests": total_files,
+                "passing": passed_files,
+                "failing": failed_files,
+                "pass_rate": round(pass_rate, 2)
+            }
+
+            for cat_name, cat_info in by_category.items():
+                if cat_info:
+                    cat_total = cat_info.get("total", 0)
+                    cat_passed = cat_info.get("passed", 0)
+                    result["categories"][cat_name] = {
+                        "total": cat_total,
+                        "passing": cat_passed,
+                        "pass_rate": round(cat_passed / cat_total * 100, 2) if cat_total > 0 else 0
+                    }
+
+    # Enhance with local dialect stats if available
+    if local_data:
+        dialect_stats = local_data.get("dialect_stats", {})
+        total_records = dialect_stats.get("total_records", 0)
+        mysql_stats = dialect_stats.get("mysql", {})
+        sqlite_stats = dialect_stats.get("sqlite", {})
+
+        # Update test counts from dialect stats (more accurate)
+        if total_records > 0:
+            result["summary"]["total_tests"] = total_records
+            result["summary"]["passing"] = mysql_stats.get("passed", 0) + sqlite_stats.get("passed", 0)
+            result["summary"]["failing"] = mysql_stats.get("failed", 0) + sqlite_stats.get("failed", 0)
+
+        # Add dialect breakdown
+        result["dialect_stats"] = {
+            "mysql": mysql_stats,
+            "sqlite": sqlite_stats
+        }
+
+    # If we only have local data and no cumulative
+    if local_data and not cumulative_data:
+        summary = local_data.get("summary", {})
+        dialect_stats = local_data.get("dialect_stats", {})
+        categories = local_data.get("categories", {})
+
+        total_records = dialect_stats.get("total_records", 0)
+        mysql_stats = dialect_stats.get("mysql", {})
+        sqlite_stats = dialect_stats.get("sqlite", {})
+
+        total_files = summary.get("total", 1)
+        passed_files = summary.get("passed", 0)
+        pass_rate = summary.get("pass_rate", 0)
+
+        result["files"] = {
+            "total": total_files,
+            "passing": passed_files,
+            "pass_rate": round(pass_rate, 2)
+        }
+
+        result["summary"] = {
+            "total_tests": total_records,
+            "passing": mysql_stats.get("passed", 0) + sqlite_stats.get("passed", 0),
+            "failing": mysql_stats.get("failed", 0) + sqlite_stats.get("failed", 0),
+            "pass_rate": round(pass_rate, 2)
+        }
+
+        for cat_name, cat_info in categories.items():
+            if cat_info:
+                result["categories"][cat_name] = {
+                    "total": cat_info.get("total", 0),
+                    "passing": cat_info.get("passed", 0),
+                    "pass_rate": cat_info.get("pass_rate", 0)
+                }
+
+        result["dialect_stats"] = {
+            "mysql": mysql_stats,
+            "sqlite": sqlite_stats
+        }
+
+    if result["summary"]:
+        return result
+
+    return None
 
 
 def detect_changes(current: Dict, previous: Optional[Dict]) -> List[Dict]:

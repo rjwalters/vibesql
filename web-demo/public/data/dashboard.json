@@ -1,13 +1,13 @@
 {
-  "generated_at": "2025-11-27T16:55:24.972209Z",
+  "generated_at": "2025-11-27T21:13:34.362426Z",
   "version": "2.0",
   "summary": {
     "conformance": {
-      "pass_rate": null,
-      "tests_passing": null,
-      "tests_total": null,
-      "files_passing": null,
-      "files_total": null
+      "pass_rate": 100.0,
+      "tests_passing": 13954,
+      "tests_total": 13954,
+      "files_passing": 628,
+      "files_total": 628
     },
     "tpch": {
       "queries_passing": 22,
@@ -675,7 +675,723 @@
         }
       }
     },
-    "tpcds": {},
+    "tpcds": {
+      "description": "TPC-DS Decision Support - 99 complex queries",
+      "queries_passing": 73,
+      "queries_total": 99,
+      "geo_mean_ms": 21.0,
+      "queries": {
+        "Q1": {
+          "latest": {
+            "vibesql_ms": 10.46,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q10": {
+          "latest": {
+            "vibesql_ms": 12.69,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q11": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "incomplete",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q12": {
+          "latest": {
+            "vibesql_ms": 8.03,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedExpression(\"Window functions not supported in aggregate context\")"
+          }
+        },
+        "Q13": {
+          "latest": {
+            "vibesql_ms": 5.8,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q14": {
+          "latest": {
+            "vibesql_ms": 1956.13,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: TableNotFound(\"CROSS_ITEMS\")"
+          }
+        },
+        "Q15": {
+          "latest": {
+            "vibesql_ms": 10.08,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q16": {
+          "latest": {
+            "vibesql_ms": 4.62,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q17": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "incomplete",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q18": {
+          "latest": {
+            "vibesql_ms": 22.0,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q19": {
+          "latest": {
+            "vibesql_ms": 9.79,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q2": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "error",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q20": {
+          "latest": {
+            "vibesql_ms": 6.89,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedExpression(\"Window functions not supported in aggregate context\")"
+          }
+        },
+        "Q21": {
+          "latest": {
+            "vibesql_ms": 9.36,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q22": {
+          "latest": {
+            "vibesql_ms": 5.23,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q23": {
+          "latest": {
+            "vibesql_ms": 112.0,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q24": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "incomplete",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q25": {
+          "latest": {
+            "vibesql_ms": 141.95,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q26": {
+          "latest": {
+            "vibesql_ms": 11.2,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q27": {
+          "latest": {
+            "vibesql_ms": 9.96,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q28": {
+          "latest": {
+            "vibesql_ms": 6.61,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q29": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "incomplete",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q3": {
+          "latest": {
+            "vibesql_ms": 10.64,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q30": {
+          "latest": {
+            "vibesql_ms": 5.86,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q31": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "error",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q32": {
+          "latest": {
+            "vibesql_ms": 5.29,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q33": {
+          "latest": {
+            "vibesql_ms": 22.64,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: TableNotFound(\"SS\")"
+          }
+        },
+        "Q34": {
+          "latest": {
+            "vibesql_ms": 7.11,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q35": {
+          "latest": {
+            "vibesql_ms": 8.1,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q36": {
+          "latest": {
+            "vibesql_ms": 7.6,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedFeature(\"Unknown function: GROUPING\")"
+          }
+        },
+        "Q37": {
+          "latest": {
+            "vibesql_ms": 10.33,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q38": {
+          "latest": {
+            "vibesql_ms": 1523.98,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q39": {
+          "latest": {
+            "vibesql_ms": 25.91,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q4": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "incomplete",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q40": {
+          "latest": {
+            "vibesql_ms": 19.71,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q41": {
+          "latest": {
+            "vibesql_ms": 39.25,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q42": {
+          "latest": {
+            "vibesql_ms": 4.4,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q43": {
+          "latest": {
+            "vibesql_ms": 35.98,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q44": {
+          "latest": {
+            "vibesql_ms": 89.7,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedExpression(\"Window functions not supported in aggregate context\")"
+          }
+        },
+        "Q45": {
+          "latest": {
+            "vibesql_ms": 8.79,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q46": {
+          "latest": {
+            "vibesql_ms": 13.81,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q47": {
+          "latest": {
+            "vibesql_ms": 77.59,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q48": {
+          "latest": {
+            "vibesql_ms": 28.35,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q49": {
+          "latest": {
+            "vibesql_ms": 66.63,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q5": {
+          "latest": {
+            "vibesql_ms": 60083.87,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: TableNotFound(\"SSR\")"
+          }
+        },
+        "Q50": {
+          "latest": {
+            "vibesql_ms": 7.59,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q51": {
+          "latest": {
+            "vibesql_ms": 7.22,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: TableNotFound(\"WEB_V1\")"
+          }
+        },
+        "Q52": {
+          "latest": {
+            "vibesql_ms": 6.93,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q53": {
+          "latest": {
+            "vibesql_ms": 10.25,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q54": {
+          "latest": {
+            "vibesql_ms": 26.4,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q55": {
+          "latest": {
+            "vibesql_ms": 5.3,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q56": {
+          "latest": {
+            "vibesql_ms": 10.03,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: ColumnNotFound { column_name: \"I_ITEM_ID\", table_name: \"STORE_SALES\", searched_tables: [\"STORE_SALES\", \"ITEM\", \"__subquery_ITEM\", \"CUSTOMER_ADDRESS\", \"DATE_DIM\"], available_columns: [\"ss_sold_date_sk\", \"ss_sold_time_sk\", \"ss_item_sk\", \"ss_customer_sk\", \"ss_cdemo_sk\", \"ss_hdemo_sk\", \"ss_addr_sk\", \"ss_store_sk\", \"ss_promo_sk\", \"ss_ticket_number\", \"ss_quantity\", \"ss_wholesale_cost\", \"ss_list_price\", \"ss_sales_price\", \"ss_ext_discount_amt\", \"ss_ext_sales_price\", \"ss_ext_wholesale_cost\", \"ss_ext_list_price\", \"ss_ext_tax\", \"ss_coupon_amt\", \"ss_net_paid\", \"ss_net_paid_inc_tax\", \"ss_net_profit\", \"i_item_sk\", \"i_item_id\", \"i_rec_start_date\", \"i_rec_end_date\", \"i_item_desc\", \"i_current_price\", \"i_wholesale_cost\", \"i_brand_id\", \"i_brand\", \"i_class_id\", \"i_class\", \"i_category_id\", \"i_category\", \"i_manufact_id\", \"i_manufact\", \"i_size\", \"i_formulation\", \"i_color\", \"i_units\", \"i_container\", \"i_manager_id\", \"i_product_name\", \"i_item_sk\", \"i_item_id\", \"i_rec_start_date\", \"i_rec_end_date\", \"i_item_desc\", \"i_current_price\", \"i_wholesale_cost\", \"i_brand_id\", \"i_brand\", \"i_class_id\", \"i_class\", \"i_category_id\", \"i_category\", \"i_manufact_id\", \"i_manufact\", \"i_size\", \"i_formulation\", \"i_color\", \"i_units\", \"i_container\", \"i_manager_id\", \"i_product_name\", \"ca_address_sk\", \"ca_address_id\", \"ca_street_number\", \"ca_street_name\", \"ca_street_type\", \"ca_suite_number\", \"ca_city\", \"ca_county\", \"ca_state\", \"ca_zip\", \"ca_country\", \"ca_gmt_offset\", \"ca_location_type\", \"d_date_sk\", \"d_date_id\", \"d_date\", \"d_month_seq\", \"d_week_seq\", \"d_quarter_seq\", \"d_year\", \"d_dow\", \"d_moy\", \"d_dom\", \"d_qoy\", \"d_fy_year\", \"d_fy_quarter_seq\", \"d_fy_week_seq\", \"d_day_name\", \"d_quarter_name\", \"d_holiday\", \"d_weekend\", \"d_following_holiday\", \"d_first_dom\", \"d_last_dom\", \"d_same_day_ly\", \"d_same_day_lq\", \"d_current_day\", \"d_current_week\", \"d_current_month\", \"d_current_quarter\", \"d_current_year\"] }"
+          }
+        },
+        "Q57": {
+          "latest": {
+            "vibesql_ms": 67.63,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedExpression(\"Window functions not supported in aggregate context\")"
+          }
+        },
+        "Q58": {
+          "latest": {
+            "vibesql_ms": 29.84,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q59": {
+          "latest": {
+            "vibesql_ms": 423.24,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q6": {
+          "latest": {
+            "vibesql_ms": 982.55,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q60": {
+          "latest": {
+            "vibesql_ms": 5.35,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q61": {
+          "latest": {
+            "vibesql_ms": 16.66,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q62": {
+          "latest": {
+            "vibesql_ms": 12.73,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q63": {
+          "latest": {
+            "vibesql_ms": 12.96,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q64": {
+          "latest": {
+            "vibesql_ms": 14.07,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q65": {
+          "latest": {
+            "vibesql_ms": 9.35,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q66": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "error",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q67": {
+          "latest": {
+            "vibesql_ms": 10.98,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q68": {
+          "latest": {
+            "vibesql_ms": 14.86,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q69": {
+          "latest": {
+            "vibesql_ms": 151421.15,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q7": {
+          "latest": {
+            "vibesql_ms": 24.3,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q70": {
+          "latest": {
+            "vibesql_ms": 11.82,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedFeature(\"Unknown function: GROUPING\")"
+          }
+        },
+        "Q71": {
+          "latest": {
+            "vibesql_ms": 1731.28,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: ColumnNotFound { column_name: \"I_BRAND_ID\", table_name: \"unknown\", searched_tables: [\"result\"], available_columns: [\"BRAND_ID\", \"BRAND\", \"T_HOUR\", \"T_MINUTE\", \"EXT_PRICE\"] }"
+          }
+        },
+        "Q72": {
+          "latest": {
+            "vibesql_ms": 36.54,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q73": {
+          "latest": {
+            "vibesql_ms": 100.34,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q74": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "error",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q75": {
+          "latest": {
+            "vibesql_ms": null,
+            "status": "error",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q76": {
+          "latest": {
+            "vibesql_ms": 5.46,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q77": {
+          "latest": {
+            "vibesql_ms": 22.94,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: TableNotFound(\"SS\")"
+          }
+        },
+        "Q78": {
+          "latest": {
+            "vibesql_ms": 46.85,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q79": {
+          "latest": {
+            "vibesql_ms": 903.58,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q8": {
+          "latest": {
+            "vibesql_ms": 1892.81,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q80": {
+          "latest": {
+            "vibesql_ms": 12.48,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: TableNotFound(\"SSR\")"
+          }
+        },
+        "Q81": {
+          "latest": {
+            "vibesql_ms": 11.47,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q82": {
+          "latest": {
+            "vibesql_ms": 0.87,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q83": {
+          "latest": {
+            "vibesql_ms": 6.2,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q84": {
+          "latest": {
+            "vibesql_ms": 2.03,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q85": {
+          "latest": {
+            "vibesql_ms": 6.25,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q86": {
+          "latest": {
+            "vibesql_ms": 4.78,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedFeature(\"Unknown function: GROUPING\")"
+          }
+        },
+        "Q87": {
+          "latest": {
+            "vibesql_ms": 16.8,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q88": {
+          "latest": {
+            "vibesql_ms": 61.8,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q89": {
+          "latest": {
+            "vibesql_ms": 72.22,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q9": {
+          "latest": {
+            "vibesql_ms": 45.95,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q90": {
+          "latest": {
+            "vibesql_ms": 19.42,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q91": {
+          "latest": {
+            "vibesql_ms": 6.96,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q92": {
+          "latest": {
+            "vibesql_ms": 4.34,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q93": {
+          "latest": {
+            "vibesql_ms": 7.51,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q94": {
+          "latest": {
+            "vibesql_ms": 5.1,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q95": {
+          "latest": {
+            "vibesql_ms": 80.31,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q96": {
+          "latest": {
+            "vibesql_ms": 14.74,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q97": {
+          "latest": {
+            "vibesql_ms": 12.77,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        },
+        "Q98": {
+          "latest": {
+            "vibesql_ms": 10.41,
+            "status": "failed",
+            "timestamp": "2025-11-27T21:04:34.339929",
+            "error": "Error: UnsupportedExpression(\"Window functions not supported in aggregate context\")"
+          }
+        },
+        "Q99": {
+          "latest": {
+            "vibesql_ms": 27.6,
+            "status": "passed",
+            "timestamp": "2025-11-27T21:04:34.339929"
+          }
+        }
+      }
+    },
     "tpcc": {
       "description": "TPC-C OLTP - Mixed read/write transactions",
       "scale_factor": 1,
@@ -786,7 +1502,66 @@
       }
     }
   },
-  "conformance": {},
+  "conformance": {
+    "summary": {
+      "total_tests": 13954,
+      "passing": 13954,
+      "failing": 0,
+      "pass_rate": 100.0
+    },
+    "files": {
+      "total": 628,
+      "passing": 628,
+      "pass_rate": 100.0
+    },
+    "categories": {
+      "select": {
+        "total": 5,
+        "passing": 5,
+        "pass_rate": 100.0
+      },
+      "evidence": {
+        "total": 12,
+        "passing": 12,
+        "pass_rate": 100.0
+      },
+      "index": {
+        "total": 214,
+        "passing": 214,
+        "pass_rate": 100.0
+      },
+      "random": {
+        "total": 391,
+        "passing": 391,
+        "pass_rate": 100.0
+      },
+      "ddl": {
+        "total": 1,
+        "passing": 1,
+        "pass_rate": 100.0
+      },
+      "other": {
+        "total": 5,
+        "passing": 5,
+        "pass_rate": 100.0
+      }
+    },
+    "history": [],
+    "dialect_stats": {
+      "mysql": {
+        "failed": 0,
+        "pass_rate": 100.0,
+        "passed": 3941,
+        "total": 3941
+      },
+      "sqlite": {
+        "failed": 0,
+        "pass_rate": 100.0,
+        "passed": 10013,
+        "total": 10013
+      }
+    }
+  },
   "changes": [],
   "machine_info": {
     "system": "Darwin 25.1.0",
@@ -797,8 +1572,8 @@
   "timeline": [
     {
       "date": "2025-11-27",
-      "commit": "fc3595a7",
-      "conformance_pass_rate": null,
+      "commit": "642bc111",
+      "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 66.99,
       "tpch_passing": 22,
       "tpcc_tps": null,
