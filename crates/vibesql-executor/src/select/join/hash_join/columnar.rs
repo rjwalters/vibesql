@@ -526,6 +526,8 @@ mod tests {
 
     #[test]
     fn test_columnar_hash_join() {
+        use std::sync::Arc;
+
         // Create left batch: customer_id, name
         let left_columns = vec![
             ColumnArray::Int64(Arc::new(vec![1, 2, 3, 4]), None),

@@ -136,7 +136,7 @@ impl<'a> PipelineInput<'a> {
                 // This fallback returns empty for safety
                 Vec::new()
             }
-            PipelineInput::Empty => vec![Row::new(vec![])],
+            PipelineInput::Empty => Vec::new(),
         }
     }
 

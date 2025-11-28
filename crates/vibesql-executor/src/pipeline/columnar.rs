@@ -87,10 +87,11 @@ impl ExecutionPipeline for ColumnarPipeline {
     /// Apply WHERE clause filtering using columnar operations.
     ///
     /// When SIMD is enabled:
-    /// 1. Converts rows to columnar batch
-    /// 2. Extracts simple predicates
-    /// 3. Applies SIMD-accelerated filtering
-    /// 4. Converts result back to rows
+    /// 1. Uses columnar batch directly if input is already columnar (zero-copy)
+    /// 2. Otherwise converts rows to columnar batch
+    /// 3. Extracts simple predicates
+    /// 4. Applies SIMD-accelerated filtering
+    /// 5. Returns columnar batch output (defers row conversion to final stage)
     ///
     fn apply_filter(
         &self,
@@ -98,9 +99,48 @@ impl ExecutionPipeline for ColumnarPipeline {
         predicate: Option<&Expression>,
         ctx: &ExecutionContext<'_>,
     ) -> Result<PipelineOutput, ExecutorError> {
+        // Handle batch input directly - avoids all conversions
+        if let PipelineInput::Batch(batch) = input {
+            // No predicate = no filtering, return batch as-is
+            if predicate.is_none() {
+                return Ok(PipelineOutput::from_batch(batch));
+            }
+
+            let predicate = predicate.unwrap();
+
+            // Try to extract simple predicates for SIMD filtering
+            let predicates = match extract_column_predicates(predicate, ctx.schema) {
+                Some(preds) => preds,
+                None => {
+                    // Complex predicate - fall back to row-oriented filtering
+                    let rows = batch.to_rows()?;
+                    return self.fallback_filter(rows, Some(predicate), ctx);
+                }
+            };
+
+            if batch.row_count() == 0 {
+                return Ok(PipelineOutput::Empty);
+            }
+
+            // Apply SIMD-accelerated filtering
+            let filtered_batch = if predicates.is_empty() {
+                batch
+            } else {
+                simd_filter_batch(&batch, &predicates)?
+            };
+
+            // Return columnar batch output (defer row conversion to final stage)
+            return Ok(PipelineOutput::from_batch(filtered_batch));
+        }
+
+        // Row-based input path
         let rows = input.into_rows();
 
-        // No predicate = no filtering
+        if rows.is_empty() {
+            return Ok(PipelineOutput::Empty);
+        }
+
+        // No predicate = no filtering needed
         if predicate.is_none() {
             return Ok(PipelineOutput::from_rows(rows));
         }
@@ -116,11 +156,7 @@ impl ExecutionPipeline for ColumnarPipeline {
             }
         };
 
-        if rows.is_empty() {
-            return Ok(PipelineOutput::Empty);
-        }
-
-        // Convert to columnar batch
+        // Convert to columnar batch for SIMD filtering
         let batch = ColumnarBatch::from_rows(&rows)?;
 
         // Apply SIMD-accelerated filtering
@@ -130,9 +166,8 @@ impl ExecutionPipeline for ColumnarPipeline {
             simd_filter_batch(&batch, &predicates)?
         };
 
-        // Convert back to rows
-        let filtered_rows = filtered_batch.to_rows()?;
-        Ok(PipelineOutput::from_rows(filtered_rows))
+        // Return columnar batch output (defer row conversion to final stage)
+        Ok(PipelineOutput::from_batch(filtered_batch))
     }
 
     /// Apply SELECT projection in columnar mode.
@@ -176,9 +211,10 @@ impl ExecutionPipeline for ColumnarPipeline {
     /// Execute aggregation using columnar operations.
     ///
     /// When SIMD is enabled:
-    /// 1. Extracts aggregate specifications from SELECT list
-    /// 2. Uses SIMD-accelerated reduction operations
-    /// 3. Returns single result row
+    /// 1. Uses columnar batch directly if input is already columnar (zero-copy)
+    /// 2. Extracts aggregate specifications from SELECT list
+    /// 3. Uses SIMD-accelerated reduction operations
+    /// 4. Returns single result row
     ///
     /// Falls back to row-oriented for GROUP BY or complex aggregates.
     fn apply_aggregation(
@@ -217,11 +253,32 @@ impl ExecutionPipeline for ColumnarPipeline {
             }
         };
 
-        // Now consume the input
-        let rows = input.into_rows();
+        // Get or create the columnar batch from input
+        // This handles both batch and row input formats
+        let batch = match input {
+            PipelineInput::Batch(batch) => batch,
+            _ => {
+                let rows = input.into_rows();
+                if rows.is_empty() {
+                    // Handle empty input per SQL standard
+                    let values: Vec<vibesql_types::SqlValue> = agg_specs
+                        .iter()
+                        .map(|spec| match spec.op {
+                            crate::select::columnar::AggregateOp::Count => {
+                                vibesql_types::SqlValue::Integer(0)
+                            }
+                            _ => vibesql_types::SqlValue::Null,
+                        })
+                        .collect();
+                    return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
+                }
+                // Convert to columnar batch for SIMD aggregation
+                ColumnarBatch::from_rows(&rows)?
+            }
+        };
 
-        // Handle empty input per SQL standard
-        if rows.is_empty() {
+        // Handle empty batch per SQL standard
+        if batch.row_count() == 0 {
             let values: Vec<vibesql_types::SqlValue> = agg_specs
                 .iter()
                 .map(|spec| match spec.op {
@@ -233,9 +290,6 @@ impl ExecutionPipeline for ColumnarPipeline {
                 .collect();
             return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
         }
-
-        // Convert to columnar batch
-        let batch = ColumnarBatch::from_rows(&rows)?;
 
         // Compute aggregates using batch-native operations
         let needs_schema = agg_specs
