@@ -28,4 +28,4 @@ pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;
 pub use subquery_to_join::transform_subqueries_to_joins;
-pub use where_pushdown::{combine_with_and, PredicateDecomposition};
+pub use where_pushdown::combine_with_and;
