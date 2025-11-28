@@ -97,18 +97,6 @@ impl std::str::FromStr for SqlMode {
 }
 
 impl SqlMode {
-    /// Check if division should return floating-point (true) or integer (false)
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use TypeBehavior::division_result_type() instead for more precise type information"
-    )]
-    pub fn division_returns_float(&self) -> bool {
-        match self {
-            SqlMode::MySQL { .. } => true,
-            SqlMode::SQLite => false,
-        }
-    }
-
     /// Get the MySQL mode flags, if in MySQL mode
     pub fn mysql_flags(&self) -> Option<&MySqlModeFlags> {
         match self {
