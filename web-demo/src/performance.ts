@@ -56,9 +56,9 @@ interface QueryStats {
 
 interface QueryLatest {
   vibesql_ms: number | null;
-  sqlite_ms: number | null;
-  duckdb_ms: number | null;
-  status: 'passing' | 'failing' | 'timeout' | 'memory';
+  sqlite_ms?: number | null;
+  duckdb_ms?: number | null;
+  status: string; // 'passed', 'failed', 'passing', 'failing', 'timeout', 'memory', 'error', 'incomplete'
   timestamp: string;
   error?: string;
 }
@@ -69,11 +69,11 @@ interface QueryHistoryEntry {
 }
 
 interface QueryData {
-  name: string;
-  description: string;
+  name?: string;
+  description?: string;
   latest: QueryLatest;
-  history: QueryHistoryEntry[];
-  stats: QueryStats | null;
+  history?: QueryHistoryEntry[];
+  stats?: QueryStats | null;
 }
 
 interface BenchmarkSuite {
@@ -81,11 +81,22 @@ interface BenchmarkSuite {
   scale_factor?: number;
   queries?: Record<string, QueryData>;
   tests?: Record<string, QueryData>;
+  queries_passing?: number;
+  queries_total?: number;
+  geo_mean_ms?: number | null;
+  latest_run?: {
+    timestamp: string;
+    commit: string;
+    branch?: string;
+  };
   latest?: {
+    timestamp?: string;
+    commit?: string;
     vibesql_tps?: number;
     sqlite_tps?: number;
     duckdb_tps?: number;
     mixed_latency_us?: number;
+    transactions?: Record<string, Record<string, { tps: number; latency_us: number }>>;
   };
   history?: Array<{ date: string; tps: number }>;
 }
@@ -182,11 +193,15 @@ function formatDate(dateStr: string): string {
 function getStatusBadge(status: string): string {
   const badges: Record<string, string> = {
     passing: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">passing</span>',
+    passed: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">passed</span>',
     failing: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">failing</span>',
+    failed: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">failed</span>',
     timeout: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">timeout</span>',
     memory: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">memory</span>',
+    error: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">error</span>',
+    incomplete: '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">incomplete</span>',
   };
-  return badges[status] || badges.failing;
+  return badges[status] || badges.failed;
 }
 
 /**
@@ -468,12 +483,28 @@ function renderBenchmarkContent(): void {
     return;
   }
 
-  // Render suite description
+  // Render suite description and summary stats
   let html = `
     <div class="mb-6">
       <h3 class="text-lg font-semibold text-foreground mb-2">${getSuiteName(selectedSuite)}</h3>
       <p class="text-muted">${escapeHtml(suite.description)}</p>
       ${suite.scale_factor ? `<p class="text-sm text-muted mt-1">Scale factor: ${suite.scale_factor}</p>` : ''}
+      ${suite.queries_passing !== undefined && suite.queries_total !== undefined ? `
+      <div class="flex flex-wrap gap-4 mt-3">
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted">Queries:</span>
+          <span class="font-medium ${suite.queries_passing === suite.queries_total ? 'text-green-600 dark:text-green-400' : 'text-foreground'}">
+            ${suite.queries_passing}/${suite.queries_total}
+          </span>
+        </div>
+        ${suite.geo_mean_ms !== undefined && suite.geo_mean_ms !== null ? `
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted">Geo Mean:</span>
+          <span class="font-medium text-foreground">${formatMs(suite.geo_mean_ms)}</span>
+        </div>
+        ` : ''}
+      </div>
+      ` : ''}
     </div>
   `;
 
@@ -546,15 +577,26 @@ function renderQueryRow(key: string, query: QueryData): string {
     }
   }
 
+  // Handle cases where name/description may not be present
+  const queryName = query.name || key.toUpperCase();
+  const queryDesc = query.description || '';
+
   return `
     <tr class="hover:bg-card/50 transition-colors">
       <td class="px-4 py-3">
-        <span class="font-medium text-foreground" title="${escapeHtml(query.description)}">
+        <span class="font-medium text-foreground" title="${queryDesc ? escapeHtml(queryDesc) : ''}">
           ${escapeHtml(key.toUpperCase())}
         </span>
-        <span class="block text-xs text-muted truncate max-w-[200px]" title="${escapeHtml(query.name)}">
-          ${escapeHtml(query.name)}
+        ${queryName !== key.toUpperCase() ? `
+        <span class="block text-xs text-muted truncate max-w-[200px]" title="${escapeHtml(queryName)}">
+          ${escapeHtml(queryName)}
         </span>
+        ` : ''}
+        ${latest.error ? `
+        <span class="block text-xs text-red-500 dark:text-red-400 truncate max-w-[200px]" title="${escapeHtml(latest.error)}">
+          ${escapeHtml(latest.error.substring(0, 50))}${latest.error.length > 50 ? '...' : ''}
+        </span>
+        ` : ''}
       </td>
       <td class="px-4 py-3 text-right font-mono text-foreground">
         ${formatMs(latest.vibesql_ms)}
@@ -572,7 +614,7 @@ function renderQueryRow(key: string, query: QueryData): string {
         ${getStatusBadge(latest.status)}
       </td>
       <td class="px-4 py-3 text-center">
-        ${renderSparkline(history)}
+        ${renderSparkline(history || [])}
       </td>
     </tr>
   `;

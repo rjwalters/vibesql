@@ -41,7 +41,7 @@ pub struct TestFileResult {
 }
 
 /// Run a test file asynchronously and capture detailed failure information
-async fn run_test_file_async(contents: &str, file_name: &str) -> TestFileResult {
+async fn run_test_file_async(contents: &str, _file_name: &str) -> TestFileResult {
     let mut tester = Runner::new(|| async { Ok(VibeSqlDB::new()) });
     // Enable hash mode with threshold of 8 (standard SQLLogicTest behavior)
     tester.with_hash_threshold(8);

@@ -31,7 +31,7 @@ fn execute_select(db: &mut Database, sql: &str) -> Vec<vibesql_storage::Row> {
 fn test_issue_2852_sqlite_integer_division() {
     // Verify SQLite mode returns integer division
     let mut db = Database::new();
-    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    // Explicitly set SQLite mode for integer division semantics
     db.set_sql_mode(SqlMode::SQLite);
 
     // In SQLite: 22 / 49 = 0 (integer division)
@@ -75,7 +75,7 @@ fn test_issue_2852_mysql_floating_division() {
 fn test_issue_2852_negative_division_sqlite() {
     // Test negative division in SQLite mode
     let mut db = Database::new();
-    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    // Explicitly set SQLite mode for integer division semantics
     db.set_sql_mode(SqlMode::SQLite);
 
     // In SQLite: -22 / 49 = 0 (truncated toward zero)

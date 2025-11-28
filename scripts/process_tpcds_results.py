@@ -2,11 +2,17 @@
 """
 Process TPC-DS benchmark results and store them in the dogfooding database.
 
-This script parses the Criterion benchmark output from tpcds_benchmark and stores
+This script parses the output from tpcds_runner benchmark and stores
 the results in the VibeSQL database for performance tracking over time.
+
+Supports two input formats:
+1. CSV output from tpcds_runner (via --csv flag or piped stdin)
+2. Criterion benchmark output (legacy, via --criterion-dir)
 """
 
 import argparse
+import csv
+import io
 import json
 import re
 import sqlite3
@@ -65,6 +71,90 @@ def init_benchmark_schema(db_path: Path):
         conn.commit()
     finally:
         conn.close()
+
+
+def parse_tpcds_runner_output(output: str) -> List[Dict]:
+    """
+    Parse output from tpcds_runner benchmark.
+
+    The output includes a CSV section starting with "=== CSV Output ===" line.
+    Format: Query,Time_ms,Rows,Status
+    Example: Q1,10.46,0,OK
+             Q2,-,0,"Parse error: ..."
+             Q4,-,0,SKIPPED (slow)
+    """
+    results = []
+
+    # Find the CSV section
+    csv_start = output.find("=== CSV Output ===")
+    if csv_start == -1:
+        return results
+
+    # Extract CSV content (skip the header line)
+    csv_content = output[csv_start:]
+    lines = csv_content.strip().split('\n')
+
+    # Skip "=== CSV Output ===" and "Query,Time_ms,Rows,Status" header
+    if len(lines) < 2:
+        return results
+
+    csv_lines = lines[2:]  # Skip first two lines (header line and column names)
+
+    # Parse CSV
+    reader = csv.reader(io.StringIO('\n'.join(csv_lines)))
+
+    for row in reader:
+        if len(row) < 4:
+            continue
+
+        query_name, time_str, rows_str, status = row[0], row[1], row[2], row[3]
+
+        # Determine status category
+        # Valid DB statuses: 'passed', 'failed', 'timeout', 'error', 'incomplete'
+        if status == "OK":
+            status_cat = "passed"
+        elif "SKIPPED" in status:
+            status_cat = "incomplete"  # Skipped queries are marked incomplete
+        elif "Parse error" in status:
+            status_cat = "error"  # Parse errors are errors
+        else:
+            status_cat = "failed"
+
+        # Parse timing (may be "-" for failed/skipped queries)
+        exec_time_ms = None
+        if time_str != "-":
+            try:
+                exec_time_ms = float(time_str)
+            except ValueError:
+                pass
+
+        # Parse row count
+        row_count = None
+        if rows_str != "-" and rows_str != "0":
+            try:
+                row_count = int(rows_str)
+            except ValueError:
+                pass
+
+        # Extract error message if present
+        error_msg = None
+        if status_cat in ("failed", "parse_error"):
+            error_msg = status
+
+        results.append({
+            'database_engine': 'vibesql',
+            'query_name': query_name,
+            'group_name': 'tpcds_queries',
+            'mean_time_ms': exec_time_ms,
+            'std_dev_ms': None,
+            'median_time_ms': None,
+            'iterations': 1,
+            'row_count': row_count,
+            'status': status_cat,
+            'error_message': error_msg
+        })
+
+    return results
 
 
 def parse_criterion_estimates(criterion_dir: Path) -> List[Dict]:
@@ -235,15 +325,16 @@ def insert_tpcds_results(db_path: Path, results: List[Dict],
             cursor.execute("""
                 INSERT INTO benchmark_results (
                     run_id, query_name, status,
-                    execution_time_ms, total_time_ms, row_count
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    execution_time_ms, total_time_ms, row_count, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 run_id,
                 result.get('query_name', 'unknown'),
                 result.get('status', 'passed'),
                 result.get('mean_time_ms'),
                 result.get('mean_time_ms'),  # Using mean as total
-                None  # row_count not available from Criterion
+                result.get('row_count'),
+                result.get('error_message')
             ))
 
         conn.commit()
@@ -263,11 +354,13 @@ def insert_tpcds_results(db_path: Path, results: List[Dict],
             by_group[group].append(r)
 
         for group, group_results in sorted(by_group.items()):
-            avg_ms = sum(r.get('mean_time_ms', 0) for r in group_results) / len(group_results)
+            times = [r.get('mean_time_ms') for r in group_results if r.get('mean_time_ms') is not None]
+            avg_ms = sum(times) / len(times) if times else 0
             print(f"   {group}: {len(group_results)} queries, avg {avg_ms:.2f} ms")
 
-        # Show slowest queries
-        sorted_results = sorted(vibesql_results, key=lambda r: r.get('mean_time_ms', 0), reverse=True)
+        # Show slowest queries (only those with timing data)
+        timed_results = [r for r in vibesql_results if r.get('mean_time_ms') is not None]
+        sorted_results = sorted(timed_results, key=lambda r: r.get('mean_time_ms', 0), reverse=True)
         print("\n   Slowest queries:")
         for r in sorted_results[:5]:
             print(f"      {r.get('query_name')}: {r.get('mean_time_ms', 0):.2f} ms")
@@ -300,7 +393,17 @@ def main():
     parser.add_argument(
         "--stdin",
         action="store_true",
-        help="Read Criterion output from stdin instead of directory"
+        help="Read tpcds_runner output from stdin"
+    )
+    parser.add_argument(
+        "--file",
+        type=str,
+        help="Read tpcds_runner output from file"
+    )
+    parser.add_argument(
+        "--criterion",
+        action="store_true",
+        help="Use legacy Criterion format instead of tpcds_runner format"
     )
 
     args = parser.parse_args()
@@ -315,12 +418,25 @@ def main():
     # Parse benchmark results
     if args.stdin:
         output = sys.stdin.read()
-        results = parse_criterion_output(output)
+        if args.criterion:
+            results = parse_criterion_output(output)
+        else:
+            results = parse_tpcds_runner_output(output)
+    elif args.file:
+        file_path = Path(args.file)
+        if not file_path.exists():
+            print(f"Error: File not found: {file_path}")
+            sys.exit(1)
+        with open(file_path) as f:
+            output = f.read()
+        results = parse_tpcds_runner_output(output)
     else:
+        # Default: try Criterion directory
         criterion_path = Path(args.criterion_dir)
         if not criterion_path.exists():
             print(f"Error: Criterion directory not found: {criterion_path}")
-            print("Run benchmarks first: cargo bench --bench tpcds_benchmark")
+            print("Run benchmarks first: cargo bench --bench tpcds_runner")
+            print("Then pipe output: cargo bench --bench tpcds_runner 2>&1 | python3 scripts/process_tpcds_results.py --stdin")
             sys.exit(1)
         results = parse_criterion_estimates(criterion_path)
 
@@ -331,6 +447,14 @@ def main():
         sys.exit(1)
 
     print(f"   Found {len(results)} benchmark results")
+
+    # Count by status
+    passed = len([r for r in results if r.get('status') == 'passed'])
+    failed = len([r for r in results if r.get('status') == 'failed'])
+    incomplete = len([r for r in results if r.get('status') == 'incomplete'])
+    errors = len([r for r in results if r.get('status') == 'error'])
+
+    print(f"   Passed: {passed}, Failed: {failed}, Errors: {errors}, Incomplete: {incomplete}")
 
     # Insert results
     insert_tpcds_results(db_path, results, args.scale_factor, args.notes)

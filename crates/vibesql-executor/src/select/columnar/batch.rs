@@ -450,11 +450,11 @@ impl ColumnarBatch {
                     ColumnArray::Boolean(u8_values, null_bitmap)
                 }
                 ColumnData::Date { values, nulls } => {
-                    // Convert Date to i32 (days since epoch using simple calculation)
+                    // Convert Date to i32 (days since Unix epoch 1970-01-01)
+                    // Must use the same formula as simd_filter.rs:date_to_days_since_epoch
+                    // for predicate evaluation to work correctly
                     let i32_values: Vec<i32> = values.iter().map(|d| {
-                        // Simple days since epoch calculation (year * 365 + month * 30 + day)
-                        // This is approximate but sufficient for comparison operations
-                        (d.year - 1970) * 365 + (d.month as i32 - 1) * 30 + d.day as i32
+                        date_to_days_since_epoch(d)
                     }).collect();
                     let null_bitmap = if nulls.iter().any(|&n| n) {
                         Some(nulls.clone())
@@ -881,6 +881,37 @@ impl ColumnArray {
             _ => None,
         }
     }
+}
+
+/// Convert Date to days since Unix epoch (1970-01-01)
+///
+/// This function MUST be kept in sync with simd_filter.rs::date_to_days_since_epoch()
+/// to ensure predicates compare dates correctly.
+fn date_to_days_since_epoch(date: &vibesql_types::Date) -> i32 {
+    // Accurate days since Unix epoch calculation with leap year handling
+    let year_days = (date.year - 1970) * 365;
+    let leap_years = ((date.year - 1969) / 4) - ((date.year - 1901) / 100) + ((date.year - 1601) / 400);
+    let month_days: i32 = match date.month {
+        1 => 0,
+        2 => 31,
+        3 => 59,
+        4 => 90,
+        5 => 120,
+        6 => 151,
+        7 => 181,
+        8 => 212,
+        9 => 243,
+        10 => 273,
+        11 => 304,
+        12 => 334,
+        _ => 0,
+    };
+
+    // Add leap day if after February in a leap year
+    let is_leap = date.year % 4 == 0 && (date.year % 100 != 0 || date.year % 400 == 0);
+    let leap_adjustment = if is_leap && date.month > 2 { 1 } else { 0 };
+
+    year_days + leap_years + month_days + date.day as i32 - 1 + leap_adjustment
 }
 
 #[cfg(test)]

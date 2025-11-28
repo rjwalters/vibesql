@@ -207,7 +207,7 @@ mod tests {
     fn test_has_decimal_type() {
         assert!(SqlMode::MySQL { flags: Default::default() }.has_decimal_type());
         assert!(!SqlMode::SQLite.has_decimal_type());
-        // Default is now MySQL (Issue #2861)
+        // Default is MySQL
         assert!(SqlMode::default().has_decimal_type());
     }
 
@@ -215,7 +215,7 @@ mod tests {
     fn test_uses_dynamic_typing() {
         assert!(!SqlMode::MySQL { flags: Default::default() }.uses_dynamic_typing());
         assert!(SqlMode::SQLite.uses_dynamic_typing());
-        // Default is now MySQL (Issue #2861)
+        // Default is MySQL
         assert!(!SqlMode::default().uses_dynamic_typing());
     }
 

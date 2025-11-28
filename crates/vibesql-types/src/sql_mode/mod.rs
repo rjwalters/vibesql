@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_default_is_mysql() {
-        // Default is MySQL for SQLLogicTest compatibility (Issue #2861)
+        // Default is MySQL for SQLLogicTest compatibility (MySQL 8.x test suite)
         let mode = SqlMode::default();
         assert!(matches!(mode, SqlMode::MySQL { .. }));
     }

@@ -29,7 +29,7 @@ fn execute_select(db: &mut Database, sql: &str) -> Vec<vibesql_storage::Row> {
 fn test_issue_2783_sqlite_mode_division_with_cast_signed() {
     // This is the exact query from slt_good_6.test that was failing
     let mut db = Database::new();
-    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    // Explicitly set SQLite mode for integer division semantics
     db.set_sql_mode(SqlMode::SQLite);
 
     let sql = r#"
@@ -66,7 +66,7 @@ fn test_issue_2783_sqlite_mode_division_with_cast_signed() {
 fn test_issue_2783_integer_division_with_avg() {
     // Simpler test case isolating the division behavior
     let mut db = Database::new();
-    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    // Explicitly set SQLite mode for integer division semantics
     db.set_sql_mode(SqlMode::SQLite);
 
     // In SQLite mode: 82 / -42 = -1 (truncated integer division)
@@ -87,7 +87,7 @@ fn test_issue_2783_integer_division_with_avg() {
 fn test_issue_2783_division_by_avg_preserves_sqlite_semantics() {
     // Test that division by AVG() works correctly in SQLite mode
     let mut db = Database::new();
-    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    // Explicitly set SQLite mode for integer division semantics
     db.set_sql_mode(SqlMode::SQLite);
 
     // AVG(97) returns 97.0 (Numeric), but the whole expression should
@@ -117,7 +117,7 @@ fn test_issue_2783_division_by_avg_preserves_sqlite_semantics() {
 fn test_issue_2783_cast_as_signed_works_in_sqlite_mode() {
     // Verify that CAST AS SIGNED (MySQL syntax) works in SQLite mode
     let mut db = Database::new();
-    // Explicitly set SQLite mode (default is now MySQL for SQLLogicTest compatibility)
+    // Explicitly set SQLite mode for integer division semantics
     db.set_sql_mode(SqlMode::SQLite);
 
     let sql = "SELECT CAST(151.99 AS SIGNED) AS result";
