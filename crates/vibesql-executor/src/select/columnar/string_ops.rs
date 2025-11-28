@@ -28,7 +28,7 @@
 /// # Returns
 ///
 /// Boolean mask where true means the string equals the target
-pub fn batch_string_eq(values: &[String], nulls: Option<&Vec<bool>>, target: &str) -> Vec<bool> {
+pub fn batch_string_eq(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let target_len = target.len();
     let mut result = Vec::with_capacity(values.len());
 
@@ -63,7 +63,7 @@ pub fn batch_string_eq(values: &[String], nulls: Option<&Vec<bool>>, target: &st
 /// # Returns
 ///
 /// Boolean mask where true means the string does not equal the target
-pub fn batch_string_ne(values: &[String], nulls: Option<&Vec<bool>>, target: &str) -> Vec<bool> {
+pub fn batch_string_ne(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let target_len = target.len();
     let mut result = Vec::with_capacity(values.len());
 
@@ -102,7 +102,7 @@ pub fn batch_string_ne(values: &[String], nulls: Option<&Vec<bool>>, target: &st
 /// Boolean mask where true means the string starts with the prefix
 pub fn batch_string_starts_with(
     values: &[String],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     prefix: &str,
 ) -> Vec<bool> {
     let prefix_len = prefix.len();
@@ -143,7 +143,7 @@ pub fn batch_string_starts_with(
 /// Boolean mask where true means the string ends with the suffix
 pub fn batch_string_ends_with(
     values: &[String],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     suffix: &str,
 ) -> Vec<bool> {
     let suffix_len = suffix.len();
@@ -184,7 +184,7 @@ pub fn batch_string_ends_with(
 /// Boolean mask where true means the string contains the substring
 pub fn batch_string_contains(
     values: &[String],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     substring: &str,
 ) -> Vec<bool> {
     let sub_len = substring.len();
@@ -336,7 +336,7 @@ impl LikePattern {
 /// Boolean mask where true means the string matches the pattern
 pub fn batch_string_like(
     values: &[String],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     pattern: &LikePattern,
 ) -> Vec<bool> {
     match pattern {
@@ -354,7 +354,7 @@ pub fn batch_string_like(
 /// Batch prefix and suffix match (for 'prefix%suffix' patterns)
 fn batch_string_prefix_suffix(
     values: &[String],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     prefix: &str,
     suffix: &str,
 ) -> Vec<bool> {
@@ -386,7 +386,7 @@ fn batch_string_prefix_suffix(
 /// Handles patterns with `_` wildcards and complex `%` combinations.
 fn batch_string_like_general(
     values: &[String],
-    nulls: Option<&Vec<bool>>,
+    nulls: Option<&[bool]>,
     pattern: &str,
 ) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
@@ -461,7 +461,7 @@ fn like_match(text: &str, pattern: &str) -> bool {
 /// # Returns
 ///
 /// Boolean mask where true means the string is less than target
-pub fn batch_string_lt(values: &[String], nulls: Option<&Vec<bool>>, target: &str) -> Vec<bool> {
+pub fn batch_string_lt(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -480,7 +480,7 @@ pub fn batch_string_lt(values: &[String], nulls: Option<&Vec<bool>>, target: &st
 }
 
 /// Batch string greater than comparison
-pub fn batch_string_gt(values: &[String], nulls: Option<&Vec<bool>>, target: &str) -> Vec<bool> {
+pub fn batch_string_gt(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -499,7 +499,7 @@ pub fn batch_string_gt(values: &[String], nulls: Option<&Vec<bool>>, target: &st
 }
 
 /// Batch string less than or equal comparison
-pub fn batch_string_le(values: &[String], nulls: Option<&Vec<bool>>, target: &str) -> Vec<bool> {
+pub fn batch_string_le(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -518,7 +518,7 @@ pub fn batch_string_le(values: &[String], nulls: Option<&Vec<bool>>, target: &st
 }
 
 /// Batch string greater than or equal comparison
-pub fn batch_string_ge(values: &[String], nulls: Option<&Vec<bool>>, target: &str) -> Vec<bool> {
+pub fn batch_string_ge(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
