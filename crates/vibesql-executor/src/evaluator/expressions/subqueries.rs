@@ -196,7 +196,7 @@ impl ExpressionEvaluator<'_> {
         };
 
         // Delegate to shared logic
-        super::super::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len())
+        super::super::subqueries_shared::eval_scalar_subquery_core(&rows)
     }
 
     /// Evaluate EXISTS predicate

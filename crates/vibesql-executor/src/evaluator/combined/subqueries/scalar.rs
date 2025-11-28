@@ -97,13 +97,13 @@ impl CombinedExpressionEvaluator<'_> {
                     )
                 };
                 let rows = select_executor.execute(subquery)?;
-                return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len());
+                return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
             }
         } else {
             // Correlated but no outer schema - skip caching
             let select_executor = crate::select::SelectExecutor::new(database);
             let rows = select_executor.execute(subquery)?;
-            return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len());
+            return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
         };
 
         // Try cache lookup
@@ -169,6 +169,6 @@ impl CombinedExpressionEvaluator<'_> {
         };
 
         // Delegate to shared logic
-        crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows, subquery.select_list.len())
+        crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows)
     }
 }
