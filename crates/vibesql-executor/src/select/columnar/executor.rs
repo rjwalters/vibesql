@@ -251,10 +251,24 @@ fn compute_fused_column_aggregate(
     })?;
 
     match column {
-        ColumnArray::Int64(values, _nulls) => {
+        ColumnArray::Int64(values, nulls) => {
+            // Has NULLs - fall back to standard path which handles them correctly
+            if nulls.as_ref().map_or(false, |n| n.iter().any(|&x| x)) {
+                return Err(ExecutorError::UnsupportedArrayType {
+                    operation: "fused_aggregate".to_string(),
+                    array_type: "Int64 with NULLs".to_string(),
+                });
+            }
             compute_fused_i64_aggregate(values, op, filter_mask)
         }
-        ColumnArray::Float64(values, _nulls) => {
+        ColumnArray::Float64(values, nulls) => {
+            // Has NULLs - fall back to standard path which handles them correctly
+            if nulls.as_ref().map_or(false, |n| n.iter().any(|&x| x)) {
+                return Err(ExecutorError::UnsupportedArrayType {
+                    operation: "fused_aggregate".to_string(),
+                    array_type: "Float64 with NULLs".to_string(),
+                });
+            }
             compute_fused_f64_aggregate(values, op, filter_mask)
         }
         // Fall back to non-fused path for other types
@@ -1285,5 +1299,88 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].get(0), Some(&SqlValue::Null)); // SUM of empty = NULL
         assert_eq!(result[0].get(1), Some(&SqlValue::Integer(0))); // COUNT of empty = 0
+    }
+
+    /// Test that aggregation correctly handles NULL values.
+    /// This verifies the fix for NULL handling in fused column aggregates.
+    #[test]
+    fn test_execute_columnar_batch_with_nulls() {
+        // Create batch with some NULL values
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(10), SqlValue::Double(1.5)]),
+            Row::new(vec![SqlValue::Null, SqlValue::Double(2.5)]),       // NULL in first column
+            Row::new(vec![SqlValue::Integer(30), SqlValue::Null]),       // NULL in second column
+            Row::new(vec![SqlValue::Integer(40), SqlValue::Double(4.5)]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        let aggregates = vec![
+            AggregateSpec {
+                op: AggregateOp::Sum,
+                source: AggregateSource::Column(0),
+            },
+            AggregateSpec {
+                op: AggregateOp::Sum,
+                source: AggregateSource::Column(1),
+            },
+            AggregateSpec {
+                op: AggregateOp::Count,
+                source: AggregateSource::CountStar,
+            },
+        ];
+
+        let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
+        assert_eq!(result.len(), 1);
+
+        // SUM(col0) should be 10 + 30 + 40 = 80 (NULL excluded)
+        assert_eq!(result[0].get(0), Some(&SqlValue::Integer(80)));
+
+        // SUM(col1) should be 1.5 + 2.5 + 4.5 = 8.5 (NULL excluded)
+        if let Some(SqlValue::Double(sum)) = result[0].get(1) {
+            assert!((sum - 8.5).abs() < 0.001);
+        } else {
+            panic!("Expected Double for SUM(col1)");
+        }
+
+        // COUNT(*) = 4 (counts all rows regardless of NULLs)
+        assert_eq!(result[0].get(2), Some(&SqlValue::Integer(4)));
+    }
+
+    /// Test aggregation with NULLs and filter predicates.
+    /// Verifies fused path correctly falls back when NULLs are present.
+    #[test]
+    fn test_execute_columnar_batch_with_nulls_and_filter() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(10), SqlValue::Double(1.0)]),
+            Row::new(vec![SqlValue::Integer(20), SqlValue::Null]),       // NULL - should be excluded from sum
+            Row::new(vec![SqlValue::Integer(30), SqlValue::Double(3.0)]),
+            Row::new(vec![SqlValue::Integer(40), SqlValue::Double(4.0)]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: col0 < 35 (includes rows 0, 1, 2)
+        let predicates = vec![
+            ColumnPredicate::LessThan {
+                column_idx: 0,
+                value: SqlValue::Integer(35),
+            },
+        ];
+
+        let aggregates = vec![
+            AggregateSpec {
+                op: AggregateOp::Sum,
+                source: AggregateSource::Column(1),
+            },
+        ];
+
+        let result = execute_columnar_batch(&batch, &predicates, &aggregates, None).unwrap();
+        assert_eq!(result.len(), 1);
+
+        // SUM(col1) where col0 < 35: 1.0 + 3.0 = 4.0 (row 1's NULL excluded)
+        if let Some(SqlValue::Double(sum)) = result[0].get(0) {
+            assert!((sum - 4.0).abs() < 0.001);
+        } else {
+            panic!("Expected Double for SUM(col1)");
+        }
     }
 }

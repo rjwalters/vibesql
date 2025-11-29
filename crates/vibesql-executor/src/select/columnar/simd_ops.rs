@@ -339,8 +339,8 @@ pub fn sum_f64_filtered(values: &[f64], filter_mask: &[bool]) -> f64 {
 
     for i in 0..chunks {
         let off = i * 4;
-        // Branchless conditional add: multiply by 0 or 1
-        // This is faster than branching for SIMD
+        // 4-accumulator pattern: reduces loop-carried dependencies
+        // The compiler may auto-vectorize these conditional adds
         if filter_mask[off] { s0 += values[off]; }
         if filter_mask[off + 1] { s1 += values[off + 1]; }
         if filter_mask[off + 2] { s2 += values[off + 2]; }
