@@ -226,3 +226,56 @@ fn test_parse_intersect_distinct() {
         Parser::parse_sql("SELECT id FROM users INTERSECT DISTINCT SELECT id FROM customers;");
     assert!(result.is_ok(), "INTERSECT DISTINCT should parse: {:?}", result);
 }
+
+// ========================================================================
+// Parenthesized Subquery Tests (TPC-DS Q2 style)
+// ========================================================================
+
+#[test]
+fn test_parse_union_all_parenthesized() {
+    let result = Parser::parse_sql("SELECT id FROM users UNION ALL (SELECT id FROM customers);");
+    assert!(
+        result.is_ok(),
+        "UNION ALL with parenthesized SELECT should parse: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_parse_union_parenthesized() {
+    let result = Parser::parse_sql("SELECT id FROM users UNION (SELECT id FROM customers);");
+    assert!(result.is_ok(), "UNION with parenthesized SELECT should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_intersect_parenthesized() {
+    let result = Parser::parse_sql("SELECT id FROM users INTERSECT (SELECT id FROM customers);");
+    assert!(result.is_ok(), "INTERSECT with parenthesized SELECT should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_except_parenthesized() {
+    let result = Parser::parse_sql("SELECT id FROM users EXCEPT (SELECT id FROM banned);");
+    assert!(result.is_ok(), "EXCEPT with parenthesized SELECT should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_union_all_parenthesized_complex() {
+    // TPC-DS Q2 style: parenthesized SELECT in UNION ALL within CTE
+    let sql = r#"
+        WITH wscs AS (
+            SELECT ws_sold_date_sk sold_date_sk
+            FROM web_sales
+            UNION ALL
+            (SELECT cs_sold_date_sk sold_date_sk
+             FROM catalog_sales)
+        )
+        SELECT * FROM wscs;
+    "#;
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "TPC-DS Q2 style UNION ALL with parenthesized SELECT in CTE should parse: {:?}",
+        result
+    );
+}
