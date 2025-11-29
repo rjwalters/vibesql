@@ -285,7 +285,7 @@ pub fn columnar_hash_join_inner(
 /// Check if a value is NULL according to the null bitmap
 #[inline]
 fn is_null(nulls: &Option<std::sync::Arc<Vec<bool>>>, idx: usize) -> bool {
-    nulls.as_ref().map_or(false, |n| n.get(idx).copied().unwrap_or(false))
+    nulls.as_ref().is_some_and(|n| n.get(idx).copied().unwrap_or(false))
 }
 
 /// Probe phase: find all matching pairs

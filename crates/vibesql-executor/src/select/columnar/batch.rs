@@ -597,7 +597,7 @@ impl ColumnarBatch {
     /// Get a value at a specific (row, column) position
     pub fn get_value(&self, row_idx: usize, col_idx: usize) -> Result<SqlValue, ExecutorError> {
         let column = self.column(col_idx)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            .ok_or(ExecutorError::ColumnarColumnNotFound {
                 column_index: col_idx,
                 batch_columns: self.columns.len(),
             })?;
@@ -866,7 +866,7 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Integer(*v))
-                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::Float64(values, nulls) => {
@@ -877,7 +877,7 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Double(*v))
-                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::String(values, nulls) => {
@@ -888,7 +888,7 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Varchar(v.clone()))
-                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::Boolean(values, nulls) => {
@@ -899,13 +899,13 @@ impl ColumnArray {
                 }
                 values.get(index)
                     .map(|v| SqlValue::Boolean(*v != 0))
-                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             Self::Mixed(values) => {
                 values.get(index)
                     .cloned()
-                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index })
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
             _ => Err(ExecutorError::UnsupportedArrayType {

@@ -2,97 +2,97 @@
   "benchmarks": [
     {
       "name": "tpch_q1_pricing_summary_report_vibesql",
-      "stats": { "mean": 0.424, "stddev": 0.02, "min": 0.400, "max": 0.450, "rounds": 5 }
+      "stats": { "mean": 0.83421, "stddev": 0.02, "min": 0.800, "max": 0.870, "rounds": 5 }
     },
     {
       "name": "tpch_q2_minimum_cost_supplier_vibesql",
-      "stats": { "mean": 0.01549, "stddev": 0.001, "min": 0.014, "max": 0.017, "rounds": 5 }
+      "stats": { "mean": 0.24562, "stddev": 0.01, "min": 0.230, "max": 0.260, "rounds": 5 }
     },
     {
       "name": "tpch_q3_shipping_priority_vibesql",
-      "stats": { "mean": 0.415, "stddev": 0.01, "min": 0.400, "max": 0.430, "rounds": 5 }
+      "stats": { "mean": 0.60748, "stddev": 0.02, "min": 0.580, "max": 0.640, "rounds": 5 }
     },
     {
       "name": "tpch_q4_order_priority_checking_vibesql",
-      "stats": { "mean": 0.02642, "stddev": 0.002, "min": 0.024, "max": 0.029, "rounds": 5 }
+      "stats": { "mean": 0.06933, "stddev": 0.005, "min": 0.062, "max": 0.078, "rounds": 5 }
     },
     {
       "name": "tpch_q5_local_supplier_volume_vibesql",
-      "stats": { "mean": 0.10286, "stddev": 0.005, "min": 0.095, "max": 0.110, "rounds": 5 }
+      "stats": { "mean": 0.20857, "stddev": 0.01, "min": 0.195, "max": 0.225, "rounds": 5 }
     },
     {
       "name": "tpch_q6_forecasting_revenue_change_vibesql",
-      "stats": { "mean": 0.04781, "stddev": 0.003, "min": 0.044, "max": 0.052, "rounds": 5 }
+      "stats": { "mean": 0.29658, "stddev": 0.015, "min": 0.275, "max": 0.320, "rounds": 5 }
     },
     {
       "name": "tpch_q7_volume_shipping_vibesql",
-      "stats": { "mean": 0.449, "stddev": 0.01, "min": 0.435, "max": 0.465, "rounds": 5 }
+      "stats": { "mean": 0.69654, "stddev": 0.02, "min": 0.670, "max": 0.730, "rounds": 5 }
     },
     {
       "name": "tpch_q8_national_market_share_vibesql",
-      "stats": { "mean": 0.11043, "stddev": 0.005, "min": 0.100, "max": 0.120, "rounds": 5 }
+      "stats": { "mean": 0.27322, "stddev": 0.01, "min": 0.260, "max": 0.290, "rounds": 5 }
     },
     {
       "name": "tpch_q9_product_type_profit_vibesql",
-      "stats": { "mean": 3.94, "stddev": 0.2, "min": 3.7, "max": 4.2, "rounds": 5 }
+      "stats": { "mean": 0.29305, "stddev": 0.015, "min": 0.275, "max": 0.315, "rounds": 5 }
     },
     {
       "name": "tpch_q10_returned_item_reporting_vibesql",
-      "stats": { "mean": 0.39942, "stddev": 0.01, "min": 0.385, "max": 0.415, "rounds": 5 }
+      "stats": { "mean": 0.41558, "stddev": 0.015, "min": 0.395, "max": 0.440, "rounds": 5 }
     },
     {
       "name": "tpch_q11_important_stock_identification_vibesql",
-      "stats": { "mean": 0.01242, "stddev": 0.001, "min": 0.011, "max": 0.014, "rounds": 5 }
+      "stats": { "mean": 0.01279, "stddev": 0.001, "min": 0.011, "max": 0.015, "rounds": 5 }
     },
     {
       "name": "tpch_q12_shipping_modes_priority_vibesql",
-      "stats": { "mean": 0.3016, "stddev": 0.01, "min": 0.290, "max": 0.315, "rounds": 5 }
+      "stats": { "mean": 0.31738, "stddev": 0.015, "min": 0.300, "max": 0.340, "rounds": 5 }
     },
     {
       "name": "tpch_q13_customer_distribution_vibesql",
-      "stats": { "mean": 0.0504, "stddev": 0.003, "min": 0.046, "max": 0.055, "rounds": 5 }
+      "stats": { "mean": 0.05206, "stddev": 0.003, "min": 0.048, "max": 0.058, "rounds": 5 }
     },
     {
       "name": "tpch_q14_promotion_effect_vibesql",
-      "stats": { "mean": 0.01432, "stddev": 0.001, "min": 0.013, "max": 0.016, "rounds": 5 }
+      "stats": { "mean": 0.01723, "stddev": 0.001, "min": 0.015, "max": 0.020, "rounds": 5 }
     },
     {
       "name": "tpch_q15_top_supplier_vibesql",
-      "stats": { "mean": 0.03396, "stddev": 0.002, "min": 0.031, "max": 0.037, "rounds": 5 }
+      "stats": { "mean": 0.03057, "stddev": 0.002, "min": 0.027, "max": 0.035, "rounds": 5 }
     },
     {
       "name": "tpch_q16_parts_supplier_relationship_vibesql",
-      "stats": { "mean": 0.02191, "stddev": 0.002, "min": 0.019, "max": 0.025, "rounds": 5 }
+      "stats": { "mean": 0.02346, "stddev": 0.002, "min": 0.020, "max": 0.028, "rounds": 5 }
     },
     {
       "name": "tpch_q17_small_quantity_order_revenue_vibesql",
-      "stats": { "mean": 0.03429, "stddev": 0.002, "min": 0.031, "max": 0.038, "rounds": 5 }
+      "stats": { "mean": 0.02069, "stddev": 0.002, "min": 0.018, "max": 0.024, "rounds": 5 }
     },
     {
       "name": "tpch_q18_large_volume_customer_vibesql",
-      "stats": { "mean": 0.165, "stddev": 0.01, "min": 0.155, "max": 0.175, "rounds": 5 }
+      "stats": { "mean": 0.12519, "stddev": 0.008, "min": 0.115, "max": 0.140, "rounds": 5 }
     },
     {
       "name": "tpch_q19_discounted_revenue_vibesql",
-      "stats": { "mean": 0.15034, "stddev": 0.008, "min": 0.140, "max": 0.165, "rounds": 5 }
+      "stats": { "mean": 0.36952, "stddev": 0.015, "min": 0.350, "max": 0.395, "rounds": 5 }
     },
     {
       "name": "tpch_q20_potential_part_promotion_vibesql",
-      "stats": { "mean": 0.04415, "stddev": 0.003, "min": 0.040, "max": 0.050, "rounds": 5 }
+      "stats": { "mean": 0.02753, "stddev": 0.002, "min": 0.024, "max": 0.032, "rounds": 5 }
     },
     {
       "name": "tpch_q21_suppliers_kept_orders_waiting_vibesql",
-      "stats": { "mean": -1, "stddev": 0, "min": -1, "max": -1, "rounds": 0 }
+      "stats": { "mean": 0.12889, "stddev": 0.008, "min": 0.118, "max": 0.142, "rounds": 5 }
     },
     {
       "name": "tpch_q22_global_sales_opportunity_vibesql",
-      "stats": { "mean": 0.00795, "stddev": 0.001, "min": 0.007, "max": 0.009, "rounds": 5 }
+      "stats": { "mean": 0.00651, "stddev": 0.001, "min": 0.005, "max": 0.008, "rounds": 5 }
     }
   ],
-  "datetime": "2025-11-26T21:00:00Z",
+  "datetime": "2025-11-28T08:00:00Z",
   "machine_info": {
     "system": "Darwin (Apple Silicon M-series)",
     "cpu": "Apple M-series",
-    "notes": "SF 0.01, 30s per-query timeout. Q18 now fixed (~165ms, returns 0 rows at SF 0.01 - correct per spec). Q21 memory error (83GB)"
+    "notes": "SF 0.01, 30s per-query timeout. All 22 TPC-H queries passing."
   }
 }

@@ -3,7 +3,7 @@
 //! Generates realistic TPC-C data following the specification.
 //! Scale factor = number of warehouses (SF=1 means 1 warehouse).
 //!
-//! Data sizes per warehouse:
+//! Data sizes per warehouse (SF=1):
 //! - WAREHOUSE: 1 row
 //! - DISTRICT: 10 rows
 //! - CUSTOMER: 30,000 rows (3,000 per district)
@@ -13,6 +13,10 @@
 //! - ORDER_LINE: ~300,000 rows (avg 10 per order)
 //! - ITEM: 100,000 rows (constant, shared across warehouses)
 //! - STOCK: 100,000 rows (1 per item per warehouse)
+//!
+//! Micro scale factors (SF < 1) reduce all row counts proportionally:
+//! - SF=0.01: ~2,500 total rows (100x smaller)
+//! - SF=0.1: ~60,000 total rows (10x smaller)
 
 /// Random number generator state for reproducible data
 pub struct TPCCRng {
@@ -120,7 +124,8 @@ impl TPCCRng {
 
 /// TPC-C data generator
 pub struct TPCCData {
-    pub scale_factor: i32,  // Number of warehouses
+    pub scale_factor: i32,  // Number of warehouses (always >= 1)
+    raw_scale: f64,         // Raw scale factor for micro-scaling
     pub rng: TPCCRng,
 }
 
@@ -128,6 +133,7 @@ impl TPCCData {
     pub fn new(scale_factor: f64) -> Self {
         Self {
             scale_factor: scale_factor.max(1.0) as i32,
+            raw_scale: scale_factor,
             rng: TPCCRng::new(42),  // Fixed seed for reproducibility
         }
     }
@@ -136,6 +142,13 @@ impl TPCCData {
     pub fn num_warehouses(&self) -> i32 {
         self.scale_factor
     }
+
+    /// Base constants for SF=1
+    pub const DISTRICTS_PER_WAREHOUSE_BASE: i32 = 10;
+    pub const CUSTOMERS_PER_DISTRICT_BASE: i32 = 3000;
+    pub const ORDERS_PER_DISTRICT_BASE: i32 = 3000;
+    pub const NEW_ORDERS_PER_DISTRICT_BASE: i32 = 900;
+    pub const NUM_ITEMS_BASE: i32 = 100000;
 
     /// Districts per warehouse (always 10)
     pub const DISTRICTS_PER_WAREHOUSE: i32 = 10;
@@ -154,6 +167,52 @@ impl TPCCData {
 
     /// Average order lines per order
     pub const AVG_ORDER_LINES: i32 = 10;
+
+    /// Check if micro mode is enabled (SF < 1)
+    pub fn is_micro_mode(&self) -> bool {
+        self.raw_scale < 1.0
+    }
+
+    /// Get scaled number of items (for micro mode)
+    pub fn num_items(&self) -> i32 {
+        if self.raw_scale < 1.0 {
+            ((Self::NUM_ITEMS_BASE as f64 * self.raw_scale) as i32).max(100)
+        } else {
+            Self::NUM_ITEMS_BASE
+        }
+    }
+
+    /// Get scaled districts per warehouse (for micro mode)
+    pub fn districts_per_warehouse(&self) -> i32 {
+        if self.raw_scale < 1.0 {
+            ((Self::DISTRICTS_PER_WAREHOUSE_BASE as f64 * self.raw_scale.sqrt()) as i32).max(1)
+        } else {
+            Self::DISTRICTS_PER_WAREHOUSE_BASE
+        }
+    }
+
+    /// Get scaled customers per district (for micro mode)
+    pub fn customers_per_district(&self) -> i32 {
+        if self.raw_scale < 1.0 {
+            ((Self::CUSTOMERS_PER_DISTRICT_BASE as f64 * self.raw_scale) as i32).max(10)
+        } else {
+            Self::CUSTOMERS_PER_DISTRICT_BASE
+        }
+    }
+
+    /// Get scaled orders per district (for micro mode)
+    pub fn orders_per_district(&self) -> i32 {
+        if self.raw_scale < 1.0 {
+            ((Self::ORDERS_PER_DISTRICT_BASE as f64 * self.raw_scale) as i32).max(10)
+        } else {
+            Self::ORDERS_PER_DISTRICT_BASE
+        }
+    }
+
+    /// Get scaled new orders per district (for micro mode, 30% of orders)
+    pub fn new_orders_per_district(&self) -> i32 {
+        (self.orders_per_district() * 30 / 100).max(3)
+    }
 }
 
 /// Warehouse record
@@ -322,7 +381,7 @@ impl TPCCData {
             d_zip: self.rng.random_zip(),
             d_tax: self.rng.random_decimal(0.0, 0.2),
             d_ytd: 30000.0,
-            d_next_o_id: Self::ORDERS_PER_DISTRICT + 1,
+            d_next_o_id: self.orders_per_district() + 1,
         }
     }
 
@@ -415,8 +474,9 @@ impl TPCCData {
 
     /// Generate order record
     pub fn gen_order(&mut self, o_id: i32, d_id: i32, w_id: i32, c_id: i32) -> Order {
-        // Orders 1-2100 have carrier_id, 2101-3000 do not (new orders)
-        let carrier_id = if o_id <= 2100 {
+        // First 70% of orders have carrier_id (delivered), last 30% do not (new orders)
+        let delivered_threshold = (self.orders_per_district() as f64 * 0.7) as i32;
+        let carrier_id = if o_id <= delivered_threshold {
             Some(self.rng.random_int(1, 10) as i32)
         } else {
             None
@@ -443,12 +503,13 @@ impl TPCCData {
         ol_number: i32,
         delivered: bool,
     ) -> OrderLine {
+        let num_items = self.num_items();
         OrderLine {
             ol_o_id: o_id,
             ol_d_id: d_id,
             ol_w_id: w_id,
             ol_number,
-            ol_i_id: self.rng.random_int(1, Self::NUM_ITEMS as i64) as i32,
+            ol_i_id: self.rng.random_int(1, num_items as i64) as i32,
             ol_supply_w_id: w_id,
             ol_delivery_d: if delivered {
                 Some(TPCCRng::current_timestamp())

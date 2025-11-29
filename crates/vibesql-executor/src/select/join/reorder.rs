@@ -264,6 +264,7 @@ impl JoinOrderAnalyzer {
 
     /// Collect all branches of an OR expression into a flat list
     /// Handles nested ORs by flattening them: (A OR B) OR C => [A, B, C]
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_or_branches(&self, expr: &Expression, branches: &mut Vec<Expression>) {
         match expr {
             Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {

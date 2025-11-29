@@ -32,11 +32,12 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     // Load data
     load_item_vibesql(&mut db, &mut data);
 
+    let districts_per_warehouse = data.districts_per_warehouse();
     for w_id in 1..=data.num_warehouses() {
         load_warehouse_vibesql(&mut db, &mut data, w_id);
         load_stock_vibesql(&mut db, &mut data, w_id);
 
-        for d_id in 1..=TPCCData::DISTRICTS_PER_WAREHOUSE {
+        for d_id in 1..=districts_per_warehouse {
             load_district_vibesql(&mut db, &mut data, d_id, w_id);
             load_customer_vibesql(&mut db, &mut data, d_id, w_id);
             load_orders_vibesql(&mut db, &mut data, d_id, w_id);
@@ -68,11 +69,12 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
 
     load_item_sqlite(&conn, &mut data);
 
+    let districts_per_warehouse = data.districts_per_warehouse();
     for w_id in 1..=data.num_warehouses() {
         load_warehouse_sqlite(&conn, &mut data, w_id);
         load_stock_sqlite(&conn, &mut data, w_id);
 
-        for d_id in 1..=TPCCData::DISTRICTS_PER_WAREHOUSE {
+        for d_id in 1..=districts_per_warehouse {
             load_district_sqlite(&conn, &mut data, d_id, w_id);
             load_customer_sqlite(&conn, &mut data, d_id, w_id);
             load_orders_sqlite(&conn, &mut data, d_id, w_id);
@@ -92,11 +94,12 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 
     load_item_duckdb(&conn, &mut data);
 
+    let districts_per_warehouse = data.districts_per_warehouse();
     for w_id in 1..=data.num_warehouses() {
         load_warehouse_duckdb(&conn, &mut data, w_id);
         load_stock_duckdb(&conn, &mut data, w_id);
 
-        for d_id in 1..=TPCCData::DISTRICTS_PER_WAREHOUSE {
+        for d_id in 1..=districts_per_warehouse {
             load_district_duckdb(&conn, &mut data, d_id, w_id);
             load_customer_duckdb(&conn, &mut data, d_id, w_id);
             load_orders_duckdb(&conn, &mut data, d_id, w_id);
@@ -364,7 +367,8 @@ fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCCData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    for i_id in 1..=TPCCData::NUM_ITEMS {
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
         let item = data.gen_item(i_id);
         let row = Row::new(vec![
             SqlValue::Integer(item.i_id as i64),
@@ -400,7 +404,8 @@ fn load_stock_vibesql(db: &mut VibeDB, data: &mut TPCCData, w_id: i32) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    for i_id in 1..=TPCCData::NUM_ITEMS {
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
         let stock = data.gen_stock(i_id, w_id);
         let row = Row::new(vec![
             SqlValue::Integer(stock.s_i_id as i64),
@@ -450,7 +455,8 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCCData, d_id: i32, w_id: 
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    for c_id in 1..=TPCCData::CUSTOMERS_PER_DISTRICT {
+    let customers_per_district = data.customers_per_district();
+    for c_id in 1..=customers_per_district {
         let customer = data.gen_customer(c_id, d_id, w_id);
         let row = Row::new(vec![
             SqlValue::Integer(customer.c_id as i64),
@@ -497,15 +503,21 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCCData, d_id: i32, w_id: i3
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
+    let customers_per_district = data.customers_per_district();
+    let orders_per_district = data.orders_per_district();
+
     // Generate customer IDs in random order for orders
-    let mut c_ids: Vec<i32> = (1..=TPCCData::CUSTOMERS_PER_DISTRICT).collect();
+    let mut c_ids: Vec<i32> = (1..=customers_per_district).collect();
     // Simple shuffle using the RNG
     for i in (1..c_ids.len()).rev() {
         let j = data.rng.random_int(0, i as i64) as usize;
         c_ids.swap(i, j);
     }
 
-    for o_id in 1..=TPCCData::ORDERS_PER_DISTRICT {
+    // Threshold for delivered orders (70% of orders)
+    let delivered_threshold = (orders_per_district as f64 * 0.7) as i32;
+
+    for o_id in 1..=orders_per_district {
         let c_id = c_ids[(o_id - 1) as usize];
         let order = data.gen_order(o_id, d_id, w_id, c_id);
 
@@ -522,7 +534,7 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCCData, d_id: i32, w_id: i3
         db.insert_row("orders", order_row).unwrap();
 
         // Generate order lines
-        let delivered = o_id <= 2100;
+        let delivered = o_id <= delivered_threshold;
         for ol_number in 1..=order.o_ol_cnt {
             let ol = data.gen_order_line(o_id, d_id, w_id, ol_number, delivered);
             let ol_row = Row::new(vec![
@@ -540,8 +552,8 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCCData, d_id: i32, w_id: i3
             db.insert_row("order_line", ol_row).unwrap();
         }
 
-        // New orders are orders 2101-3000
-        if o_id > 2100 {
+        // New orders are the remaining 30%
+        if o_id > delivered_threshold {
             let no = data.gen_new_order(o_id, d_id, w_id);
             let no_row = Row::new(vec![
                 SqlValue::Integer(no.no_o_id as i64),
@@ -707,7 +719,8 @@ fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCCData) {
         "INSERT INTO item VALUES (?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for i_id in 1..=TPCCData::NUM_ITEMS {
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
         let item = data.gen_item(i_id);
         stmt.execute(rusqlite::params![
             item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data
@@ -733,7 +746,8 @@ fn load_stock_sqlite(conn: &SqliteConn, data: &mut TPCCData, w_id: i32) {
         "INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for i_id in 1..=TPCCData::NUM_ITEMS {
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
         let stock = data.gen_stock(i_id, w_id);
         stmt.execute(rusqlite::params![
             stock.s_i_id, stock.s_w_id, stock.s_quantity,
@@ -765,7 +779,8 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id:
         "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for c_id in 1..=TPCCData::CUSTOMERS_PER_DISTRICT {
+    let customers_per_district = data.customers_per_district();
+    for c_id in 1..=customers_per_district {
         let customer = data.gen_customer(c_id, d_id, w_id);
         cust_stmt.execute(rusqlite::params![
             customer.c_id, customer.c_d_id, customer.c_w_id,
@@ -786,7 +801,11 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id:
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
-    let mut c_ids: Vec<i32> = (1..=TPCCData::CUSTOMERS_PER_DISTRICT).collect();
+    let customers_per_district = data.customers_per_district();
+    let orders_per_district = data.orders_per_district();
+    let delivered_threshold = (orders_per_district as f64 * 0.7) as i32;
+
+    let mut c_ids: Vec<i32> = (1..=customers_per_district).collect();
     for i in (1..c_ids.len()).rev() {
         let j = data.rng.random_int(0, i as i64) as usize;
         c_ids.swap(i, j);
@@ -802,7 +821,7 @@ fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i
         "INSERT INTO new_order VALUES (?, ?, ?)"
     ).unwrap();
 
-    for o_id in 1..=TPCCData::ORDERS_PER_DISTRICT {
+    for o_id in 1..=orders_per_district {
         let c_id = c_ids[(o_id - 1) as usize];
         let order = data.gen_order(o_id, d_id, w_id, c_id);
 
@@ -811,7 +830,7 @@ fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i
             order.o_entry_d, order.o_carrier_id, order.o_ol_cnt, order.o_all_local
         ]).unwrap();
 
-        let delivered = o_id <= 2100;
+        let delivered = o_id <= delivered_threshold;
         for ol_number in 1..=order.o_ol_cnt {
             let ol = data.gen_order_line(o_id, d_id, w_id, ol_number, delivered);
             ol_stmt.execute(rusqlite::params![
@@ -821,7 +840,7 @@ fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i
             ]).unwrap();
         }
 
-        if o_id > 2100 {
+        if o_id > delivered_threshold {
             let no = data.gen_new_order(o_id, d_id, w_id);
             no_stmt.execute(rusqlite::params![no.no_o_id, no.no_d_id, no.no_w_id]).unwrap();
         }
@@ -982,7 +1001,8 @@ fn load_item_duckdb(conn: &DuckDBConn, data: &mut TPCCData) {
         "INSERT INTO item VALUES (?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for i_id in 1..=TPCCData::NUM_ITEMS {
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
         let item = data.gen_item(i_id);
         stmt.execute(duckdb::params![
             item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data
@@ -1008,7 +1028,8 @@ fn load_stock_duckdb(conn: &DuckDBConn, data: &mut TPCCData, w_id: i32) {
         "INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for i_id in 1..=TPCCData::NUM_ITEMS {
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
         let stock = data.gen_stock(i_id, w_id);
         stmt.execute(duckdb::params![
             stock.s_i_id, stock.s_w_id, stock.s_quantity,
@@ -1040,7 +1061,8 @@ fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id:
         "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
 
-    for c_id in 1..=TPCCData::CUSTOMERS_PER_DISTRICT {
+    let customers_per_district = data.customers_per_district();
+    for c_id in 1..=customers_per_district {
         let customer = data.gen_customer(c_id, d_id, w_id);
         cust_stmt.execute(duckdb::params![
             customer.c_id, customer.c_d_id, customer.c_w_id,
@@ -1061,7 +1083,11 @@ fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id:
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
-    let mut c_ids: Vec<i32> = (1..=TPCCData::CUSTOMERS_PER_DISTRICT).collect();
+    let customers_per_district = data.customers_per_district();
+    let orders_per_district = data.orders_per_district();
+    let delivered_threshold = (orders_per_district as f64 * 0.7) as i32;
+
+    let mut c_ids: Vec<i32> = (1..=customers_per_district).collect();
     for i in (1..c_ids.len()).rev() {
         let j = data.rng.random_int(0, i as i64) as usize;
         c_ids.swap(i, j);
@@ -1077,7 +1103,7 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i
         "INSERT INTO new_order VALUES (?, ?, ?)"
     ).unwrap();
 
-    for o_id in 1..=TPCCData::ORDERS_PER_DISTRICT {
+    for o_id in 1..=orders_per_district {
         let c_id = c_ids[(o_id - 1) as usize];
         let order = data.gen_order(o_id, d_id, w_id, c_id);
 
@@ -1086,7 +1112,7 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i
             order.o_entry_d, order.o_carrier_id, order.o_ol_cnt, order.o_all_local
         ]).unwrap();
 
-        let delivered = o_id <= 2100;
+        let delivered = o_id <= delivered_threshold;
         for ol_number in 1..=order.o_ol_cnt {
             let ol = data.gen_order_line(o_id, d_id, w_id, ol_number, delivered);
             ol_stmt.execute(duckdb::params![
@@ -1096,7 +1122,7 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i
             ]).unwrap();
         }
 
-        if o_id > 2100 {
+        if o_id > delivered_threshold {
             let no = data.gen_new_order(o_id, d_id, w_id);
             no_stmt.execute(duckdb::params![no.no_o_id, no.no_d_id, no.no_w_id]).unwrap();
         }

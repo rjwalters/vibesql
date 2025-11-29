@@ -41,6 +41,7 @@ pub enum ColumnData {
     Interval { values: Arc<Vec<Interval>>, nulls: Arc<Vec<bool>> },
 }
 
+#[allow(clippy::type_complexity)]
 impl ColumnData {
     /// Get the number of values in this column (including NULLs)
     pub fn len(&self) -> usize {

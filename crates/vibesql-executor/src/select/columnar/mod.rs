@@ -405,13 +405,12 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
                         // Convert SQL LIKE pattern to simple check
                         // This is a simplified version - full LIKE support is in simd_filter
                         let pattern_str = pattern.as_str();
-                        if pattern_str.starts_with('%') && pattern_str.ends_with('%') {
-                            let search = &pattern_str[1..pattern_str.len()-1];
-                            s.contains(search)
-                        } else if pattern_str.starts_with('%') {
-                            s.ends_with(&pattern_str[1..])
-                        } else if pattern_str.ends_with('%') {
-                            s.starts_with(&pattern_str[..pattern_str.len()-1])
+                        if let Some(inner) = pattern_str.strip_prefix('%').and_then(|s| s.strip_suffix('%')) {
+                            s.contains(inner)
+                        } else if let Some(suffix) = pattern_str.strip_prefix('%') {
+                            s.ends_with(suffix)
+                        } else if let Some(prefix) = pattern_str.strip_suffix('%') {
+                            s.starts_with(prefix)
                         } else {
                             s == pattern_str
                         }
@@ -426,7 +425,6 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
 }
 
 /// Compare two SqlValues
-
 fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
 
@@ -438,8 +436,8 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
         // Cross-type comparisons
         (SqlValue::Integer(a), SqlValue::Double(b)) => (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal),
         (SqlValue::Double(a), SqlValue::Integer(b)) => a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal),
-        (SqlValue::Integer(a), SqlValue::Bigint(b)) => (*a as i64).cmp(b),
-        (SqlValue::Bigint(a), SqlValue::Integer(b)) => a.cmp(&(*b as i64)),
+        (SqlValue::Integer(a), SqlValue::Bigint(b)) => (*a).cmp(b),
+        (SqlValue::Bigint(a), SqlValue::Integer(b)) => a.cmp(&{ *b }),
         // String comparisons
         (SqlValue::Varchar(a), SqlValue::Varchar(b)) => a.cmp(b),
         // Date comparisons
@@ -460,7 +458,7 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
 }
 
 /// Evaluate a simple expression (for expression aggregates)
-
+#[allow(clippy::only_used_in_recursion)]
 fn eval_simple_expression(row: &Row, expr: &vibesql_ast::Expression) -> Option<f64> {
     use vibesql_ast::{BinaryOperator, Expression};
 

@@ -238,7 +238,7 @@ impl SelectExecutor<'_> {
                     match self.execute_via_pipeline(
                         stmt,
                         cte_results,
-                        || NativeColumnarPipeline::new(),
+                        NativeColumnarPipeline::new,
                         "NativeColumnar",
                     )? {
                         Some(result) => result,
@@ -261,7 +261,7 @@ impl SelectExecutor<'_> {
                 match self.execute_via_pipeline(
                     stmt,
                     cte_results,
-                    || ColumnarPipeline::new(),
+                    ColumnarPipeline::new,
                     "StandardColumnar",
                 )? {
                     Some(result) => result,
@@ -282,7 +282,7 @@ impl SelectExecutor<'_> {
 
                 // Phase 4: Try columnar join execution for multi-table JOIN queries (#2943)
                 // This provides 3-5x speedup for TPC-H Q3 style queries
-                let has_joins = stmt.from.as_ref().map_or(false, |f| matches!(f, vibesql_ast::FromClause::Join { .. }));
+                let has_joins = stmt.from.as_ref().is_some_and(|f| matches!(f, vibesql_ast::FromClause::Join { .. }));
                 if has_joins {
                     if let Some(result) = self.try_columnar_join_execution(stmt, cte_results)? {
                         log::info!("Columnar join execution succeeded");
@@ -367,7 +367,7 @@ impl SelectExecutor<'_> {
         // Check query complexity - pipelines don't support all features
         let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
         let has_group_by = stmt.group_by.is_some();
-        let has_joins = stmt.from.as_ref().map_or(false, |f| matches!(f, vibesql_ast::FromClause::Join { .. }));
+        let has_joins = stmt.from.as_ref().is_some_and(|f| matches!(f, vibesql_ast::FromClause::Join { .. }));
         let has_order_by = stmt.order_by.is_some();
         let has_distinct = stmt.distinct;
         let has_set_ops = stmt.set_operation.is_some();
@@ -513,6 +513,7 @@ impl SelectExecutor<'_> {
     }
 
     /// Recursively check if an expression contains a window function
+    #[allow(clippy::only_used_in_recursion)]
     fn expr_has_window_function(&self, expr: &vibesql_ast::Expression) -> bool {
         match expr {
             vibesql_ast::Expression::WindowFunction { .. } => true,
@@ -524,12 +525,12 @@ impl SelectExecutor<'_> {
                 args.iter().any(|arg| self.expr_has_window_function(arg))
             }
             vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
-                operand.as_ref().map_or(false, |e| self.expr_has_window_function(e))
+                operand.as_ref().is_some_and(|e| self.expr_has_window_function(e))
                     || when_clauses.iter().any(|case_when| {
                         case_when.conditions.iter().any(|c| self.expr_has_window_function(c))
                             || self.expr_has_window_function(&case_when.result)
                     })
-                    || else_result.as_ref().map_or(false, |e| self.expr_has_window_function(e))
+                    || else_result.as_ref().is_some_and(|e| self.expr_has_window_function(e))
             }
             _ => false,
         }
@@ -547,6 +548,7 @@ impl SelectExecutor<'_> {
     }
 
     /// Recursively check if an expression contains a DISTINCT aggregate
+    #[allow(clippy::only_used_in_recursion)]
     fn expr_has_distinct_aggregate(&self, expr: &vibesql_ast::Expression) -> bool {
         match expr {
             vibesql_ast::Expression::AggregateFunction { distinct, .. } => *distinct,
@@ -558,12 +560,12 @@ impl SelectExecutor<'_> {
                 args.iter().any(|arg| self.expr_has_distinct_aggregate(arg))
             }
             vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
-                operand.as_ref().map_or(false, |e| self.expr_has_distinct_aggregate(e))
+                operand.as_ref().is_some_and(|e| self.expr_has_distinct_aggregate(e))
                     || when_clauses.iter().any(|case_when| {
                         case_when.conditions.iter().any(|c| self.expr_has_distinct_aggregate(c))
                             || self.expr_has_distinct_aggregate(&case_when.result)
                     })
-                    || else_result.as_ref().map_or(false, |e| self.expr_has_distinct_aggregate(e))
+                    || else_result.as_ref().is_some_and(|e| self.expr_has_distinct_aggregate(e))
             }
             _ => false,
         }

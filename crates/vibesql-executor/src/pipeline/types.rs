@@ -234,6 +234,7 @@ impl<'a> PipelineInput<'a> {
 /// let rows = output.into_rows(); // Materializes batch to rows
 /// ```
 #[derive(Debug)]
+#[derive(Default)]
 pub enum PipelineOutput {
     /// Row-based output (traditional format)
     Rows(Vec<Row>),
@@ -245,6 +246,7 @@ pub enum PipelineOutput {
     Batch(ColumnarBatch),
 
     /// Empty output (zero rows)
+    #[default]
     Empty,
 }
 
@@ -360,11 +362,6 @@ impl PipelineOutput {
     }
 }
 
-impl Default for PipelineOutput {
-    fn default() -> Self {
-        PipelineOutput::Empty
-    }
-}
 
 #[cfg(test)]
 mod tests {

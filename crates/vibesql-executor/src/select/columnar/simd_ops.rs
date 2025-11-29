@@ -280,8 +280,8 @@ pub fn sum_product_f64_masked(
     }
 
     // Fast path: no nulls in either array
-    let no_nulls_a = null_a.map_or(true, |n| !n.iter().any(|&x| x));
-    let no_nulls_b = null_b.map_or(true, |n| !n.iter().any(|&x| x));
+    let no_nulls_a = null_a.is_none_or(|n| !n.iter().any(|&x| x));
+    let no_nulls_b = null_b.is_none_or(|n| !n.iter().any(|&x| x));
 
     if no_nulls_a && no_nulls_b {
         return (sum_product_f64(a, b), len as i64);

@@ -262,12 +262,12 @@ impl LikePattern {
                             LikePattern::Contains(inner.to_string())
                         }
                     }
-                } else if pattern.ends_with('%') {
+                } else if let Some(prefix) = pattern.strip_suffix('%') {
                     // 'prefix%'
-                    LikePattern::Prefix(pattern[..pattern.len() - 1].to_string())
-                } else if pattern.starts_with('%') {
+                    LikePattern::Prefix(prefix.to_string())
+                } else if let Some(suffix) = pattern.strip_prefix('%') {
                     // '%suffix'
-                    LikePattern::Suffix(pattern[1..].to_string())
+                    LikePattern::Suffix(suffix.to_string())
                 } else {
                     // Single % in middle - 'prefix%suffix' pattern
                     let parts: Vec<&str> = pattern.split('%').collect();
