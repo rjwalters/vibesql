@@ -256,10 +256,11 @@ fn main() {
     }
 
     // Get configuration from environment
-    let scale_factor: i32 = env::var("TPCC_SCALE_FACTOR")
+    // Scale factor can be fractional (e.g., 0.01 for micro mode)
+    let scale_factor: f64 = env::var("TPCC_SCALE_FACTOR")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
+        .unwrap_or(1.0);
 
     let duration_secs: u64 = env::var("TPCC_DURATION_SECS")
         .ok()
@@ -287,8 +288,16 @@ fn main() {
         TransactionType::Mixed
     };
 
+    // Convert to integer warehouses (minimum 1)
+    let num_warehouses = scale_factor.max(1.0) as i32;
+    let is_micro_mode = scale_factor < 1.0;
+
     eprintln!("Configuration:");
-    eprintln!("  Scale factor (warehouses): {}", scale_factor);
+    eprintln!("  Scale factor: {}", scale_factor);
+    eprintln!("  Warehouses: {}", num_warehouses);
+    if is_micro_mode {
+        eprintln!("  Mode: MICRO (reduced row counts)");
+    }
     eprintln!("  Duration: {} seconds", duration_secs);
     eprintln!("  Warmup: {} seconds", warmup_secs);
     eprintln!("  Transaction type: {}", transaction_type.name());
@@ -296,13 +305,13 @@ fn main() {
     // Load VibeSQL database
     eprintln!("\nLoading VibeSQL TPC-C database (SF {})...", scale_factor);
     let load_start = Instant::now();
-    let vibesql_db = load_vibesql(scale_factor as f64);
+    let vibesql_db = load_vibesql(scale_factor);
     eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
 
     // Run VibeSQL benchmark
     eprintln!("\n--- VibeSQL Benchmark ---");
     let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
-    let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, scale_factor, duration, warmup, true);
+    let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
     print_results(&vibesql_results, transaction_type);
 
     // Comparison benchmarks (if feature enabled)
@@ -314,22 +323,22 @@ fn main() {
         eprintln!("\n\n--- SQLite Benchmark ---");
         eprintln!("Loading SQLite database...");
         let sqlite_load_start = Instant::now();
-        let sqlite_conn = load_sqlite(scale_factor as f64);
+        let sqlite_conn = load_sqlite(scale_factor);
         eprintln!("SQLite loaded in {:?}", sqlite_load_start.elapsed());
 
         let sqlite_executor = SqliteTransactionExecutor::new(&sqlite_conn);
-        let sqlite_results = run_benchmark(&sqlite_executor, transaction_type, scale_factor, duration, warmup, true);
+        let sqlite_results = run_benchmark(&sqlite_executor, transaction_type, num_warehouses, duration, warmup, true);
         print_results(&sqlite_results, transaction_type);
 
         // DuckDB benchmark
         eprintln!("\n\n--- DuckDB Benchmark ---");
         eprintln!("Loading DuckDB database...");
         let duckdb_load_start = Instant::now();
-        let duckdb_conn = load_duckdb(scale_factor as f64);
+        let duckdb_conn = load_duckdb(scale_factor);
         eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
 
         let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
-        let duckdb_results = run_benchmark(&duckdb_executor, transaction_type, scale_factor, duration, warmup, true);
+        let duckdb_results = run_benchmark(&duckdb_executor, transaction_type, num_warehouses, duration, warmup, true);
         print_results(&duckdb_results, transaction_type);
 
         // Summary comparison
