@@ -1,4 +1,4 @@
-use vibesql_types::SqlValue;
+use vibesql_types::{Date, SqlValue};
 
 /// Result of comparing two SqlValues, accounting for NULL semantics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,17 +76,28 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
         (SqlValue::Character(a), SqlValue::Character(b)) => a.cmp(b),
         (SqlValue::Date(a), SqlValue::Date(b)) => a.cmp(b),
 
-        // Date-String comparisons: convert string to date format for comparison
+        // Date-String comparisons: parse string to Date for native comparison
         // This handles cases like: date_column >= '1994-01-01'
+        // Converting String→Date avoids per-row string allocation (vs Date→String)
         (SqlValue::Date(date), SqlValue::Varchar(s)) | (SqlValue::Date(date), SqlValue::Character(s)) => {
-            // Compare dates as strings in ISO format (YYYY-MM-DD)
-            let date_str = date.to_string();
-            date_str.as_str().cmp(s.as_str())
+            // Parse string as YYYY-MM-DD and compare as Date
+            if let Some(parsed_date) = parse_date_string(s) {
+                date.cmp(&parsed_date)
+            } else {
+                // If parsing fails, fall back to string comparison
+                let date_str = date.to_string();
+                date_str.as_str().cmp(s.as_str())
+            }
         }
         (SqlValue::Varchar(s), SqlValue::Date(date)) | (SqlValue::Character(s), SqlValue::Date(date)) => {
-            // Reverse comparison
-            let date_str = date.to_string();
-            s.as_str().cmp(date_str.as_str())
+            // Parse string as YYYY-MM-DD and compare as Date
+            if let Some(parsed_date) = parse_date_string(s) {
+                parsed_date.cmp(date)
+            } else {
+                // If parsing fails, fall back to string comparison
+                let date_str = date.to_string();
+                s.as_str().cmp(date_str.as_str())
+            }
         }
 
         // Mixed numeric types: coerce to f64 with epsilon comparison for floats
@@ -108,4 +119,19 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
             }
         }
     })
+}
+
+/// Parse a date string in YYYY-MM-DD format
+///
+/// Returns None if parsing fails, allowing callers to fall back to string comparison.
+/// Used by both scalar comparison and SIMD filtering paths.
+pub(crate) fn parse_date_string(s: &str) -> Option<Date> {
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let year: i32 = parts[0].parse().ok()?;
+    let month: u8 = parts[1].parse().ok()?;
+    let day: u8 = parts[2].parse().ok()?;
+    Date::new(year, month, day).ok()
 }

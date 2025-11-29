@@ -12,6 +12,7 @@ mod predicates;
 use crate::errors::ExecutorError;
 
 // Re-export public types and functions
+pub(super) use comparison::parse_date_string;
 pub use evaluation::{evaluate_predicate, evaluate_predicate_tree};
 pub use predicates::{extract_column_predicates, extract_predicate_tree, ColumnPredicate, PredicateTree};
 
