@@ -525,6 +525,207 @@ pub fn hash_join_indices_columnar(
     Some(join_pairs)
 }
 
+/// Hash table for multi-column integer joins
+///
+/// Uses pre-computed composite hashes for efficient multi-column lookups.
+/// This avoids SqlValue enum dispatch and Vec allocation for each key.
+pub struct CompositeIntHashTable {
+    /// Number of hash buckets (power of 2)
+    bucket_count: usize,
+    /// Bucket array: bucket[hash % bucket_count] = first entry index (or u32::MAX if empty)
+    buckets: Vec<u32>,
+    /// Entry array: entries[i] = (row_index, next_entry_index)
+    entries: Vec<(u32, u32)>,
+    /// Number of key columns
+    num_cols: usize,
+}
+
+impl CompositeIntHashTable {
+    /// Hash multiple i64 values into a single u64
+    #[inline(always)]
+    fn hash_composite(values: &[i64]) -> u64 {
+        const K: u64 = 0x517cc1b727220a95;
+        let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
+
+        for &v in values {
+            h ^= v as u64;
+            h = h.wrapping_mul(K);
+            h ^= h >> 32;
+        }
+        h
+    }
+
+    /// Build a hash table from multiple integer columns
+    ///
+    /// Fast path for multi-column integer-keyed joins (common in TPC-H Q3, Q7, Q10).
+    pub fn build_from_multi_i64(columns: &[&[i64]]) -> Self {
+        if columns.is_empty() {
+            return Self {
+                bucket_count: 16,
+                buckets: vec![u32::MAX; 16],
+                entries: Vec::new(),
+                num_cols: 0,
+            };
+        }
+
+        let row_count = columns[0].len();
+        let num_cols = columns.len();
+
+        // Size buckets to ~2x entries for good load factor
+        let bucket_count = (row_count * 2).next_power_of_two().max(16);
+        let bucket_mask = bucket_count - 1;
+
+        // Initialize buckets to empty (u32::MAX)
+        let mut buckets = vec![u32::MAX; bucket_count];
+
+        // Pre-allocate entries
+        let mut entries = Vec::with_capacity(row_count);
+
+        // Build hash table
+        let mut key_values = vec![0i64; num_cols];
+        for row_idx in 0..row_count {
+            // Extract key values for this row
+            for (col_idx, col) in columns.iter().enumerate() {
+                key_values[col_idx] = col[row_idx];
+            }
+
+            let hash = Self::hash_composite(&key_values);
+            let bucket_idx = (hash as usize) & bucket_mask;
+
+            // Insert into linked list at this bucket
+            let prev_head = buckets[bucket_idx];
+            entries.push((row_idx as u32, prev_head));
+            buckets[bucket_idx] = entries.len() as u32 - 1;
+        }
+
+        Self { bucket_count, buckets, entries, num_cols }
+    }
+
+    /// Probe the hash table with multiple i64 keys
+    #[inline]
+    pub fn probe_multi_i64<'a>(
+        &'a self,
+        probe_keys: &'a [i64],
+        build_columns: &'a [&'a [i64]],
+    ) -> impl Iterator<Item = u32> + 'a {
+        let hash = Self::hash_composite(probe_keys);
+        let bucket_idx = (hash as usize) & (self.bucket_count - 1);
+        let num_cols = self.num_cols;
+
+        CompositeHashTableIter {
+            entries: &self.entries,
+            current: self.buckets[bucket_idx],
+            probe_keys,
+            build_columns,
+            num_cols,
+        }
+    }
+}
+
+/// Iterator over composite hash table entries matching a multi-column key
+struct CompositeHashTableIter<'a> {
+    entries: &'a [(u32, u32)],
+    current: u32,
+    probe_keys: &'a [i64],
+    build_columns: &'a [&'a [i64]],
+    num_cols: usize,
+}
+
+impl<'a> Iterator for CompositeHashTableIter<'a> {
+    type Item = u32;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current != u32::MAX {
+            let (row_idx, next) = self.entries[self.current as usize];
+            self.current = next;
+
+            // Check if all columns match
+            let mut matches = true;
+            for col_idx in 0..self.num_cols {
+                if self.build_columns[col_idx][row_idx as usize] != self.probe_keys[col_idx] {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if matches {
+                return Some(row_idx);
+            }
+        }
+        None
+    }
+}
+
+/// Extract multiple integer columns from rows as typed arrays
+///
+/// Returns None if any column contains non-integer values or NULLs.
+pub fn extract_multi_i64_columns(
+    rows: &[vibesql_storage::Row],
+    col_indices: &[usize],
+) -> Option<Vec<Vec<i64>>> {
+    let mut columns: Vec<Vec<i64>> = col_indices.iter().map(|_| Vec::with_capacity(rows.len())).collect();
+
+    for row in rows {
+        for (out_idx, &col_idx) in col_indices.iter().enumerate() {
+            match row.values.get(col_idx) {
+                Some(vibesql_types::SqlValue::Integer(v)) => columns[out_idx].push(*v),
+                Some(vibesql_types::SqlValue::Bigint(v)) => columns[out_idx].push(*v),
+                Some(vibesql_types::SqlValue::Smallint(v)) => columns[out_idx].push(*v as i64),
+                _ => return None, // Non-integer or NULL value
+            }
+        }
+    }
+
+    Some(columns)
+}
+
+/// Multi-column hash join using columnar hash table on row-based data
+///
+/// This function provides a fast path for multi-column integer equi-joins by:
+/// 1. Extracting join columns as typed i64 arrays (avoiding SqlValue enum dispatch)
+/// 2. Using the composite columnar hash table with pre-computed hashes
+/// 3. Returning index pairs for row combination
+///
+/// Returns None if any join columns are not integer types.
+pub fn hash_join_indices_columnar_multi(
+    build_rows: &[vibesql_storage::Row],
+    probe_rows: &[vibesql_storage::Row],
+    build_col_indices: &[usize],
+    probe_col_indices: &[usize],
+) -> Option<Vec<(usize, usize)>> {
+    // Extract join columns as typed arrays
+    let build_columns = extract_multi_i64_columns(build_rows, build_col_indices)?;
+    let probe_columns = extract_multi_i64_columns(probe_rows, probe_col_indices)?;
+
+    // Convert to slice references for the hash table
+    let build_col_refs: Vec<&[i64]> = build_columns.iter().map(|c| c.as_slice()).collect();
+    let probe_col_refs: Vec<&[i64]> = probe_columns.iter().map(|c| c.as_slice()).collect();
+
+    // Build hash table on build side
+    let hash_table = CompositeIntHashTable::build_from_multi_i64(&build_col_refs);
+
+    // Probe and collect matching index pairs
+    let estimated_capacity = probe_rows.len().min(100_000);
+    let mut join_pairs = Vec::with_capacity(estimated_capacity);
+
+    let num_cols = probe_col_indices.len();
+    let mut probe_key = vec![0i64; num_cols];
+
+    for probe_idx in 0..probe_rows.len() {
+        // Extract probe keys for this row
+        for (col_idx, col) in probe_col_refs.iter().enumerate() {
+            probe_key[col_idx] = col[probe_idx];
+        }
+
+        for build_idx in hash_table.probe_multi_i64(&probe_key, &build_col_refs) {
+            join_pairs.push((build_idx as usize, probe_idx));
+        }
+    }
+
+    Some(join_pairs)
+}
+
 /// Execute a columnar LEFT OUTER hash join
 ///
 /// This function operates entirely on columnar data without materializing rows.
@@ -1181,5 +1382,124 @@ mod tests {
         // Bob's right-side columns should be NULL
         assert!(matches!(bob.get(2), Some(vibesql_types::SqlValue::Null)));
         assert!(matches!(bob.get(3), Some(vibesql_types::SqlValue::Null)));
+    }
+
+    #[test]
+    fn test_composite_int_hash_table_build_and_probe() {
+        // Build table with two columns
+        let col1 = vec![1i64, 2, 3, 1];
+        let col2 = vec![10i64, 20, 30, 10]; // Row 0 and 3 have same composite key (1, 10)
+        let columns: Vec<&[i64]> = vec![col1.as_slice(), col2.as_slice()];
+
+        let ht = CompositeIntHashTable::build_from_multi_i64(&columns);
+
+        // Probe for (1, 10) - should find indices 0 and 3
+        let probe_key = vec![1i64, 10];
+        let matches: Vec<u32> = ht.probe_multi_i64(&probe_key, &columns).collect();
+        assert_eq!(matches.len(), 2);
+        assert!(matches.contains(&0));
+        assert!(matches.contains(&3));
+
+        // Probe for (2, 20) - should find index 1
+        let probe_key = vec![2i64, 20];
+        let matches: Vec<u32> = ht.probe_multi_i64(&probe_key, &columns).collect();
+        assert_eq!(matches.len(), 1);
+        assert!(matches.contains(&1));
+
+        // Probe for (1, 20) - should find nothing (partial match)
+        let probe_key = vec![1i64, 20];
+        let matches: Vec<u32> = ht.probe_multi_i64(&probe_key, &columns).collect();
+        assert!(matches.is_empty());
+
+        // Probe for (99, 99) - should find nothing
+        let probe_key = vec![99i64, 99];
+        let matches: Vec<u32> = ht.probe_multi_i64(&probe_key, &columns).collect();
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_hash_join_indices_columnar_multi() {
+        use vibesql_storage::Row;
+        use vibesql_types::SqlValue;
+
+        // Build rows: (a, b) pairs
+        let build_rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(20)]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(30)]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]), // Duplicate key
+        ];
+
+        // Probe rows: (a, b) pairs
+        let probe_rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]), // Matches build[0] and build[3]
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(20)]), // Matches build[1]
+            Row::new(vec![SqlValue::Integer(99), SqlValue::Integer(99)]), // No match
+        ];
+
+        let pairs = hash_join_indices_columnar_multi(
+            &build_rows, &probe_rows, &[0, 1], &[0, 1]
+        ).unwrap();
+
+        // Should have 3 pairs: (0,0), (3,0), (1,1)
+        assert_eq!(pairs.len(), 3);
+
+        // Probe row 0 matches build rows 0 and 3
+        let matches_for_probe_0: Vec<_> = pairs.iter().filter(|(_, p)| *p == 0).collect();
+        assert_eq!(matches_for_probe_0.len(), 2);
+
+        // Probe row 1 matches build row 1
+        let matches_for_probe_1: Vec<_> = pairs.iter().filter(|(_, p)| *p == 1).collect();
+        assert_eq!(matches_for_probe_1.len(), 1);
+        assert_eq!(matches_for_probe_1[0].0, 1);
+
+        // Probe row 2 has no matches
+        let matches_for_probe_2: Vec<_> = pairs.iter().filter(|(_, p)| *p == 2).collect();
+        assert_eq!(matches_for_probe_2.len(), 0);
+    }
+
+    #[test]
+    fn test_hash_join_indices_columnar_multi_with_non_integer() {
+        use vibesql_storage::Row;
+        use vibesql_types::SqlValue;
+
+        // Build rows with string column (should fall back to None)
+        let build_rows = vec![
+            Row::new(vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(10)]),
+        ];
+
+        let probe_rows = vec![
+            Row::new(vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(10)]),
+        ];
+
+        // Should return None because not all columns are integers
+        let result = hash_join_indices_columnar_multi(
+            &build_rows, &probe_rows, &[0, 1], &[0, 1]
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_multi_i64_columns() {
+        use vibesql_storage::Row;
+        use vibesql_types::SqlValue;
+
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Bigint(100), SqlValue::Smallint(10)]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Bigint(200), SqlValue::Smallint(20)]),
+        ];
+
+        // Extract columns 0 and 2
+        let columns = extract_multi_i64_columns(&rows, &[0, 2]).unwrap();
+        assert_eq!(columns.len(), 2);
+        assert_eq!(columns[0], vec![1i64, 2]);
+        assert_eq!(columns[1], vec![10i64, 20]);
+
+        // Extract all columns
+        let columns = extract_multi_i64_columns(&rows, &[0, 1, 2]).unwrap();
+        assert_eq!(columns.len(), 3);
+        assert_eq!(columns[0], vec![1i64, 2]);
+        assert_eq!(columns[1], vec![100i64, 200]);
+        assert_eq!(columns[2], vec![10i64, 20]);
     }
 }
