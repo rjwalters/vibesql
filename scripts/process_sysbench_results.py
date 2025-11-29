@@ -150,11 +150,6 @@ def parse_criterion_output(output: str) -> List[Dict]:
     # Build a map of benchmark name -> iterations from the output
     # Pattern: "Collecting N samples ... (Mk iterations)" or "(N iterations)"
     iterations_map = {}
-    iter_pattern = re.compile(
-        r'^Benchmarking\s+(\S+).*?Collecting\s+(\d+)\s+samples.*?\(([0-9.]+)([kMG]?)\s+iterations\)',
-        re.MULTILINE | re.DOTALL
-    )
-    # Simpler approach: find "Collecting" lines directly
     collect_pattern = re.compile(
         r'Benchmarking\s+(\S+)\s*\n.*?Collecting\s+(\d+)\s+samples.*?\(([0-9.]+)([kMG]?)\s+iterations\)',
         re.DOTALL
