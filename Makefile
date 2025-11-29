@@ -135,8 +135,8 @@ benchmark-sysbench:
 	cargo bench --package vibesql-executor --bench sysbench_oltp --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/sysbench_results.txt
 	@echo ""
 	@echo "Processing Sysbench results into database..."
-	./scripts/process_sysbench_results.py --stdin < /tmp/sysbench_results.txt || \
-		./scripts/process_sysbench_results.py --criterion-dir target/criterion
+	./scripts/process_sysbench_results.py --criterion-dir target/criterion || \
+		./scripts/process_sysbench_results.py --stdin < /tmp/sysbench_results.txt
 
 #
 # Analysis Targets
