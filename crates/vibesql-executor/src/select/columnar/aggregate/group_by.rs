@@ -341,7 +341,6 @@ pub fn columnar_group_by_batch(
 ///
 /// Uses masked SIMD operations on typed column arrays for optimal performance.
 /// The `effective_mask` buffer is reused across calls to avoid allocations.
-#[cfg(feature = "simd")]
 fn compute_group_aggregate_simd_reuse(
     batch: &ColumnarBatch,
     col_idx: usize,
