@@ -18,7 +18,9 @@ export class DataProcessor {
       const contentType = response.headers.get('content-type')
 
       if (response.ok && contentType && contentType.includes('application/json')) {
-        const data = (await response.json()) as DashboardData
+        const rawData = await response.json()
+        // Transform the data to match expected DashboardData structure
+        const data = this.transformDashboardData(rawData)
         // Validate that we have the expected conformance data
         if (data.conformance && data.conformance.summary) {
           return data
@@ -28,6 +30,42 @@ export class DataProcessor {
       console.warn('Dashboard data not available, using legacy format:', error)
     }
     return null
+  }
+
+  /**
+   * Transform raw dashboard JSON to match expected DashboardData structure
+   * Handles field name differences between JSON format and TypeScript types
+   */
+  private transformDashboardData(raw: Record<string, unknown>): DashboardData {
+    const conformance = raw.conformance as Record<string, unknown> | undefined
+
+    if (!conformance) {
+      return raw as unknown as DashboardData
+    }
+
+    const rawSummary = conformance.summary as Record<string, number> | undefined
+    const rawFiles = conformance.files as Record<string, number> | undefined
+
+    // Transform conformance.summary to expected format
+    // JSON uses: total_tests, passing, failing, pass_rate
+    // Expected: pass_rate, tests_passing, tests_total, files_passing, files_total
+    const transformedSummary = {
+      pass_rate: rawSummary?.pass_rate ?? 0,
+      tests_passing: rawSummary?.passing ?? rawSummary?.tests_passing ?? 0,
+      tests_total: rawSummary?.total_tests ?? rawSummary?.tests_total ?? 0,
+      files_passing: rawFiles?.passing ?? rawSummary?.files_passing ?? 0,
+      files_total: rawFiles?.total ?? rawSummary?.files_total ?? 0,
+    }
+
+    return {
+      ...raw,
+      conformance: {
+        ...conformance,
+        summary: transformedSummary,
+        categories: conformance.categories ?? {},
+        history: conformance.history ?? [],
+      },
+    } as DashboardData
   }
 
   /**
