@@ -1,45 +1,48 @@
-# TPC-H Performance Comparison: VibeSQL vs DuckDB
+# TPC-H Performance Comparison: VibeSQL vs DuckDB vs MySQL
 
-**Date**: 2025-11-24
+**Date**: 2025-11-29
 **Scale Factor**: 0.01
 **Issue**: #2490
 
 ## Executive Summary
 
-Complete benchmark comparison of all 22 TPC-H queries between VibeSQL and DuckDB at SF 0.01.
+Complete benchmark comparison of all 22 TPC-H queries between VibeSQL, DuckDB, and MySQL at SF 0.01.
 
-**Overall Result**: VibeSQL is **321.4x slower** on average than DuckDB
+**Overall Result**:
+- VibeSQL is **321.4x slower** than DuckDB on average
+- VibeSQL is **65.1x slower** than MySQL on average
+- MySQL is **4.9x slower** than DuckDB on average
 
-**Best Case**: Q2 (3.9x slower) - Correlated subquery
-**Worst Case**: Q21 (3468x slower) - Multi-way self-joins with NOT EXISTS
+**Best Case (VibeSQL vs MySQL)**: Q11 (3.0x slower) - Subquery + HAVING
+**Worst Case (VibeSQL vs MySQL)**: Q21 (3410x slower) - Multi-way self-joins with NOT EXISTS
 
 ## Complete Comparison Table
 
-| Query | VibeSQL | DuckDB | Gap | Category | Priority |
-|-------|---------|---------|-----|----------|----------|
-| Q1 | 447.48ms | 4.47ms | 100.2x | Aggregation + GROUP BY | HIGH |
-| Q2 | 12.70ms | 3.27ms | 3.9x ⭐ | Correlated Subquery | LOW |
-| Q3 | 337.85ms | 2.05ms | 165.1x | JOIN/Aggregation | HIGH |
-| Q4 | 63.85ms | 2.31ms | 27.6x | Subquery | MEDIUM |
-| Q5 | 119.21ms | 2.89ms | 41.2x | Multi-way JOIN | MEDIUM |
-| Q6 | 74.21ms | 0.54ms | 137.1x | Scan + Aggregation | HIGH |
-| Q7 | 449.64ms | 2.98ms | 150.7x | Multi-way JOIN | HIGH |
-| Q8 | 103.65ms | 3.36ms | 30.8x | Complex JOIN | MEDIUM |
-| Q9 | 128.46ms | 3.63ms | 35.4x | Complex JOIN | MEDIUM |
-| Q10 | 309.72ms | 3.25ms | 95.2x | JOIN/Aggregation | HIGH |
-| Q11 | 11.87ms | 1.72ms | 6.9x ⭐ | Subquery + HAVING | LOW |
-| Q12 | 237.44ms | 2.51ms | 94.4x | JOIN/Aggregation | HIGH |
-| Q13 | 88.21ms | 2.88ms | 30.6x | Outer JOIN | MEDIUM |
-| Q14 | 22.05ms | 1.03ms | 21.4x | JOIN/Aggregation | MEDIUM |
-| Q15 | 75.97ms | 1.21ms | 62.6x | CTE | MEDIUM |
-| Q16 | 20.91ms | 2.61ms | 8.0x ⭐ | Complex Subquery | LOW |
-| Q17 | 56.22ms | 0.99ms | 56.9x | Subquery | MEDIUM |
-| Q18 | 722.86ms | 3.08ms | 235.0x | JOIN/Agg + Subquery | CRITICAL |
-| Q19 | 53.32ms | 3.41ms | 15.6x | Complex JOIN | MEDIUM |
-| Q20 | 143.27ms | 2.53ms | 56.7x | Correlated Subquery | MEDIUM |
-| Q21 | 14800.0ms | 4.27ms | 3468.1x 🔴 | Multi-way Self-JOIN | CRITICAL |
-| Q22 | 12.08ms | 1.90ms | 6.4x ⭐ | Subquery/Aggregation | LOW |
-| **AVG** | **831.41ms** | **2.59ms** | **321.4x** | | |
+| Query | VibeSQL | DuckDB | MySQL | vs DuckDB | vs MySQL | Category |
+|-------|---------|--------|-------|-----------|----------|----------|
+| Q1 | 447.48ms | 4.47ms | 71.60ms | 100.2x | 6.3x | Aggregation + GROUP BY |
+| Q2 | 12.70ms | 3.27ms | 7.02ms | 3.9x ⭐ | 1.8x ⭐ | Correlated Subquery |
+| Q3 | 337.85ms | 2.05ms | 8.55ms | 165.1x | 39.5x | JOIN/Aggregation |
+| Q4 | 63.85ms | 2.31ms | 1.77ms | 27.6x | 36.1x | Subquery |
+| Q5 | 119.21ms | 2.89ms | 4.91ms | 41.2x | 24.3x | Multi-way JOIN |
+| Q6 | 74.21ms | 0.54ms | 7.67ms | 137.1x | 9.7x | Scan + Aggregation |
+| Q7 | 449.64ms | 2.98ms | 4.04ms | 150.7x | 111.3x | Multi-way JOIN |
+| Q8 | 103.65ms | 3.36ms | 10.28ms | 30.8x | 10.1x | Complex JOIN |
+| Q9 | 128.46ms | 3.63ms | 84.07ms | 35.4x | 1.5x ⭐ | Complex JOIN |
+| Q10 | 309.72ms | 3.25ms | 13.33ms | 95.2x | 23.2x | JOIN/Aggregation |
+| Q11 | 11.87ms | 1.72ms | 3.95ms | 6.9x ⭐ | 3.0x ⭐ | Subquery + HAVING |
+| Q12 | 237.44ms | 2.51ms | 13.13ms | 94.4x | 18.1x | JOIN/Aggregation |
+| Q13 | 88.21ms | 2.88ms | 13.92ms | 30.6x | 6.3x | Outer JOIN |
+| Q14 | 22.05ms | 1.03ms | 1.50ms | 21.4x | 14.7x | JOIN/Aggregation |
+| Q15 | 75.97ms | 1.21ms | 2.74ms | 62.6x | 27.7x | CTE |
+| Q16 | 20.91ms | 2.61ms | 3.52ms | 8.0x ⭐ | 5.9x | Complex Subquery |
+| Q17 | 56.22ms | 0.99ms | 1.17ms | 56.9x | 48.1x | Subquery |
+| Q18 | 722.86ms | 3.08ms | 17.93ms | 235.0x | 40.3x | JOIN/Agg + Subquery |
+| Q19 | 53.32ms | 3.41ms | 1.07ms | 15.6x | 49.8x | Complex JOIN |
+| Q20 | 143.27ms | 2.53ms | 3.05ms | 56.7x | 47.0x | Correlated Subquery |
+| Q21 | 14800.0ms | 4.27ms | 4.34ms | 3468.1x 🔴 | 3410.1x 🔴 | Multi-way Self-JOIN |
+| Q22 | 12.08ms | 1.90ms | 1.08ms | 6.4x ⭐ | 11.2x | Subquery/Aggregation |
+| **AVG** | **831.41ms** | **2.59ms** | **12.76ms** | **321.4x** | **65.1x** | |
 
 ## Performance Categories
 
@@ -172,6 +175,7 @@ At 14.8 seconds and 3468x slower, Q21 dominates the average:
 
 **DuckDB Version**: 1.4.2
 **DuckDB Data**: Built-in TPC-H extension (`dbgen(sf=0.01)`)
+**MySQL Version**: 8.4.7 (Docker)
 **VibeSQL Version**: Commit c0b65b74
 **Runs**: 3 per query, averaged
 **Environment**: macOS Darwin 25.1.0, ARM64
@@ -181,6 +185,11 @@ At 14.8 seconds and 3468x slower, Q21 dominates the average:
 conn.execute("PRAGMA tpch(1)")  # Q1
 conn.execute("PRAGMA tpch(6)")  # Q6
 # etc.
+```
+
+**MySQL Query Execution**:
+```bash
+./scripts/mysql-benchmark/run-benchmark.sh --scale-factor 0.01 --iterations 3
 ```
 
 **VibeSQL Query Execution**:
