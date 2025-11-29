@@ -137,7 +137,24 @@ impl Parser {
             // Parse the right-hand side SELECT statement
             // Don't allow ORDER BY/LIMIT on the right side - they should only apply to the final
             // result
-            let right = Box::new(self.parse_select_statement_internal(false)?);
+            //
+            // Standard SQL allows the right-hand SELECT to be wrapped in parentheses:
+            //   SELECT ... UNION ALL (SELECT ...)
+            // This is commonly used in CTEs and TPC-DS queries.
+            let right = if matches!(self.peek(), Token::LParen) {
+                self.advance(); // consume '('
+                let stmt = self.parse_select_statement_internal(false)?;
+                if !matches!(self.peek(), Token::RParen) {
+                    return Err(ParseError {
+                        message: "Expected ')' after parenthesized SELECT in set operation"
+                            .to_string(),
+                    });
+                }
+                self.advance(); // consume ')'
+                Box::new(stmt)
+            } else {
+                Box::new(self.parse_select_statement_internal(false)?)
+            };
 
             Some(vibesql_ast::SetOperation { op, all, right })
         } else {
