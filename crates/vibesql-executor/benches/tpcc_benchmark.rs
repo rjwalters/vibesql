@@ -256,10 +256,11 @@ fn main() {
     }
 
     // Get configuration from environment
-    let scale_factor: i32 = env::var("TPCC_SCALE_FACTOR")
+    // Scale factor can be fractional (e.g., 0.01 for micro mode)
+    let scale_factor: f64 = env::var("TPCC_SCALE_FACTOR")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
+        .unwrap_or(1.0);
 
     let duration_secs: u64 = env::var("TPCC_DURATION_SECS")
         .ok()
@@ -287,8 +288,16 @@ fn main() {
         TransactionType::Mixed
     };
 
+    // Convert to integer warehouses (minimum 1)
+    let num_warehouses = scale_factor.max(1.0) as i32;
+    let is_micro_mode = scale_factor < 1.0;
+
     eprintln!("Configuration:");
-    eprintln!("  Scale factor (warehouses): {}", scale_factor);
+    eprintln!("  Scale factor: {}", scale_factor);
+    eprintln!("  Warehouses: {}", num_warehouses);
+    if is_micro_mode {
+        eprintln!("  Mode: MICRO (reduced row counts)");
+    }
     eprintln!("  Duration: {} seconds", duration_secs);
     eprintln!("  Warmup: {} seconds", warmup_secs);
     eprintln!("  Transaction type: {}", transaction_type.name());
@@ -296,42 +305,41 @@ fn main() {
     // Load VibeSQL database
     eprintln!("\nLoading VibeSQL TPC-C database (SF {})...", scale_factor);
     let load_start = Instant::now();
-    let vibesql_db = load_vibesql(scale_factor as f64);
+    let vibesql_db = load_vibesql(scale_factor);
     eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
 
     // Run VibeSQL benchmark
     eprintln!("\n--- VibeSQL Benchmark ---");
     let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
-    let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, scale_factor, duration, warmup, true);
+    let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
     print_results(&vibesql_results, transaction_type);
 
     // Comparison benchmarks (if feature enabled)
     #[cfg(feature = "benchmark-comparison")]
     {
-        use tpcc::schema::load_sqlite;
-        // Note: load_duckdb is not used because DuckDB is skipped for TPC-C
-        // DuckDB is an OLAP database not suited for OLTP workloads
+        use tpcc::schema::{load_duckdb, load_sqlite};
 
         // SQLite benchmark
         eprintln!("\n\n--- SQLite Benchmark ---");
         eprintln!("Loading SQLite database...");
         let sqlite_load_start = Instant::now();
-        let sqlite_conn = load_sqlite(scale_factor as f64);
+        let sqlite_conn = load_sqlite(scale_factor);
         eprintln!("SQLite loaded in {:?}", sqlite_load_start.elapsed());
 
         let sqlite_executor = SqliteTransactionExecutor::new(&sqlite_conn);
-        let sqlite_results = run_benchmark(&sqlite_executor, transaction_type, scale_factor, duration, warmup, true);
+        let sqlite_results = run_benchmark(&sqlite_executor, transaction_type, num_warehouses, duration, warmup, true);
         print_results(&sqlite_results, transaction_type);
 
-        // DuckDB benchmark - SKIPPED
-        // DuckDB is an OLAP (analytics) database optimized for bulk operations and complex
-        // analytical queries. TPC-C is an OLTP (transactional) benchmark that requires many
-        // individual row inserts (~600,000+ for SF=1). DuckDB's architecture is not designed
-        // for this workload pattern, causing the loading phase to hang indefinitely.
-        // DuckDB performs excellently on TPC-H (analytics) where it completes all 22 queries.
+        // DuckDB benchmark
         eprintln!("\n\n--- DuckDB Benchmark ---");
-        eprintln!("SKIPPED: DuckDB is an OLAP database not suited for OLTP workloads like TPC-C.");
-        eprintln!("         DuckDB excels at analytical queries (see TPC-H results).");
+        eprintln!("Loading DuckDB database...");
+        let duckdb_load_start = Instant::now();
+        let duckdb_conn = load_duckdb(scale_factor);
+        eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
+
+        let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
+        let duckdb_results = run_benchmark(&duckdb_executor, transaction_type, num_warehouses, duration, warmup, true);
+        print_results(&duckdb_results, transaction_type);
 
         // Summary comparison
         eprintln!("\n\n=== Comparison Summary ===");
@@ -354,7 +362,7 @@ fn main() {
 
         eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, compute_avg(&vibesql_results));
         eprintln!("{:<12} {:>12.2} {:>12.2}", "SQLite", sqlite_results.transactions_per_second, compute_avg(&sqlite_results));
-        eprintln!("{:<12} {:>12} {:>12}", "DuckDB", "N/A", "N/A");
+        eprintln!("{:<12} {:>12.2} {:>12.2}", "DuckDB", duckdb_results.transactions_per_second, compute_avg(&duckdb_results));
     }
 
     #[cfg(not(feature = "benchmark-comparison"))]
