@@ -148,3 +148,193 @@ impl Database {
         self.pre_warm_columnar_cache(&refs)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Row;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+
+    fn create_test_table_schema(name: &str) -> TableSchema {
+        TableSchema::new(
+            name.to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(255) }, true),
+            ],
+        )
+    }
+
+    fn create_test_rows(count: usize) -> Vec<Row> {
+        (0..count)
+            .map(|i| {
+                Row::new(vec![
+                    SqlValue::Integer(i as i64),
+                    SqlValue::Varchar(format!("name_{}", i)),
+                ])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_pre_warm_columnar_cache_with_valid_tables() {
+        let mut db = Database::new();
+
+        // Create test tables
+        db.create_table(create_test_table_schema("table1")).unwrap();
+        db.create_table(create_test_table_schema("table2")).unwrap();
+
+        // Insert some rows
+        for row in create_test_rows(10) {
+            db.insert_row("table1", row).unwrap();
+        }
+        for row in create_test_rows(5) {
+            db.insert_row("table2", row).unwrap();
+        }
+
+        // Pre-warm specific tables
+        let count = db.pre_warm_columnar_cache(&["table1", "table2"]).unwrap();
+        assert_eq!(count, 2, "Should have pre-warmed 2 tables");
+
+        // Verify stats show conversions occurred
+        let stats = db.columnar_cache_stats();
+        assert_eq!(stats.conversions, 2, "Should have converted 2 tables");
+    }
+
+    #[test]
+    fn test_pre_warm_columnar_cache_nonexistent_table() {
+        let db = Database::new();
+
+        // Pre-warm with nonexistent tables
+        let count = db.pre_warm_columnar_cache(&["nonexistent1", "nonexistent2"]).unwrap();
+        assert_eq!(count, 0, "Should return 0 for nonexistent tables");
+
+        // Verify no conversions occurred
+        let stats = db.columnar_cache_stats();
+        assert_eq!(stats.conversions, 0, "Should have 0 conversions for nonexistent tables");
+    }
+
+    #[test]
+    fn test_pre_warm_columnar_cache_mixed_tables() {
+        let mut db = Database::new();
+
+        // Create only one table
+        db.create_table(create_test_table_schema("exists")).unwrap();
+        for row in create_test_rows(5) {
+            db.insert_row("exists", row).unwrap();
+        }
+
+        // Pre-warm with mix of existing and nonexistent tables
+        let count = db.pre_warm_columnar_cache(&["exists", "nonexistent"]).unwrap();
+        assert_eq!(count, 1, "Should have pre-warmed only 1 existing table");
+    }
+
+    #[test]
+    fn test_pre_warm_all_columnar() {
+        let mut db = Database::new();
+
+        // Create multiple test tables
+        db.create_table(create_test_table_schema("table_a")).unwrap();
+        db.create_table(create_test_table_schema("table_b")).unwrap();
+        db.create_table(create_test_table_schema("table_c")).unwrap();
+
+        // Insert some rows
+        for row in create_test_rows(5) {
+            db.insert_row("table_a", row).unwrap();
+        }
+        for row in create_test_rows(3) {
+            db.insert_row("table_b", row).unwrap();
+        }
+        for row in create_test_rows(7) {
+            db.insert_row("table_c", row).unwrap();
+        }
+
+        // Pre-warm all tables
+        let count = db.pre_warm_all_columnar().unwrap();
+        assert_eq!(count, 3, "Should have pre-warmed all 3 tables");
+
+        // Verify stats
+        let stats = db.columnar_cache_stats();
+        assert_eq!(stats.conversions, 3, "Should have converted all 3 tables");
+    }
+
+    #[test]
+    fn test_pre_warm_results_in_cache_hits() {
+        let mut db = Database::new();
+
+        // Create and populate a table
+        db.create_table(create_test_table_schema("cached_table")).unwrap();
+        for row in create_test_rows(10) {
+            db.insert_row("cached_table", row).unwrap();
+        }
+
+        // Pre-warm the cache
+        let count = db.pre_warm_columnar_cache(&["cached_table"]).unwrap();
+        assert_eq!(count, 1);
+
+        // Record stats after pre-warming
+        let stats_before = db.columnar_cache_stats();
+        let hits_before = stats_before.hits;
+
+        // Access the columnar data again - should be a cache hit
+        let _ = db.get_columnar("cached_table").unwrap();
+
+        // Verify cache hit occurred
+        let stats_after = db.columnar_cache_stats();
+        assert_eq!(
+            stats_after.hits,
+            hits_before + 1,
+            "Should have one more cache hit after accessing pre-warmed table"
+        );
+        assert_eq!(
+            stats_after.conversions, stats_before.conversions,
+            "Should not have additional conversions"
+        );
+    }
+
+    #[test]
+    fn test_pre_warm_empty_table_list() {
+        let db = Database::new();
+
+        // Pre-warm with empty list
+        let count = db.pre_warm_columnar_cache(&[]).unwrap();
+        assert_eq!(count, 0, "Should return 0 for empty table list");
+    }
+
+    #[test]
+    fn test_pre_warm_all_empty_database() {
+        let db = Database::new();
+
+        // Pre-warm all on empty database
+        let count = db.pre_warm_all_columnar().unwrap();
+        assert_eq!(count, 0, "Should return 0 for empty database");
+    }
+
+    #[test]
+    fn test_pre_warm_idempotent() {
+        let mut db = Database::new();
+
+        // Create and populate a table
+        db.create_table(create_test_table_schema("test_table")).unwrap();
+        for row in create_test_rows(5) {
+            db.insert_row("test_table", row).unwrap();
+        }
+
+        // Pre-warm twice
+        let count1 = db.pre_warm_columnar_cache(&["test_table"]).unwrap();
+        let stats1 = db.columnar_cache_stats();
+
+        let count2 = db.pre_warm_columnar_cache(&["test_table"]).unwrap();
+        let stats2 = db.columnar_cache_stats();
+
+        // Both should report success
+        assert_eq!(count1, 1);
+        assert_eq!(count2, 1);
+
+        // But only one conversion should have occurred (second should be cache hit)
+        assert_eq!(stats1.conversions, 1);
+        assert_eq!(stats2.conversions, 1, "Second pre-warm should not cause additional conversion");
+        assert_eq!(stats2.hits, stats1.hits + 1, "Second pre-warm should result in cache hit");
+    }
+}
