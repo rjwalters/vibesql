@@ -8,6 +8,8 @@ mod helpers;
 mod iterator;
 pub mod join;
 #[allow(dead_code)] // Experimental feature with tests, not yet enabled in production
+pub mod late_materialization;
+#[allow(dead_code)] // Experimental feature with tests, not yet enabled in production
 mod monomorphic;
 mod order;
 #[cfg(feature = "parallel")]
@@ -21,6 +23,10 @@ pub(crate) mod window;
 
 pub use cte::CteResult;
 pub use iterator::{RowIterator, TableScanIterator};
+pub use late_materialization::{
+    SelectionVector, RowReference, LazyMaterializedBatch,
+    gather_columns, gather_single_column,
+};
 pub use window::WindowFunctionKey;
 
 /// Result of a SELECT query including column metadata
