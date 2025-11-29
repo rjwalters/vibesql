@@ -2,7 +2,7 @@
 
 use super::{combine_rows, FromResult};
 use super::build::{CompositeKey, build_hash_table_composite_parallel, build_hash_table_parallel};
-use super::columnar::hash_join_indices_columnar;
+use super::columnar::{hash_join_indices_columnar, hash_join_indices_columnar_multi};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 // Note: Memory limit checking removed from hash join.
@@ -170,27 +170,40 @@ pub(in crate::select::join) fn hash_join_inner_multi(
             (right.rows(), left.rows(), right_col_indices, left_col_indices, false)
         };
 
-    // Build phase: Create hash table with composite keys from build side
-    let hash_table = build_hash_table_composite_parallel(build_rows, build_col_indices);
+    // Fast path: Try columnar hash join for integer keys
+    // This provides significant speedup for integer equi-joins by:
+    // 1. Using FxHash-style hashing without SqlValue enum dispatch
+    // 2. Better cache locality with contiguous i64 arrays
+    // 3. Pre-computed composite hashes for multi-column keys
+    let join_pairs: Vec<(usize, usize)> = if let Some(pairs) = hash_join_indices_columnar_multi(
+        build_rows, probe_rows, build_col_indices, probe_col_indices
+    ) {
+        pairs
+    } else {
+        // Fallback: Generic hash join using SqlValue-based CompositeKey
+        // Build phase: Create hash table with composite keys from build side
+        let hash_table = build_hash_table_composite_parallel(build_rows, build_col_indices);
 
-    // Probe phase: Collect (build_idx, probe_idx) pairs
-    let estimated_capacity = probe_rows.len().saturating_mul(2).min(100_000);
-    let mut join_pairs: Vec<(usize, usize)> = Vec::with_capacity(estimated_capacity);
+        // Probe phase: Collect (build_idx, probe_idx) pairs
+        let estimated_capacity = probe_rows.len().saturating_mul(2).min(100_000);
+        let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(estimated_capacity);
 
-    for (probe_idx, probe_row) in probe_rows.iter().enumerate() {
-        let probe_key = CompositeKey::from_row(probe_row, probe_col_indices);
+        for (probe_idx, probe_row) in probe_rows.iter().enumerate() {
+            let probe_key = CompositeKey::from_row(probe_row, probe_col_indices);
 
-        // Skip rows with NULL key values
-        if probe_key.has_null() {
-            continue;
-        }
+            // Skip rows with NULL key values
+            if probe_key.has_null() {
+                continue;
+            }
 
-        if let Some(build_indices) = hash_table.get(&probe_key) {
-            for &build_idx in build_indices {
-                join_pairs.push((build_idx, probe_idx));
+            if let Some(build_indices) = hash_table.get(&probe_key) {
+                for &build_idx in build_indices {
+                    pairs.push((build_idx, probe_idx));
+                }
             }
         }
-    }
+        pairs
+    };
 
     // Materialization phase: Create combined rows from index pairs
     let mut result_rows = Vec::with_capacity(join_pairs.len());
