@@ -46,6 +46,15 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
         }
     }
 
+    // Pre-warm the columnar cache for large tables used in analytical queries
+    // This eliminates the ~31% row-to-columnar conversion overhead on first query
+    // See: https://github.com/vibesql/vibesql/issues/2970
+    let _ = db.pre_warm_columnar_cache(&[
+        "LINEITEM",  // Q1, Q3, Q5, Q6, Q7, Q10, Q12, Q14, Q15, Q17, Q18, Q19, Q20, Q21
+        "ORDERS",    // Q3, Q4, Q5, Q7, Q8, Q9, Q10, Q12, Q13, Q18, Q21, Q22
+        "CUSTOMER",  // Q3, Q5, Q7, Q8, Q10, Q13, Q18, Q22
+    ]);
+
     db
 }
 
