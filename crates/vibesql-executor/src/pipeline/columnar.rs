@@ -392,8 +392,11 @@ impl ColumnarPipeline {
                     let value = Self::evaluate_empty_aggregate(expr, &evaluator)?;
                     results.push(value);
                 } else {
-                    let value = evaluator.eval(expr, &rows[0])?;
-                    results.push(value);
+                    // Complex aggregates with non-empty input need full row-oriented execution
+                    // to properly aggregate over all rows, not just the first one
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "Complex aggregate expressions require row-oriented execution".to_string(),
+                    ));
                 }
             }
         }
@@ -693,5 +696,71 @@ mod tests {
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Null);
+    }
+
+    #[test]
+    fn test_fallback_aggregation_returns_error_for_nonempty_rows() {
+        let (database, schema) = create_test_setup();
+        let pipeline = ColumnarPipeline::new();
+        let ctx = ExecutionContext::new(&schema, &database);
+
+        // Create non-empty input rows
+        let rows = vec![make_test_row(vec![1, 2]), make_test_row(vec![3, 4])];
+        let input = PipelineInput::from_rows_owned(rows);
+
+        // Create a complex aggregate expression (- COUNT(*))
+        let complex_agg = Expression::UnaryOp {
+            op: vibesql_ast::UnaryOperator::Minus,
+            expr: Box::new(Expression::AggregateFunction {
+                name: "COUNT".to_string(),
+                args: vec![Expression::Wildcard],
+                distinct: false,
+            }),
+        };
+        let select_items = vec![SelectItem::Expression {
+            expr: complex_agg,
+            alias: None,
+        }];
+
+        // fallback_aggregation should return UnsupportedFeature for non-empty rows
+        let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);
+        assert!(result.is_err());
+        match result {
+            Err(ExecutorError::UnsupportedFeature(msg)) => {
+                assert!(msg.contains("row-oriented execution"));
+            }
+            other => panic!("Expected UnsupportedFeature error, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_fallback_aggregation_works_for_empty_rows() {
+        let (database, schema) = create_test_setup();
+        let pipeline = ColumnarPipeline::new();
+        let ctx = ExecutionContext::new(&schema, &database);
+
+        // Create empty input
+        let rows: Vec<Row> = vec![];
+        let input = PipelineInput::from_rows_owned(rows);
+
+        // Create a complex aggregate expression (- COUNT(*))
+        let complex_agg = Expression::UnaryOp {
+            op: vibesql_ast::UnaryOperator::Minus,
+            expr: Box::new(Expression::AggregateFunction {
+                name: "COUNT".to_string(),
+                args: vec![Expression::Wildcard],
+                distinct: false,
+            }),
+        };
+        let select_items = vec![SelectItem::Expression {
+            expr: complex_agg,
+            alias: None,
+        }];
+
+        // fallback_aggregation should work for empty rows (returns -0 = 0)
+        let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.row_count(), 1);
     }
 }
