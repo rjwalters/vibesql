@@ -5,6 +5,7 @@
 //! - CTEs (Common Table Expressions)
 //! - Views
 //! - Predicate pushdown optimization
+//! - SIMD-accelerated columnar filtering (#2972)
 
 #![allow(clippy::too_many_arguments)]
 
@@ -14,10 +15,15 @@ use super::predicates::{apply_table_local_predicates, apply_table_local_predicat
 use crate::{
     errors::ExecutorError, optimizer::PredicatePlan, privilege_checker::PrivilegeChecker,
     schema::CombinedSchema, select::cte::CteResult,
+    select::columnar::{ColumnarBatch, ColumnPredicate, simd_filter_batch},
 };
 
 #[cfg(feature = "parallel")]
 use crate::select::parallel::parallel_scan_materialize;
+
+/// Minimum row count to benefit from SIMD columnar filtering
+/// Below this threshold, row-by-row filtering is faster due to conversion overhead
+const SIMD_COLUMNAR_THRESHOLD: usize = 500;
 
 /// Execute a table scan (handles CTEs, views, and regular tables)
 pub(crate) fn execute_table_scan(
@@ -187,9 +193,19 @@ pub(crate) fn execute_table_scan(
 
         // Check if there are actually table-local predicates for this table
         if predicate_plan.has_table_filters(table_name) {
-            // Try columnar filter optimization first (for simple predicates)
+            // Try columnar filter optimization for simple predicates
+            // Extract predicates once and choose the best execution path (#2972)
             if let Some(column_predicates) = crate::select::columnar::extract_column_predicates(where_expr, &schema) {
-                // Use fast columnar filtering
+                // For native columnar tables, use SIMD filtering on typed columns
+                // This avoids SqlValue overhead by working directly on i64/f64/String arrays
+                if table.is_native_columnar() && row_slice.len() >= SIMD_COLUMNAR_THRESHOLD {
+                    if let Ok(filtered_rows) = filter_with_simd_columnar(table, &column_predicates) {
+                        return Ok(super::FromResult::from_rows(schema, filtered_rows));
+                    }
+                    // Fall through to row-based path if SIMD fails
+                }
+
+                // For row-oriented tables, use bitmap-based filtering
                 let indices = crate::select::columnar::apply_columnar_filter(row_slice, &column_predicates)?;
                 let filtered_rows: Vec<_> = indices.into_iter().filter_map(|idx| row_slice.get(idx).cloned()).collect();
                 return Ok(super::FromResult::from_rows(schema, filtered_rows));
@@ -219,4 +235,45 @@ pub(crate) fn execute_table_scan(
 
     use crate::select::from_iterator::FromIterator;
     Ok(super::FromResult::from_iterator(schema, FromIterator::from_table_scan(rows)))
+}
+
+/// Apply SIMD columnar filtering using native typed columns
+///
+/// This function implements the columnar predicate evaluation optimization from #2972:
+/// 1. Get columnar data from table.scan_columnar() (native typed Vec<i64>, Vec<f64>, etc.)
+/// 2. Convert to ColumnarBatch for SIMD operations
+/// 3. Apply predicates using SIMD on native types (no SqlValue overhead)
+/// 4. Convert only the filtered rows back to Row format
+///
+/// This avoids the overhead of SqlValue enum matching during predicate evaluation,
+/// and only materializes rows that pass all filters.
+///
+/// # Performance
+///
+/// For Q3 with ~32K lineitem rows where ~3K pass filters:
+/// - Old: Evaluate predicates on all 32K rows via SqlValue
+/// - New: SIMD filter on native types, only materialize 3K passing rows
+/// - Expected: ~10x reduction in predicate evaluation overhead
+fn filter_with_simd_columnar(
+    table: &vibesql_storage::Table,
+    predicates: &[ColumnPredicate],
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+    // Step 1: Get columnar data from table (uses cache if available)
+    let columnar_table = table.scan_columnar()
+        .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+    // Step 2: Convert to ColumnarBatch for SIMD operations
+    // This is zero-copy for Arc-wrapped data (just bumps reference count)
+    let batch = ColumnarBatch::from_storage_columnar(&columnar_table)?;
+
+    // Step 3: Apply SIMD-accelerated filtering on native types
+    // This evaluates predicates directly on Vec<i64>, Vec<f64>, Vec<String>, etc.
+    // without going through SqlValue enum matching
+    let filtered_batch = simd_filter_batch(&batch, predicates)?;
+
+    // Step 4: Convert filtered batch back to rows
+    // Only the rows that passed all predicates are materialized
+    let filtered_rows = filtered_batch.to_rows()?;
+
+    Ok(filtered_rows)
 }
