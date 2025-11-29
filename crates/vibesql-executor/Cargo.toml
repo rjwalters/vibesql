@@ -177,3 +177,7 @@ harness = false
 [[bench]]
 name = "simd_filter_benchmark"
 harness = false
+
+[[bench]]
+name = "lineitem_scan_profiling"
+harness = false
