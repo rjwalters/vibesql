@@ -17,6 +17,8 @@ use std::hash::{Hash, Hasher};
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
+use crate::select::columnar::batch::{ColumnArray, ColumnarBatch};
+
 /// Specialized GROUP BY key types for efficient hashing
 ///
 /// The key insight is that most GROUP BY queries use a small number of
@@ -294,6 +296,212 @@ impl GroupKeySpec {
             GroupKey::Generic(v) => v.clone(),
         }
     }
+
+    /// Analyze ColumnarBatch columns and determine the best key strategy
+    ///
+    /// This method examines the column types in a ColumnarBatch to select
+    /// the most efficient key representation for GROUP BY operations.
+    pub fn from_columnar_batch(batch: &ColumnarBatch, group_cols: &[usize]) -> Self {
+        match group_cols.len() {
+            1 => {
+                let col_idx = group_cols[0];
+                if let Some(column) = batch.column(col_idx) {
+                    match column {
+                        ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _) => {
+                            return GroupKeySpec::SingleI64 { col_idx };
+                        }
+                        ColumnArray::String(_, _) | ColumnArray::FixedString(_, _) => {
+                            return GroupKeySpec::SingleString { col_idx };
+                        }
+                        _ => {}
+                    }
+                }
+                GroupKeySpec::Generic {
+                    col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+                }
+            }
+            2 => {
+                let col1_idx = group_cols[0];
+                let col2_idx = group_cols[1];
+                if let (Some(col1), Some(col2)) = (batch.column(col1_idx), batch.column(col2_idx)) {
+                    // Check for two string columns (TPC-H Q1 pattern: l_returnflag, l_linestatus)
+                    if matches!(col1, ColumnArray::String(_, _) | ColumnArray::FixedString(_, _))
+                        && matches!(col2, ColumnArray::String(_, _) | ColumnArray::FixedString(_, _))
+                    {
+                        return GroupKeySpec::TwoChars { col1_idx, col2_idx };
+                    }
+                    // Check for two integer columns
+                    if matches!(col1, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _))
+                        && matches!(col2, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _))
+                    {
+                        return GroupKeySpec::TwoI64 { col1_idx, col2_idx };
+                    }
+                    // Check for (int, string) pattern
+                    if matches!(col1, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _))
+                        && matches!(col2, ColumnArray::String(_, _) | ColumnArray::FixedString(_, _))
+                    {
+                        return GroupKeySpec::I64String {
+                            i64_col: col1_idx,
+                            string_col: col2_idx,
+                        };
+                    }
+                }
+                GroupKeySpec::Generic {
+                    col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+                }
+            }
+            3 => {
+                let col1_idx = group_cols[0];
+                let col2_idx = group_cols[1];
+                let col3_idx = group_cols[2];
+                if let (Some(col1), Some(col2), Some(col3)) = (
+                    batch.column(col1_idx),
+                    batch.column(col2_idx),
+                    batch.column(col3_idx),
+                ) {
+                    // Check for three integer columns (TPC-H Q3 pattern)
+                    if matches!(col1, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _) | ColumnArray::Date(_, _))
+                        && matches!(col2, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _) | ColumnArray::Date(_, _))
+                        && matches!(col3, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _) | ColumnArray::Date(_, _))
+                    {
+                        return GroupKeySpec::ThreeI64 {
+                            col1_idx,
+                            col2_idx,
+                            col3_idx,
+                        };
+                    }
+                }
+                GroupKeySpec::Generic {
+                    col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+                }
+            }
+            _ => GroupKeySpec::Generic {
+                col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+            },
+        }
+    }
+
+    /// Extract a group key from a ColumnarBatch at the specified row index
+    ///
+    /// This provides direct columnar extraction without going through Row.
+    #[inline]
+    pub fn extract_key_from_batch(&self, batch: &ColumnarBatch, row_idx: usize) -> GroupKey {
+        match self {
+            GroupKeySpec::SingleI64 { col_idx } => {
+                if let Some(ColumnArray::Int64(values, nulls)) = batch.column(*col_idx) {
+                    if let Some(null_mask) = nulls {
+                        if null_mask.get(row_idx).copied().unwrap_or(false) {
+                            return GroupKey::Generic(vec![SqlValue::Null]);
+                        }
+                    }
+                    return GroupKey::SingleI64(values[row_idx]);
+                }
+                if let Some(ColumnArray::Int32(values, nulls)) = batch.column(*col_idx) {
+                    if let Some(null_mask) = nulls {
+                        if null_mask.get(row_idx).copied().unwrap_or(false) {
+                            return GroupKey::Generic(vec![SqlValue::Null]);
+                        }
+                    }
+                    return GroupKey::SingleI64(values[row_idx] as i64);
+                }
+                // Fallback
+                batch.get_value(row_idx, *col_idx)
+                    .map(|v| GroupKey::Generic(vec![v]))
+                    .unwrap_or(GroupKey::Generic(vec![SqlValue::Null]))
+            }
+            GroupKeySpec::SingleString { col_idx } => {
+                if let Some(ColumnArray::String(values, nulls)) = batch.column(*col_idx) {
+                    if let Some(null_mask) = nulls {
+                        if null_mask.get(row_idx).copied().unwrap_or(false) {
+                            return GroupKey::Generic(vec![SqlValue::Null]);
+                        }
+                    }
+                    return GroupKey::SingleString(values[row_idx].clone());
+                }
+                if let Some(ColumnArray::FixedString(values, nulls)) = batch.column(*col_idx) {
+                    if let Some(null_mask) = nulls {
+                        if null_mask.get(row_idx).copied().unwrap_or(false) {
+                            return GroupKey::Generic(vec![SqlValue::Null]);
+                        }
+                    }
+                    return GroupKey::SingleString(values[row_idx].clone());
+                }
+                // Fallback
+                batch.get_value(row_idx, *col_idx)
+                    .map(|v| GroupKey::Generic(vec![v]))
+                    .unwrap_or(GroupKey::Generic(vec![SqlValue::Null]))
+            }
+            GroupKeySpec::TwoChars { col1_idx, col2_idx } => {
+                // Fast path: extract first char from each string column
+                let c1 = Self::extract_first_char(batch, *col1_idx, row_idx);
+                let c2 = Self::extract_first_char(batch, *col2_idx, row_idx);
+                GroupKey::TwoChars(c1, c2)
+            }
+            GroupKeySpec::TwoI64 { col1_idx, col2_idx } => {
+                let v1 = Self::extract_i64(batch, *col1_idx, row_idx);
+                let v2 = Self::extract_i64(batch, *col2_idx, row_idx);
+                GroupKey::TwoI64(v1, v2)
+            }
+            GroupKeySpec::I64String { i64_col, string_col } => {
+                let i = Self::extract_i64(batch, *i64_col, row_idx);
+                let s = Self::extract_string(batch, *string_col, row_idx);
+                GroupKey::I64String(i, s)
+            }
+            GroupKeySpec::ThreeI64 { col1_idx, col2_idx, col3_idx } => {
+                let v1 = Self::extract_i64(batch, *col1_idx, row_idx);
+                let v2 = Self::extract_i64(batch, *col2_idx, row_idx);
+                let v3 = Self::extract_i64(batch, *col3_idx, row_idx);
+                GroupKey::ThreeI64(v1, v2, v3)
+            }
+            GroupKeySpec::Generic { col_indices } => {
+                let mut key = Vec::with_capacity(col_indices.len());
+                for (idx, _) in col_indices {
+                    let value = batch.get_value(row_idx, *idx).unwrap_or(SqlValue::Null);
+                    key.push(value);
+                }
+                GroupKey::Generic(key)
+            }
+        }
+    }
+
+    /// Extract first character from a string column (for TwoChars key)
+    #[inline]
+    fn extract_first_char(batch: &ColumnarBatch, col_idx: usize, row_idx: usize) -> u8 {
+        if let Some(ColumnArray::String(values, _)) = batch.column(col_idx) {
+            return values[row_idx].as_bytes().first().copied().unwrap_or(0);
+        }
+        if let Some(ColumnArray::FixedString(values, _)) = batch.column(col_idx) {
+            return values[row_idx].as_bytes().first().copied().unwrap_or(0);
+        }
+        0
+    }
+
+    /// Extract i64 value from an integer column
+    #[inline]
+    fn extract_i64(batch: &ColumnarBatch, col_idx: usize, row_idx: usize) -> i64 {
+        if let Some(ColumnArray::Int64(values, _)) = batch.column(col_idx) {
+            return values[row_idx];
+        }
+        if let Some(ColumnArray::Int32(values, _)) = batch.column(col_idx) {
+            return values[row_idx] as i64;
+        }
+        if let Some(ColumnArray::Date(values, _)) = batch.column(col_idx) {
+            return values[row_idx] as i64;
+        }
+        0
+    }
+
+    /// Extract String value from a string column
+    #[inline]
+    fn extract_string(batch: &ColumnarBatch, col_idx: usize, row_idx: usize) -> String {
+        if let Some(ColumnArray::String(values, _)) = batch.column(col_idx) {
+            return values[row_idx].clone();
+        }
+        if let Some(ColumnArray::FixedString(values, _)) = batch.column(col_idx) {
+            return values[row_idx].clone();
+        }
+        String::new()
+    }
 }
 
 #[cfg(test)]
@@ -353,5 +561,80 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert_eq!(values[0], SqlValue::Varchar("A".to_string()));
         assert_eq!(values[1], SqlValue::Varchar("F".to_string()));
+    }
+
+    #[test]
+    fn test_columnar_batch_key_extraction() {
+        use vibesql_storage::Row;
+
+        // Create a batch with string columns (like TPC-H Q1: l_returnflag, l_linestatus)
+        let rows = vec![
+            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Varchar("F".to_string())]),
+            Row::new(vec![SqlValue::Varchar("N".to_string()), SqlValue::Varchar("O".to_string())]),
+            Row::new(vec![SqlValue::Varchar("R".to_string()), SqlValue::Varchar("F".to_string())]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Should detect TwoChars pattern for two string columns
+        let spec = GroupKeySpec::from_columnar_batch(&batch, &[0, 1]);
+        assert!(matches!(spec, GroupKeySpec::TwoChars { col1_idx: 0, col2_idx: 1 }));
+
+        // Extract keys and verify
+        let key0 = spec.extract_key_from_batch(&batch, 0);
+        let key1 = spec.extract_key_from_batch(&batch, 1);
+        let key2 = spec.extract_key_from_batch(&batch, 2);
+
+        assert_eq!(key0, GroupKey::TwoChars(b'A', b'F'));
+        assert_eq!(key1, GroupKey::TwoChars(b'N', b'O'));
+        assert_eq!(key2, GroupKey::TwoChars(b'R', b'F'));
+    }
+
+    #[test]
+    fn test_columnar_batch_single_i64_extraction() {
+        use vibesql_storage::Row;
+
+        // Create a batch with integer column
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(100)]),
+            Row::new(vec![SqlValue::Integer(200)]),
+            Row::new(vec![SqlValue::Integer(300)]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Should detect SingleI64 pattern
+        let spec = GroupKeySpec::from_columnar_batch(&batch, &[0]);
+        assert!(matches!(spec, GroupKeySpec::SingleI64 { col_idx: 0 }));
+
+        // Extract keys and verify
+        let key0 = spec.extract_key_from_batch(&batch, 0);
+        let key1 = spec.extract_key_from_batch(&batch, 1);
+        let key2 = spec.extract_key_from_batch(&batch, 2);
+
+        assert_eq!(key0, GroupKey::SingleI64(100));
+        assert_eq!(key1, GroupKey::SingleI64(200));
+        assert_eq!(key2, GroupKey::SingleI64(300));
+    }
+
+    #[test]
+    fn test_columnar_batch_two_i64_extraction() {
+        use vibesql_storage::Row;
+
+        // Create a batch with two integer columns
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(20)]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Should detect TwoI64 pattern
+        let spec = GroupKeySpec::from_columnar_batch(&batch, &[0, 1]);
+        assert!(matches!(spec, GroupKeySpec::TwoI64 { col1_idx: 0, col2_idx: 1 }));
+
+        // Extract keys and verify
+        let key0 = spec.extract_key_from_batch(&batch, 0);
+        let key1 = spec.extract_key_from_batch(&batch, 1);
+
+        assert_eq!(key0, GroupKey::TwoI64(1, 10));
+        assert_eq!(key1, GroupKey::TwoI64(2, 20));
     }
 }

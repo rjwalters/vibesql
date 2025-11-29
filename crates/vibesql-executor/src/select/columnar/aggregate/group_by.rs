@@ -10,6 +10,7 @@
 use ahash::AHashMap;
 
 use crate::errors::ExecutorError;
+use crate::select::grouping::{GroupKey, GroupKeySpec};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -245,12 +246,17 @@ pub fn columnar_group_by(
 ///
 /// # Algorithm
 ///
-/// 1. Build hash table mapping group keys → row indices
-/// 2. For each group, use SIMD masked aggregation on typed arrays
-/// 3. Return results as rows with (group_key_cols, aggregate_cols)
+/// 1. Analyze column types and select specialized key strategy
+/// 2. Build hash table mapping specialized group keys → row indices
+/// 3. For each group, use SIMD masked aggregation on typed arrays
+/// 4. Return results as rows with (group_key_cols, aggregate_cols)
 ///
 /// # Performance
 ///
+/// - **Specialized key hashing**: Uses `GroupKey` enum for efficient hashing
+///   - `TwoChars(u8, u8)` for TPC-H Q1 (l_returnflag, l_linestatus)
+///   - `SingleI64(i64)` for single integer GROUP BY
+///   - `TwoI64(i64, i64)` for two integer columns
 /// - Uses auto-vectorized SIMD for per-group aggregation (SUM, MIN, MAX)
 /// - Avoids row materialization within groups
 /// - Direct typed array access (no SqlValue pattern matching in hot path)
@@ -278,16 +284,17 @@ pub fn columnar_group_by_batch(
 
     let row_count = batch.row_count();
 
-    // Phase 1: Build hash table mapping group keys to row indices
-    let mut groups: AHashMap<Vec<SqlValue>, Vec<usize>> = AHashMap::new();
+    // Analyze column types and select optimal key strategy
+    let key_spec = GroupKeySpec::from_columnar_batch(batch, group_cols);
+
+    // Phase 1: Build hash table mapping specialized group keys to row indices
+    // Using GroupKey instead of Vec<SqlValue> eliminates per-row allocations
+    // and provides efficient hashing for common patterns (e.g., TwoChars for Q1)
+    let mut groups: AHashMap<GroupKey, Vec<usize>> = AHashMap::new();
 
     for row_idx in 0..row_count {
-        // Extract group key values for this row
-        let mut group_key = Vec::with_capacity(group_cols.len());
-        for &col_idx in group_cols {
-            let value = batch.get_value(row_idx, col_idx)?;
-            group_key.push(value);
-        }
+        // Extract group key using specialized strategy (no allocation for primitive keys)
+        let group_key = key_spec.extract_key_from_batch(batch, row_idx);
 
         // Add row index to this group
         groups.entry(group_key).or_default().push(row_idx);
@@ -309,10 +316,8 @@ pub fn columnar_group_by_batch(
         }
 
         // Compute aggregates for this group using SIMD
-        let mut result_values = Vec::with_capacity(group_key.len() + agg_cols.len());
-
-        // First, add group key values
-        result_values.extend(group_key);
+        // Convert GroupKey back to Vec<SqlValue> for result row
+        let mut result_values = key_spec.key_to_values(&group_key);
 
         // Then, compute each aggregate using SIMD on typed arrays
         for (col_idx, agg_op) in agg_cols {
