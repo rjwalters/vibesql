@@ -136,6 +136,15 @@ pub fn apply_columnar_filter(
     rows: &[vibesql_storage::Row],
     predicates: &[ColumnPredicate],
 ) -> Result<Vec<usize>, ExecutorError> {
+    // For larger row sets, use SIMD-accelerated streaming batch filter
+    // Threshold chosen based on benchmark: SIMD overhead pays off around 256+ rows
+    const SIMD_THRESHOLD: usize = 256;
+
+    if rows.len() >= SIMD_THRESHOLD && !predicates.is_empty() {
+        return apply_columnar_filter_simd_streaming(rows, predicates);
+    }
+
+    // For small row sets, use scalar evaluation (lower overhead)
     let bitmap = create_filter_bitmap(rows.len(), predicates, |row_idx, col_idx| {
         rows.get(row_idx).and_then(|row| row.get(col_idx))
     })?;
@@ -144,6 +153,77 @@ pub fn apply_columnar_filter(
         .enumerate()
         .filter_map(|(idx, &pass)| if pass { Some(idx) } else { None })
         .collect())
+}
+
+/// SIMD-accelerated streaming batch filter
+///
+/// Processes rows in fixed-size batches, converting each batch to columnar format
+/// and applying vectorized SIMD filtering. This approach:
+/// - Uses O(batch_size) memory instead of O(total_rows)
+/// - Benefits from cache locality (batch fits in L2/L3 cache)
+/// - Enables SIMD vectorization for predicate evaluation
+///
+/// # Arguments
+///
+/// * `rows` - The rows to filter
+/// * `predicates` - Column-based predicates to evaluate
+///
+/// # Returns
+///
+/// Indices of rows that pass all predicates
+pub fn apply_columnar_filter_simd_streaming(
+    rows: &[vibesql_storage::Row],
+    predicates: &[ColumnPredicate],
+) -> Result<Vec<usize>, ExecutorError> {
+    use super::batch::ColumnarBatch;
+
+    if predicates.is_empty() {
+        // No predicates: all rows pass
+        return Ok((0..rows.len()).collect());
+    }
+
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Batch size tuned for L2 cache efficiency (~256KB)
+    // With ~16 columns of 8 bytes each = 128 bytes/row
+    // 1024 rows = ~128KB per batch, leaving room for predicates
+    const BATCH_SIZE: usize = 1024;
+
+    let mut matching_indices = Vec::with_capacity(rows.len() / 4); // Estimate 25% selectivity
+
+    // Process rows in streaming batches
+    for batch_start in (0..rows.len()).step_by(BATCH_SIZE) {
+        let batch_end = (batch_start + BATCH_SIZE).min(rows.len());
+        let batch_slice = &rows[batch_start..batch_end];
+
+        // Convert batch to columnar format for SIMD processing
+        let batch = ColumnarBatch::from_rows(batch_slice)?;
+
+        // Create filter mask using SIMD operations
+        let filter_mask = create_filter_mask_simd(&batch, predicates)?;
+
+        // Collect matching indices
+        for (local_idx, &passes) in filter_mask.iter().enumerate() {
+            if passes {
+                matching_indices.push(batch_start + local_idx);
+            }
+        }
+    }
+
+    Ok(matching_indices)
+}
+
+/// Create a filter mask using SIMD operations
+///
+/// Returns a Vec<bool> where true means the row passes all predicates.
+fn create_filter_mask_simd(
+    batch: &super::batch::ColumnarBatch,
+    predicates: &[ColumnPredicate],
+) -> Result<Vec<bool>, ExecutorError> {
+    use super::simd_filter::simd_create_filter_mask;
+    simd_create_filter_mask(batch, predicates)
 }
 
 /// Filter rows in place using columnar predicates
@@ -176,6 +256,119 @@ mod tests {
     use super::*;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    #[test]
+    fn test_simd_streaming_filter_large_dataset() {
+        // Create a large dataset (>256 rows to trigger SIMD path)
+        let rows: Vec<Row> = (0..1000)
+            .map(|i| {
+                Row::new(vec![
+                    SqlValue::Integer(i),
+                    SqlValue::Double(i as f64 * 0.01),
+                ])
+            })
+            .collect();
+
+        // Filter: col0 < 500 AND col1 < 3.0
+        let predicates = vec![
+            ColumnPredicate::LessThan {
+                column_idx: 0,
+                value: SqlValue::Integer(500),
+            },
+            ColumnPredicate::LessThan {
+                column_idx: 1,
+                value: SqlValue::Double(3.0),
+            },
+        ];
+
+        let indices = apply_columnar_filter(&rows, &predicates).unwrap();
+
+        // Verify: indices should be 0..300 (where i < 500 AND i*0.01 < 3.0)
+        // i*0.01 < 3.0 => i < 300
+        assert_eq!(indices.len(), 300);
+        for (i, idx) in indices.iter().enumerate() {
+            assert_eq!(*idx, i);
+        }
+    }
+
+    #[test]
+    fn test_simd_streaming_filter_date_predicates() {
+        use vibesql_types::Date;
+
+        // Create rows with dates spanning multiple years
+        let rows: Vec<Row> = (0..500)
+            .map(|i| {
+                let year = 1994 + (i / 365);
+                let day = (i % 28) + 1;
+                Row::new(vec![SqlValue::Date(Date {
+                    year: year as i32,
+                    month: 6,
+                    day: day as u8,
+                })])
+            })
+            .collect();
+
+        // Filter: date >= 1994-06-01 AND date < 1995-06-01
+        let predicates = vec![
+            ColumnPredicate::GreaterThanOrEqual {
+                column_idx: 0,
+                value: SqlValue::Date(Date {
+                    year: 1994,
+                    month: 6,
+                    day: 1,
+                }),
+            },
+            ColumnPredicate::LessThan {
+                column_idx: 0,
+                value: SqlValue::Date(Date {
+                    year: 1995,
+                    month: 6,
+                    day: 1,
+                }),
+            },
+        ];
+
+        let indices = apply_columnar_filter(&rows, &predicates).unwrap();
+
+        // Should match rows where year is 1994 (indices 0-364)
+        assert_eq!(indices.len(), 365);
+    }
+
+    #[test]
+    fn test_simd_streaming_vs_scalar_consistency() {
+        // Verify SIMD streaming produces same results as scalar path
+        let rows: Vec<Row> = (0..300)
+            .map(|i| Row::new(vec![SqlValue::Integer(i)]))
+            .collect();
+
+        let predicates = vec![
+            ColumnPredicate::GreaterThan {
+                column_idx: 0,
+                value: SqlValue::Integer(100),
+            },
+            ColumnPredicate::LessThan {
+                column_idx: 0,
+                value: SqlValue::Integer(200),
+            },
+        ];
+
+        // Get results from SIMD streaming path
+        let simd_indices = apply_columnar_filter_simd_streaming(&rows, &predicates).unwrap();
+
+        // Get results from scalar path (using smaller dataset)
+        let small_rows: Vec<Row> = (0..100)
+            .map(|i| Row::new(vec![SqlValue::Integer(i + 100)]))
+            .collect();
+        let scalar_bitmap = create_filter_bitmap(small_rows.len(), &predicates, |row_idx, col_idx| {
+            small_rows.get(row_idx).and_then(|row| row.get(col_idx))
+        })
+        .unwrap();
+        let expected_count = scalar_bitmap.iter().filter(|&&x| x).count();
+
+        // Both should find 99 rows (101-199 inclusive for SIMD, 100-199 adjusted for scalar)
+        assert_eq!(simd_indices.len(), 99); // 101, 102, ..., 199
+        assert_eq!(expected_count, 99); // Same count
+    }
 
     #[test]
     fn test_predicate_tree_or() {

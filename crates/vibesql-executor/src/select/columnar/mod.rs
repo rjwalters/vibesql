@@ -51,15 +51,15 @@ pub use batch::{ColumnarBatch, ColumnArray};
 pub use scan::ColumnarScan;
 pub use executor::execute_columnar_batch;
 pub use filter::{
-    apply_columnar_filter, create_filter_bitmap, create_filter_bitmap_tree,
-    evaluate_predicate_tree, extract_column_predicates, extract_predicate_tree, ColumnPredicate,
-    PredicateTree,
+    apply_columnar_filter, apply_columnar_filter_simd_streaming, create_filter_bitmap,
+    create_filter_bitmap_tree, evaluate_predicate_tree, extract_column_predicates,
+    extract_predicate_tree, ColumnPredicate, PredicateTree,
 };
 pub use aggregate::{columnar_group_by, columnar_group_by_batch, compute_multiple_aggregates, extract_aggregates, AggregateOp, AggregateSpec, AggregateSource};
 
 pub use aggregate::compute_aggregates_from_batch;
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
-pub use simd_filter::simd_filter_batch;
+pub use simd_filter::{simd_create_filter_mask, simd_filter_batch};
 pub use simd_join::columnar_hash_join_inner;
 
 use crate::errors::ExecutorError;
