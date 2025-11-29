@@ -15,6 +15,11 @@ use crate::{
 };
 use super::{graph, predicates, utils};
 
+/// Check if join profiling is enabled via environment variable
+fn join_profile_enabled() -> bool {
+    std::env::var("JOIN_PROFILE").is_ok()
+}
+
 /// Apply join reordering optimization to a multi-table join
 ///
 /// This function:
@@ -124,14 +129,24 @@ where
     }
 
     // Step 7: Use search to find optimal join order (with real statistics + selectivity)
+    let optimizer_start = std::time::Instant::now();
     let search = JoinOrderSearch::from_analyzer_with_predicates(&analyzer, database, &table_local_predicates);
     let optimal_order = search.find_optimal_order();
+    let optimizer_time = optimizer_start.elapsed();
 
     // Log the reordering decision (optional, for debugging)
     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
         eprintln!("[JOIN_REORDER] Original order: {:?}", table_names);
         eprintln!("[JOIN_REORDER] Optimal order:  {:?}", optimal_order);
         eprintln!("[JOIN_REORDER] Join conditions (including WHERE equijoins): {}", join_conditions.len());
+    }
+
+    // Profiling: Track times for each phase
+    let profile = join_profile_enabled();
+    let mut scan_times: Vec<(String, std::time::Duration)> = Vec::new();
+    let mut join_times: Vec<(String, std::time::Duration, usize, usize)> = Vec::new();
+    if profile {
+        eprintln!("[JOIN_PROFILE] Optimizer time: {:?}", optimizer_time);
     }
 
     // Step 8: Build a map from table name to TableRef for easy lookup
@@ -158,6 +173,7 @@ where
         })?;
 
         // Execute this table
+        let scan_start = std::time::Instant::now();
         let table_result = if table_ref.is_subquery {
             if let Some(subquery) = &table_ref.subquery {
                 execute_derived_table(subquery, table_name, execute_subquery)?
@@ -169,6 +185,11 @@ where
         } else {
             execute_table_scan(&table_ref.name, table_ref.alias.as_ref(), cte_results, database, where_clause, None, outer_row, outer_schema)?
         };
+        let scan_time = scan_start.elapsed();
+        if profile {
+            let scan_rows = table_result.data.as_slice().len();
+            scan_times.push((format!("{} ({} rows)", table_name, scan_rows), scan_time));
+        }
 
         // Record the column count for this table (using table_schemas to get column info)
         let col_count = if let Some((_, schema)) = table_result.schema.table_schemas.get(table_name) {
@@ -228,6 +249,9 @@ where
 
             // Note: Using default timeout context - proper timeout propagation is a future improvement
             let timeout_ctx = TimeoutContext::new_default();
+            let left_rows = prev_result.data.as_slice().len();
+            let right_rows = table_result.data.as_slice().len();
+            let join_start = std::time::Instant::now();
             result = Some(nested_loop_join(
                 prev_result,
                 table_result,
@@ -238,6 +262,11 @@ where
                 &applicable_conditions, // Pass only the applicable conditions for this join
                 &timeout_ctx,
             )?);
+            let join_time = join_start.elapsed();
+            let result_rows = result.as_ref().map(|r| r.data.as_slice().len()).unwrap_or(0);
+            if profile {
+                join_times.push((table_name.clone(), join_time, left_rows * right_rows, result_rows));
+            }
         } else {
             result = Some(table_result);
         }
@@ -253,6 +282,7 @@ where
     let column_permutation = utils::build_column_permutation(&table_names, &optimal_order, &table_column_counts);
 
     // Reorder rows according to the permutation
+    let reorder_start = std::time::Instant::now();
     let rows = result.data.into_rows();
     let reordered_rows: Vec<vibesql_storage::Row> = rows
         .into_iter()
@@ -264,6 +294,28 @@ where
             vibesql_storage::Row::new(new_values)
         })
         .collect();
+    let reorder_time = reorder_start.elapsed();
+
+    // Print profiling summary
+    if profile {
+        eprintln!("[JOIN_PROFILE] === Multi-way JOIN Timing Breakdown ===");
+        let total_scan: std::time::Duration = scan_times.iter().map(|(_, t)| *t).sum();
+        let total_join: std::time::Duration = join_times.iter().map(|(_, t, _, _)| *t).sum();
+        eprintln!("[JOIN_PROFILE] Table scans ({} tables):", scan_times.len());
+        for (name, time) in &scan_times {
+            eprintln!("[JOIN_PROFILE]   {} scan: {:?}", name, time);
+        }
+        eprintln!("[JOIN_PROFILE] Total scan time: {:?}", total_scan);
+        eprintln!("[JOIN_PROFILE] Joins ({} joins):", join_times.len());
+        for (name, time, cartesian, result_rows) in &join_times {
+            eprintln!("[JOIN_PROFILE]   Join {}: {:?} (cartesian={}, result={})",
+                name, time, cartesian, result_rows);
+        }
+        eprintln!("[JOIN_PROFILE] Total join time: {:?}", total_join);
+        eprintln!("[JOIN_PROFILE] Column reorder: {:?} ({} rows)", reorder_time, reordered_rows.len());
+        eprintln!("[JOIN_PROFILE] Grand total (scan+join+reorder): {:?}",
+            total_scan + total_join + reorder_time);
+    }
 
     // Build a new combined schema with tables in original order
     let new_schema = utils::build_reordered_schema(&result.schema, &table_names, &optimal_order);
