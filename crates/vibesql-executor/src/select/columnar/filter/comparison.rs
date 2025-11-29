@@ -124,7 +124,8 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
 /// Parse a date string in YYYY-MM-DD format
 ///
 /// Returns None if parsing fails, allowing callers to fall back to string comparison.
-fn parse_date_string(s: &str) -> Option<Date> {
+/// Used by both scalar comparison and SIMD filtering paths.
+pub(crate) fn parse_date_string(s: &str) -> Option<Date> {
     let parts: Vec<&str> = s.split('-').collect();
     if parts.len() != 3 {
         return None;
