@@ -337,11 +337,11 @@ pub fn columnar_group_by_batch(
     Ok(result_rows)
 }
 
-/// Compute a single aggregate for a group using SIMD with buffer reuse
+/// Compute a single aggregate for a group using vectorized operations with buffer reuse
 ///
-/// Uses masked SIMD operations on typed column arrays for optimal performance.
+/// Uses masked operations on typed column arrays for optimal performance.
+/// LLVM auto-vectorizes these operations when possible.
 /// The `effective_mask` buffer is reused across calls to avoid allocations.
-#[cfg(feature = "simd")]
 fn compute_group_aggregate_simd_reuse(
     batch: &ColumnarBatch,
     col_idx: usize,

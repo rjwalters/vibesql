@@ -308,7 +308,9 @@ fn main() {
     // Comparison benchmarks (if feature enabled)
     #[cfg(feature = "benchmark-comparison")]
     {
-        use tpcc::schema::{load_duckdb, load_sqlite};
+        use tpcc::schema::load_sqlite;
+        // Note: load_duckdb is not used because DuckDB is skipped for TPC-C
+        // DuckDB is an OLAP database not suited for OLTP workloads
 
         // SQLite benchmark
         eprintln!("\n\n--- SQLite Benchmark ---");
@@ -321,16 +323,15 @@ fn main() {
         let sqlite_results = run_benchmark(&sqlite_executor, transaction_type, scale_factor, duration, warmup, true);
         print_results(&sqlite_results, transaction_type);
 
-        // DuckDB benchmark
+        // DuckDB benchmark - SKIPPED
+        // DuckDB is an OLAP (analytics) database optimized for bulk operations and complex
+        // analytical queries. TPC-C is an OLTP (transactional) benchmark that requires many
+        // individual row inserts (~600,000+ for SF=1). DuckDB's architecture is not designed
+        // for this workload pattern, causing the loading phase to hang indefinitely.
+        // DuckDB performs excellently on TPC-H (analytics) where it completes all 22 queries.
         eprintln!("\n\n--- DuckDB Benchmark ---");
-        eprintln!("Loading DuckDB database...");
-        let duckdb_load_start = Instant::now();
-        let duckdb_conn = load_duckdb(scale_factor as f64);
-        eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
-
-        let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
-        let duckdb_results = run_benchmark(&duckdb_executor, transaction_type, scale_factor, duration, warmup, true);
-        print_results(&duckdb_results, transaction_type);
+        eprintln!("SKIPPED: DuckDB is an OLAP database not suited for OLTP workloads like TPC-C.");
+        eprintln!("         DuckDB excels at analytical queries (see TPC-H results).");
 
         // Summary comparison
         eprintln!("\n\n=== Comparison Summary ===");
@@ -353,7 +354,7 @@ fn main() {
 
         eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, compute_avg(&vibesql_results));
         eprintln!("{:<12} {:>12.2} {:>12.2}", "SQLite", sqlite_results.transactions_per_second, compute_avg(&sqlite_results));
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "DuckDB", duckdb_results.transactions_per_second, compute_avg(&duckdb_results));
+        eprintln!("{:<12} {:>12} {:>12}", "DuckDB", "N/A", "N/A");
     }
 
     #[cfg(not(feature = "benchmark-comparison"))]
