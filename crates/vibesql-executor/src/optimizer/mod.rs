@@ -5,7 +5,6 @@
 //! - WHERE clause predicate pushdown for efficient join evaluation
 //! - Cost-based predicate ordering for optimal filter performance
 //! - Centralized index planning and strategy selection
-//! - Unified predicate classification and index strategy selection
 //! - Subquery rewriting for IN predicate optimization
 //! - Adaptive execution model selection (row-oriented vs columnar)
 //! - Aggregate-aware query optimization for GROUP BY/HAVING performance
@@ -14,8 +13,6 @@ pub mod adaptive;
 pub mod aggregate_analysis;
 mod expressions;
 pub mod index_planner;
-pub mod index_strategy;
-pub mod predicate;
 mod predicate_plan;
 pub mod selectivity;
 pub mod subquery_rewrite;
