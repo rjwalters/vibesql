@@ -7,7 +7,11 @@
 // - build.rs: Hash table building (sequential, parallel, and composite key)
 // - inner.rs: INNER JOIN implementation (single and multi-column)
 // - outer.rs: LEFT/RIGHT/FULL OUTER JOIN implementations
-// - columnar.rs: Columnar hash join (high-performance, no row materialization)
+// - columnar/: Columnar hash join module (high-performance, no row materialization)
+//   - hash_table.rs: Hash table structures for single and multi-column keys
+//   - probe.rs: Probe phase implementations for inner and outer joins
+//   - output.rs: Result construction and column gathering
+//   - row_extract.rs: Row-to-column extraction utilities
 // - tests.rs: Comprehensive test suite
 
 mod build;
