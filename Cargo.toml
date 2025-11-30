@@ -409,6 +409,10 @@ path = "tests/parser/error_handling.rs"
 name = "dialect_tests"
 path = "tests/dialect/mod.rs"
 
+# Release profile with debug symbols for profiling
+[profile.release]
+debug = true              # Enable debug symbols for flamegraph profiling
+
 # Custom release profile optimized for WASM size
 [profile.wasm-release]
 inherits = "release"
@@ -417,6 +421,12 @@ lto = "fat"               # Link-Time Optimization
 codegen-units = 1         # Better optimization (slower compile, smaller binary)
 strip = true              # Remove debug symbols
 panic = "abort"           # Smaller panic handler
+
+# Profiling profile - release optimizations with maximum debug info
+[profile.profiling]
+inherits = "release"
+debug = 2                 # Full debug info for detailed profiling
+strip = false             # Keep all symbols
 
 [patch.crates-io]
 sqllogictest = { path = "crates/vibesql-sqllogictest" }

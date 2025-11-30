@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze
+.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
 
 # Default target - fully qualify and update the state of the repo
 # Runs build-all (including Python), all tests, benchmarks, and records results to database
@@ -29,6 +29,18 @@ help:
 	@echo "  make benchmark-tpcc     - Run TPC-C benchmark suite (60s duration)"
 	@echo "  make benchmark-tpcds    - Run TPC-DS benchmark suite (99 queries)"
 	@echo "  make benchmark-sysbench - Run Sysbench OLTP benchmarks"
+	@echo ""
+	@echo "Profiling targets:"
+	@echo "  make flamegraph-tpch    - Generate flamegraph for TPC-H queries"
+	@echo "  make flamegraph-tpcc    - Generate flamegraph for TPC-C transactions"
+	@echo "  make flamegraph-sysbench - Generate flamegraph for Sysbench OLTP"
+	@echo "  make flamegraph-select  - Generate flamegraph for point SELECT"
+	@echo "  make profile-query Q=X  - Profile specific TPC-H query (e.g., Q=Q6)"
+	@echo ""
+	@echo "Subsystem benchmarks:"
+	@echo "  make bench-storage      - Run storage subsystem benchmarks (B-tree, page cache)"
+	@echo "  make bench-executor     - Run executor benchmarks (expression eval, iterators)"
+	@echo "  make bench-types        - Run type system benchmarks (SqlValue operations)"
 	@echo ""
 	@echo "Analysis targets:"
 	@echo "  make analyze            - Show test and benchmark analysis"
@@ -192,3 +204,62 @@ clean:
 	rm -rf target/wheels
 	rm -f target/sqllogictest_*.json
 	rm -f /tmp/tpch_results.txt
+	rm -f flamegraph*.svg
+
+#
+# Profiling Targets
+#
+
+# Generate flamegraph for TPC-H queries
+flamegraph-tpch:
+	@echo "Generating flamegraph for TPC-H queries..."
+	@echo "Requires: cargo install flamegraph"
+	./scripts/flamegraph.sh tpch
+
+# Generate flamegraph for TPC-C transactions
+flamegraph-tpcc:
+	@echo "Generating flamegraph for TPC-C transactions..."
+	./scripts/flamegraph.sh tpcc
+
+# Generate flamegraph for Sysbench OLTP
+flamegraph-sysbench:
+	@echo "Generating flamegraph for Sysbench OLTP..."
+	./scripts/flamegraph.sh sysbench
+
+# Generate flamegraph for point SELECT operations
+flamegraph-select:
+	@echo "Generating flamegraph for SELECT operations..."
+	./scripts/flamegraph.sh select
+
+# Profile specific TPC-H query with detailed timing breakdown
+# Usage: make profile-query Q=Q6
+profile-query:
+ifndef Q
+	@echo "Usage: make profile-query Q=<query>"
+	@echo "Example: make profile-query Q=Q6"
+	@exit 1
+endif
+	@echo "Profiling TPC-H query: $(Q)"
+	./scripts/profile-query.sh --tpch $(Q)
+
+#
+# Subsystem Benchmarks
+#
+
+# Run storage subsystem benchmarks (B-tree operations, page cache)
+bench-storage:
+	@echo "Running storage subsystem benchmarks..."
+	cargo bench --package vibesql-storage --bench storage_bench 2>&1 | tee /tmp/storage_bench_results.txt || \
+		echo "Note: Storage benchmarks not yet implemented. Create benches/storage_bench.rs"
+
+# Run executor benchmarks (expression evaluation, iterator operations)
+bench-executor:
+	@echo "Running executor benchmarks..."
+	cargo bench --package vibesql-executor --bench iterator_execution -- --noplot 2>&1 | tee /tmp/executor_bench_results.txt
+	cargo bench --package vibesql-executor --bench columnar_execution -- --noplot 2>&1 | tee -a /tmp/executor_bench_results.txt
+
+# Run type system benchmarks (SqlValue construction, comparison, conversion)
+bench-types:
+	@echo "Running type system benchmarks..."
+	cargo bench --package vibesql-types --bench types_bench 2>&1 | tee /tmp/types_bench_results.txt || \
+		echo "Note: Types benchmarks not yet implemented. Create benches/types_bench.rs"
