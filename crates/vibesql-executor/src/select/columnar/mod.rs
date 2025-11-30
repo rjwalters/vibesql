@@ -59,8 +59,9 @@ pub use aggregate::{columnar_group_by, columnar_group_by_batch, compute_multiple
 
 pub use aggregate::compute_aggregates_from_batch;
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
-pub use simd_filter::{simd_create_filter_mask, simd_filter_batch};
+pub use simd_filter::{simd_create_filter_mask, simd_create_filter_mask_packed, simd_filter_batch};
 pub use simd_join::columnar_hash_join_inner;
+pub use simd_ops::PackedMask;
 
 use crate::errors::ExecutorError;
 use crate::schema::CombinedSchema;
