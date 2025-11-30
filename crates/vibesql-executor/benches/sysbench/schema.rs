@@ -1,7 +1,7 @@
 //! Sysbench Schema Creation and Data Loading
 //!
 //! This module provides schema creation and data loading functions for sysbench
-//! benchmark tables across multiple database engines (VibeSQL, SQLite, DuckDB).
+//! benchmark tables across multiple database engines (VibeSQL, SQLite, DuckDB, MySQL).
 
 use super::data::SysbenchData;
 use vibesql_storage::Database as VibeDB;
@@ -277,6 +277,7 @@ fn load_sbtest_mysql(conn: &mut PooledConn, data: &mut SysbenchData) {
         conn.exec_drop(
             "INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)",
             (id, k, &c, &pad),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }

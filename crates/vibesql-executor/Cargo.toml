@@ -184,5 +184,9 @@ name = "simd_filter_benchmark"
 harness = false
 
 [[bench]]
+name = "sysbench_benchmark"
+harness = false
+
+[[bench]]
 name = "lineitem_scan_profiling"
 harness = false
