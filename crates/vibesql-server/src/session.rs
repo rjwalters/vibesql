@@ -104,6 +104,7 @@ impl Session {
     }
 
     /// Create a new session with a shared statement cache
+    #[allow(dead_code)]
     pub fn with_cache(
         database: String,
         user: String,
@@ -130,6 +131,7 @@ impl Session {
     /// let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
     /// let result = session.execute_prepared(&stmt, &[SqlValue::Integer(1)])?;
     /// ```
+    #[allow(dead_code)]
     pub fn prepare(&self, sql: &str) -> Result<Arc<PreparedStatement>> {
         self.stmt_cache.get_or_prepare(sql).map_err(|e| anyhow::anyhow!("{}", e))
     }
@@ -138,6 +140,7 @@ impl Session {
     ///
     /// Binds the provided parameters to the prepared statement and executes it.
     /// This avoids the parsing overhead of the original SQL.
+    #[allow(dead_code)]
     pub fn execute_prepared(
         &mut self,
         stmt: &PreparedStatement,
@@ -165,6 +168,7 @@ impl Session {
     /// Execute a SQL query with parameters (convenience method)
     ///
     /// Combines prepare + execute_prepared in one call.
+    #[allow(dead_code)]
     pub fn execute_with_params(&mut self, sql: &str, params: &[SqlValue]) -> Result<ExecutionResult> {
         let prepared = self.prepare(sql)?;
         self.execute_prepared(&prepared, params)
@@ -252,11 +256,13 @@ impl Session {
     }
 
     /// Get prepared statement cache statistics
+    #[allow(dead_code)]
     pub fn cache_stats(&self) -> PreparedStatementCacheStats {
         self.stmt_cache.stats()
     }
 
     /// Clear the prepared statement cache
+    #[allow(dead_code)]
     pub fn clear_cache(&self) {
         self.stmt_cache.clear();
     }
