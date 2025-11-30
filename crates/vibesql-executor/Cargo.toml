@@ -46,6 +46,11 @@ cranelift-jit = { version = "0.126", optional = true }
 cranelift-module = { version = "0.126", optional = true }
 cranelift-native = { version = "0.126", optional = true }
 
+# jemalloc for better memory release characteristics in benchmarks
+# These must be in [dependencies] (not dev-dependencies) to be feature-gated
+tikv-jemallocator = { version = "0.6", optional = true }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
+
 [dev-dependencies]
 vibesql-parser = { version = "0.1.0", path = "../vibesql-parser" }
 criterion = { version = "0.7", features = ["html_reports"] }
@@ -79,6 +84,9 @@ native-columnar = []
 jit = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-native"]
 # Enable experimental SIMD-accelerated group-by aggregation (research/experimental)
 simd = []
+# Use jemalloc allocator for better memory release characteristics
+# Usage: cargo bench --features jemalloc -- tpcds_runner
+jemalloc = ["tikv-jemallocator", "tikv-jemalloc-ctl"]
 
 [[test]]
 name = "foreign_key_tests"
