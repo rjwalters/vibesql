@@ -49,26 +49,32 @@ pub(crate) fn execute_table_scan(
         // Use CTE result
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         let schema = CombinedSchema::from_table(effective_name, cte_schema.clone());
-        let mut rows = cte_rows.clone();
 
-        // Apply table-local predicates from WHERE clause using pre-computed plan
-        // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
+        // Optimize CTE access: use reference-based filtering to avoid cloning all rows (#3101)
+        // When predicates are applied, only clone rows that pass the filter.
+        // This is especially beneficial for CTEs referenced multiple times (like Q2's wswscs)
+        // where each reference filters to different subsets.
         let is_correlated = outer_row.is_some() || outer_schema.is_some();
-        if where_clause.is_some() && !is_correlated {
+        let rows = if where_clause.is_some() && !is_correlated {
             // Build predicate plan once for this table
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
-            rows = apply_table_local_predicates(
-                rows,
+            // Use ref-based filtering: iterates over cte_rows by reference,
+            // only cloning rows that pass all predicates
+            apply_table_local_predicates_ref(
+                cte_rows,
                 schema.clone(),
                 &predicate_plan,
                 table_name,
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
-            )?;
-        }
+            )?
+        } else {
+            // No filtering needed - must clone all rows for downstream processing
+            cte_rows.clone()
+        };
 
         return Ok(super::FromResult::from_rows(schema, rows));
     }
