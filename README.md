@@ -111,8 +111,8 @@ make logs           # Follow full output
 
 # Individual targets
 make build          # Build all crates
-make test           # Run all tests
-make benchmark      # Run TPC-H/TPC-C/TPC-DS benchmarks
+make test           # Run all tests (unit + integration + sqllogictest)
+make benchmark      # Run TPC-H/TPC-C/TPC-DS/Sysbench benchmarks
 make all-fg         # Run everything in foreground (blocking)
 make help           # Show all targets
 ```
