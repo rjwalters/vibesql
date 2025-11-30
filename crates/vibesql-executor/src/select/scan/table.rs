@@ -70,8 +70,8 @@ pub(crate) fn execute_table_scan(
                 None,
             )?
         } else {
-            // No filtering needed - cheap Arc::clone() instead of deep Vec clone
-            // This is a major memory optimization for CTE-heavy queries like TPC-DS Q2
+            // No filtering needed - clone CTE rows directly
+            // The main memory optimization from Arc is in CTE context merging (execute.rs:97)
             cte_rows.as_ref().clone()
         };
 
