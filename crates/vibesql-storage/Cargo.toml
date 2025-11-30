@@ -53,6 +53,11 @@ web-sys = { version = "0.3", features = [
 [dev-dependencies]
 vibesql-parser = { version = "0.1.0", path = "../vibesql-parser" }
 tempfile = "3.8"
+criterion = { version = "0.7", features = ["html_reports"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+[[bench]]
+name = "storage_bench"
+harness = false
