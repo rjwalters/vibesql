@@ -100,11 +100,26 @@ impl SelectExecutor<'_> {
                 simple::evaluate_no_aggregates(expr, group_rows, evaluator)
             }
 
-            // Window functions and match against require special handling
-            vibesql_ast::Expression::WindowFunction { .. } => {
-                Err(ExecutorError::UnsupportedExpression(
-                    "Window functions not supported in aggregate context".to_string(),
-                ))
+            // Window functions in aggregate context: evaluate the inner aggregate argument
+            // The outer window function will be applied after aggregation completes
+            // Example: SUM(SUM(x)) OVER (PARTITION BY y) - we evaluate SUM(x) here
+            vibesql_ast::Expression::WindowFunction { function, .. } => {
+                // Extract the aggregate argument from the window function
+                let args = match function {
+                    vibesql_ast::WindowFunctionSpec::Aggregate { args, .. } => args,
+                    vibesql_ast::WindowFunctionSpec::Ranking { args, .. } => args,
+                    vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+                };
+
+                // If the window function has an argument, evaluate it (may contain aggregates)
+                // This handles cases like SUM(SUM(x)) OVER() where the inner SUM needs evaluation
+                if !args.is_empty() {
+                    self.evaluate_with_aggregates(&args[0], group_rows, group_key, evaluator)
+                } else {
+                    // Window functions like ROW_NUMBER() have no arguments
+                    // Return a placeholder - actual value will be computed in window phase
+                    Ok(vibesql_types::SqlValue::Null)
+                }
             }
             vibesql_ast::Expression::MatchAgainst { .. } => {
                 Err(ExecutorError::UnsupportedExpression(
