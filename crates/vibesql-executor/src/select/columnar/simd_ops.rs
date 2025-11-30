@@ -1905,29 +1905,6 @@ pub fn and_masks_inplace(mask: &mut [bool], other: &[bool]) {
     }
 }
 
-/// Create a combined filter mask from multiple predicates using in-place AND.
-///
-/// Returns a mask where `result[i] = pred1[i] && pred2[i] && ...`
-/// This is more efficient than repeatedly allocating and ANDing masks.
-///
-/// # Arguments
-/// * `masks` - Iterator of boolean mask slices to combine
-/// * `len` - Expected length of each mask
-///
-/// # Returns
-/// Combined mask with all predicates ANDed together
-#[inline]
-pub fn combine_masks<'a>(masks: impl Iterator<Item = &'a [bool]>, len: usize) -> Vec<bool> {
-    let mut result = vec![true; len];
-
-    for mask in masks {
-        assert_eq!(mask.len(), len, "all masks must have same length");
-        and_masks_inplace(&mut result, mask);
-    }
-
-    result
-}
-
 // ============================================================================
 // TESTS
 // ============================================================================
