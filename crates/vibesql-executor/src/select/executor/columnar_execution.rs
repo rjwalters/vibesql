@@ -499,7 +499,7 @@ impl SelectExecutor<'_> {
                         // Check if this expression can be computed using a cached sub-expression
                         // For TPC-H Q1: E2 = E1 * (1 + l_tax) where E1 is already computed
                         let expr_col = if let Some((sub_expr_col, remaining_expr)) =
-                            find_cached_subexpression(expr, &expr_cache, &expanded)
+                            find_cached_subexpression(expr, &expr_cache)
                         {
                             log::debug!(
                                 "GROUP BY CSE: using cached sub-expression from column {} for compound expression",
@@ -1231,7 +1231,6 @@ fn hash_expression_recursive<H: std::hash::Hasher>(expr: &Expression, hasher: &m
 fn find_cached_subexpression(
     expr: &Expression,
     expr_cache: &std::collections::HashMap<u64, usize>,
-    _batch: &columnar::ColumnarBatch,
 ) -> Option<(usize, Expression)> {
     // Only handle binary multiply operations for now (most common pattern)
     if let Expression::BinaryOp {
@@ -1256,7 +1255,7 @@ fn find_cached_subexpression(
 
         // Recursively check if left or right contains a cached sub-expression
         // This handles nested cases like: (A * B) * C where A * B is cached
-        if let Some((cached_col, remaining)) = find_cached_subexpression(left, expr_cache, _batch) {
+        if let Some((cached_col, remaining)) = find_cached_subexpression(left, expr_cache) {
             // Build: remaining * right
             return Some((
                 cached_col,
@@ -1268,7 +1267,7 @@ fn find_cached_subexpression(
             ));
         }
 
-        if let Some((cached_col, remaining)) = find_cached_subexpression(right, expr_cache, _batch) {
+        if let Some((cached_col, remaining)) = find_cached_subexpression(right, expr_cache) {
             // Build: left * remaining
             return Some((
                 cached_col,
