@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-sequential test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -68,10 +68,11 @@ help:
 	@echo "  make build-python       - Build Python bindings wheel (via maturin)"
 	@echo ""
 	@echo "Test targets:"
-	@echo "  make test               - Run all tests (workspace + sqllogictest)"
+	@echo "  make test               - Run all tests in PARALLEL (workspace + sqllogictest)"
+	@echo "  make test-sequential    - Run all tests sequentially (for debugging)"
 	@echo "  make test-unit          - Run unit tests only (lib tests)"
 	@echo "  make test-workspace     - Run all workspace tests (unit + integration)"
-	@echo "  make test-sqllogictest  - Run SQLLogicTest suite (parallel, 8 workers)"
+	@echo "  make test-sqllogictest  - Run SQLLogicTest suite (parallel workers)"
 	@echo ""
 	@echo "Benchmark targets:"
 	@echo "  make benchmark          - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
@@ -132,8 +133,35 @@ build-all: build build-python
 # Test Targets
 #
 
-# Run all tests (workspace + sqllogictest) with analysis
-test: test-workspace test-sqllogictest analyze-tests
+# Run all tests (workspace + sqllogictest) in PARALLEL with analysis
+test:
+	@echo "Running tests in parallel..."
+	@echo "  - Workspace tests (cargo test)"
+	@echo "  - SQLLogicTest suite (623 files)"
+	@mkdir -p /tmp/vibesql-test-logs
+	@$(MAKE) test-workspace > /tmp/vibesql-test-logs/workspace.log 2>&1 & \
+		WS_PID=$$!; \
+		$(MAKE) test-sqllogictest > /tmp/vibesql-test-logs/sqllogictest.log 2>&1 & \
+		SLT_PID=$$!; \
+		echo "Started workspace tests (PID: $$WS_PID) and SQLLogicTest (PID: $$SLT_PID)"; \
+		WS_EXIT=0; SLT_EXIT=0; \
+		wait $$WS_PID || WS_EXIT=$$?; \
+		wait $$SLT_PID || SLT_EXIT=$$?; \
+		echo ""; \
+		echo "=== Workspace Tests ==="; \
+		tail -20 /tmp/vibesql-test-logs/workspace.log; \
+		echo ""; \
+		echo "=== SQLLogicTest ==="; \
+		tail -20 /tmp/vibesql-test-logs/sqllogictest.log; \
+		if [ $$WS_EXIT -ne 0 ] || [ $$SLT_EXIT -ne 0 ]; then \
+			echo ""; \
+			echo "FAILED: workspace=$$WS_EXIT sqllogictest=$$SLT_EXIT"; \
+			exit 1; \
+		fi
+	@$(MAKE) analyze-tests
+
+# Run tests sequentially (for debugging)
+test-sequential: test-workspace test-sqllogictest analyze-tests
 
 # Run unit tests only (lib tests)
 test-unit:
