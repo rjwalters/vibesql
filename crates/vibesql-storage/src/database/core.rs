@@ -359,6 +359,107 @@ impl Database {
         Ok(total_inserted)
     }
 
+    /// Update a single row by primary key value (direct API, no SQL parsing)
+    ///
+    /// This method provides a high-performance update path that bypasses SQL parsing,
+    /// making it suitable for benchmarking and performance-critical code paths.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table
+    /// * `pk_value` - Primary key value to match (single column PK only)
+    /// * `column_updates` - List of (column_name, new_value) pairs to update
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Row was found and updated
+    /// * `Ok(false)` - Row was not found (no error)
+    /// * `Err(StorageError)` - Table not found, column not found, or constraint violation
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Update column 'name' for row with id=5
+    /// let updated = db.update_row_by_pk(
+    ///     "users",
+    ///     SqlValue::Integer(5),
+    ///     vec![("name", SqlValue::Varchar("Alice".into()))],
+    /// )?;
+    /// ```
+    pub fn update_row_by_pk(
+        &mut self,
+        table_name: &str,
+        pk_value: vibesql_types::SqlValue,
+        column_updates: Vec<(&str, vibesql_types::SqlValue)>,
+    ) -> Result<bool, StorageError> {
+        // First phase: read data (immutable borrow)
+        let (row_index, old_row, schema, resolved_name) = {
+            // Get table using existing lookup logic (handles schema prefixes)
+            let table = self.get_table(table_name).ok_or_else(|| {
+                StorageError::TableNotFound(table_name.to_string())
+            })?;
+
+            // Look up row by PK
+            let pk_index = table.primary_key_index().ok_or_else(|| {
+                StorageError::Other("Table has no primary key index".to_string())
+            })?;
+
+            let row_index = match pk_index.get(&vec![pk_value.clone()]) {
+                Some(&idx) => idx,
+                None => return Ok(false), // Row not found
+            };
+
+            // Get old row and schema
+            let old_row = table.scan()[row_index].clone();
+            let schema = table.schema.clone();
+            let resolved_name = schema.name.clone();
+
+            (row_index, old_row, schema, resolved_name)
+        };
+
+        // Second phase: apply updates
+        let mut new_row = old_row.clone();
+        let mut changed_columns = std::collections::HashSet::new();
+
+        for (col_name, new_value) in &column_updates {
+            let col_index = schema.get_column_index(col_name).ok_or_else(|| {
+                StorageError::ColumnNotFound {
+                    column_name: col_name.to_string(),
+                    table_name: resolved_name.clone(),
+                }
+            })?;
+
+            // Check NOT NULL constraint
+            let column = &schema.columns[col_index];
+            if !column.nullable && *new_value == vibesql_types::SqlValue::Null {
+                return Err(StorageError::NullConstraintViolation {
+                    column: col_name.to_string(),
+                });
+            }
+
+            new_row.set(col_index, new_value.clone())?;
+            changed_columns.insert(col_index);
+        }
+
+        // Third phase: write data (mutable borrow)
+        let table_mut = self.get_table_mut(table_name).unwrap();
+        table_mut.update_row_selective(row_index, new_row.clone(), &changed_columns)?;
+
+        // Update user-defined indexes
+        self.operations.update_indexes_for_update(
+            &self.catalog,
+            &resolved_name,
+            &old_row,
+            &new_row,
+            row_index,
+        );
+
+        // Invalidate columnar cache
+        self.columnar_cache.invalidate(&resolved_name);
+
+        Ok(true)
+    }
+
     /// List all table names
     pub fn list_tables(&self) -> Vec<String> {
         self.catalog.list_tables()

@@ -10,13 +10,21 @@
 //! The main `UpdateExecutor` orchestrates these components to implement SQL's two-phase
 //! update semantics: first collect all updates evaluating against original rows, then
 //! apply all updates atomically.
+//!
+//! ## Performance Optimizations
+//!
+//! The executor includes a fast path for single-row primary key updates that:
+//! - Skips trigger checks when no triggers exist for the table
+//! - Avoids schema cloning
+//! - Uses single-pass execution instead of two-phase
+//! - Minimizes allocations
 
 mod constraints;
 mod foreign_keys;
 mod row_selector;
 mod value_updater;
 
-use vibesql_ast::UpdateStmt;
+use vibesql_ast::{BinaryOperator, Expression, UpdateStmt};
 use constraints::ConstraintValidator;
 use foreign_keys::ForeignKeyValidator;
 use row_selector::RowSelector;
@@ -140,8 +148,37 @@ impl UpdateExecutor {
         // Check UPDATE privilege on the table
         PrivilegeChecker::check_update(database, &stmt.table_name)?;
 
-        // Fire BEFORE STATEMENT triggers (unless we're already inside a trigger context)
-        if trigger_context.is_none() {
+        // Step 1: Get table schema - clone it to avoid borrow issues
+        // We need owned schema because we take mutable references to database later
+        let schema_owned: vibesql_catalog::TableSchema = if let Some(s) = schema {
+            s.clone()
+        } else {
+            database
+                .catalog
+                .get_table(&stmt.table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
+                .clone()
+        };
+        let schema = &schema_owned;
+
+        // Check if table has UPDATE triggers (check once, use multiple times)
+        let has_triggers = trigger_context.is_none()
+            && database
+                .catalog
+                .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Update(None)))
+                .next()
+                .is_some();
+
+        // Try fast path for simple single-row PK updates without triggers
+        // Conditions: no triggers, no procedural context, simple WHERE pk = value
+        if !has_triggers && procedural_context.is_none() && trigger_context.is_none() {
+            if let Some(result) = Self::try_fast_path_update(stmt, database, schema)? {
+                return Ok(result);
+            }
+        }
+
+        // Fire BEFORE STATEMENT triggers only if triggers exist
+        if has_triggers {
             crate::TriggerFirer::execute_before_statement_triggers(
                 database,
                 &stmt.table_name,
@@ -149,19 +186,8 @@ impl UpdateExecutor {
             )?;
         }
 
-        // Step 1: Get table schema - use provided schema or fetch from catalog
-        let schema = if let Some(s) = schema {
-            s
-        } else {
-            database
-                .catalog
-                .get_table(&stmt.table_name)
-                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
-        };
-
-        // Clone schema for PK checking (to avoid borrow checker issues)
-        let schema_clone = schema.clone();
-        let pk_indices_clone = schema_clone.get_primary_key_indices();
+        // Get PK indices without cloning entire schema
+        let pk_indices = schema.get_primary_key_indices();
 
         // Step 2: Get table from storage (for reading rows)
         let table = database
@@ -206,10 +232,10 @@ impl UpdateExecutor {
                 value_updater.apply_assignments(&row, &stmt.assignments)?;
 
             // Check if primary key is being updated
-            let updates_pk = if let Some(ref pk_indices) = pk_indices_clone {
+            let updates_pk = if let Some(ref pk_idx) = pk_indices {
                 stmt.assignments.iter().any(|a| {
                     let col_index = schema.get_column_index(&a.column).unwrap();
-                    pk_indices.contains(&col_index)
+                    pk_idx.contains(&col_index)
                 })
             } else {
                 false
@@ -259,14 +285,16 @@ impl UpdateExecutor {
         }
 
         // Fire BEFORE UPDATE triggers for all rows (before database mutation)
-        for (_row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
-            crate::TriggerFirer::execute_before_triggers(
-                database,
-                &stmt.table_name,
-                vibesql_ast::TriggerEvent::Update(None),
-                Some(old_row),
-                Some(new_row),
-            )?;
+        if has_triggers {
+            for (_row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
+                crate::TriggerFirer::execute_before_triggers(
+                    database,
+                    &stmt.table_name,
+                    vibesql_ast::TriggerEvent::Update(None),
+                    Some(old_row),
+                    Some(new_row),
+                )?;
+            }
         }
 
         // Step 8: Apply all updates (after evaluation phase completes)
@@ -288,14 +316,16 @@ impl UpdateExecutor {
         }
 
         // Fire AFTER UPDATE triggers for all updated rows
-        for (_index, old_row, new_row) in &index_updates {
-            crate::TriggerFirer::execute_after_triggers(
-                database,
-                &stmt.table_name,
-                vibesql_ast::TriggerEvent::Update(None),
-                Some(old_row),
-                Some(new_row),
-            )?;
+        if has_triggers {
+            for (_index, old_row, new_row) in &index_updates {
+                crate::TriggerFirer::execute_after_triggers(
+                    database,
+                    &stmt.table_name,
+                    vibesql_ast::TriggerEvent::Update(None),
+                    Some(old_row),
+                    Some(new_row),
+                )?;
+            }
         }
 
         // Now update user-defined indexes after releasing table borrow
@@ -308,8 +338,8 @@ impl UpdateExecutor {
             database.invalidate_columnar_cache(&stmt.table_name);
         }
 
-        // Fire AFTER STATEMENT triggers (unless we're already inside a trigger context)
-        if trigger_context.is_none() {
+        // Fire AFTER STATEMENT triggers only if triggers exist
+        if has_triggers {
             crate::TriggerFirer::execute_after_statement_triggers(
                 database,
                 &stmt.table_name,
@@ -318,6 +348,208 @@ impl UpdateExecutor {
         }
 
         Ok(update_count)
+    }
+
+    /// Try to execute UPDATE via fast path for simple single-row PK updates.
+    /// Returns Some(count) if fast path succeeded, None if we should use normal path.
+    ///
+    /// Fast path conditions:
+    /// - WHERE clause is simple equality on single-column primary key
+    /// - No foreign keys to validate
+    /// - Table has a primary key index
+    fn try_fast_path_update(
+        stmt: &UpdateStmt,
+        database: &mut Database,
+        schema: &vibesql_catalog::TableSchema,
+    ) -> Result<Option<usize>, ExecutorError> {
+        // Check if we have a simple PK lookup in WHERE clause
+        let where_clause = match &stmt.where_clause {
+            Some(vibesql_ast::WhereClause::Condition(expr)) => expr,
+            _ => return Ok(None), // No WHERE or CURRENT OF - use normal path
+        };
+
+        // Extract PK value from WHERE clause
+        let pk_value = match Self::extract_pk_equality(where_clause, schema) {
+            Some(val) => val,
+            None => return Ok(None), // Not a simple PK equality
+        };
+
+        // Get table and check for PK index
+        let table = database
+            .get_table(&stmt.table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+        let pk_index = match table.primary_key_index() {
+            Some(idx) => idx,
+            None => return Ok(None), // No PK index
+        };
+
+        // Look up row by PK
+        let row_index = match pk_index.get(&pk_value) {
+            Some(&idx) => idx,
+            None => return Ok(Some(0)), // Row not found - 0 rows updated
+        };
+
+        // Skip fast path if table has foreign keys (need validation)
+        if !schema.foreign_keys.is_empty() {
+            return Ok(None);
+        }
+
+        // Skip fast path if table has unique constraints (need validation)
+        if !schema.unique_constraints.is_empty() {
+            return Ok(None);
+        }
+
+        // Check if we're updating PK columns - if so, check for CASCADE requirements
+        if let Some(ref pk_idx) = schema.get_primary_key_indices() {
+            let updates_pk = stmt.assignments.iter().any(|a| {
+                schema
+                    .get_column_index(&a.column)
+                    .map(|idx| pk_idx.contains(&idx))
+                    .unwrap_or(false)
+            });
+            if updates_pk {
+                // Check if ANY table in database has foreign keys (might need CASCADE)
+                let has_any_fks = database.catalog.list_tables().iter().any(|table_name| {
+                    database
+                        .catalog
+                        .get_table(table_name)
+                        .map(|s| !s.foreign_keys.is_empty())
+                        .unwrap_or(false)
+                });
+                if has_any_fks {
+                    return Ok(None); // Use normal path for CASCADE handling
+                }
+            }
+        }
+
+        // Get the old row
+        let old_row = table.scan()[row_index].clone();
+
+        // Create evaluator for expression evaluation
+        let evaluator = ExpressionEvaluator::with_database(schema, database);
+
+        // Apply assignments
+        let mut new_row = old_row.clone();
+        let mut changed_columns = std::collections::HashSet::new();
+
+        for assignment in &stmt.assignments {
+            let col_index = schema.get_column_index(&assignment.column).ok_or_else(|| {
+                ExecutorError::ColumnNotFound {
+                    column_name: assignment.column.clone(),
+                    table_name: stmt.table_name.clone(),
+                    searched_tables: vec![stmt.table_name.clone()],
+                    available_columns: schema.columns.iter().map(|c| c.name.clone()).collect(),
+                }
+            })?;
+
+            let new_value = match &assignment.value {
+                vibesql_ast::Expression::Default => {
+                    let column = &schema.columns[col_index];
+                    if let Some(default_expr) = &column.default_value {
+                        match default_expr {
+                            vibesql_ast::Expression::Literal(lit) => lit.clone(),
+                            _ => return Ok(None), // Complex default - use normal path
+                        }
+                    } else {
+                        vibesql_types::SqlValue::Null
+                    }
+                }
+                _ => evaluator.eval(&assignment.value, &old_row)?,
+            };
+
+            new_row
+                .set(col_index, new_value)
+                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+            changed_columns.insert(col_index);
+        }
+
+        // Quick constraint validation (NOT NULL only for changed columns)
+        for &col_idx in &changed_columns {
+            let column = &schema.columns[col_idx];
+            if !column.nullable && new_row.values[col_idx] == vibesql_types::SqlValue::Null {
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "NOT NULL constraint violation: column '{}' cannot be NULL",
+                    column.name
+                )));
+            }
+        }
+
+        // Check PK uniqueness if updating PK columns
+        let pk_indices = schema.get_primary_key_indices();
+        if let Some(ref pk_idx) = pk_indices {
+            let updates_pk = changed_columns.iter().any(|c| pk_idx.contains(c));
+            if updates_pk {
+                // PK is being updated - need to check uniqueness
+                let new_pk: Vec<_> = pk_idx.iter().map(|&i| new_row.values[i].clone()).collect();
+                if let Some(pk_index) = table.primary_key_index() {
+                    if let Some(&existing_idx) = pk_index.get(&new_pk) {
+                        if existing_idx != row_index {
+                            return Err(ExecutorError::ConstraintViolation(format!(
+                                "PRIMARY KEY constraint violation: duplicate key {:?} on {}",
+                                new_pk, stmt.table_name
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply the update directly
+        let table_mut = database
+            .get_table_mut(&stmt.table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+        table_mut
+            .update_row_selective(row_index, new_row.clone(), &changed_columns)
+            .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+        // Update user-defined indexes
+        database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, row_index);
+
+        // Invalidate columnar cache
+        database.invalidate_columnar_cache(&stmt.table_name);
+
+        Ok(Some(1))
+    }
+
+    /// Extract primary key value from a simple equality expression.
+    /// Returns Some(pk_values) if expression is `pk_column = literal` or `literal = pk_column`.
+    fn extract_pk_equality(
+        expr: &Expression,
+        schema: &vibesql_catalog::TableSchema,
+    ) -> Option<Vec<vibesql_types::SqlValue>> {
+        match expr {
+            Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
+                // Check: column = literal
+                if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                    (left.as_ref(), right.as_ref())
+                {
+                    if let Some(pk_indices) = schema.get_primary_key_indices() {
+                        if let Some(col_index) = schema.get_column_index(column) {
+                            if pk_indices.len() == 1 && pk_indices[0] == col_index {
+                                return Some(vec![value.clone()]);
+                            }
+                        }
+                    }
+                }
+
+                // Check: literal = column
+                if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                    (left.as_ref(), right.as_ref())
+                {
+                    if let Some(pk_indices) = schema.get_primary_key_indices() {
+                        if let Some(col_index) = schema.get_column_index(column) {
+                            if pk_indices.len() == 1 && pk_indices[0] == col_index {
+                                return Some(vec![value.clone()]);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        None
     }
 }
 

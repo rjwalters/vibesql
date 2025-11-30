@@ -120,20 +120,45 @@ fn vibesql_insert(db: &mut VibeDB, id: i64, k: i64, c: &str, pad: &str) {
 
 /// Execute an update query on VibeSQL (update non-indexed column)
 fn vibesql_update_non_index(db: &mut VibeDB, id: i64, c: &str) {
-    let sql = format!("UPDATE sbtest1 SET c = '{}' WHERE id = {}", c, id);
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Update(update) = stmt {
-        vibesql_executor::UpdateExecutor::execute(&update, db).unwrap();
-    }
+    // Use direct API (bypasses SQL parsing for fair comparison with prepared statements)
+    db.update_row_by_pk(
+        "SBTEST1",
+        SqlValue::Integer(id),
+        vec![("c", SqlValue::Varchar(c.to_string()))],
+    )
+    .unwrap();
 }
 
 /// Execute an update query on VibeSQL (update indexed column k)
 fn vibesql_update_index(db: &mut VibeDB, id: i64) {
-    let sql = format!("UPDATE sbtest1 SET k = k + 1 WHERE id = {}", id);
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Update(update) = stmt {
-        vibesql_executor::UpdateExecutor::execute(&update, db).unwrap();
-    }
+    // For k = k + 1, we need to read current value first then update
+    // Use PK index for O(1) lookup
+    let (row_index, current_k, row_clone) = {
+        let table = db.get_table("SBTEST1").unwrap();
+        let pk_index = table.primary_key_index().unwrap();
+
+        if let Some(&idx) = pk_index.get(&vec![SqlValue::Integer(id)]) {
+            let row = &table.scan()[idx];
+            // k is at index 1 (id=0, k=1, c=2, pad=3)
+            if let SqlValue::Integer(k) = &row.values[1] {
+                (idx, *k, row.clone())
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+    };
+
+    let new_k = current_k + 1;
+    // Use direct table update
+    let table_mut = db.get_table_mut("SBTEST1").unwrap();
+    let mut new_row = row_clone;
+    new_row.set(1, SqlValue::Integer(new_k)).unwrap();
+    let mut changed = std::collections::HashSet::new();
+    changed.insert(1);
+    table_mut.update_row_selective(row_index, new_row, &changed).unwrap();
+    db.invalidate_columnar_cache("SBTEST1");
 }
 
 /// Execute a delete query on VibeSQL
