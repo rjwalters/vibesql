@@ -94,7 +94,7 @@ const RANDOM_POINTS_COUNT: usize = 10;
 // Helper Functions - VibeSQL
 // =============================================================================
 
-/// Execute a point select query on VibeSQL
+/// Execute a point select query on VibeSQL (SQL path - includes parsing overhead)
 fn vibesql_point_select(db: &VibeDB, id: i64) -> usize {
     let sql = format!("SELECT c FROM sbtest1 WHERE id = {}", id);
     let stmt = Parser::parse_sql(&sql).unwrap();
@@ -104,6 +104,16 @@ fn vibesql_point_select(db: &VibeDB, id: i64) -> usize {
         result.len()
     } else {
         0
+    }
+}
+
+/// Execute a point select using direct PK lookup (bypasses SQL parsing)
+/// This is the optimized path that should be used for point SELECT performance
+fn vibesql_point_select_direct(db: &VibeDB, id: i64) -> usize {
+    // Column index 2 is 'c' (after id=0, k=1, c=2, pad=3)
+    match db.get_column_by_pk("SBTEST1", &SqlValue::Integer(id), 2) {
+        Ok(Some(_)) => 1,
+        _ => 0,
     }
 }
 
@@ -474,7 +484,7 @@ fn generate_pad_string() -> String {
 // Point Select Benchmarks
 // =============================================================================
 
-/// Benchmark oltp_point_select on VibeSQL
+/// Benchmark oltp_point_select on VibeSQL (SQL path with parsing)
 ///
 /// This test measures single-row lookup by primary key, which is the most
 /// common OLTP operation. It tests index lookup performance.
@@ -489,6 +499,27 @@ fn benchmark_point_select_vibesql(c: &mut Criterion) {
         b.iter(|| {
             let id = rng.random_range(1..=TABLE_SIZE as i64);
             black_box(vibesql_point_select(&db, id))
+        })
+    });
+
+    group.finish();
+}
+
+/// Benchmark oltp_point_select on VibeSQL using direct PK lookup (no SQL parsing)
+///
+/// This test measures the optimized path that bypasses SQL parsing entirely,
+/// providing a fair comparison with SQLite's prepared statement cache.
+fn benchmark_point_select_vibesql_direct(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sysbench_point_select");
+    group.measurement_time(Duration::from_secs(10));
+
+    let db = load_vibesql(TABLE_SIZE);
+    let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+    group.bench_function(BenchmarkId::new("vibesql_direct", TABLE_SIZE), |b| {
+        b.iter(|| {
+            let id = rng.random_range(1..=TABLE_SIZE as i64);
+            black_box(vibesql_point_select_direct(&db, id))
         })
     });
 
@@ -1340,6 +1371,7 @@ fn benchmark_select_random_ranges_duckdb(c: &mut Criterion) {
 criterion_group!(
     benches,
     benchmark_point_select_vibesql,
+    benchmark_point_select_vibesql_direct,
     benchmark_insert_vibesql,
     benchmark_delete_vibesql,
     benchmark_update_index_vibesql,
@@ -1356,6 +1388,7 @@ criterion_group!(
 criterion_group!(
     benches,
     benchmark_point_select_vibesql,
+    benchmark_point_select_vibesql_direct,
     benchmark_point_select_sqlite,
     benchmark_point_select_duckdb,
     benchmark_insert_vibesql,
