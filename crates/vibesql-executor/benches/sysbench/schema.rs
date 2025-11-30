@@ -82,7 +82,8 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
     // Using Varchar for string columns for compatibility with SQL UPDATE statements
     // (the SQL parser produces SqlValue::Varchar for string literals)
     // Note: default values are handled at insert time, not schema level
-    db.create_table(TableSchema::new(
+    // Use with_primary_key to create a proper PK constraint for efficient lookups
+    db.create_table(TableSchema::with_primary_key(
         "SBTEST1".to_string(),
         vec![
             ColumnSchema {
@@ -110,6 +111,7 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 default_value: None,
             },
         ],
+        vec!["id".to_string()], // PRIMARY KEY on id column
     ))
     .unwrap();
 }
