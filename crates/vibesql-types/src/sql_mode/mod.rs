@@ -79,24 +79,108 @@ impl std::str::FromStr for SqlMode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // First try simple mode names
         match s.to_lowercase().as_str() {
-            "mysql" => Ok(SqlMode::MySQL {
-                flags: MySqlModeFlags::default(),
-            }),
+            "mysql" => {
+                return Ok(SqlMode::MySQL {
+                    flags: MySqlModeFlags::default(),
+                })
+            }
             // MySQL mode with SQLite division semantics
             // This is used by SQLLogicTest where MySQL syntax is needed (e.g., CAST...AS SIGNED)
             // but division should behave like SQLite (INTEGER / INTEGER → INTEGER)
             // because the expected results were generated using SQLite.
-            "mysql_slt" => Ok(SqlMode::MySQL {
-                flags: MySqlModeFlags::with_sqlite_division_semantics(),
-            }),
-            "sqlite" => Ok(SqlMode::SQLite),
-            _ => Err(format!(
-                "Unknown SQL mode: '{}'. Valid modes: mysql, mysql_slt, sqlite",
-                s
-            )),
+            "mysql_slt" => {
+                return Ok(SqlMode::MySQL {
+                    flags: MySqlModeFlags::with_sqlite_division_semantics(),
+                })
+            }
+            "sqlite" => return Ok(SqlMode::SQLite),
+            _ => {}
+        }
+
+        // Try parsing as MySQL comma-separated mode flags
+        // e.g., "STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,..."
+        // Also handles leading/trailing commas and empty segments
+        parse_mysql_mode_flags(s)
+    }
+}
+
+/// Parse MySQL comma-separated mode flags
+///
+/// This handles strings like:
+/// - "STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+/// - ",STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,..." (leading comma from REPLACE() removing first mode)
+/// - "STRICT_TRANS_TABLES," (trailing comma)
+/// - "MODE1,,MODE2" (empty segments)
+///
+/// MySQL mode flags we recognize and map:
+/// - STRICT_TRANS_TABLES → strict_mode
+/// - PIPES_AS_CONCAT → pipes_as_concat
+/// - ANSI_QUOTES → ansi_quotes
+/// - ANSI → pipes_as_concat + ansi_quotes
+///
+/// Other MySQL modes (NO_ZERO_IN_DATE, NO_ZERO_DATE, ERROR_FOR_DIVISION_BY_ZERO,
+/// NO_ENGINE_SUBSTITUTION, ONLY_FULL_GROUP_BY, etc.) are accepted but ignored
+/// as they don't affect our behavior.
+fn parse_mysql_mode_flags(s: &str) -> Result<SqlMode, String> {
+    let mut flags = MySqlModeFlags::default();
+
+    // Split by comma and process each mode
+    for mode in s.split(',') {
+        // Skip empty segments (handles leading/trailing commas and consecutive commas)
+        let mode = mode.trim();
+        if mode.is_empty() {
+            continue;
+        }
+
+        // Match MySQL mode flags (case-insensitive)
+        match mode.to_uppercase().as_str() {
+            // Modes we actually implement
+            "STRICT_TRANS_TABLES" | "STRICT_ALL_TABLES" => {
+                flags.strict_mode = true;
+            }
+            "PIPES_AS_CONCAT" => {
+                flags.pipes_as_concat = true;
+            }
+            "ANSI_QUOTES" => {
+                flags.ansi_quotes = true;
+            }
+            "ANSI" => {
+                // ANSI mode is a combination
+                flags.pipes_as_concat = true;
+                flags.ansi_quotes = true;
+            }
+
+            // Common MySQL modes we accept but don't implement
+            // These are standard MySQL 8.0 defaults and commonly used modes
+            "NO_ZERO_IN_DATE" | "NO_ZERO_DATE" | "ERROR_FOR_DIVISION_BY_ZERO"
+            | "NO_ENGINE_SUBSTITUTION" | "ONLY_FULL_GROUP_BY" | "NO_AUTO_CREATE_USER"
+            | "NO_AUTO_VALUE_ON_ZERO" | "NO_BACKSLASH_ESCAPES" | "NO_DIR_IN_CREATE"
+            | "NO_UNSIGNED_SUBTRACTION" | "PAD_CHAR_TO_FULL_LENGTH" | "REAL_AS_FLOAT"
+            | "TIME_TRUNCATE_FRACTIONAL" | "IGNORE_SPACE" | "TRADITIONAL"
+            | "ALLOW_INVALID_DATES" | "HIGH_NOT_PRECEDENCE" => {
+                // Accepted but not implemented - no action needed
+            }
+
+            // Unknown mode - but we're lenient to allow future MySQL versions
+            // We only error on truly unrecognized patterns
+            other => {
+                // Check if it looks like a MySQL mode (alphanumeric with underscores)
+                if other.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    // Looks like a MySQL mode we don't know - accept it silently
+                    // This allows forward compatibility with new MySQL modes
+                } else {
+                    return Err(format!(
+                        "Unknown SQL mode: '{}'. Valid modes: mysql, mysql_slt, sqlite, or MySQL mode flags",
+                        s
+                    ));
+                }
+            }
         }
     }
+
+    Ok(SqlMode::MySQL { flags })
 }
 
 impl SqlMode {
@@ -436,11 +520,173 @@ mod tests {
 
     #[test]
     fn test_from_str_invalid() {
-        let result: Result<SqlMode, _> = "invalid".parse();
+        // Invalid patterns with special characters should still error
+        let result: Result<SqlMode, _> = "invalid!@#".parse();
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("Unknown SQL mode"));
-        assert!(err.contains("invalid"));
+    }
+
+    // Tests for MySQL mode flags parsing (issue #3074)
+
+    #[test]
+    fn test_from_str_mysql_mode_flags() {
+        // Standard MySQL 8.0 default mode string
+        let mode: SqlMode =
+            "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+                .parse()
+                .unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+                assert!(!flags.pipes_as_concat);
+                assert!(!flags.ansi_quotes);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_leading_comma() {
+        // Leading comma (from REPLACE() removing first mode like ONLY_FULL_GROUP_BY)
+        let mode: SqlMode =
+            ",STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+                .parse()
+                .unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_trailing_comma() {
+        // Trailing comma
+        let mode: SqlMode = "STRICT_TRANS_TABLES,".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_empty_segments() {
+        // Empty segments between commas
+        let mode: SqlMode = "STRICT_TRANS_TABLES,,PIPES_AS_CONCAT".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+                assert!(flags.pipes_as_concat);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_empty_string() {
+        // Empty string should result in default flags
+        let mode: SqlMode = "".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(!flags.strict_mode);
+                assert!(!flags.pipes_as_concat);
+                assert!(!flags.ansi_quotes);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_only_commas() {
+        // Only commas should result in default flags
+        let mode: SqlMode = ",,,".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(!flags.strict_mode);
+                assert!(!flags.pipes_as_concat);
+                assert!(!flags.ansi_quotes);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_ansi_mode() {
+        // ANSI mode should set both pipes_as_concat and ansi_quotes
+        let mode: SqlMode = "ANSI".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.pipes_as_concat);
+                assert!(flags.ansi_quotes);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_pipes_as_concat() {
+        let mode: SqlMode = "PIPES_AS_CONCAT".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.pipes_as_concat);
+                assert!(!flags.ansi_quotes);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_ansi_quotes() {
+        let mode: SqlMode = "ANSI_QUOTES".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(!flags.pipes_as_concat);
+                assert!(flags.ansi_quotes);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_mode_flags_case_insensitive() {
+        // Mode flags should be case-insensitive
+        let mode: SqlMode = "strict_trans_tables,pipes_as_concat".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+                assert!(flags.pipes_as_concat);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_mode_flags_with_whitespace() {
+        // Whitespace around modes should be trimmed
+        let mode: SqlMode = " STRICT_TRANS_TABLES , PIPES_AS_CONCAT ".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+                assert!(flags.pipes_as_concat);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_from_str_unknown_mode_accepted() {
+        // Unknown MySQL-like modes should be accepted silently (forward compatibility)
+        let mode: SqlMode = "SOME_FUTURE_MODE,STRICT_TRANS_TABLES".parse().unwrap();
+        match mode {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
     }
 
     #[test]
