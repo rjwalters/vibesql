@@ -24,8 +24,8 @@ pub(super) fn evaluate(
     // Format: "{name}:{distinct}:{arg_debug}"
     let cache_key = format!("{}:{}:{:?}", name.to_uppercase(), distinct, args);
 
-    // Check cache first
-    if let Some(cached_result) = executor.aggregate_cache.borrow().get(&cache_key) {
+    // Check cache first (lazily initialized)
+    if let Some(cached_result) = executor.get_aggregate_cache().borrow().get(&cache_key) {
         return Ok(cached_result.clone());
     }
 
@@ -48,8 +48,8 @@ pub(super) fn evaluate(
             }
             // Fast path: COUNT(*) without DISTINCT is just row count (O(1) vs O(n))
             let result = vibesql_types::SqlValue::Integer(group_rows.len() as i64);
-            // Cache the result
-            executor.aggregate_cache.borrow_mut().insert(cache_key, result.clone());
+            // Cache the result (lazily initialized)
+            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
             return Ok(result);
         }
     }
@@ -77,7 +77,7 @@ pub(super) fn evaluate(
         if is_count_star_fallback {
             // COUNT(*) fallback: just count all rows
             let result = vibesql_types::SqlValue::Integer(group_rows.len() as i64);
-            executor.aggregate_cache.borrow_mut().insert(cache_key, result.clone());
+            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
             return Ok(result);
         }
     }
@@ -92,7 +92,7 @@ pub(super) fn evaluate(
     }
 
     let result = acc.finalize();
-    // Cache the result for reuse within this group
-    executor.aggregate_cache.borrow_mut().insert(cache_key, result.clone());
+    // Cache the result for reuse within this group (lazily initialized)
+    executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
     Ok(result)
 }

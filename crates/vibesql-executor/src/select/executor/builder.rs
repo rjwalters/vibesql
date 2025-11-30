@@ -1,7 +1,7 @@
 //! SelectExecutor construction and initialization
 
 use std::{
-    cell::{Cell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     collections::HashMap,
 };
 use instant::Instant;
@@ -36,15 +36,24 @@ pub struct SelectExecutor<'a> {
     /// Key: Hash of the aggregate expression (format: "{name}:{distinct}:{arg_debug}")
     /// Value: Cached aggregate result
     /// Scope: Per-group evaluation (cleared between groups)
-    pub(super) aggregate_cache: RefCell<HashMap<String, vibesql_types::SqlValue>>,
+    /// Lazily initialized - only created when first aggregate is evaluated
+    pub(super) aggregate_cache: OnceCell<RefCell<HashMap<String, vibesql_types::SqlValue>>>,
     /// Arena allocator for query-scoped allocations
     /// Eliminates malloc/free overhead by using bump-pointer allocation
     /// All allocations are freed when query completes
-    pub(super) arena: RefCell<QueryArena>,
+    /// Lazily initialized - only created when first allocation is needed
+    pub(super) arena: OnceCell<RefCell<QueryArena>>,
 }
 
 impl<'a> SelectExecutor<'a> {
     /// Create a new SELECT executor
+    ///
+    /// # Performance
+    ///
+    /// This constructor is optimized for OLTP workloads:
+    /// - Arena is lazily initialized (10MB allocation deferred until needed)
+    /// - Aggregate cache is lazily initialized (HashMap allocation deferred)
+    /// - Simple queries that don't use aggregates or complex allocations skip these costs
     pub fn new(database: &'a vibesql_storage::Database) -> Self {
         SelectExecutor {
             database,
@@ -57,8 +66,8 @@ impl<'a> SelectExecutor<'a> {
             memory_warning_logged: Cell::new(false),
             start_time: Instant::now(),
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
-            aggregate_cache: RefCell::new(HashMap::new()),
-            arena: RefCell::new(QueryArena::new()),
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
         }
     }
 
@@ -79,8 +88,8 @@ impl<'a> SelectExecutor<'a> {
             memory_warning_logged: Cell::new(false),
             start_time: Instant::now(),
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
-            aggregate_cache: RefCell::new(HashMap::new()),
-            arena: RefCell::new(QueryArena::new()),
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
         }
     }
 
@@ -98,8 +107,8 @@ impl<'a> SelectExecutor<'a> {
             memory_warning_logged: Cell::new(false),
             start_time: Instant::now(),
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
-            aggregate_cache: RefCell::new(HashMap::new()),
-            arena: RefCell::new(QueryArena::new()),
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
         }
     }
 
@@ -136,8 +145,8 @@ impl<'a> SelectExecutor<'a> {
             memory_warning_logged: Cell::new(false),
             start_time: Instant::now(),
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
-            aggregate_cache: RefCell::new(HashMap::new()),
-            arena: RefCell::new(QueryArena::new()),
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
         }
     }
 
@@ -157,8 +166,8 @@ impl<'a> SelectExecutor<'a> {
             memory_warning_logged: Cell::new(false),
             start_time: Instant::now(),
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
-            aggregate_cache: RefCell::new(HashMap::new()),
-            arena: RefCell::new(QueryArena::new()),
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
         }
     }
 
@@ -180,8 +189,8 @@ impl<'a> SelectExecutor<'a> {
             memory_warning_logged: Cell::new(false),
             start_time: Instant::now(),
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
-            aggregate_cache: RefCell::new(HashMap::new()),
-            arena: RefCell::new(QueryArena::new()),
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
         }
     }
 
@@ -205,8 +214,8 @@ impl<'a> SelectExecutor<'a> {
             memory_warning_logged: Cell::new(false),
             start_time: Instant::now(),
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
-            aggregate_cache: RefCell::new(HashMap::new()),
-            arena: RefCell::new(QueryArena::new()),
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
         }
     }
 
@@ -250,8 +259,16 @@ impl<'a> SelectExecutor<'a> {
     }
 
     /// Clear aggregate cache (should be called between group evaluations)
+    /// No-op if the cache has not been initialized (lazy initialization)
     pub(super) fn clear_aggregate_cache(&self) {
-        self.aggregate_cache.borrow_mut().clear();
+        if let Some(cache) = self.aggregate_cache.get() {
+            cache.borrow_mut().clear();
+        }
+    }
+
+    /// Get access to the aggregate cache, initializing it lazily if needed
+    pub(super) fn get_aggregate_cache(&self) -> &RefCell<HashMap<String, vibesql_types::SqlValue>> {
+        self.aggregate_cache.get_or_init(|| RefCell::new(HashMap::new()))
     }
 
     /// Get access to the query buffer pool for reducing allocations
@@ -273,15 +290,51 @@ impl<'a> SelectExecutor<'a> {
     }
 
     /// Get access to the query arena for allocations
-    /// The arena is automatically reset between queries
+    /// The arena is lazily initialized on first access
     #[allow(dead_code)]
     pub(crate) fn arena(&self) -> &RefCell<QueryArena> {
-        &self.arena
+        self.arena.get_or_init(|| RefCell::new(QueryArena::new()))
     }
 
     /// Reset the arena for query reuse
     /// Called at the start of each query execution
+    /// No-op if the arena has not been initialized (lazy initialization)
     pub(super) fn reset_arena(&self) {
-        self.arena.borrow_mut().reset();
+        if let Some(arena) = self.arena.get() {
+            arena.borrow_mut().reset();
+        }
+    }
+
+    /// Reset the executor for reuse between queries
+    ///
+    /// This method prepares the executor for a new query execution by:
+    /// - Resetting the start time to now
+    /// - Clearing memory tracking counters
+    /// - Resetting the arena (if initialized)
+    /// - Clearing the aggregate cache (if initialized)
+    ///
+    /// # Performance
+    ///
+    /// Call this method to reuse an executor instead of creating a new one.
+    /// This avoids the allocation overhead of creating new HashMap and arena instances.
+    pub fn reset_for_reuse(&mut self) {
+        self.start_time = Instant::now();
+        self.memory_used_bytes.set(0);
+        self.memory_warning_logged.set(false);
+        self.subquery_depth = 0;
+        self.outer_row = None;
+        self.outer_schema = None;
+        self.procedural_context = None;
+        self.cte_context = None;
+
+        // Reset arena if it was initialized (clears offset, keeps buffer allocation)
+        if let Some(arena) = self.arena.get() {
+            arena.borrow_mut().reset();
+        }
+
+        // Clear aggregate cache if it was initialized (clears entries, keeps HashMap allocation)
+        if let Some(cache) = self.aggregate_cache.get() {
+            cache.borrow_mut().clear();
+        }
     }
 }
