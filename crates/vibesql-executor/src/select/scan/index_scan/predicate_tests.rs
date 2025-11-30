@@ -234,3 +234,164 @@ fn test_where_clause_not_fully_satisfied_or() {
 
     assert!(!where_clause_fully_satisfied_by_index(&expr, "col0"));
 }
+
+// Tests for composite index predicate extraction
+
+#[test]
+fn test_extract_composite_predicates_full_match() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 AND c_id = 3
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_w_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_d_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            }),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(3))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    let result = extract_composite_equality_predicates(&expr, &columns);
+
+    assert!(result.is_some());
+    let key = result.unwrap();
+    assert_eq!(key.len(), 3);
+    assert_eq!(key[0], SqlValue::Integer(1));
+    assert_eq!(key[1], SqlValue::Integer(2));
+    assert_eq!(key[2], SqlValue::Integer(3));
+}
+
+#[test]
+fn test_extract_composite_predicates_partial_match() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 (missing c_id predicate)
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    let result = extract_composite_equality_predicates(&expr, &columns);
+
+    // Should return None since c_id predicate is missing
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_extract_composite_predicates_case_insensitive() {
+    // WHERE C_W_ID = 1 AND C_D_ID = 2 (uppercase in query)
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "C_W_ID".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "C_D_ID".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"]; // lowercase index columns
+    let result = extract_composite_equality_predicates(&expr, &columns);
+
+    assert!(result.is_some());
+    let key = result.unwrap();
+    assert_eq!(key.len(), 2);
+    assert_eq!(key[0], SqlValue::Integer(1));
+    assert_eq!(key[1], SqlValue::Integer(2));
+}
+
+#[test]
+fn test_extract_composite_predicates_with_string_values() {
+    // WHERE department = 'Engineering' AND name = 'Alice'
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "department".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Varchar("Engineering".to_string()))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "name".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Varchar("Alice".to_string()))),
+        }),
+    };
+
+    let columns = vec!["department", "name"];
+    let result = extract_composite_equality_predicates(&expr, &columns);
+
+    assert!(result.is_some());
+    let key = result.unwrap();
+    assert_eq!(key.len(), 2);
+    assert_eq!(key[0], SqlValue::Varchar("Engineering".to_string()));
+    assert_eq!(key[1], SqlValue::Varchar("Alice".to_string()));
+}
+
+#[test]
+fn test_extract_composite_predicates_empty_columns() {
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(Expression::ColumnRef {
+            table: None,
+            column: "col".to_string(),
+        }),
+        right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+    };
+
+    let columns: Vec<&str> = vec![];
+    let result = extract_composite_equality_predicates(&expr, &columns);
+
+    // Should return None for empty column list
+    assert!(result.is_none());
+}

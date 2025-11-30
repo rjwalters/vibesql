@@ -7,7 +7,7 @@ use vibesql_storage::{Database, Row};
 
 use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema};
 
-use super::predicate::{extract_index_predicate, IndexPredicate};
+use super::predicate::{extract_composite_equality_predicates, extract_index_predicate, IndexPredicate};
 
 /// Execute an index scan
 ///
@@ -43,62 +43,94 @@ pub(crate) fn execute_index_scan(
         .get_index_data(index_name)
         .ok_or_else(|| ExecutorError::IndexNotFound(index_name.to_string()))?;
 
-    // Get the first indexed column (for predicate extraction)
-    let indexed_column = index_metadata
-        .columns
-        .first()
-        .map(|col| col.column_name.as_str())
-        .unwrap_or("");
-
-    // Try to extract index predicate (range or IN) for the indexed column
-    let index_predicate = where_clause.and_then(|expr| extract_index_predicate(expr, indexed_column));
-
-    // Performance optimization: Determine if WHERE filtering can be skipped
-    // Check if the index predicate fully satisfies the WHERE clause
-    let need_where_filter = match (&where_clause, &index_predicate) {
-        (Some(where_expr), Some(_)) => {
-            // Only skip WHERE filtering if we're certain the index handles everything
-            !where_clause_fully_satisfied_by_index(where_expr, indexed_column, &index_predicate)
-        }
-        (Some(_), None) => true,  // WHERE present but no index predicate extracted
-        (None, _) => false,         // No WHERE clause
-    };
-
     // Determine if this is a multi-column index
     let is_multi_column_index = index_metadata.columns.len() > 1;
 
-    // Get row indices using the appropriate index operation
-    let matching_row_indices: Vec<usize> = match index_predicate {
-        Some(IndexPredicate::Range(range)) => {
-            // Use storage layer's optimized range_scan for >, <, >=, <=, BETWEEN
-            // The storage layer handles empty/inverted range validation efficiently
-            index_data.range_scan(
-                range.start.as_ref(),
-                range.end.as_ref(),
-                range.inclusive_start,
-                range.inclusive_end,
-            )
-        }
-        Some(IndexPredicate::In(values)) => {
-            // For multi-column indexes, use prefix matching to find all rows
-            // where the first column matches any of the IN values
-            if is_multi_column_index {
-                // Use prefix_multi_lookup which performs range scans to match
-                // partial keys (e.g., [10] matches [10, 20], [10, 30], etc.)
-                index_data.prefix_multi_lookup(&values)
-            } else {
-                // For single-column indexes, use regular exact match lookup
-                index_data.multi_lookup(&values)
+    // Get column names for the index (in order)
+    let index_column_names: Vec<&str> = index_metadata
+        .columns
+        .iter()
+        .map(|col| col.column_name.as_str())
+        .collect();
+
+    // Get the first indexed column (for single-column predicate extraction fallback)
+    let first_indexed_column = index_column_names.first().copied().unwrap_or("");
+
+    // Try composite key lookup first (for multi-column indexes with full equality predicates)
+    // This handles queries like: WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 42
+    let composite_key = if is_multi_column_index {
+        where_clause.and_then(|expr| extract_composite_equality_predicates(expr, &index_column_names))
+    } else {
+        None
+    };
+
+    // Determine if we can use composite key point lookup
+    let use_composite_lookup = composite_key.is_some();
+
+    // Fall back to single-column predicate extraction if composite key not available
+    let index_predicate = if use_composite_lookup {
+        None // Don't need single-column predicate - using composite key
+    } else {
+        where_clause.and_then(|expr| extract_index_predicate(expr, first_indexed_column))
+    };
+
+    // Performance optimization: Determine if WHERE filtering can be skipped
+    // Check if the index predicate fully satisfies the WHERE clause
+    let need_where_filter = if use_composite_lookup {
+        // Composite key lookup is an exact match - only skip WHERE filter if
+        // the WHERE clause contains ONLY the equality predicates for index columns
+        // For now, be conservative and still apply WHERE filter to handle edge cases
+        // TODO: Optimize by detecting when WHERE is fully satisfied by composite key
+        where_clause.is_some()
+    } else {
+        match (&where_clause, &index_predicate) {
+            (Some(where_expr), Some(_)) => {
+                // Only skip WHERE filtering if we're certain the index handles everything
+                !where_clause_fully_satisfied_by_index(where_expr, first_indexed_column, &index_predicate)
             }
+            (Some(_), None) => true,  // WHERE present but no index predicate extracted
+            (None, _) => false,         // No WHERE clause
         }
-        None => {
-            // Full index scan - collect all row indices from the index in index key order
-            // (Will be sorted by row index later if needed, see lines 425-427)
-            // Note: values() now returns owned Vec<usize>, so no need for .copied()
-            index_data
-                .values()
-                .flatten()
-                .collect()
+    };
+
+    // Get row indices using the appropriate index operation
+    let matching_row_indices: Vec<usize> = if let Some(ref key) = composite_key {
+        // Composite key point lookup - O(log n) exact match
+        // This is the fast path for multi-column equality predicates
+        index_data.get(key).unwrap_or_default()
+    } else {
+        match index_predicate {
+            Some(IndexPredicate::Range(range)) => {
+                // Use storage layer's optimized range_scan for >, <, >=, <=, BETWEEN
+                // The storage layer handles empty/inverted range validation efficiently
+                index_data.range_scan(
+                    range.start.as_ref(),
+                    range.end.as_ref(),
+                    range.inclusive_start,
+                    range.inclusive_end,
+                )
+            }
+            Some(IndexPredicate::In(values)) => {
+                // For multi-column indexes, use prefix matching to find all rows
+                // where the first column matches any of the IN values
+                if is_multi_column_index {
+                    // Use prefix_multi_lookup which performs range scans to match
+                    // partial keys (e.g., [10] matches [10, 20], [10, 30], etc.)
+                    index_data.prefix_multi_lookup(&values)
+                } else {
+                    // For single-column indexes, use regular exact match lookup
+                    index_data.multi_lookup(&values)
+                }
+            }
+            None => {
+                // Full index scan - collect all row indices from the index in index key order
+                // (Will be sorted by row index later if needed, see lines 425-427)
+                // Note: values() now returns owned Vec<usize>, so no need for .copied()
+                index_data
+                    .values()
+                    .flatten()
+                    .collect()
+            }
         }
     };
 
