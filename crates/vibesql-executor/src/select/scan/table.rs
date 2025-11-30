@@ -49,26 +49,31 @@ pub(crate) fn execute_table_scan(
         // Use CTE result
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         let schema = CombinedSchema::from_table(effective_name, cte_schema.clone());
-        let mut rows = cte_rows.clone();
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
         // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
         let is_correlated = outer_row.is_some() || outer_schema.is_some();
-        if where_clause.is_some() && !is_correlated {
+        let rows = if where_clause.is_some() && !is_correlated {
             // Build predicate plan once for this table
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
-            rows = apply_table_local_predicates(
-                rows,
+            // Only clone CTE rows when we need to filter them
+            // For queries without predicates, we avoid the expensive deep clone
+            apply_table_local_predicates(
+                cte_rows.as_ref().clone(),  // Clone Vec from Arc only when filtering
                 schema.clone(),
                 &predicate_plan,
                 table_name,
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
-            )?;
-        }
+            )?
+        } else {
+            // No filtering needed - cheap Arc::clone() instead of deep Vec clone
+            // This is a major memory optimization for CTE-heavy queries like TPC-DS Q2
+            cte_rows.as_ref().clone()
+        };
 
         return Ok(super::FromResult::from_rows(schema, rows));
     }
