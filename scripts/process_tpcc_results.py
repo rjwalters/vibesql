@@ -43,8 +43,8 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
 
 
 def get_db_path() -> Path:
-    """Get the path to the dogfooding database."""
-    return Path.home() / ".vibesql" / "test_results" / "sqllogictest_results.vbsql"
+    """Get the path to the benchmark results database."""
+    return Path.home() / ".vibesql" / "test_results" / "benchmark_results.db"
 
 
 def init_benchmark_schema(db_path: Path):
@@ -80,17 +80,34 @@ def parse_tpcc_output(output: str) -> Tuple[List[Dict], Dict]:
 
     lines = output.split('\n')
 
+    def save_current_result():
+        """Save current result if valid."""
+        nonlocal current_result
+        if current_result and 'transaction_count' in current_result:
+            if 'avg_latencies' in current_result and current_result.get('transaction_count', 0) > 0:
+                total_latency = sum(current_result['avg_latencies'].values())
+                current_result['avg_latency_us'] = total_latency / len(current_result['avg_latencies'])
+            results.append(current_result)
+            current_result = None
+
     for line in lines:
-        # Detect engine section
+        # Detect engine section - save previous result when switching
         if '--- VibeSQL Benchmark ---' in line:
+            save_current_result()
             current_engine = 'vibesql'
             current_result = {'database_engine': 'vibesql'}
         elif '--- SQLite Benchmark ---' in line:
+            save_current_result()
             current_engine = 'sqlite'
             current_result = {'database_engine': 'sqlite'}
         elif '--- DuckDB Benchmark ---' in line:
+            save_current_result()
             current_engine = 'duckdb'
             current_result = {'database_engine': 'duckdb'}
+        elif '--- MySQL Benchmark ---' in line:
+            save_current_result()
+            current_engine = 'mysql'
+            current_result = {'database_engine': 'mysql'}
 
         if not current_result:
             continue
@@ -134,22 +151,12 @@ def parse_tpcc_output(output: str) -> Tuple[List[Dict], Dict]:
                 current_result['avg_latencies'] = {}
             current_result['avg_latencies'][txn_name] = avg_us
 
-        # Detect end of engine section (next engine or comparison summary)
-        if ('=== Comparison Summary ===' in line or
-            ('=== Done ===' in line)) and current_result and 'transaction_count' in current_result:
-            # Calculate overall average latency
-            if 'avg_latencies' in current_result and current_result.get('transaction_count', 0) > 0:
-                total_latency = sum(current_result['avg_latencies'].values())
-                current_result['avg_latency_us'] = total_latency / len(current_result['avg_latencies'])
-            results.append(current_result)
-            current_result = None
+        # Detect end of benchmark section
+        if '=== Comparison Summary ===' in line or '=== Done ===' in line:
+            save_current_result()
 
-    # Handle case where last engine wasn't added
-    if current_result and 'transaction_count' in current_result:
-        if 'avg_latencies' in current_result and current_result.get('transaction_count', 0) > 0:
-            total_latency = sum(current_result['avg_latencies'].values())
-            current_result['avg_latency_us'] = total_latency / len(current_result['avg_latencies'])
-        results.append(current_result)
+    # Handle case where last engine wasn't added (no trailing marker)
+    save_current_result()
 
     summary = {
         'total_engines': len(results),

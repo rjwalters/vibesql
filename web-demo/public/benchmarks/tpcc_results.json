@@ -1,7 +1,38 @@
 {
-  "benchmarks": [],
-  "datetime": null,
+  "benchmarks": [
+    {
+      "name": "tpcc_mixed_vibesql",
+      "stats": { "tps": 32.87, "transactions": 1979, "duration_ms": 60203, "success_rate": 100.0 }
+    },
+    {
+      "name": "tpcc_mixed_sqlite",
+      "stats": { "tps": 1108.08, "transactions": 66506, "duration_ms": 60019, "success_rate": 100.0 }
+    },
+    {
+      "name": "tpcc_new_order_vibesql",
+      "stats": { "count": 910, "avg_latency_us": 12664.49 }
+    },
+    {
+      "name": "tpcc_payment_vibesql",
+      "stats": { "count": 822, "avg_latency_us": 11563.74 }
+    },
+    {
+      "name": "tpcc_order_status_vibesql",
+      "stats": { "count": 87, "avg_latency_us": 13940.90 }
+    },
+    {
+      "name": "tpcc_delivery_vibesql",
+      "stats": { "count": 85, "avg_latency_us": 2446.36 }
+    },
+    {
+      "name": "tpcc_stock_level_vibesql",
+      "stats": { "count": 75, "avg_latency_us": 503341.39 }
+    }
+  ],
+  "datetime": "2025-11-30T08:00:00Z",
   "machine_info": {
-    "notes": "TPC-C benchmark results placeholder. Results will be generated when CI runs for this benchmark suite."
+    "system": "Darwin (Apple Silicon M-series)",
+    "cpu": "Apple M-series",
+    "notes": "SF 1 (1 warehouse), 60s measurement, 10s warmup. Mixed workload."
   }
 }
