@@ -53,29 +53,27 @@ pub(crate) fn execute_table_scan(
         // Apply table-local predicates from WHERE clause using pre-computed plan
         // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
         let is_correlated = outer_row.is_some() || outer_schema.is_some();
-        let rows = if where_clause.is_some() && !is_correlated {
+        if where_clause.is_some() && !is_correlated {
             // Build predicate plan once for this table
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
-            // Only clone CTE rows when we need to filter them
-            // For queries without predicates, we avoid the expensive deep clone
-            apply_table_local_predicates(
-                cte_rows.as_ref().clone(),  // Clone Vec from Arc only when filtering
+            // Must clone rows for filtering (copy-on-write semantics)
+            let rows = apply_table_local_predicates(
+                cte_rows.as_ref().clone(),
                 schema.clone(),
                 &predicate_plan,
                 table_name,
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
-            )?
-        } else {
-            // No filtering needed - cheap Arc::clone() instead of deep Vec clone
-            // This is a major memory optimization for CTE-heavy queries like TPC-DS Q2
-            cte_rows.as_ref().clone()
-        };
+            )?;
+            return Ok(super::FromResult::from_rows(schema, rows));
+        }
 
-        return Ok(super::FromResult::from_rows(schema, rows));
+        // No filtering needed - use zero-copy shared rows
+        // This avoids O(n) cloning when CTE is referenced multiple times
+        return Ok(super::FromResult::from_shared_rows(schema, cte_rows.clone()));
     }
 
     // Check if it's a view
