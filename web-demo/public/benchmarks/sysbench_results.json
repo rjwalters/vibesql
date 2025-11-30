@@ -7,64 +7,64 @@
         "stddev": 0.0,
         "min": 0.0,
         "max": 0.0,
-        "rounds": 42233977
+        "rounds": 48770880
       }
     },
     {
       "name": "sysbench_insert_vibesql",
       "stats": {
-        "mean": 1.92e-06,
-        "stddev": 9.6e-08,
-        "min": 1.7279999999999998e-06,
-        "max": 2.112e-06,
-        "rounds": 3144821
+        "mean": 1.54e-06,
+        "stddev": 7.700000000000001e-08,
+        "min": 1.3860000000000002e-06,
+        "max": 1.6940000000000002e-06,
+        "rounds": 3601754
       }
     },
     {
       "name": "sysbench_update_index_vibesql",
       "stats": {
-        "mean": 3.3e-07,
-        "stddev": 1.6500000000000002e-08,
-        "min": 2.97e-07,
-        "max": 3.6300000000000006e-07,
-        "rounds": 10178222
+        "mean": 1.8e-07,
+        "stddev": 9.000000000000001e-09,
+        "min": 1.62e-07,
+        "max": 1.9800000000000003e-07,
+        "rounds": 11118516
       }
     },
     {
       "name": "sysbench_update_non_index_vibesql",
       "stats": {
-        "mean": 1.5800000000000001e-06,
-        "stddev": 7.9e-08,
-        "min": 1.4220000000000001e-06,
-        "max": 1.7380000000000003e-06,
-        "rounds": 3923192
+        "mean": 1.3600000000000001e-06,
+        "stddev": 6.800000000000001e-08,
+        "min": 1.224e-06,
+        "max": 1.4960000000000002e-06,
+        "rounds": 4251686
       }
     },
     {
       "name": "sysbench_delete_vibesql",
       "stats": {
-        "mean": 0.00033359,
-        "stddev": 1.66795e-05,
-        "min": 0.000300231,
-        "max": 0.000366949,
-        "rounds": 7524
+        "mean": 0.00031205,
+        "stddev": 1.5602500000000002e-05,
+        "min": 0.00028084500000000005,
+        "max": 0.00034325500000000005,
+        "rounds": 7268
       }
     },
     {
       "name": "sysbench_range_queries_vibesql",
       "stats": {
-        "mean": 0.0014171099999999999,
-        "stddev": 7.085549999999999e-05,
-        "min": 0.001275399,
-        "max": 0.001558821,
-        "rounds": 7056
+        "mean": 0.00150329,
+        "stddev": 7.516450000000001e-05,
+        "min": 0.001352961,
+        "max": 0.001653619,
+        "rounds": 6652
       }
     }
   ],
-  "datetime": "2025-11-30T20:27:54.087870Z",
+  "datetime": "2025-11-30T20:35:29.933875Z",
   "machine_info": {
-    "system": "Darwin (Apple Silicon M-series)",
-    "cpu": "Apple M-series",
+    "system": "Darwin",
+    "cpu": "arm",
     "notes": "Table size: 10000 rows, 10s per workload"
   }
 }

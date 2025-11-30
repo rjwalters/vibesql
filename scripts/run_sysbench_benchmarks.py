@@ -17,12 +17,13 @@ Usage:
 import argparse
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 # Sysbench workload descriptions
@@ -219,8 +220,8 @@ def convert_to_web_format(
         "benchmarks": benchmarks,
         "datetime": datetime.utcnow().isoformat() + "Z",
         "machine_info": {
-            "system": "Darwin (Apple Silicon M-series)",
-            "cpu": "Apple M-series",
+            "system": platform.system(),
+            "cpu": platform.processor() or platform.machine(),
             "notes": f"Table size: {table_size} rows, {duration_secs}s per workload",
         }
     }
