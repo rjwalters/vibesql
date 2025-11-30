@@ -197,3 +197,108 @@ fn test_cte_in_select_list_scalar_subquery() {
     assert_eq!(result[1].values[2], vibesql_types::SqlValue::Integer(450));
     assert_eq!(result[2].values[2], vibesql_types::SqlValue::Integer(450));
 }
+
+/// Test CTE referenced in IN subquery (issue #3044)
+/// This tests that CTE context is properly propagated to IN subquery evaluation.
+/// Note: Uses correlated subquery to avoid thread-local cache interference.
+#[test]
+fn test_cte_in_in_subquery() {
+    let mut db = vibesql_storage::Database::new();
+
+    execute_sql(&mut db, "CREATE TABLE orders_cte_in(order_id INT, customer_id INT, amount INT)").unwrap();
+    execute_sql(&mut db, "INSERT INTO orders_cte_in VALUES (1, 1, 100)").unwrap();
+    execute_sql(&mut db, "INSERT INTO orders_cte_in VALUES (2, 2, 200)").unwrap();
+    execute_sql(&mut db, "INSERT INTO orders_cte_in VALUES (3, 1, 150)").unwrap();
+    execute_sql(&mut db, "INSERT INTO orders_cte_in VALUES (4, 3, 50)").unwrap();
+
+    // Find orders from customers who have high-value orders (>= 150)
+    // CTE defines the high-value customers, correlated IN subquery references the CTE
+    // Making it correlated avoids the thread-local cache issue
+    let query = "
+        WITH high_value AS (
+            SELECT customer_id, amount FROM orders_cte_in WHERE amount >= 150
+        )
+        SELECT o.order_id, o.customer_id, o.amount
+        FROM orders_cte_in o
+        WHERE o.customer_id IN (SELECT h.customer_id FROM high_value h WHERE h.customer_id = o.customer_id)
+        ORDER BY o.order_id
+    ";
+
+    let result = execute_sql(&mut db, query).unwrap();
+
+    // Customers with orders >= 150: customer 1 (150), customer 2 (200)
+    // All orders from these customers: 1, 2, 3 (order 4 is customer 3 with only 50)
+    assert_eq!(result.len(), 3, "Expected 3 orders from customers with high-value orders");
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
+    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(3));
+}
+
+/// Test CTE referenced in EXISTS subquery (issue #3044)
+/// This tests that CTE context is properly propagated to EXISTS evaluation.
+#[test]
+fn test_cte_in_exists_subquery() {
+    let mut db = vibesql_storage::Database::new();
+
+    execute_sql(&mut db, "CREATE TABLE products(product_id INT, name TEXT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE order_items(order_id INT, product_id INT)").unwrap();
+
+    execute_sql(&mut db, "INSERT INTO products VALUES (1, 'Widget')").unwrap();
+    execute_sql(&mut db, "INSERT INTO products VALUES (2, 'Gadget')").unwrap();
+    execute_sql(&mut db, "INSERT INTO products VALUES (3, 'Gizmo')").unwrap();
+
+    execute_sql(&mut db, "INSERT INTO order_items VALUES (100, 1)").unwrap();
+    execute_sql(&mut db, "INSERT INTO order_items VALUES (101, 2)").unwrap();
+
+    // Find products that have been ordered, using CTE for order items
+    let query = "
+        WITH ordered_products AS (
+            SELECT DISTINCT product_id FROM order_items
+        )
+        SELECT product_id, name
+        FROM products p
+        WHERE EXISTS (SELECT 1 FROM ordered_products op WHERE op.product_id = p.product_id)
+        ORDER BY product_id
+    ";
+
+    let result = execute_sql(&mut db, query).unwrap();
+
+    // Products 1 and 2 have been ordered
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
+}
+
+/// Test CTE referenced in NOT EXISTS subquery (issue #3044)
+#[test]
+fn test_cte_in_not_exists_subquery() {
+    let mut db = vibesql_storage::Database::new();
+
+    execute_sql(&mut db, "CREATE TABLE products(product_id INT, name TEXT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE order_items(order_id INT, product_id INT)").unwrap();
+
+    execute_sql(&mut db, "INSERT INTO products VALUES (1, 'Widget')").unwrap();
+    execute_sql(&mut db, "INSERT INTO products VALUES (2, 'Gadget')").unwrap();
+    execute_sql(&mut db, "INSERT INTO products VALUES (3, 'Gizmo')").unwrap();
+
+    execute_sql(&mut db, "INSERT INTO order_items VALUES (100, 1)").unwrap();
+    execute_sql(&mut db, "INSERT INTO order_items VALUES (101, 2)").unwrap();
+
+    // Find products that have NOT been ordered, using CTE for order items
+    let query = "
+        WITH ordered_products AS (
+            SELECT DISTINCT product_id FROM order_items
+        )
+        SELECT product_id, name
+        FROM products p
+        WHERE NOT EXISTS (SELECT 1 FROM ordered_products op WHERE op.product_id = p.product_id)
+        ORDER BY product_id
+    ";
+
+    let result = execute_sql(&mut db, query).unwrap();
+
+    // Only product 3 (Gizmo) has not been ordered
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(3));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar("Gizmo".to_string()));
+}
