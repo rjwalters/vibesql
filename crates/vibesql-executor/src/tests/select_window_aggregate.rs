@@ -428,3 +428,177 @@ fn test_order_by_with_window_function_not_in_select() {
         panic!("Expected SELECT statement");
     }
 }
+
+#[test]
+fn test_window_function_with_group_by_aggregate() {
+    use vibesql_storage::Row;
+    let mut db = Database::new();
+
+    // Create sales table with categories
+    let schema = TableSchema::new(
+        "SALES".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new(
+                "CATEGORY".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
+            ColumnSchema::new("AMOUNT".to_string(), DataType::Integer, false),
+        ],
+    );
+
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("SALES").unwrap();
+    // Category A has 3 sales: 100, 200, 300 = 600 total
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar("A".to_string()),
+            SqlValue::Integer(100),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar("A".to_string()),
+            SqlValue::Integer(200),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(3),
+            SqlValue::Varchar("A".to_string()),
+            SqlValue::Integer(300),
+        ]))
+        .unwrap();
+    // Category B has 2 sales: 400, 500 = 900 total
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(4),
+            SqlValue::Varchar("B".to_string()),
+            SqlValue::Integer(400),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(5),
+            SqlValue::Varchar("B".to_string()),
+            SqlValue::Integer(500),
+        ]))
+        .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // Test: Q12-style nested aggregate in window function
+    // SUM(SUM(amount)) OVER (PARTITION BY category)
+    // This is the pattern from TPC-DS Q12:
+    // - Inner SUM(amount) is computed per GROUP BY
+    // - Outer SUM() OVER() computes the window aggregate over the grouped results
+    let query = r#"
+        SELECT 
+            category,
+            SUM(amount) as total,
+            SUM(SUM(amount)) OVER (PARTITION BY category) as partition_total
+        FROM sales
+        GROUP BY category
+    "#;
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute(&select_stmt);
+        
+        // This should succeed - currently may fail with UnsupportedExpression
+        assert!(result.is_ok(), "Expected Q12-style window function to work: {:?}", result.err());
+        
+        let rows = result.unwrap();
+        assert_eq!(rows.len(), 2); // Two categories
+
+        // Category A: total=600, partition_total=600 (only one group in partition)
+        // Category B: total=900, partition_total=900 (only one group in partition)
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+/// Test TPC-DS Q12 exact pattern:
+/// SUM(amount) * 100 / SUM(SUM(amount)) OVER (PARTITION BY class)
+#[test]
+fn test_tpcds_q12_revenue_ratio_pattern() {
+    use vibesql_storage::Row;
+    let mut db = Database::new();
+
+    // Create web_sales-like table
+    let schema = TableSchema::new(
+        "WEB_SALES".to_string(),
+        vec![
+            ColumnSchema::new("WS_ITEM_SK".to_string(), DataType::Integer, false),
+            ColumnSchema::new("WS_EXT_SALES_PRICE".to_string(), DataType::Integer, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Create item-like table
+    let schema = TableSchema::new(
+        "ITEM".to_string(),
+        vec![
+            ColumnSchema::new("I_ITEM_SK".to_string(), DataType::Integer, false),
+            ColumnSchema::new("I_ITEM_ID".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ColumnSchema::new("I_CLASS".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Insert items with different classes
+    let item_table = db.get_table_mut("ITEM").unwrap();
+    // Class "electronics" - items 1 and 2
+    item_table.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("ITEM001".to_string()), SqlValue::Varchar("electronics".to_string())])).unwrap();
+    item_table.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("ITEM002".to_string()), SqlValue::Varchar("electronics".to_string())])).unwrap();
+    // Class "sports" - item 3
+    item_table.insert(Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("ITEM003".to_string()), SqlValue::Varchar("sports".to_string())])).unwrap();
+
+    // Insert web sales
+    let sales_table = db.get_table_mut("WEB_SALES").unwrap();
+    // Item 1 (electronics): sales of 100, 200 = 300 total
+    sales_table.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)])).unwrap();
+    sales_table.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(200)])).unwrap();
+    // Item 2 (electronics): sales of 300, 400 = 700 total
+    sales_table.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(300)])).unwrap();
+    sales_table.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(400)])).unwrap();
+    // Item 3 (sports): sales of 500
+    sales_table.insert(Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(500)])).unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // TPC-DS Q12 pattern: revenue ratio within class
+    // SUM(ws_ext_sales_price) * 100 / SUM(SUM(ws_ext_sales_price)) OVER (PARTITION BY i_class)
+    let query = r#"
+        SELECT
+            i_item_id,
+            i_class,
+            SUM(ws_ext_sales_price) AS itemrevenue,
+            SUM(ws_ext_sales_price) * 100 / SUM(SUM(ws_ext_sales_price)) OVER (PARTITION BY i_class) AS revenueratio
+        FROM web_sales, item
+        WHERE ws_item_sk = i_item_sk
+        GROUP BY i_item_id, i_class
+    "#;
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute(&select_stmt);
+
+        assert!(result.is_ok(), "TPC-DS Q12 pattern should work: {:?}", result.err());
+
+        let rows = result.unwrap();
+        assert_eq!(rows.len(), 3); // 3 items
+
+        // Electronics class total: 300 + 700 = 1000
+        // ITEM001: 300 / 1000 * 100 = 30%
+        // ITEM002: 700 / 1000 * 100 = 70%
+        // Sports class total: 500
+        // ITEM003: 500 / 500 * 100 = 100%
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
