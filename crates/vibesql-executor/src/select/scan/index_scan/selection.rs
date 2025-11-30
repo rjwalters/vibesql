@@ -4,7 +4,34 @@
 //! Supports both rule-based (simple) and cost-based (statistics-aware) selection.
 
 use vibesql_ast::Expression;
+use vibesql_catalog::TableSchema;
 use vibesql_storage::{Database, statistics::{CostEstimator, AccessMethod}};
+
+/// Check if any ORDER BY column is nullable
+///
+/// BTreeMap orders NULLs first (NULL < everything), but SQL default is:
+/// - NULLS LAST for ASC
+/// - NULLS FIRST for DESC
+///
+/// When a nullable column is used for ORDER BY without explicit NULLS FIRST/LAST,
+/// using an index would produce incorrect NULL ordering. This function helps
+/// detect such cases to avoid using the index for ORDER BY.
+fn any_order_by_column_nullable(
+    order_items: &[vibesql_ast::OrderByItem],
+    table_schema: &TableSchema,
+) -> bool {
+    for item in order_items {
+        if let Expression::ColumnRef { column, .. } = &item.expr {
+            // Look up column in schema (case-insensitive)
+            if let Some(idx) = table_schema.get_column_index(column) {
+                if table_schema.columns[idx].nullable {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
 
 /// Determines if an index scan is beneficial for the given query
 ///
@@ -27,7 +54,7 @@ pub(crate) fn should_use_index_scan(
     // applied as a post-filter in execute_index_scan() to ensure correctness.
 
     // Get all indexes for this table
-    let _table = database.get_table(table_name)?;
+    let table = database.get_table(table_name)?;
     let indexes = database.list_indexes_for_table(table_name);
 
     if indexes.is_empty() {
@@ -47,8 +74,16 @@ pub(crate) fn should_use_index_scan(
             // Check if this index can be used for ORDER BY clause
             let can_use_for_order = if let Some(order_items) = order_by {
                 // Check if ORDER BY columns match the index columns
-                // Support multi-column ORDER BY matching
-                can_use_index_for_order_by(order_items, &index_metadata.columns)
+                let columns_match = can_use_index_for_order_by(order_items, &index_metadata.columns);
+
+                // Don't use index for ORDER BY if any column is nullable
+                // BTreeMap orders NULLs first, but SQL default is NULLS LAST for ASC
+                // This would produce incorrect results for nullable columns
+                if columns_match && any_order_by_column_nullable(order_items, &table.schema) {
+                    false
+                } else {
+                    columns_match
+                }
             } else {
                 false
             };
@@ -123,11 +158,36 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
 }
 
 /// Check if an expression is a reference to a specific column
+///
+/// Uses case-insensitive comparison because:
+/// - SQL parser normalizes unquoted identifiers to uppercase (e.g., `i_id` → `I_ID`)
+/// - Index column names may be lowercase or uppercase depending on how they're created
+/// - Table column statistics are stored with the original column name case
 pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool {
     match expr {
-        Expression::ColumnRef { column, .. } => column == column_name,
+        Expression::ColumnRef { column, .. } => column.eq_ignore_ascii_case(column_name),
         _ => false,
     }
+}
+
+/// Case-insensitive lookup of column statistics
+///
+/// Returns the ColumnStatistics for a column name, ignoring case differences.
+/// This is necessary because schema column names may use different casing than
+/// index column names or query column references.
+fn get_column_stats_ignore_case<'a>(
+    columns: &'a std::collections::HashMap<String, vibesql_storage::statistics::ColumnStatistics>,
+    column_name: &str,
+) -> Option<&'a vibesql_storage::statistics::ColumnStatistics> {
+    // First try exact match for efficiency
+    if let Some(stats) = columns.get(column_name) {
+        return Some(stats);
+    }
+    // Fall back to case-insensitive search
+    columns
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(column_name))
+        .map(|(_, stats)| stats)
 }
 
 /// Check if an index can be used to satisfy an ORDER BY clause
@@ -157,8 +217,8 @@ pub(crate) fn can_use_index_for_order_by(
             _ => return false, // Complex expressions not supported
         };
 
-        // Column names must match
-        if order_col_name != &index_col.column_name {
+        // Column names must match (case-insensitive due to SQL identifier normalization)
+        if !order_col_name.eq_ignore_ascii_case(&index_col.column_name) {
             return false;
         }
 
@@ -232,7 +292,16 @@ pub(crate) fn cost_based_index_selection(
                 .unwrap_or(false);
 
             let can_use_for_order = if let Some(order_items) = order_by {
-                can_use_index_for_order_by(order_items, &index_metadata.columns)
+                let columns_match = can_use_index_for_order_by(order_items, &index_metadata.columns);
+
+                // Don't use index for ORDER BY if any column is nullable
+                // BTreeMap orders NULLs first, but SQL default is NULLS LAST for ASC
+                // This would produce incorrect results for nullable columns
+                if columns_match && any_order_by_column_nullable(order_items, &table.schema) {
+                    false
+                } else {
+                    columns_match
+                }
             } else {
                 false
             };
@@ -242,8 +311,8 @@ pub(crate) fn cost_based_index_selection(
                 continue;
             }
 
-            // Get column statistics for the indexed column
-            let col_stats = table_stats.columns.get(column_name);
+            // Get column statistics for the indexed column (case-insensitive lookup)
+            let col_stats = get_column_stats_ignore_case(&table_stats.columns, column_name);
             if col_stats.is_none() {
                 // Track that we found an applicable index without column stats
                 // We'll fall back to rule-based selection if cost-based fails
@@ -329,14 +398,14 @@ pub(crate) fn estimate_selectivity(
         Expression::BinaryOp { left, op, right } => {
             match op {
                 vibesql_ast::BinaryOperator::Equal => {
-                    // Check if this is a predicate on our column
+                    // Check if this is a predicate on our column (case-insensitive)
                     if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) = (&**left, &**right) {
-                        if column == column_name {
+                        if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
                         }
                     }
                     if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) = (&**left, &**right) {
-                        if column == column_name {
+                        if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
                         }
                     }
@@ -346,9 +415,9 @@ pub(crate) fn estimate_selectivity(
                 | vibesql_ast::BinaryOperator::GreaterThanOrEqual
                 | vibesql_ast::BinaryOperator::LessThan
                 | vibesql_ast::BinaryOperator::LessThanOrEqual => {
-                    // Range predicates
+                    // Range predicates (case-insensitive column comparison)
                     if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) = (&**left, &**right) {
-                        if column == column_name {
+                        if column.eq_ignore_ascii_case(column_name) {
                             let op_str = match op {
                                 vibesql_ast::BinaryOperator::GreaterThan => ">",
                                 vibesql_ast::BinaryOperator::GreaterThanOrEqual => ">=",
@@ -379,7 +448,7 @@ pub(crate) fn estimate_selectivity(
         }
         Expression::Between { expr, low, high, negated: _, symmetric: _ } => {
             if let Expression::ColumnRef { column, .. } = &**expr {
-                if column == column_name {
+                if column.eq_ignore_ascii_case(column_name) {
                     // Estimate BETWEEN as: P(col >= low AND col <= high)
                     if let (Expression::Literal(low_val), Expression::Literal(high_val)) = (&**low, &**high) {
                         let low_sel = col_stats.estimate_range_selectivity(low_val, ">=");
@@ -451,5 +520,39 @@ mod tests {
 
         assert!(is_column_reference(&expr, "age"));
         assert!(!is_column_reference(&expr, "name"));
+    }
+
+    #[test]
+    fn test_is_column_reference_case_insensitive() {
+        // SQL parser normalizes unquoted identifiers to uppercase
+        // but index columns might be lowercase
+        let expr = Expression::ColumnRef {
+            table: None,
+            column: "I_ID".to_string(), // Uppercase from parser
+        };
+
+        // Should match regardless of case
+        assert!(is_column_reference(&expr, "i_id"));  // lowercase
+        assert!(is_column_reference(&expr, "I_ID"));  // exact match
+        assert!(is_column_reference(&expr, "I_id"));  // mixed case
+        assert!(!is_column_reference(&expr, "other_column"));
+    }
+
+    #[test]
+    fn test_expression_filters_column_case_insensitive() {
+        // WHERE I_ID = 42 (uppercase from parser)
+        let expr = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "I_ID".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(42))),
+        };
+
+        // Should match lowercase index column name
+        assert!(expression_filters_column(&expr, "i_id"));
+        assert!(expression_filters_column(&expr, "I_ID"));
+        assert!(!expression_filters_column(&expr, "other"));
     }
 }
