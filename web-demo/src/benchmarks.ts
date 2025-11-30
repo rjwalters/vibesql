@@ -141,11 +141,11 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
     opsLabel: 'Sysbench operations',
     descriptions: {
       'point_select': 'Point Select - Single row lookup by primary key',
-      'range_select': 'Range Select - Fetch rows within a key range',
-      'simple_update': 'Simple Update - Update single row by primary key',
-      'index_update': 'Index Update - Update indexed column',
-      'delete_insert': 'Delete/Insert - Remove and re-insert row',
-      'read_write': 'Read/Write Mix - Combined read and write operations',
+      'insert': 'Insert - Insert new rows into table',
+      'update_index': 'Update Index - Update indexed column (k = k + 1)',
+      'update_non_index': 'Update Non-Index - Update non-indexed column',
+      'delete': 'Delete - Remove rows by primary key',
+      'range_queries': 'Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans',
     },
     methodology: `
       <h3 class="text-lg font-semibold text-foreground mb-2">Sysbench Micro-Benchmarks</h3>
