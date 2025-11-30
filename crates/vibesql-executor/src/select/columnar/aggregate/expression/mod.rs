@@ -35,6 +35,7 @@ use super::{AggregateOp, AggregateSource, AggregateSpec};
 // Re-export public API
 pub(super) use vectorized::compute_expression_aggregate;
 pub(super) use batch::compute_batch_expression_aggregate;
+pub use batch::evaluate_expression_to_column;
 
 /// Extract aggregate operations from AST expressions
 ///

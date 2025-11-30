@@ -55,7 +55,7 @@ pub use filter::{
     create_filter_bitmap_tree, evaluate_predicate_tree, extract_column_predicates,
     extract_predicate_tree, ColumnPredicate, PredicateTree,
 };
-pub use aggregate::{columnar_group_by, columnar_group_by_batch, compute_multiple_aggregates, extract_aggregates, AggregateOp, AggregateSpec, AggregateSource};
+pub use aggregate::{columnar_group_by, columnar_group_by_batch, compute_multiple_aggregates, extract_aggregates, evaluate_expression_to_column, AggregateOp, AggregateSpec, AggregateSource};
 
 pub use aggregate::compute_aggregates_from_batch;
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};

@@ -425,3 +425,26 @@ fn aggregate_i64_array(
         }
     }
 }
+
+/// Evaluate an expression on a ColumnarBatch and return the result as a ColumnArray
+///
+/// This is the public interface for computing expression columns for GROUP BY support.
+/// It evaluates an expression (e.g., `l_extendedprice * (1 - l_discount)`) on all rows
+/// and returns the computed values as a typed column that can be added to the batch.
+///
+/// # Arguments
+///
+/// * `batch` - The ColumnarBatch to evaluate the expression on
+/// * `expr` - The expression to evaluate (e.g., BinaryOp of column refs)
+/// * `schema` - Schema for resolving column names
+///
+/// # Returns
+///
+/// A ColumnArray containing the computed values (Float64 or Int64)
+pub fn evaluate_expression_to_column(
+    batch: &ColumnarBatch,
+    expr: &Expression,
+    schema: &CombinedSchema,
+) -> Result<ColumnArray, ExecutorError> {
+    evaluate_batch_expression(batch, expr, schema)
+}

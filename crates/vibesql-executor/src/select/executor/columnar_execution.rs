@@ -312,24 +312,30 @@ impl SelectExecutor<'_> {
             .unwrap_or_default();
 
         // Extract select expressions
+        // For GROUP BY queries, filter to only aggregate functions (GROUP BY columns are handled separately)
+        let has_group_by = stmt.group_by.is_some();
         let select_exprs: Vec<_> = stmt.select_list.iter()
             .filter_map(|item| match item {
-                vibesql_ast::SelectItem::Expression { expr, .. } => Some(expr.clone()),
+                vibesql_ast::SelectItem::Expression { expr, .. } => {
+                    // For GROUP BY queries, skip non-aggregate expressions (they're GROUP BY columns)
+                    if has_group_by && !matches!(expr, Expression::AggregateFunction { .. }) {
+                        None
+                    } else {
+                        Some(expr.clone())
+                    }
+                }
                 _ => None,
             })
             .collect();
 
         // Extract aggregates from select expressions
         let aggregates = match columnar::extract_aggregates(&select_exprs, &schema) {
-            Some(aggs) => aggs,
-            None => {
+            Some(aggs) if !aggs.is_empty() => aggs,
+            _ => {
                 log::debug!("Native columnar: skipping - no aggregates or unsupported expressions");
                 return Ok(None);
             }
         };
-
-        // Check if this query has GROUP BY
-        let has_group_by = stmt.group_by.is_some();
 
         // Skip native columnar for complex GROUP BY (ROLLUP/CUBE/GROUPING SETS)
         // These require special handling that the columnar path doesn't support
@@ -435,31 +441,70 @@ impl SelectExecutor<'_> {
             ));
         }
 
-        // Phase 3: Convert aggregates to (column_idx, op) format for columnar_group_by
-        let agg_cols: Vec<(usize, columnar::AggregateOp)> = aggregates
-            .iter()
-            .filter_map(|spec| {
+        // Phase 3: Handle expression aggregates by pre-computing them as new columns
+        // This enables TPC-H Q1 style queries with SUM(col * expr) to use SIMD GROUP BY
+        let has_expression_aggs = aggregates.iter().any(|spec| {
+            matches!(&spec.source, columnar::AggregateSource::Expression(_))
+        });
+
+        #[cfg(feature = "profile-q6")]
+        let expr_start = std::time::Instant::now();
+
+        let (expanded_batch, agg_cols) = if has_expression_aggs {
+            // Clone the batch so we can add computed expression columns
+            let mut expanded = filtered_batch.clone();
+            let mut expanded_agg_cols = Vec::with_capacity(aggregates.len());
+
+            for spec in aggregates {
                 match &spec.source {
-                    columnar::AggregateSource::Column(idx) => Some((*idx, spec.op)),
-                    columnar::AggregateSource::CountStar => {
-                        // For COUNT(*), use column 0 with Count op
-                        Some((0, columnar::AggregateOp::Count))
+                    columnar::AggregateSource::Column(idx) => {
+                        expanded_agg_cols.push((*idx, spec.op));
                     }
-                    columnar::AggregateSource::Expression(_) => {
-                        // Expression aggregates not yet supported in GROUP BY path
-                        // TODO: Add support for expression aggregates in GROUP BY
-                        log::debug!("Expression aggregate in GROUP BY not yet supported");
-                        None
+                    columnar::AggregateSource::CountStar => {
+                        expanded_agg_cols.push((0, columnar::AggregateOp::Count));
+                    }
+                    columnar::AggregateSource::Expression(expr) => {
+                        // Evaluate expression using SIMD and add as new column
+                        let expr_col = columnar::evaluate_expression_to_column(&expanded, expr, schema)?;
+                        expanded.add_column(expr_col)?;
+                        // The new column is at the end of the batch
+                        expanded_agg_cols.push((expanded.column_count() - 1, spec.op));
                     }
                 }
-            })
-            .collect();
+            }
 
-        if agg_cols.len() != aggregates.len() {
-            log::debug!("Some aggregates not supported in columnar GROUP BY path");
-            return Err(ExecutorError::Other(
-                "Expression aggregates not supported in columnar GROUP BY path".to_string()
-            ));
+            log::debug!(
+                "GROUP BY: expanded batch with {} expression columns ({} -> {} columns)",
+                aggregates.iter().filter(|s| matches!(&s.source, columnar::AggregateSource::Expression(_))).count(),
+                filtered_batch.column_count(),
+                expanded.column_count()
+            );
+
+            (expanded, expanded_agg_cols)
+        } else {
+            // No expression aggregates - convert directly (no batch clone needed)
+            let agg_cols: Vec<(usize, columnar::AggregateOp)> = aggregates
+                .iter()
+                .map(|spec| {
+                    match &spec.source {
+                        columnar::AggregateSource::Column(idx) => (*idx, spec.op),
+                        columnar::AggregateSource::CountStar => (0, columnar::AggregateOp::Count),
+                        columnar::AggregateSource::Expression(_) => unreachable!(),
+                    }
+                })
+                .collect();
+            (filtered_batch, agg_cols)
+        };
+
+        #[cfg(feature = "profile-q6")]
+        {
+            let expr_time = expr_start.elapsed();
+            if has_expression_aggs {
+                eprintln!(
+                    "[PROFILE-Q6]   GROUP BY Phase 2 - Expression pre-compute: {:?}",
+                    expr_time
+                );
+            }
         }
 
         #[cfg(feature = "profile-q6")]
@@ -467,7 +512,7 @@ impl SelectExecutor<'_> {
 
         // Phase 4: Execute SIMD-accelerated GROUP BY aggregation directly on batch
         // Uses columnar_group_by_batch for 3-5x improvement over scalar path
-        let result = columnar::columnar_group_by_batch(&filtered_batch, &group_cols, &agg_cols)?;
+        let result = columnar::columnar_group_by_batch(&expanded_batch, &group_cols, &agg_cols)?;
 
         #[cfg(feature = "profile-q6")]
         {
