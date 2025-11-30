@@ -143,11 +143,19 @@ impl SelectExecutor<'_> {
     ) -> Result<SelectResult, ExecutorError> {
         // First, get the FROM result to access the schema
         let from_result = if let Some(from_clause) = &stmt.from {
-            let cte_results = if let Some(with_clause) = &stmt.with_clause {
+            let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
                 execute_ctes(with_clause, |query, cte_ctx| self.execute_with_ctes(query, cte_ctx))?
             } else {
                 HashMap::new()
             };
+            // If we have access to outer query's CTEs (for subqueries/derived tables), merge them in
+            // Local CTEs take precedence over outer CTEs if there are name conflicts
+            // This is critical for queries like TPC-DS Q2 where CTEs are referenced from derived tables
+            if let Some(outer_cte_ctx) = self.cte_context {
+                for (name, result) in outer_cte_ctx {
+                    cte_results.entry(name.clone()).or_insert_with(|| result.clone());
+                }
+            }
             // Pass WHERE and ORDER BY for join reordering optimization
             // This is critical for GROUP BY queries to avoid CROSS JOINs
             Some(self.execute_from_with_where(
@@ -678,7 +686,19 @@ impl SelectExecutor<'_> {
     ) -> Result<FromResult, ExecutorError> {
         use crate::select::scan::execute_from_clause;
         let from_result = execute_from_clause(from, cte_results, self.database, where_clause, order_by, self.outer_row, self.outer_schema, |query| {
-            self.execute_with_columns(query)
+            // For derived table subqueries, create a child executor with CTE context
+            // This allows CTEs from the outer WITH clause to be referenced in subqueries
+            // Critical for queries like TPC-DS Q2 where CTEs are used in FROM subqueries
+            if !cte_results.is_empty() {
+                let child = SelectExecutor::new_with_cte_and_depth(
+                    self.database,
+                    cte_results,
+                    self.subquery_depth,
+                );
+                child.execute_with_columns(query)
+            } else {
+                self.execute_with_columns(query)
+            }
         })?;
 
         // NOTE: We DON'T merge outer schema with from_result.schema here because:
