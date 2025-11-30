@@ -419,12 +419,15 @@ impl SelectExecutor<'_> {
         )?;
 
         // Build execution context
-        let exec_ctx = ExecutionContext::new(&from_result.schema, self.database);
-        let exec_ctx = if !cte_results.is_empty() {
-            exec_ctx.with_cte_context(cte_results)
-        } else {
-            exec_ctx
-        };
+        let mut exec_ctx = ExecutionContext::new(&from_result.schema, self.database);
+        // Add outer context for correlated subqueries (#2998)
+        if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+            exec_ctx = exec_ctx.with_outer_context(outer_row, outer_schema);
+        }
+        // Add CTE context if available
+        if !cte_results.is_empty() {
+            exec_ctx = exec_ctx.with_cte_context(cte_results);
+        }
 
         // Validate column references BEFORE processing
         super::validation::validate_select_columns_with_context(
