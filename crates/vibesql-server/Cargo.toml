@@ -27,9 +27,9 @@ vibesql-parser = { version = "0.1.0", path = "../vibesql-parser" }
 tokio = { version = "1.0", features = ["full"] }
 futures = "0.3"
 
-# TLS/SSL support
-tokio-rustls = "0.26"
-rustls = "0.23"
+# TLS/SSL support (use ring backend - faster to compile than aws-lc-rs)
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2.0"
 
 # Authentication
