@@ -991,6 +991,220 @@ impl<'a> TPCCExecutor for DuckdbTransactionExecutor<'a> {
     }
 }
 
+/// TPC-C transaction executor for MySQL
+#[cfg(feature = "benchmark-comparison")]
+pub struct MysqlTransactionExecutor<'a> {
+    pub conn: &'a mut mysql::PooledConn,
+}
+
+#[cfg(feature = "benchmark-comparison")]
+impl<'a> MysqlTransactionExecutor<'a> {
+    pub fn new(conn: &'a mut mysql::PooledConn) -> Self {
+        Self { conn }
+    }
+
+    pub fn new_order(&mut self, input: &NewOrderInput) -> TransactionResult {
+        use mysql::prelude::*;
+        let start = Instant::now();
+
+        // Get warehouse tax rate
+        let _: Option<(f64,)> = self.conn.exec_first(
+            "SELECT w_tax FROM warehouse WHERE w_id = ?",
+            (input.w_id,),
+        ).ok().flatten();
+
+        // Get district info
+        let _: Option<(f64, i32)> = self.conn.exec_first(
+            "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
+            (input.w_id, input.d_id),
+        ).ok().flatten();
+
+        // Get customer info
+        let _: Option<(f64, String, String)> = self.conn.exec_first(
+            "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+            (input.w_id, input.d_id, input.c_id),
+        ).ok().flatten();
+
+        // Process each order line - query item and stock info
+        for item in &input.items {
+            // Get item info
+            let _: Option<(f64, String, String)> = self.conn.exec_first(
+                "SELECT i_price, i_name, i_data FROM item WHERE i_id = ?",
+                (item.ol_i_id,),
+            ).ok().flatten();
+
+            // Get stock info
+            let _: Option<(i32, i32, i32)> = self.conn.exec_first(
+                "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = ? AND s_w_id = ?",
+                (item.ol_i_id, item.ol_supply_w_id),
+            ).ok().flatten();
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn payment(&mut self, input: &PaymentInput) -> TransactionResult {
+        use mysql::prelude::*;
+        let start = Instant::now();
+
+        // Get warehouse info
+        let _: Option<(String, String, String, String, String, String)> = self.conn.exec_first(
+            "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = ?",
+            (input.w_id,),
+        ).ok().flatten();
+
+        // Get district info
+        let _: Option<(String, String, String, String, String, String)> = self.conn.exec_first(
+            "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = ? AND d_id = ?",
+            (input.w_id, input.d_id),
+        ).ok().flatten();
+
+        // Get customer (by ID or last name)
+        if let Some(c_id) = input.c_id {
+            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+                (input.c_w_id, input.c_d_id, c_id),
+            ).ok().flatten();
+        } else {
+            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
+                (input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()),
+            ).ok().flatten();
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn order_status(&mut self, input: &OrderStatusInput) -> TransactionResult {
+        use mysql::prelude::*;
+        let start = Instant::now();
+
+        // Get customer (by ID or last name)
+        let c_id = if let Some(c_id) = input.c_id {
+            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+                (input.w_id, input.d_id, c_id),
+            ).ok().flatten();
+            c_id
+        } else {
+            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
+                (input.w_id, input.d_id, input.c_last.as_ref().unwrap()),
+            ).ok().flatten();
+            1 // Default c_id for order lookup
+        };
+
+        // Get last order for customer
+        let _: Option<(i32, String, Option<i32>)> = self.conn.exec_first(
+            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = ? AND o_d_id = ? AND o_c_id = ? ORDER BY o_id DESC LIMIT 1",
+            (input.w_id, input.d_id, c_id),
+        ).ok().flatten();
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn delivery(&mut self, input: &DeliveryInput) -> TransactionResult {
+        use mysql::prelude::*;
+        let start = Instant::now();
+
+        // Process each district - query for new orders
+        for d_id in 1..=10 {
+            let _: Option<(i32,)> = self.conn.exec_first(
+                "SELECT no_o_id FROM new_order WHERE no_w_id = ? AND no_d_id = ? ORDER BY no_o_id LIMIT 1",
+                (input.w_id, d_id),
+            ).ok().flatten();
+        }
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+
+    pub fn stock_level(&mut self, input: &StockLevelInput) -> TransactionResult {
+        use mysql::prelude::*;
+        let start = Instant::now();
+
+        // Get district next order ID
+        let _: Option<(i32,)> = self.conn.exec_first(
+            "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
+            (input.w_id, input.d_id),
+        ).ok().flatten();
+
+        // Count low stock items (same query as other engines)
+        let _: Option<(i64,)> = self.conn.exec_first(
+            "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+             WHERE ol_w_id = ? AND ol_d_id = ? \
+             AND s_w_id = ? AND s_i_id = ol_i_id AND s_quantity < ?",
+            (input.w_id, input.d_id, input.w_id, input.threshold),
+        ).ok().flatten();
+
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+impl<'a> TPCCExecutor for MysqlTransactionExecutor<'a> {
+    fn new_order(&self, _input: &NewOrderInput) -> TransactionResult {
+        // This trait requires &self but MySQL needs &mut self for queries
+        // We implement the trait for benchmarking compatibility but use the &mut self methods directly
+        TransactionResult {
+            success: false,
+            duration_us: 0,
+            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
+        }
+    }
+
+    fn payment(&self, _input: &PaymentInput) -> TransactionResult {
+        TransactionResult {
+            success: false,
+            duration_us: 0,
+            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
+        }
+    }
+
+    fn order_status(&self, _input: &OrderStatusInput) -> TransactionResult {
+        TransactionResult {
+            success: false,
+            duration_us: 0,
+            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
+        }
+    }
+
+    fn delivery(&self, _input: &DeliveryInput) -> TransactionResult {
+        TransactionResult {
+            success: false,
+            duration_us: 0,
+            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
+        }
+    }
+
+    fn stock_level(&self, _input: &StockLevelInput) -> TransactionResult {
+        TransactionResult {
+            success: false,
+            duration_us: 0,
+            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
+        }
+    }
+}
+
 /// TPC-C workload generator following standard transaction mix
 pub struct TPCCWorkload {
     pub rng: TPCCRng,

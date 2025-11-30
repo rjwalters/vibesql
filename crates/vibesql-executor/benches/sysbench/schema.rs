@@ -10,6 +10,10 @@ use vibesql_storage::Database as VibeDB;
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::prelude::*;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::{Pool, PooledConn};
 
 // =============================================================================
 // Database Loaders
@@ -68,6 +72,25 @@ pub fn load_duckdb(table_size: usize) -> DuckDBConn {
     load_sbtest_duckdb(&conn, &mut data);
 
     conn
+}
+
+/// Load MySQL with sysbench schema and data
+/// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/sysbench)
+/// Returns None if MYSQL_URL is not set or connection fails
+#[cfg(feature = "benchmark-comparison")]
+pub fn load_mysql(table_size: usize) -> Option<PooledConn> {
+    let url = std::env::var("MYSQL_URL").ok()?;
+    let pool = Pool::new(url.as_str()).ok()?;
+    let mut conn = pool.get_conn().ok()?;
+    let mut data = SysbenchData::new(table_size);
+
+    // Create schema (drops and recreates table)
+    create_sbtest_schema_mysql(&mut conn);
+
+    // Load data
+    load_sbtest_mysql(&mut conn, &mut data);
+
+    Some(conn)
 }
 
 // =============================================================================
@@ -220,5 +243,40 @@ fn load_sbtest_duckdb(conn: &DuckDBConn, data: &mut SysbenchData) {
 
     while let Some((id, k, c, pad)) = data.next_row() {
         stmt.execute(duckdb::params![id, k, c, pad]).unwrap();
+    }
+}
+
+// =============================================================================
+// Schema Creation - MySQL
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn create_sbtest_schema_mysql(conn: &mut PooledConn) {
+    // Drop table if exists
+    conn.query_drop("DROP TABLE IF EXISTS sbtest1").unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE sbtest1 (
+            id INTEGER PRIMARY KEY,
+            k INTEGER NOT NULL DEFAULT 0,
+            c VARCHAR(120) NOT NULL DEFAULT '',
+            pad VARCHAR(60) NOT NULL DEFAULT ''
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    // Create index on k column
+    conn.query_drop("CREATE INDEX k_1 ON sbtest1(k)").unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_sbtest_mysql(conn: &mut PooledConn, data: &mut SysbenchData) {
+    while let Some((id, k, c, pad)) = data.next_row() {
+        conn.exec_drop(
+            "INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)",
+            (id, k, &c, &pad),
+        ).unwrap();
     }
 }
