@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use anyhow::Result;
-use vibesql_parser::Parser;
+use vibesql_executor::{PreparedStatement, PreparedStatementCache, PreparedStatementCacheStats};
 use vibesql_storage::Database;
+use vibesql_types::SqlValue;
 
 /// Session state for a database connection
 pub struct Session {
@@ -15,6 +18,8 @@ pub struct Session {
     /// Transaction state
     #[allow(dead_code)]
     pub in_transaction: bool,
+    /// Prepared statement cache for reduced parsing overhead
+    stmt_cache: Arc<PreparedStatementCache>,
 }
 
 /// Simplified execution result for wire protocol
@@ -94,90 +99,166 @@ impl Session {
             user,
             db,
             in_transaction: false,
+            stmt_cache: Arc::new(PreparedStatementCache::default_cache()),
         })
     }
 
-    /// Execute a SQL query
-    pub fn execute(&mut self, sql: &str) -> Result<ExecutionResult> {
-        // Parse SQL
-        let statement = Parser::parse_sql(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
+    /// Create a new session with a shared statement cache
+    pub fn with_cache(
+        database: String,
+        user: String,
+        cache: Arc<PreparedStatementCache>,
+    ) -> Result<Self> {
+        let db = Database::new();
 
-        // Execute based on statement type
+        Ok(Self {
+            database,
+            user,
+            db,
+            in_transaction: false,
+            stmt_cache: cache,
+        })
+    }
+
+    /// Prepare a SQL statement for repeated execution
+    ///
+    /// The statement is parsed once and cached. Subsequent calls with the same
+    /// SQL will return the cached prepared statement without re-parsing.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
+    /// let result = session.execute_prepared(&stmt, &[SqlValue::Integer(1)])?;
+    /// ```
+    pub fn prepare(&self, sql: &str) -> Result<Arc<PreparedStatement>> {
+        self.stmt_cache.get_or_prepare(sql).map_err(|e| anyhow::anyhow!("{}", e))
+    }
+
+    /// Execute a prepared statement with parameters
+    ///
+    /// Binds the provided parameters to the prepared statement and executes it.
+    /// This avoids the parsing overhead of the original SQL.
+    pub fn execute_prepared(
+        &mut self,
+        stmt: &PreparedStatement,
+        params: &[SqlValue],
+    ) -> Result<ExecutionResult> {
+        // Bind parameters to get executable statement
+        let bound_stmt = stmt.bind(params).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // Execute the bound statement
+        self.execute_statement(&bound_stmt)
+    }
+
+    /// Execute a SQL query with auto-caching
+    ///
+    /// This method automatically caches parsed statements for performance.
+    /// For repeated queries, use `prepare()` + `execute_prepared()` for best performance.
+    pub fn execute(&mut self, sql: &str) -> Result<ExecutionResult> {
+        // Try to get from cache or prepare
+        let prepared = self.stmt_cache.get_or_prepare(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // For non-parameterized queries, execute directly from cached AST
+        self.execute_statement(prepared.statement())
+    }
+
+    /// Execute a SQL query with parameters (convenience method)
+    ///
+    /// Combines prepare + execute_prepared in one call.
+    pub fn execute_with_params(&mut self, sql: &str, params: &[SqlValue]) -> Result<ExecutionResult> {
+        let prepared = self.prepare(sql)?;
+        self.execute_prepared(&prepared, params)
+    }
+
+    /// Execute a parsed statement
+    fn execute_statement(&mut self, statement: &vibesql_ast::Statement) -> Result<ExecutionResult> {
         match statement {
             vibesql_ast::Statement::Select(select_stmt) => {
                 let executor = vibesql_executor::SelectExecutor::new(&self.db);
-                let rows = executor.execute(&select_stmt)?;
+                let rows = executor.execute(select_stmt)?;
 
                 // Convert to our result format
-                let result_rows: Vec<Row> = rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+                let result_rows: Vec<Row> =
+                    rows.iter().map(|r| Row { values: r.values.clone() }).collect();
 
                 // TODO: Get actual column names from select statement
                 let columns = if !rows.is_empty() {
-                    (0..rows[0].values.len())
-                        .map(|i| Column { name: format!("col{}", i) })
-                        .collect()
+                    (0..rows[0].values.len()).map(|i| Column { name: format!("col{}", i) }).collect()
                 } else {
                     Vec::new()
                 };
 
-                Ok(ExecutionResult::Select {
-                    rows: result_rows,
-                    columns,
-                })
+                Ok(ExecutionResult::Select { rows: result_rows, columns })
             }
 
             vibesql_ast::Statement::Insert(insert_stmt) => {
-                let affected = vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)?;
+                let affected = vibesql_executor::InsertExecutor::execute(&mut self.db, insert_stmt)?;
+                // Invalidate cache for modified table
+                self.stmt_cache.invalidate_table(&insert_stmt.table_name);
                 Ok(ExecutionResult::Insert { rows_affected: affected })
             }
 
             vibesql_ast::Statement::Update(update_stmt) => {
-                let affected = vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)?;
+                let affected = vibesql_executor::UpdateExecutor::execute(update_stmt, &mut self.db)?;
+                // Invalidate cache for modified table
+                self.stmt_cache.invalidate_table(&update_stmt.table_name);
                 Ok(ExecutionResult::Update { rows_affected: affected })
             }
 
             vibesql_ast::Statement::Delete(delete_stmt) => {
-                let affected = vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)?;
+                let affected = vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut self.db)?;
+                // Invalidate cache for modified table
+                self.stmt_cache.invalidate_table(&delete_stmt.table_name);
                 Ok(ExecutionResult::Delete { rows_affected: affected })
             }
 
             vibesql_ast::Statement::CreateTable(create_stmt) => {
-                vibesql_executor::CreateTableExecutor::execute(&create_stmt, &mut self.db)?;
+                vibesql_executor::CreateTableExecutor::execute(create_stmt, &mut self.db)?;
                 Ok(ExecutionResult::CreateTable)
             }
 
             vibesql_ast::Statement::CreateIndex(index_stmt) => {
-                vibesql_executor::CreateIndexExecutor::execute(&index_stmt, &mut self.db)?;
+                vibesql_executor::CreateIndexExecutor::execute(index_stmt, &mut self.db)?;
                 Ok(ExecutionResult::CreateIndex)
             }
 
             vibesql_ast::Statement::CreateView(view_stmt) => {
-                vibesql_executor::advanced_objects::execute_create_view(&view_stmt, &mut self.db)?;
+                vibesql_executor::advanced_objects::execute_create_view(view_stmt, &mut self.db)?;
                 Ok(ExecutionResult::CreateView)
             }
 
             vibesql_ast::Statement::DropTable(drop_stmt) => {
-                vibesql_executor::DropTableExecutor::execute(&drop_stmt, &mut self.db)?;
+                vibesql_executor::DropTableExecutor::execute(drop_stmt, &mut self.db)?;
+                // Invalidate cache for dropped table
+                self.stmt_cache.invalidate_table(&drop_stmt.table_name);
                 Ok(ExecutionResult::DropTable)
             }
 
             vibesql_ast::Statement::DropIndex(drop_stmt) => {
-                vibesql_executor::DropIndexExecutor::execute(&drop_stmt, &mut self.db)?;
+                vibesql_executor::DropIndexExecutor::execute(drop_stmt, &mut self.db)?;
                 Ok(ExecutionResult::DropIndex)
             }
 
             vibesql_ast::Statement::DropView(drop_stmt) => {
-                vibesql_executor::advanced_objects::execute_drop_view(&drop_stmt, &mut self.db)?;
+                vibesql_executor::advanced_objects::execute_drop_view(drop_stmt, &mut self.db)?;
                 Ok(ExecutionResult::DropView)
             }
 
             _ => {
                 // For now, return a generic success for other statements
-                Ok(ExecutionResult::Other {
-                    message: "Command completed successfully".to_string(),
-                })
+                Ok(ExecutionResult::Other { message: "Command completed successfully".to_string() })
             }
         }
+    }
+
+    /// Get prepared statement cache statistics
+    pub fn cache_stats(&self) -> PreparedStatementCacheStats {
+        self.stmt_cache.stats()
+    }
+
+    /// Clear the prepared statement cache
+    pub fn clear_cache(&self) {
+        self.stmt_cache.clear();
     }
 
     /// Begin a transaction
@@ -245,5 +326,59 @@ mod tests {
 
         // Can't commit when not in transaction
         assert!(session.commit().is_err());
+    }
+
+    #[test]
+    fn test_prepare_and_execute() {
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+
+        // Create a table first
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").unwrap();
+
+        // Prepare a statement (note: parser doesn't support ?, so use literal value)
+        let stmt = session.prepare("SELECT * FROM users WHERE id = 1").unwrap();
+        assert_eq!(stmt.param_count(), 0);
+
+        // Execute the prepared statement
+        let result = session.execute_prepared(&stmt, &[]);
+        assert!(result.is_ok());
+
+        // Verify we get a Select result
+        match result.unwrap() {
+            ExecutionResult::Select { .. } => (),
+            _ => panic!("Expected Select result"),
+        }
+    }
+
+    #[test]
+    fn test_cache_hit() {
+        let session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+
+        // First prepare - cache miss
+        let _stmt1 = session.prepare("SELECT 1").unwrap();
+        let stats = session.cache_stats();
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.hits, 0);
+
+        // Second prepare - cache hit
+        let _stmt2 = session.prepare("SELECT 1").unwrap();
+        let stats = session.cache_stats();
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.hits, 1);
+    }
+
+    #[test]
+    fn test_auto_caching_in_execute() {
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+
+        // First execute - cache miss
+        session.execute("SELECT 1").unwrap();
+        let stats = session.cache_stats();
+        assert_eq!(stats.misses, 1);
+
+        // Second execute - cache hit
+        session.execute("SELECT 1").unwrap();
+        let stats = session.cache_stats();
+        assert_eq!(stats.hits, 1);
     }
 }

@@ -47,7 +47,10 @@ mod view_ddl;
 pub mod simd;
 
 pub use alter::AlterTableExecutor;
-pub use cache::{CacheManager, CacheStats, CachedQueryContext, QueryPlanCache, QuerySignature};
+pub use cache::{
+    CacheManager, CacheStats, CachedQueryContext, PreparedStatement, PreparedStatementCache,
+    PreparedStatementCacheStats, PreparedStatementError, QueryPlanCache, QuerySignature,
+};
 pub use constraint_validator::ConstraintValidator;
 pub use create_table::CreateTableExecutor;
 pub use delete::DeleteExecutor;
