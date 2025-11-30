@@ -18,6 +18,7 @@ Usage:
     ./scripts/benchmark_footprint.py --output web-demo/public/benchmarks/footprint_results.json
 """
 
+import gzip
 import json
 import os
 import platform
@@ -30,7 +31,7 @@ import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 # Number of runs for averaging startup/memory measurements
 NUM_RUNS = 10
@@ -49,6 +50,10 @@ class FootprintResult:
     version: str
     available: bool
     error: Optional[str] = None
+    # WASM-specific fields (only for VibeSQL)
+    wasm_size_bytes: Optional[int] = None
+    wasm_size_gzip_bytes: Optional[int] = None
+    wasm_size_brotli_bytes: Optional[int] = None
 
 
 @dataclass
@@ -76,6 +81,61 @@ def get_binary_size(path: str) -> int:
     if not os.path.exists(path):
         return 0
     return os.path.getsize(path)
+
+
+def get_compressed_size(path: str, compression: str = 'gzip') -> Optional[int]:
+    """Get the compressed size of a file.
+
+    Args:
+        path: Path to the file to compress
+        compression: 'gzip' or 'brotli'
+
+    Returns:
+        Compressed size in bytes, or None if compression fails
+    """
+    if not os.path.exists(path):
+        return None
+
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+
+        if compression == 'gzip':
+            compressed = gzip.compress(data, compresslevel=9)
+            return len(compressed)
+        elif compression == 'brotli':
+            # Try to import brotli, but don't fail if not available
+            try:
+                import brotli
+                compressed = brotli.compress(data, quality=11)
+                return len(compressed)
+            except ImportError:
+                return None
+    except Exception:
+        return None
+
+    return None
+
+
+def measure_wasm_sizes(repo_root: Path) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """Measure WASM binary sizes (raw, gzip, brotli).
+
+    Returns:
+        Tuple of (raw_size, gzip_size, brotli_size) in bytes.
+        Returns (None, None, None) if WASM file not found.
+    """
+    wasm_path = repo_root / "web-demo" / "public" / "pkg" / "vibesql_wasm_bg.wasm"
+
+    if not wasm_path.exists():
+        print(f"    WASM file not found: {wasm_path}")
+        print("    Run 'make build-wasm' to generate WASM bindings")
+        return None, None, None
+
+    raw_size = get_binary_size(str(wasm_path))
+    gzip_size = get_compressed_size(str(wasm_path), 'gzip')
+    brotli_size = get_compressed_size(str(wasm_path), 'brotli')
+
+    return raw_size, gzip_size, brotli_size
 
 
 def get_binary_version(db_name: str, binary_path: str) -> str:
@@ -312,7 +372,12 @@ def measure_startup_and_memory_linux(
     return avg_startup, stddev_startup, avg_memory, stddev_memory
 
 
-def measure_database(db_name: str, binary_path: str, num_runs: int = NUM_RUNS) -> FootprintResult:
+def measure_database(
+    db_name: str,
+    binary_path: str,
+    repo_root: Path,
+    num_runs: int = NUM_RUNS
+) -> FootprintResult:
     """Measure footprint for a single database."""
     print(f"  Measuring {db_name}...")
 
@@ -351,6 +416,20 @@ def measure_database(db_name: str, binary_path: str, num_runs: int = NUM_RUNS) -
     print(f"    Startup time: {avg_startup:.2f} ± {stddev_startup:.2f} ms")
     print(f"    Peak memory: {avg_memory:.0f} ± {stddev_memory:.0f} KB ({avg_memory/1024:.1f} MB)")
 
+    # Measure WASM sizes (only for VibeSQL)
+    wasm_size = None
+    wasm_gzip_size = None
+    wasm_brotli_size = None
+
+    if db_name == "vibesql":
+        wasm_size, wasm_gzip_size, wasm_brotli_size = measure_wasm_sizes(repo_root)
+        if wasm_size:
+            print(f"    WASM size: {wasm_size / (1024*1024):.2f} MB")
+            if wasm_gzip_size:
+                print(f"    WASM gzip: {wasm_gzip_size / (1024*1024):.2f} MB ({wasm_gzip_size/wasm_size*100:.1f}%)")
+            if wasm_brotli_size:
+                print(f"    WASM brotli: {wasm_brotli_size / (1024*1024):.2f} MB ({wasm_brotli_size/wasm_size*100:.1f}%)")
+
     return FootprintResult(
         database=db_name,
         binary_path=binary_path,
@@ -360,7 +439,10 @@ def measure_database(db_name: str, binary_path: str, num_runs: int = NUM_RUNS) -
         peak_memory_kb=avg_memory,
         peak_memory_stddev_kb=stddev_memory,
         version=version,
-        available=True
+        available=True,
+        wasm_size_bytes=wasm_size,
+        wasm_size_gzip_bytes=wasm_gzip_size,
+        wasm_size_brotli_bytes=wasm_brotli_size
     )
 
 
@@ -408,6 +490,9 @@ def run_benchmarks(output_path: Optional[str] = None, num_runs: int = NUM_RUNS) 
     print(f"Runs per database: {num_runs}")
     print()
 
+    # Get repo root for WASM path lookup
+    repo_root = Path(__file__).parent.parent
+
     # Find binaries
     print("📂 Locating database binaries...")
     binaries = find_binaries()
@@ -420,7 +505,7 @@ def run_benchmarks(output_path: Optional[str] = None, num_runs: int = NUM_RUNS) 
 
     results = []
     for db_name, binary_path in binaries.items():
-        result = measure_database(db_name, binary_path, num_runs)
+        result = measure_database(db_name, binary_path, repo_root, num_runs)
         results.append(asdict(result))
 
     # Create final results object
