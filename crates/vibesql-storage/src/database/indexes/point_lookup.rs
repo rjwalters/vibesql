@@ -11,7 +11,7 @@ impl IndexData {
     /// Lookup exact key in the index
     ///
     /// # Arguments
-    /// * `key` - Key to look up
+    /// * `key` - Key to look up (values will be normalized for consistent comparison)
     ///
     /// # Returns
     /// Owned vector of row indices if key exists, None otherwise
@@ -19,16 +19,19 @@ impl IndexData {
     /// # Note
     /// This is the primary point-lookup API for index queries.
     /// Returns owned data to support both in-memory (cloned) and disk-backed (loaded) indexes.
+    /// Values are normalized (e.g., Integer -> Double) to match insertion-time normalization.
     pub fn get(&self, key: &[SqlValue]) -> Option<Vec<usize>> {
+        // Normalize all key values for consistent comparison
+        // This ensures that Integer(100000) matches Double(100000.0) in the index
+        let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
+
         match self {
-            IndexData::InMemory { data } => data.get(key).cloned(),
+            IndexData::InMemory { data } => data.get(&normalized_key).cloned(),
             IndexData::DiskBacked { btree, .. } => {
                 // Safely acquire lock and perform lookup
-                // Convert slice to Vec for btree.lookup() which expects &Vec<SqlValue>
-                let key_vec = key.to_vec();
                 match acquire_btree_lock(btree) {
                     Ok(guard) => {
-                        match guard.lookup(&key_vec) {
+                        match guard.lookup(&normalized_key) {
                             Ok(row_ids) if !row_ids.is_empty() => Some(row_ids),
                             Ok(_) => None, // Empty result means key not found
                             Err(e) => {
@@ -49,23 +52,25 @@ impl IndexData {
     /// Check if a key exists in the index
     ///
     /// # Arguments
-    /// * `key` - Key to check
+    /// * `key` - Key to check (values will be normalized for consistent comparison)
     ///
     /// # Returns
     /// true if key exists, false otherwise
     ///
     /// # Note
     /// Used primarily for UNIQUE constraint validation.
+    /// Values are normalized (e.g., Integer -> Double) to match insertion-time normalization.
     pub fn contains_key(&self, key: &[SqlValue]) -> bool {
+        // Normalize all key values for consistent comparison
+        let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
+
         match self {
-            IndexData::InMemory { data } => data.contains_key(key),
+            IndexData::InMemory { data } => data.contains_key(&normalized_key),
             IndexData::DiskBacked { btree, .. } => {
                 // Safely acquire lock and check if key exists
-                // Convert slice to Vec for btree.lookup() which expects &Vec<SqlValue>
-                let key_vec = key.to_vec();
                 match acquire_btree_lock(btree) {
                     Ok(guard) => {
-                        match guard.lookup(&key_vec) {
+                        match guard.lookup(&normalized_key) {
                             Ok(row_ids) => !row_ids.is_empty(),
                             Err(e) => {
                                 log::warn!("BTreeIndex lookup failed in contains_key: {}", e);
