@@ -328,6 +328,15 @@ jobs:
             "$(find artifacts historical -name 'benchmark_results.json' 2>/dev/null | head -1)" \
             "historical/benchmark_history.json"
 
+          # Copy Sysbench benchmark results
+          SYSBENCH_RESULT=$(find artifacts -name "sysbench_results.json" 2>/dev/null | head -1)
+          if [ -n "$SYSBENCH_RESULT" ] && [ -f "$SYSBENCH_RESULT" ]; then
+            cp "$SYSBENCH_RESULT" deploy/benchmarks/sysbench_results.json
+            echo "✓ Copied sysbench_results.json"
+          else
+            echo "⚠️  No Sysbench results found in artifacts"
+          fi
+
           # Copy merged punchlist results
           if [ -f merged/sqllogictest_punchlist.json ]; then
             cp merged/sqllogictest_punchlist.json deploy/badges/

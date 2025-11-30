@@ -112,12 +112,19 @@ jobs:
         run: |
           python3 scripts/run_tpch_benchmarks.py --quick --output benchmark_results.json
 
+      - name: Run Sysbench benchmarks (quick mode)
+        continue-on-error: true
+        run: |
+          python3 scripts/run_sysbench_benchmarks.py --quick --output sysbench_results.json
+
       - name: Upload benchmark results
         if: always() && hashFiles('benchmark_results.json') != ''
         uses: actions/upload-artifact@v5
         with:
           name: ci-benchmark-results
-          path: benchmark_results.json
+          path: |
+            benchmark_results.json
+            sysbench_results.json
           retention-days: 90
 
       - name: Display results summary
