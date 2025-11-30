@@ -193,7 +193,7 @@ pub fn generate_stock_level_input(rng: &mut TPCCRng, num_warehouses: i32) -> Sto
     }
 }
 
-/// Thread-local profiling accumulators for query breakdown
+// Thread-local profiling accumulators for query breakdown
 thread_local! {
     static PARSE_TIME_US: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static EXECUTE_TIME_US: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
