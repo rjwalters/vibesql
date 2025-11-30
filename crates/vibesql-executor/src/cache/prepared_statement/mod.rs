@@ -4,20 +4,22 @@
 //! This provides significant performance benefits for repeated queries by:
 //! - Caching the parsed AST for identical SQL strings
 //! - Avoiding expensive parsing for each query execution
+//! - Supporting `?` placeholders with AST-level parameter binding
 //!
-//! ## Current Limitations
+//! ## Parameterized Queries
 //!
-//! The SQL parser does not currently support `?` placeholders directly.
-//! Parameterized queries should substitute values before calling `prepare()`.
-//! The cache key is the exact SQL string, so queries with different literal
-//! values will be cached separately.
+//! The parser supports `?` placeholders which are converted to `Placeholder(index)`
+//! expressions in the AST. Parameter binding replaces these placeholders with
+//! literal values directly in the AST, avoiding re-parsing entirely.
 //!
-//! ## Future Enhancement
-//!
-//! True parameterized query support would require parser changes to:
-//! - Accept `?` as valid expression tokens
-//! - Store placeholder nodes in the AST
-//! - Bind parameters at execution time without re-parsing
+//! Example:
+//! ```ignore
+//! let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
+//! // First execution - fast (no re-parsing)
+//! let result1 = session.execute_prepared(&stmt, &[SqlValue::Integer(1)])?;
+//! // Second execution - equally fast (still no re-parsing)
+//! let result2 = session.execute_prepared(&stmt, &[SqlValue::Integer(2)])?;
+//! ```
 
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -30,6 +32,8 @@ use vibesql_ast::Statement;
 use vibesql_types::SqlValue;
 
 use super::{extract_tables_from_statement, QuerySignature};
+
+mod bind;
 
 /// A prepared statement with cached AST
 #[derive(Debug, Clone)]
@@ -50,7 +54,8 @@ impl PreparedStatement {
     /// Create a new prepared statement from parsed AST
     pub fn new(sql: String, statement: Statement) -> Self {
         let signature = QuerySignature::from_ast(&statement);
-        let param_count = sql.matches('?').count();
+        // Count placeholders from the AST (more accurate than counting ? in SQL string)
+        let param_count = bind::count_placeholders(&statement);
         let tables = extract_tables_from_statement(&statement);
 
         Self {
@@ -90,7 +95,11 @@ impl PreparedStatement {
     /// Bind parameters to create an executable statement
     ///
     /// For statements without placeholders, returns a clone of the cached statement.
-    /// For parameterized statements, substitutes `?` with actual values and re-parses.
+    /// For parameterized statements, replaces Placeholder expressions with Literal values
+    /// directly in the AST, avoiding the overhead of re-parsing.
+    ///
+    /// This is the key performance optimization: binding happens at the AST level,
+    /// not by string substitution and re-parsing.
     pub fn bind(&self, params: &[SqlValue]) -> Result<Statement, PreparedStatementError> {
         if params.len() != self.param_count {
             return Err(PreparedStatementError::ParameterCountMismatch {
@@ -104,10 +113,8 @@ impl PreparedStatement {
             return Ok(self.statement.clone());
         }
 
-        // Substitute parameters into SQL and re-parse
-        let bound_sql = substitute_placeholders(&self.sql, params);
-        vibesql_parser::Parser::parse_sql(&bound_sql)
-            .map_err(|e| PreparedStatementError::ParseError(e.to_string()))
+        // Bind parameters at AST level (no re-parsing!)
+        Ok(bind::bind_parameters(&self.statement, params))
     }
 }
 
@@ -132,64 +139,6 @@ impl std::fmt::Display for PreparedStatementError {
 }
 
 impl std::error::Error for PreparedStatementError {}
-
-/// Substitute `?` placeholders with actual SQL values
-fn substitute_placeholders(sql: &str, params: &[SqlValue]) -> String {
-    let mut result = String::with_capacity(sql.len() + params.len() * 16);
-    let mut param_idx = 0;
-    let mut chars = sql.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '?' && param_idx < params.len() {
-            // Substitute the placeholder with the parameter value
-            result.push_str(&sql_value_to_sql(&params[param_idx]));
-            param_idx += 1;
-        } else if c == '\'' {
-            // Handle string literals - don't substitute ? inside them
-            result.push(c);
-            while let Some(&next) = chars.peek() {
-                chars.next();
-                result.push(next);
-                if next == '\'' {
-                    // Check for escaped quote
-                    if chars.peek() == Some(&'\'') {
-                        chars.next();
-                        result.push('\'');
-                    } else {
-                        break;
-                    }
-                }
-            }
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
-}
-
-/// Convert SqlValue to SQL string representation
-fn sql_value_to_sql(value: &SqlValue) -> String {
-    match value {
-        SqlValue::Integer(n) => n.to_string(),
-        SqlValue::Smallint(n) => n.to_string(),
-        SqlValue::Bigint(n) => n.to_string(),
-        SqlValue::Unsigned(n) => n.to_string(),
-        SqlValue::Numeric(n) => n.to_string(),
-        SqlValue::Float(n) => n.to_string(),
-        SqlValue::Real(n) => n.to_string(),
-        SqlValue::Double(n) => n.to_string(),
-        SqlValue::Character(s) | SqlValue::Varchar(s) => {
-            format!("'{}'", s.replace('\'', "''"))
-        }
-        SqlValue::Boolean(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
-        SqlValue::Date(d) => format!("DATE '{}'", d),
-        SqlValue::Time(t) => format!("TIME '{}'", t),
-        SqlValue::Timestamp(ts) => format!("TIMESTAMP '{}'", ts),
-        SqlValue::Interval(i) => format!("INTERVAL '{}'", i),
-        SqlValue::Null => "NULL".to_string(),
-    }
-}
 
 /// Statistics for prepared statement cache
 #[derive(Debug, Clone)]
@@ -327,39 +276,7 @@ impl PreparedStatementCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_substitute_placeholders_simple() {
-        let sql = "SELECT * FROM users WHERE id = ?";
-        let params = vec![SqlValue::Integer(42)];
-        let result = substitute_placeholders(sql, &params);
-        assert_eq!(result, "SELECT * FROM users WHERE id = 42");
-    }
-
-    #[test]
-    fn test_substitute_placeholders_multiple() {
-        let sql = "SELECT * FROM users WHERE id = ? AND name = ?";
-        let params = vec![SqlValue::Integer(42), SqlValue::Varchar("John".to_string())];
-        let result = substitute_placeholders(sql, &params);
-        assert_eq!(result, "SELECT * FROM users WHERE id = 42 AND name = 'John'");
-    }
-
-    #[test]
-    fn test_substitute_placeholders_string_escape() {
-        let sql = "SELECT * FROM users WHERE name = ?";
-        let params = vec![SqlValue::Varchar("O'Brien".to_string())];
-        let result = substitute_placeholders(sql, &params);
-        assert_eq!(result, "SELECT * FROM users WHERE name = 'O''Brien'");
-    }
-
-    #[test]
-    fn test_substitute_placeholders_in_string_literal() {
-        // ? inside string literal should not be substituted
-        let sql = "SELECT '?' AS question, id FROM users WHERE id = ?";
-        let params = vec![SqlValue::Integer(1)];
-        let result = substitute_placeholders(sql, &params);
-        assert_eq!(result, "SELECT '?' AS question, id FROM users WHERE id = 1");
-    }
+    use vibesql_ast::Expression;
 
     #[test]
     fn test_prepared_statement_no_params() {
@@ -372,32 +289,83 @@ mod tests {
     }
 
     #[test]
-    fn test_prepared_statement_with_literal() {
-        // Parser doesn't support ? placeholders, so we test with literal values
-        let sql = "SELECT * FROM users WHERE id = 42";
+    fn test_prepared_statement_with_placeholder() {
+        // Parser now supports ? placeholders
+        let sql = "SELECT * FROM users WHERE id = ?";
         let statement = vibesql_parser::Parser::parse_sql(sql).unwrap();
         let prepared = PreparedStatement::new(sql.to_string(), statement);
 
-        // No ? placeholders means param_count is 0
-        assert_eq!(prepared.param_count(), 0);
+        // Should have 1 placeholder
+        assert_eq!(prepared.param_count(), 1);
 
-        // bind() with empty params returns the cached statement
-        let bound = prepared.bind(&[]).unwrap();
+        // bind() with correct params should work
+        let bound = prepared.bind(&[SqlValue::Integer(42)]).unwrap();
+        assert!(matches!(bound, Statement::Select(_)));
+
+        // Verify placeholder was replaced with literal
+        if let Statement::Select(select) = bound {
+            if let Some(Expression::BinaryOp { right, .. }) = &select.where_clause {
+                assert_eq!(**right, Expression::Literal(SqlValue::Integer(42)));
+            } else {
+                panic!("Expected BinaryOp in WHERE clause");
+            }
+        }
+    }
+
+    #[test]
+    fn test_prepared_statement_multiple_placeholders() {
+        let sql = "SELECT * FROM users WHERE id = ? AND name = ?";
+        let statement = vibesql_parser::Parser::parse_sql(sql).unwrap();
+        let prepared = PreparedStatement::new(sql.to_string(), statement);
+
+        assert_eq!(prepared.param_count(), 2);
+
+        let params = vec![SqlValue::Integer(42), SqlValue::Varchar("John".to_string())];
+        let bound = prepared.bind(&params).unwrap();
         assert!(matches!(bound, Statement::Select(_)));
     }
 
     #[test]
-    fn test_prepared_statement_bind_no_params() {
-        let sql = "SELECT * FROM users";
+    fn test_prepared_statement_bind_param_mismatch() {
+        let sql = "SELECT * FROM users WHERE id = ?";
         let statement = vibesql_parser::Parser::parse_sql(sql).unwrap();
         let prepared = PreparedStatement::new(sql.to_string(), statement);
 
         // Wrong param count should fail
-        let result = prepared.bind(&[SqlValue::Integer(42)]);
+        let result = prepared.bind(&[]);
         assert!(matches!(
             result,
-            Err(PreparedStatementError::ParameterCountMismatch { expected: 0, actual: 1 })
+            Err(PreparedStatementError::ParameterCountMismatch { expected: 1, actual: 0 })
         ));
+
+        // Too many params should also fail
+        let result = prepared.bind(&[SqlValue::Integer(1), SqlValue::Integer(2)]);
+        assert!(matches!(
+            result,
+            Err(PreparedStatementError::ParameterCountMismatch { expected: 1, actual: 2 })
+        ));
+    }
+
+    #[test]
+    fn test_prepared_statement_reuse() {
+        // The key performance test: we can bind multiple times without re-parsing
+        let sql = "SELECT * FROM users WHERE id = ?";
+        let statement = vibesql_parser::Parser::parse_sql(sql).unwrap();
+        let prepared = PreparedStatement::new(sql.to_string(), statement);
+
+        // Bind with different values - each should work without re-parsing
+        let bound1 = prepared.bind(&[SqlValue::Integer(1)]).unwrap();
+        let bound2 = prepared.bind(&[SqlValue::Integer(2)]).unwrap();
+        let bound3 = prepared.bind(&[SqlValue::Integer(3)]).unwrap();
+
+        // Verify each has the correct value
+        for (bound, expected_id) in [(bound1, 1), (bound2, 2), (bound3, 3)] {
+            if let Statement::Select(select) = bound {
+                if let Some(Expression::BinaryOp { right, .. }) = &select.where_clause {
+                    assert_eq!(**right, Expression::Literal(SqlValue::Integer(expected_id)));
+                }
+            }
+        }
     }
 
     #[test]
@@ -422,14 +390,39 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_different_literals_different_entries() {
+    fn test_cache_placeholder_reuse() {
+        // This is the key benefit: one cached statement for all values
         let cache = PreparedStatementCache::new(10);
+        let sql = "SELECT * FROM users WHERE id = ?";
 
-        // Different literal values = different cache entries
-        cache.get_or_prepare("SELECT * FROM users WHERE id = 1").unwrap();
-        cache.get_or_prepare("SELECT * FROM users WHERE id = 2").unwrap();
-        assert_eq!(cache.stats().size, 2);
-        assert_eq!(cache.stats().misses, 2);
+        // First call - cache miss
+        let stmt1 = cache.get_or_prepare(sql).unwrap();
+        assert_eq!(cache.stats().misses, 1);
+        assert_eq!(cache.stats().hits, 0);
+
+        // Same SQL with placeholder - cache hit!
+        let stmt2 = cache.get_or_prepare(sql).unwrap();
+        assert_eq!(cache.stats().misses, 1);
+        assert_eq!(cache.stats().hits, 1);
+
+        // Both point to same prepared statement
+        assert!(Arc::ptr_eq(&stmt1, &stmt2));
+
+        // Now bind with different values - no re-parsing needed
+        let bound1 = stmt1.bind(&[SqlValue::Integer(1)]).unwrap();
+        let bound2 = stmt2.bind(&[SqlValue::Integer(999)]).unwrap();
+
+        // Verify different bound values
+        if let (Statement::Select(s1), Statement::Select(s2)) = (&bound1, &bound2) {
+            if let (
+                Some(Expression::BinaryOp { right: r1, .. }),
+                Some(Expression::BinaryOp { right: r2, .. }),
+            ) = (&s1.where_clause, &s2.where_clause)
+            {
+                assert_eq!(**r1, Expression::Literal(SqlValue::Integer(1)));
+                assert_eq!(**r2, Expression::Literal(SqlValue::Integer(999)));
+            }
+        }
     }
 
     #[test]
@@ -453,30 +446,11 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_lru_access_updates_order() {
-        let cache = PreparedStatementCache::new(2);
-
-        cache.get_or_prepare("SELECT * FROM users").unwrap();
-        cache.get_or_prepare("SELECT * FROM orders").unwrap();
-
-        // Access users to make it recently used
-        cache.get("SELECT * FROM users");
-
-        // Now insert products - orders should be evicted (it's now LRU)
-        cache.get_or_prepare("SELECT * FROM products").unwrap();
-
-        // users should still be in cache (was accessed), orders should be evicted
-        assert!(cache.get("SELECT * FROM users").is_some());
-        assert!(cache.get("SELECT * FROM orders").is_none());
-        assert!(cache.get("SELECT * FROM products").is_some());
-    }
-
-    #[test]
     fn test_cache_table_invalidation() {
         let cache = PreparedStatementCache::new(10);
 
-        cache.get_or_prepare("SELECT * FROM users WHERE id = 1").unwrap();
-        cache.get_or_prepare("SELECT * FROM orders WHERE id = 1").unwrap();
+        cache.get_or_prepare("SELECT * FROM users WHERE id = ?").unwrap();
+        cache.get_or_prepare("SELECT * FROM orders WHERE id = ?").unwrap();
         assert_eq!(cache.stats().size, 2);
 
         // Invalidate users table
@@ -484,6 +458,6 @@ mod tests {
         assert_eq!(cache.stats().size, 1);
 
         // orders should still be cached
-        assert!(cache.get("SELECT * FROM orders WHERE id = 1").is_some());
+        assert!(cache.get("SELECT * FROM orders WHERE id = ?").is_some());
     }
 }

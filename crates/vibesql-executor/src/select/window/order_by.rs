@@ -124,6 +124,9 @@ fn collect_window_functions_from_expression(
             // Recursively collect window functions from the search term
             collect_window_functions_from_expression(search_modifier, window_functions);
         }
+
+        // Placeholders don't contain window functions
+        Expression::Placeholder(_) => {}
     }
 }
 

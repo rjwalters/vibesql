@@ -442,5 +442,8 @@ fn validate_expression_column_refs(
 
         // VALUES() in ON DUPLICATE KEY UPDATE - not validated against regular schema
         Expression::DuplicateKeyValue { .. } => Ok(()),
+
+        // Placeholders - no column references to validate
+        Expression::Placeholder(_) => Ok(()),
     }
 }

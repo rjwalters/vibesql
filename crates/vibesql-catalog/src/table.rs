@@ -564,6 +564,7 @@ impl TableSchema {
                 Self::expression_references_column(value, column_name)
             }
             vibesql_ast::Expression::Literal(_)
+            | vibesql_ast::Expression::Placeholder(_)
             | vibesql_ast::Expression::Wildcard
             | vibesql_ast::Expression::CurrentDate
             | vibesql_ast::Expression::CurrentTime { .. }

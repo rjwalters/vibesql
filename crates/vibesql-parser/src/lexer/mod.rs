@@ -110,6 +110,10 @@ impl Lexer {
             '`' => self.tokenize_backtick_identifier(),
             '0'..='9' => self.tokenize_number(),
             'a'..='z' | 'A'..='Z' | '_' => self.tokenize_identifier_or_keyword(),
+            '?' => {
+                self.advance();
+                Ok(Token::Placeholder)
+            }
             _ => Err(LexerError {
                 message: format!("Unexpected character: '{}'", ch),
                 position: self.position,

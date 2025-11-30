@@ -10,6 +10,11 @@ pub enum Expression {
     /// Literal value (42, 'hello', TRUE, NULL)
     Literal(SqlValue),
 
+    /// Parameter placeholder (?) for prepared statements
+    /// The index is 0-based and assigned in order of appearance in the SQL
+    /// Example: WHERE id = ? AND name = ? -> Placeholder(0), Placeholder(1)
+    Placeholder(usize),
+
     /// Column reference (id, users.id)
     ColumnRef {
         table: Option<String>,

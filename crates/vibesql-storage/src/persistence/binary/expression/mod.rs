@@ -373,6 +373,12 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_interval_unit(writer, field)?;
             write_expression(writer, expr)?;
         }
+        Expression::Placeholder(_) => {
+            // Placeholders should be bound to values before storage serialization
+            return Err(StorageError::NotImplemented(
+                "Placeholder expressions must be bound to values before serialization".to_string(),
+            ));
+        }
     }
     Ok(())
 }

@@ -152,7 +152,8 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
         | Expression::Default
         | Expression::DuplicateKeyValue { .. }
         | Expression::NextValue { .. }
-        | Expression::SessionVariable { .. } => {}
+        | Expression::SessionVariable { .. }
+        | Expression::Placeholder(_) => {}
     }
 }
 

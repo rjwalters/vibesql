@@ -42,12 +42,15 @@ impl fmt::Display for ParseError {
 pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
+    /// Counter for placeholder parameters (?)
+    /// Incremented each time a placeholder is parsed, providing 0-indexed parameter positions
+    placeholder_count: usize,
 }
 
 impl Parser {
     /// Create a new parser from tokens
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, position: 0 }
+        Parser { tokens, position: 0, placeholder_count: 0 }
     }
 
     /// Parse a comma-separated list of items using a provided parser function

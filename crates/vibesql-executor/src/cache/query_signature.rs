@@ -274,8 +274,11 @@ impl QuerySignature {
     /// Hash an expression, replacing literals with a placeholder marker
     fn hash_expression(expr: &Expression, hasher: &mut DefaultHasher) {
         match expr {
-            // Key difference: All literals hash to the same value
-            Expression::Literal(_) => "LITERAL_PLACEHOLDER".hash(hasher),
+            // Key difference: All literals and placeholders hash to the same value
+            // This allows parameterized queries to match with literal values
+            Expression::Literal(_) | Expression::Placeholder(_) => {
+                "LITERAL_PLACEHOLDER".hash(hasher)
+            }
 
             Expression::ColumnRef { table, column } => {
                 "COLUMN".hash(hasher);
