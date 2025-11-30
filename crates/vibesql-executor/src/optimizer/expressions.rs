@@ -108,7 +108,10 @@ pub fn optimize_expression(
             if let (Expression::Literal(left_val), Expression::Literal(right_val)) =
                 (&left_opt, &right_opt)
             {
-                match ExpressionEvaluator::eval_binary_op_static(left_val, op, right_val, vibesql_types::SqlMode::default()) {
+                // Use the evaluator's SQL mode for constant folding to ensure correct behavior
+                // across different database modes (MySQL, SQLite, etc.)
+                let sql_mode = evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
+                match ExpressionEvaluator::eval_binary_op_static(left_val, op, right_val, sql_mode) {
                     Ok(result) => return Ok(Expression::Literal(result)),
                     Err(_) => {
                         // If evaluation fails, continue with normalization below
@@ -225,13 +228,16 @@ pub fn optimize_expression(
             if let (Expression::Literal(expr_val), Expression::Literal(low_val), Expression::Literal(high_val)) =
                 (&expr_opt, &low_opt, &high_opt)
             {
+                // Use the evaluator's SQL mode for constant folding to ensure correct behavior
+                // across different database modes (MySQL, SQLite, etc.)
+                let sql_mode = evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
                 match ExpressionEvaluator::eval_between_static(
                     expr_val,
                     low_val,
                     high_val,
                     *negated,
                     *symmetric,
-                    vibesql_types::SqlMode::default(),
+                    sql_mode,
                 ) {
                     Ok(result) => return Ok(Expression::Literal(result)),
                     Err(_) => {
