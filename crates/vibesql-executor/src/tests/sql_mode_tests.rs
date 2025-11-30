@@ -77,11 +77,51 @@ mod tests {
     fn test_set_sql_mode_invalid() {
         let mut db = Database::new();
 
-        let result = execute_set_variable(&mut db, "SET sql_mode = 'invalid'");
+        // Note: MySQL-like mode names (alphanumeric with underscores) are now accepted
+        // for forward compatibility with future MySQL versions.
+        // Only strings with special characters are rejected.
+        let result = execute_set_variable(&mut db, "SET sql_mode = 'invalid!@#'");
         assert!(result.is_err());
         let err = result.unwrap_err();
         let err_str = err.to_string();
         assert!(err_str.contains("Unknown SQL mode"));
+    }
+
+    #[test]
+    fn test_set_sql_mode_mysql_flags() {
+        let mut db = Database::new();
+
+        // Test MySQL comma-separated mode flags (issue #3074)
+        let result = execute_set_variable(
+            &mut db,
+            "SET sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE'"
+        );
+        assert!(result.is_ok());
+        match db.sql_mode() {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
+    }
+
+    #[test]
+    fn test_set_sql_mode_leading_comma() {
+        let mut db = Database::new();
+
+        // Test leading comma (from REPLACE() removing first mode like ONLY_FULL_GROUP_BY)
+        // This is the actual bug from issue #3074
+        let result = execute_set_variable(
+            &mut db,
+            "SET sql_mode = ',STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE'"
+        );
+        assert!(result.is_ok());
+        match db.sql_mode() {
+            SqlMode::MySQL { flags } => {
+                assert!(flags.strict_mode);
+            }
+            _ => panic!("Expected MySQL mode"),
+        }
     }
 
     #[test]
