@@ -9,6 +9,7 @@
 //! - Batched query execution with cleanup between batches
 //! - Memory usage tracking and reporting
 //! - Configurable memory warning thresholds
+//! - Optional jemalloc allocator for better memory release
 //!
 //! Usage:
 //!   cargo run --release --bench tpcds_runner
@@ -16,12 +17,20 @@
 //!   SKIP_SLOW=1 cargo run --release --bench tpcds_runner  # Skip known slow queries
 //!   BATCH_SIZE=5 cargo run --release --bench tpcds_runner  # Run 5 queries per batch
 //!   MEMORY_WARN_MB=4000 cargo run --release --bench tpcds_runner  # Warn at 4GB RSS
+//!
+//! For better memory release, use jemalloc:
+//!   cargo run --release --bench tpcds_runner --features jemalloc
+
+// Set up jemalloc as the global allocator when feature is enabled
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod tpcds;
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
-use tpcds::memory::{get_memory_usage, hint_memory_release, MemoryTracker};
+use tpcds::memory::{get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled, MemoryTracker};
 use tpcds::queries::TPCDS_QUERIES;
 use tpcds::schema::load_vibesql;
 use vibesql_executor::SelectExecutor;
@@ -74,6 +83,7 @@ fn main() {
     println!("  Scale factor:    {}", scale_factor);
     println!("  Batch size:      {} queries", batch_size);
     println!("  Memory warning:  {:.0} MB", memory_warn_mb);
+    println!("  Allocator:       {}", if is_jemalloc_enabled() { "jemalloc" } else { "system" });
     if skip_slow {
         println!("  Skipping:        {} known slow queries", SLOW_QUERIES.len());
     }
@@ -213,11 +223,20 @@ fn main() {
 
             // Report batch completion
             if let Some(stats) = memory_tracker.record() {
-                eprintln!(
-                    "  [Batch {} complete, RSS: {:.1} MB]",
-                    (idx / batch_size) + 1,
-                    stats.rss_mb()
-                );
+                if let Some(je_stats) = get_jemalloc_stats() {
+                    eprintln!(
+                        "  [Batch {} complete, RSS: {:.1} MB, jemalloc resident: {:.1} MB]",
+                        (idx / batch_size) + 1,
+                        stats.rss_mb(),
+                        je_stats.resident as f64 / (1024.0 * 1024.0)
+                    );
+                } else {
+                    eprintln!(
+                        "  [Batch {} complete, RSS: {:.1} MB]",
+                        (idx / batch_size) + 1,
+                        stats.rss_mb()
+                    );
+                }
             }
         }
     }
@@ -242,6 +261,12 @@ fn main() {
 
     // Print memory summary
     memory_tracker.print_summary();
+
+    // Print jemalloc-specific stats if available
+    if let Some(je_stats) = get_jemalloc_stats() {
+        eprintln!("\n--- jemalloc Stats ---");
+        eprintln!("{}", je_stats);
+    }
 
     // Output CSV for documentation
     println!("\n=== CSV Output ===");

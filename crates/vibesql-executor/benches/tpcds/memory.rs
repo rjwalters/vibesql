@@ -176,7 +176,35 @@ impl MemoryTracker {
 
 /// Hint to the allocator that now is a good time to return memory to the OS
 ///
-/// This doesn't force memory release but can help on some platforms.
+/// When jemalloc feature is enabled, this uses jemalloc's epoch advancement
+/// and arena purging which is much more effective at releasing memory.
+///
+/// Without jemalloc, falls back to platform-specific hints which may have
+/// limited effectiveness.
+#[cfg(feature = "jemalloc")]
+pub fn hint_memory_release() {
+    use tikv_jemalloc_ctl::{epoch, raw};
+
+    // Advance the epoch to update jemalloc's statistics
+    // This is necessary before purging to ensure we have accurate data
+    if let Err(e) = epoch::advance() {
+        eprintln!("[jemalloc] Failed to advance epoch: {}", e);
+    }
+
+    // Purge all arenas to release memory back to the OS
+    // "arenas.purge" is a write-only command that forces immediate page purging
+    let purge_result = unsafe {
+        raw::write(b"arena.0.purge\0", ())
+    };
+    if let Err(e) = purge_result {
+        // Arena 0 might not exist; try the global purge
+        let _ = unsafe { raw::write(b"arenas.purge\0", ()) };
+        let _ = e; // Suppress warning
+    }
+}
+
+/// Fallback hint_memory_release for when jemalloc is not enabled
+#[cfg(not(feature = "jemalloc"))]
 pub fn hint_memory_release() {
     // On macOS, we can use malloc_zone_pressure_relief
     #[cfg(target_os = "macos")]
@@ -199,6 +227,58 @@ pub fn hint_memory_release() {
         unsafe {
             malloc_trim(0);
         }
+    }
+}
+
+/// Returns true if jemalloc is being used as the global allocator
+pub fn is_jemalloc_enabled() -> bool {
+    cfg!(feature = "jemalloc")
+}
+
+/// Get jemalloc memory statistics (only available with jemalloc feature)
+#[cfg(feature = "jemalloc")]
+pub fn get_jemalloc_stats() -> Option<JemallocStats> {
+    use tikv_jemalloc_ctl::{epoch, stats};
+
+    // Advance epoch to get fresh stats
+    epoch::advance().ok()?;
+
+    Some(JemallocStats {
+        allocated: stats::allocated::read().ok()?,
+        active: stats::active::read().ok()?,
+        resident: stats::resident::read().ok()?,
+        retained: stats::retained::read().ok()?,
+    })
+}
+
+#[cfg(not(feature = "jemalloc"))]
+pub fn get_jemalloc_stats() -> Option<JemallocStats> {
+    None
+}
+
+/// jemalloc memory statistics
+#[derive(Debug, Clone, Copy)]
+pub struct JemallocStats {
+    /// Total bytes allocated by the application
+    pub allocated: usize,
+    /// Total bytes in active pages (may include fragmentation)
+    pub active: usize,
+    /// Total bytes mapped by jemalloc (RSS contribution)
+    pub resident: usize,
+    /// Total bytes retained in virtual memory (not returned to OS)
+    pub retained: usize,
+}
+
+impl std::fmt::Display for JemallocStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "allocated: {:.1} MB, active: {:.1} MB, resident: {:.1} MB, retained: {:.1} MB",
+            self.allocated as f64 / (1024.0 * 1024.0),
+            self.active as f64 / (1024.0 * 1024.0),
+            self.resident as f64 / (1024.0 * 1024.0),
+            self.retained as f64 / (1024.0 * 1024.0)
+        )
     }
 }
 
