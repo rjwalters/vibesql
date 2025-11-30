@@ -181,6 +181,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
     opsLabel: 'databases compared',
     descriptions: {
       'binary_size': 'Binary Size - Size of the compiled database binary on disk',
+      'wasm_size': 'WASM Size - Size of the WebAssembly module for browser deployment',
       'startup_time': 'Startup Time - Time to cold-start and execute first query',
       'peak_memory': 'Peak Memory - Maximum resident set size during initialization',
     },
@@ -188,11 +189,12 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       <h3 class="text-lg font-semibold text-foreground mb-2">Binary Footprint Benchmarks</h3>
       <p class="text-muted mb-4">
         <strong>Footprint benchmarks</strong> measure the resource efficiency of database binaries,
-        comparing binary size, cold startup time, and peak memory usage during initialization.
+        comparing binary size, WASM bundle size, cold startup time, and peak memory usage during initialization.
       </p>
 
       <ul class="space-y-2 text-muted">
-        <li><strong>Binary Size:</strong> Size of the compiled binary in bytes (stripped release build)</li>
+        <li><strong>Binary Size:</strong> Size of the compiled native binary in bytes (stripped release build)</li>
+        <li><strong>WASM Size:</strong> Size of the WebAssembly module (raw and gzip-compressed)</li>
         <li><strong>Startup Time:</strong> Time from process start to first query result (CREATE TABLE, INSERT, SELECT)</li>
         <li><strong>Peak Memory:</strong> Maximum resident set size (RSS) during cold startup</li>
         <li><strong>Measurement:</strong> macOS /usr/bin/time -l for memory, perf_counter for timing</li>
@@ -200,8 +202,9 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </ul>
 
       <p class="mt-4 text-muted">
-        Footprint benchmarks are critical for <strong>embedded and edge deployments</strong> where
-        binary size, startup latency, and memory consumption directly impact user experience and costs.
+        Footprint benchmarks are critical for <strong>embedded, edge, and web deployments</strong> where
+        binary size, WASM bundle size, startup latency, and memory consumption directly impact user experience and costs.
+        WASM gzip sizes are particularly relevant for web delivery, as browsers automatically decompress gzip content.
       </p>
 
       <p class="mt-2 text-muted text-sm">
@@ -248,6 +251,10 @@ interface FootprintBenchmark {
   version: string;
   available: boolean;
   error: string | null;
+  // WASM-specific fields (only for VibeSQL)
+  wasm_size_bytes?: number | null;
+  wasm_size_gzip_bytes?: number | null;
+  wasm_size_brotli_bytes?: number | null;
 }
 
 interface FootprintResults {
@@ -704,6 +711,8 @@ function renderFootprintTable(data: FootprintResults): void {
     thead.innerHTML = `
       <th class="px-4 py-3">Database</th>
       <th class="px-4 py-3 text-right">Binary Size</th>
+      <th class="px-4 py-3 text-right">WASM Size</th>
+      <th class="px-4 py-3 text-right">WASM (gzip)</th>
       <th class="px-4 py-3 text-right">Startup Time</th>
       <th class="px-4 py-3 text-right">Peak Memory</th>
       <th class="px-4 py-3 text-right">Version</th>
@@ -747,6 +756,33 @@ function renderFootprintTable(data: FootprintResults): void {
       ? `<span class="text-green-600 dark:text-green-400 font-semibold">${formatBytes(benchmark.binary_size_bytes)}</span>`
       : `<span class="text-muted">${formatBytes(benchmark.binary_size_bytes)}</span>`;
     row.appendChild(sizeCell);
+
+    // WASM size (only for VibeSQL)
+    const wasmCell = document.createElement('td');
+    wasmCell.className = 'px-4 py-3 text-right';
+    if (benchmark.wasm_size_bytes) {
+      wasmCell.innerHTML = `<span class="text-muted">${formatBytes(benchmark.wasm_size_bytes)}</span>`;
+    } else {
+      wasmCell.innerHTML = '<span class="text-muted/50">-</span>';
+    }
+    row.appendChild(wasmCell);
+
+    // WASM gzip size (only for VibeSQL)
+    const wasmGzipCell = document.createElement('td');
+    wasmGzipCell.className = 'px-4 py-3 text-right';
+    if (benchmark.wasm_size_gzip_bytes) {
+      // Show percentage of original WASM size
+      const ratio = benchmark.wasm_size_bytes
+        ? ((benchmark.wasm_size_gzip_bytes / benchmark.wasm_size_bytes) * 100).toFixed(0)
+        : '';
+      wasmGzipCell.innerHTML = `<span class="text-muted">${formatBytes(benchmark.wasm_size_gzip_bytes)}</span>`;
+      if (ratio) {
+        wasmGzipCell.title = `${ratio}% of uncompressed WASM`;
+      }
+    } else {
+      wasmGzipCell.innerHTML = '<span class="text-muted/50">-</span>';
+    }
+    row.appendChild(wasmGzipCell);
 
     // Startup time
     const startupCell = document.createElement('td');
@@ -844,12 +880,14 @@ function renderFootprintChart(data: FootprintResults): void {
     'mysql': 'MySQL',
   };
 
-  const labels = ['Binary Size (MB)', 'Startup Time (ms)', 'Peak Memory (MB)'];
+  const labels = ['Binary Size (MB)', 'WASM Size (MB)', 'WASM gzip (MB)', 'Startup Time (ms)', 'Peak Memory (MB)'];
 
   const datasets = availableBenchmarks.map(bench => ({
     label: dbDisplayNames[bench.database] || bench.database,
     data: [
       bench.binary_size_bytes / (1024 * 1024), // Convert to MB
+      bench.wasm_size_bytes ? bench.wasm_size_bytes / (1024 * 1024) : 0, // WASM size
+      bench.wasm_size_gzip_bytes ? bench.wasm_size_gzip_bytes / (1024 * 1024) : 0, // WASM gzip
       bench.startup_time_ms,
       bench.peak_memory_kb / 1024, // Convert to MB
     ],
