@@ -1,0 +1,37 @@
+{
+  "benchmarks": [
+    {
+      "database": "vibesql",
+      "binary_path": "/Users/rwalters/GitHub/vibesql/target/release/vibesql",
+      "binary_size_bytes": 17144312,
+      "startup_time_ms": 14.110596999999984,
+      "startup_time_stddev_ms": 2.149572731667204,
+      "peak_memory_kb": 6885.333333333333,
+      "peak_memory_stddev_kb": 9.237604307034013,
+      "version": "vibesql 0.1.0",
+      "available": true,
+      "error": null
+    },
+    {
+      "database": "sqlite",
+      "binary_path": "/usr/bin/sqlite3",
+      "binary_size_bytes": 4674048,
+      "startup_time_ms": 17.065305333333356,
+      "startup_time_stddev_ms": 1.4498055671093735,
+      "peak_memory_kb": 2906.6666666666665,
+      "peak_memory_stddev_kb": 18.475208614068023,
+      "version": "3.51.0",
+      "available": true,
+      "error": null
+    }
+  ],
+  "datetime": "2025-11-30T10:00:56.114971",
+  "machine_info": {
+    "system": "Darwin",
+    "release": "25.1.0",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.9.6"
+  },
+  "num_runs": 3
+}
