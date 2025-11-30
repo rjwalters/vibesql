@@ -96,10 +96,49 @@ use tpcds::schema::*;
 // =============================================================================
 // Cache databases to avoid reloading for each benchmark group.
 // TPC-DS data loading is expensive (~10+ minutes), so we load once and reuse.
+//
+// Memory Management:
+// When running with benchmark-comparison feature, you can set TPCDS_ENGINE
+// environment variable to only load specific engines:
+//   - TPCDS_ENGINE=sqlite  - Load VibeSQL + SQLite only
+//   - TPCDS_ENGINE=duckdb  - Load VibeSQL + DuckDB only
+//   - TPCDS_ENGINE=all (or unset) - Load all engines (may cause memory pressure)
+//
+// The isolated benchmark script (scripts/bench-tpcds-isolated.sh) runs each
+// engine in a separate process to avoid memory exhaustion from loading all
+// engines simultaneously.
 
 /// Default scale factor for TPC-DS benchmarks
 /// Using 0.001 for faster loading (~1 minute vs ~10+ minutes at 0.01)
 const SCALE_FACTOR: f64 = 0.001;
+
+/// Check which comparison engine to use (for memory-conscious sequential execution)
+#[cfg(feature = "benchmark-comparison")]
+fn get_comparison_engine() -> Option<String> {
+    std::env::var("TPCDS_ENGINE").ok()
+}
+
+/// Check if SQLite comparison should be enabled
+#[cfg(feature = "benchmark-comparison")]
+fn sqlite_enabled() -> bool {
+    match get_comparison_engine() {
+        None => true,                                    // Default: all engines
+        Some(ref e) if e == "all" => true,               // Explicit all
+        Some(ref e) if e == "sqlite" => true,            // SQLite only
+        _ => false,
+    }
+}
+
+/// Check if DuckDB comparison should be enabled
+#[cfg(feature = "benchmark-comparison")]
+fn duckdb_enabled() -> bool {
+    match get_comparison_engine() {
+        None => true,                                    // Default: all engines
+        Some(ref e) if e == "all" => true,               // Explicit all
+        Some(ref e) if e == "duckdb" => true,            // DuckDB only
+        _ => false,
+    }
+}
 
 /// Cached VibeSQL database (loaded once, reused across all benchmarks)
 static VIBESQL_DB: OnceLock<VibeDB> = OnceLock::new();
@@ -119,28 +158,34 @@ fn get_vibesql_db() -> &'static VibeDB {
 static SQLITE_CONN: OnceLock<Mutex<SqliteConn>> = OnceLock::new();
 
 #[cfg(feature = "benchmark-comparison")]
-fn get_sqlite_conn() -> &'static Mutex<SqliteConn> {
-    SQLITE_CONN.get_or_init(|| {
+fn get_sqlite_conn() -> Option<&'static Mutex<SqliteConn>> {
+    if !sqlite_enabled() {
+        return None;
+    }
+    Some(SQLITE_CONN.get_or_init(|| {
         eprintln!("Loading TPC-DS SQLite database (scale factor {})...", SCALE_FACTOR);
         let start = std::time::Instant::now();
         let conn = load_sqlite(SCALE_FACTOR);
         eprintln!("SQLite database loaded in {:?}", start.elapsed());
         Mutex::new(conn)
-    })
+    }))
 }
 
 #[cfg(feature = "benchmark-comparison")]
 static DUCKDB_CONN: OnceLock<Mutex<DuckDBConn>> = OnceLock::new();
 
 #[cfg(feature = "benchmark-comparison")]
-fn get_duckdb_conn() -> &'static Mutex<DuckDBConn> {
-    DUCKDB_CONN.get_or_init(|| {
+fn get_duckdb_conn() -> Option<&'static Mutex<DuckDBConn>> {
+    if !duckdb_enabled() {
+        return None;
+    }
+    Some(DUCKDB_CONN.get_or_init(|| {
         eprintln!("Loading TPC-DS DuckDB database (scale factor {})...", SCALE_FACTOR);
         let start = std::time::Instant::now();
         let conn = load_duckdb(SCALE_FACTOR);
         eprintln!("DuckDB database loaded in {:?}", start.elapsed());
         Mutex::new(conn)
-    })
+    }))
 }
 
 // =============================================================================
@@ -260,10 +305,15 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_sanity_comparison");
     group.measurement_time(Duration::from_secs(5));
 
-    // Use cached databases
+    // Use cached databases (only load if enabled via TPCDS_ENGINE env var)
     let vibesql_db = get_vibesql_db();
-    let sqlite_conn = get_sqlite_conn();
-    let duckdb_conn = get_duckdb_conn();
+    let sqlite_conn = get_sqlite_conn();  // Returns None if SQLite disabled
+    let duckdb_conn = get_duckdb_conn();  // Returns None if DuckDB disabled
+
+    // Log which engines are enabled
+    if let Some(engine) = get_comparison_engine() {
+        eprintln!("Running comparison with TPCDS_ENGINE={}", engine);
+    }
 
     for (name, sql) in TPCDS_SANITY_QUERIES {
         // Only benchmark if VibeSQL can parse and execute the query
@@ -279,21 +329,27 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
             });
         });
 
-        group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
-            b.iter(|| {
-                let conn = sqlite_conn.lock().unwrap();
-                let count = benchmark_sqlite_query(&conn, sql);
-                black_box(count);
+        // SQLite benchmark (only if enabled)
+        if let Some(sqlite) = sqlite_conn {
+            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                b.iter(|| {
+                    let conn = sqlite.lock().unwrap();
+                    let count = benchmark_sqlite_query(&conn, sql);
+                    black_box(count);
+                });
             });
-        });
+        }
 
-        group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
-            b.iter(|| {
-                let conn = duckdb_conn.lock().unwrap();
-                let count = benchmark_duckdb_query(&conn, sql);
-                black_box(count);
+        // DuckDB benchmark (only if enabled)
+        if let Some(duckdb) = duckdb_conn {
+            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                b.iter(|| {
+                    let conn = duckdb.lock().unwrap();
+                    let count = benchmark_duckdb_query(&conn, sql);
+                    black_box(count);
+                });
             });
-        });
+        }
     }
 
     group.finish();
