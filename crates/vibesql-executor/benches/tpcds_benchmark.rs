@@ -5,6 +5,9 @@
 //! - Phase 2: Extended tables (promotion, warehouse, ship_mode, reason, store_returns)
 //! - Phase 3: Full e-commerce (catalog_sales/returns, web_sales/returns)
 //!
+//! Parse errors are handled gracefully - queries that fail to parse are skipped
+//! with a warning, allowing the benchmark suite to continue.
+//!
 //! Usage:
 //!   cargo bench --bench tpcds_benchmark
 //!   cargo bench --bench tpcds_benchmark --features benchmark-comparison
@@ -17,6 +20,67 @@ use std::sync::{Mutex, OnceLock};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
+
+// =============================================================================
+// Query Result Tracking
+// =============================================================================
+
+/// Track results for each query during benchmarking
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // Fields are stored for potential debugging/future use
+enum QueryResult {
+    Passed { name: String, row_count: usize },
+    Skipped { name: String, reason: String },
+}
+
+/// Global tracker for query results
+static QUERY_RESULTS: OnceLock<Mutex<Vec<QueryResult>>> = OnceLock::new();
+
+fn get_query_results() -> &'static Mutex<Vec<QueryResult>> {
+    QUERY_RESULTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn record_query_result(result: QueryResult) {
+    if let Ok(mut results) = get_query_results().lock() {
+        results.push(result);
+    }
+}
+
+/// Print summary of all query results at the end of benchmarking
+fn print_query_summary() {
+    if let Ok(results) = get_query_results().lock() {
+        if results.is_empty() {
+            return;
+        }
+
+        let passed: Vec<_> = results
+            .iter()
+            .filter(|r| matches!(r, QueryResult::Passed { .. }))
+            .collect();
+        let skipped: Vec<_> = results
+            .iter()
+            .filter(|r| matches!(r, QueryResult::Skipped { .. }))
+            .collect();
+
+        eprintln!("\n{}", "=".repeat(60));
+        eprintln!("TPC-DS BENCHMARK SUMMARY");
+        eprintln!("{}", "=".repeat(60));
+        eprintln!("Passed:  {} queries", passed.len());
+        eprintln!("Skipped: {} queries", skipped.len());
+        eprintln!("{}", "-".repeat(60));
+
+        if !skipped.is_empty() {
+            eprintln!("\nSkipped queries:");
+            for result in &skipped {
+                if let QueryResult::Skipped { name, reason } = result {
+                    eprintln!("  - {}: {}", name, reason);
+                }
+            }
+        }
+
+        eprintln!("{}", "=".repeat(60));
+    }
+}
 
 #[cfg(feature = "benchmark-comparison")]
 use duckdb::Connection as DuckDBConn;
@@ -83,7 +147,40 @@ fn get_duckdb_conn() -> &'static Mutex<DuckDBConn> {
 // Benchmark Helper Functions
 // =============================================================================
 
-/// Helper function to benchmark a query on VibeSQL
+/// Error type for query execution failures
+#[derive(Debug)]
+enum QueryError {
+    ParseError(String),
+    ExecutionError(String),
+    NotASelect,
+}
+
+impl std::fmt::Display for QueryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QueryError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            QueryError::ExecutionError(msg) => write!(f, "Execution error: {}", msg),
+            QueryError::NotASelect => write!(f, "Not a SELECT statement"),
+        }
+    }
+}
+
+/// Try to parse and execute a query, returning an error if it fails
+fn try_vibesql_query(db: &VibeDB, sql: &str) -> Result<usize, QueryError> {
+    let stmt = Parser::parse_sql(sql).map_err(|e| QueryError::ParseError(e.to_string()))?;
+
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        let executor = SelectExecutor::new(db);
+        let result = executor
+            .execute(&select)
+            .map_err(|e| QueryError::ExecutionError(e.to_string()))?;
+        Ok(result.len())
+    } else {
+        Err(QueryError::NotASelect)
+    }
+}
+
+/// Helper function to benchmark a query on VibeSQL (panics on error - only use after validation)
 fn benchmark_vibesql_query(db: &VibeDB, sql: &str) -> usize {
     let stmt = Parser::parse_sql(sql).unwrap();
     if let vibesql_ast::Statement::Select(select) = stmt {
@@ -131,12 +228,28 @@ fn bench_sanity_queries(c: &mut Criterion) {
     let db = get_vibesql_db();
 
     for (name, sql) in TPCDS_SANITY_QUERIES {
-        group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
-            b.iter(|| {
-                let count = benchmark_vibesql_query(db, sql);
-                black_box(count);
-            });
-        });
+        // Validate query before benchmarking
+        match try_vibesql_query(db, sql) {
+            Ok(row_count) => {
+                record_query_result(QueryResult::Passed {
+                    name: format!("sanity_{}", name),
+                    row_count,
+                });
+                group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                    b.iter(|| {
+                        let count = benchmark_vibesql_query(db, sql);
+                        black_box(count);
+                    });
+                });
+            }
+            Err(e) => {
+                eprintln!("[SKIP] sanity_{}: {}", name, e);
+                record_query_result(QueryResult::Skipped {
+                    name: format!("sanity_{}", name),
+                    reason: e.to_string(),
+                });
+            }
+        }
     }
 
     group.finish();
@@ -153,6 +266,12 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
     let duckdb_conn = get_duckdb_conn();
 
     for (name, sql) in TPCDS_SANITY_QUERIES {
+        // Only benchmark if VibeSQL can parse and execute the query
+        if let Err(e) = try_vibesql_query(vibesql_db, sql) {
+            eprintln!("[SKIP] comparison_{}: {}", name, e);
+            continue;
+        }
+
         group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
             b.iter(|| {
                 let count = benchmark_vibesql_query(vibesql_db, sql);
@@ -192,15 +311,34 @@ fn bench_tpcds_queries(c: &mut Criterion) {
     let db = get_vibesql_db();
 
     for (name, sql) in TPCDS_QUERIES {
-        group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
-            b.iter(|| {
-                let count = benchmark_vibesql_query(db, sql);
-                black_box(count);
-            });
-        });
+        // Validate query before benchmarking
+        match try_vibesql_query(db, sql) {
+            Ok(row_count) => {
+                record_query_result(QueryResult::Passed {
+                    name: name.to_string(),
+                    row_count,
+                });
+                group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                    b.iter(|| {
+                        let count = benchmark_vibesql_query(db, sql);
+                        black_box(count);
+                    });
+                });
+            }
+            Err(e) => {
+                eprintln!("[SKIP] {}: {}", name, e);
+                record_query_result(QueryResult::Skipped {
+                    name: name.to_string(),
+                    reason: e.to_string(),
+                });
+            }
+        }
     }
 
     group.finish();
+
+    // Print summary at the end
+    print_query_summary();
 }
 
 // =============================================================================
