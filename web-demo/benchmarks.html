@@ -21,6 +21,39 @@
 
     <!-- Main Content -->
     <main class="max-w-7xl mx-auto px-4 py-6 space-y-8">
+      <!-- Benchmark Suite Tabs -->
+      <div class="bg-background rounded-lg shadow-lg p-2 border border-border">
+        <nav class="flex gap-2" role="tablist" aria-label="Benchmark suites">
+          <button
+            id="tab-tpch"
+            role="tab"
+            aria-selected="true"
+            aria-controls="panel-tpch"
+            class="benchmark-tab benchmark-tab--active px-4 py-2 rounded-lg font-medium transition-all focus:outline-none focus:ring-2 focus:ring-primary-light"
+          >
+            TPC-H
+          </button>
+          <button
+            id="tab-tpcc"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-tpcc"
+            class="benchmark-tab px-4 py-2 rounded-lg font-medium transition-all focus:outline-none focus:ring-2 focus:ring-primary-light"
+          >
+            TPC-C
+          </button>
+          <button
+            id="tab-sysbench"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-sysbench"
+            class="benchmark-tab px-4 py-2 rounded-lg font-medium transition-all focus:outline-none focus:ring-2 focus:ring-primary-light"
+          >
+            Sysbench
+          </button>
+        </nav>
+      </div>
+
       <!-- Summary Cards -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
@@ -90,36 +123,8 @@
         <h2 class="text-2xl font-semibold text-foreground mb-4">
           Methodology
         </h2>
-        <div class="prose prose-sm dark:prose-invert max-w-none text-foreground">
-          <h3 class="text-lg font-semibold text-foreground mb-2">TPC-H Decision Support Benchmark</h3>
-          <p class="text-muted mb-4">
-            These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>,
-            which simulates real-world decision support workloads with complex analytical queries
-            involving aggregations, joins, subqueries, and sorting.
-          </p>
-
-          <ul class="space-y-2 text-muted">
-            <li><strong>Hardware:</strong> GitHub Actions runners (ubuntu-latest, 2-core CPU)</li>
-            <li><strong>Benchmark Framework:</strong> Criterion.rs (Rust native benchmarking)</li>
-            <li><strong>Scale Factor:</strong> SF 0.01 (~60,000 rows across 6 tables)</li>
-            <li><strong>Data:</strong> Deterministic TPC-H compliant dataset</li>
-            <li><strong>Databases Tested:</strong> VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs), MySQL 8.0 (via mysql crate)</li>
-            <li><strong>Execution Mode:</strong> All databases run in-memory (no disk I/O)</li>
-            <li><strong>Measurement:</strong> Native Rust API calls (no Python/FFI overhead)</li>
-          </ul>
-
-          <p class="mt-4 text-muted">
-            All benchmarks measure end-to-end query execution time including parsing,
-            planning, execution, and result materialization. This represents <strong>real-world
-            SQL engine performance</strong> for analytical workloads. Results are automatically
-            updated on every commit to the main branch.
-          </p>
-
-          <p class="mt-2 text-muted text-sm">
-            <strong>Note:</strong> TPC-H queries test different aspects of SQL performance:
-            simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15),
-            and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
-          </p>
+        <div id="methodology-content" class="prose prose-sm dark:prose-invert max-w-none text-foreground">
+          <!-- Content populated by JavaScript based on selected tab -->
         </div>
       </div>
     </main>

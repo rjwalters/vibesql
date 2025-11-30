@@ -221,4 +221,13 @@
       transform: rotate(360deg);
     }
   }
+
+  /* Benchmark tabs */
+  .benchmark-tab {
+    @apply text-muted bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700;
+  }
+
+  .benchmark-tab--active {
+    @apply bg-primary-light dark:bg-primary-dark text-white hover:bg-primary-light dark:hover:bg-primary-dark;
+  }
 }

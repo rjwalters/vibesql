@@ -1,0 +1,7 @@
+{
+  "benchmarks": [],
+  "datetime": null,
+  "machine_info": {
+    "notes": "TPC-C benchmark results placeholder. Results will be generated when CI runs for this benchmark suite."
+  }
+}

@@ -2,6 +2,7 @@
  * Benchmark results page
  *
  * Loads and displays performance benchmark data comparing VibeSQL to SQLite, DuckDB, and MySQL.
+ * Supports multiple benchmark suites: TPC-H, TPC-C, and Sysbench.
  */
 
 import './styles/main.css';
@@ -10,6 +11,170 @@ import { NavigationComponent } from './components/Navigation';
 
 // Chart.js is loaded via CDN in benchmarks.html
 declare const Chart: any;
+
+/**
+ * Benchmark suite types
+ */
+type BenchmarkSuite = 'tpch' | 'tpcc' | 'sysbench';
+
+/**
+ * Suite configuration
+ */
+interface SuiteConfig {
+  id: BenchmarkSuite;
+  name: string;
+  dataFile: string;
+  opsLabel: string;
+  descriptions: Record<string, string>;
+  methodology: string;
+}
+
+/**
+ * Suite configurations
+ */
+const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
+  tpch: {
+    id: 'tpch',
+    name: 'TPC-H',
+    dataFile: 'benchmark_results.json',
+    opsLabel: 'TPC-H queries',
+    descriptions: {
+      'q1': 'Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY',
+      'q2': 'Minimum Cost Supplier - 3-table JOIN with ORDER BY and LIMIT',
+      'q3': 'Shipping Priority - 3-table JOIN with aggregation',
+      'q4': 'Order Priority Checking - Correlated EXISTS subquery',
+      'q5': 'Local Supplier Volume - 6-table JOIN with complex filtering',
+      'q6': 'Forecasting Revenue Change - WHERE filters with BETWEEN and SUM',
+      'q7': 'Volume Shipping - 6-table JOIN with SUBSTR and date filtering',
+      'q8': 'National Market Share - 7-table JOIN with CASE expressions',
+      'q9': 'Product Type Profit Measure - 4-table JOIN with aggregation',
+      'q10': 'Returned Item Reporting - 4-table JOIN with TOP-N LIMIT',
+      'q11': 'Important Stock Identification - Subquery in HAVING clause',
+      'q12': 'Shipping Modes Priority - CASE aggregation with date logic',
+      'q13': 'Customer Distribution - LEFT OUTER JOIN with subquery',
+      'q14': 'Promotion Effect - Conditional aggregation with CASE',
+      'q15': 'Top Supplier - Nested subqueries with MAX',
+      'q16': 'Parts/Supplier Relationship - NOT IN subquery with DISTINCT',
+      'q17': 'Small-Quantity-Order Revenue - Correlated subquery in WHERE',
+      'q18': 'Large Volume Customer - GROUP BY with HAVING',
+      'q19': 'Discounted Revenue - Complex OR conditions',
+      'q20': 'Potential Part Promotion - IN subquery with GROUP BY/HAVING',
+      'q21': 'Suppliers Who Kept Orders Waiting - Multi-table EXISTS',
+      'q22': 'Global Sales Opportunity - SUBSTR with NOT EXISTS subquery',
+    },
+    methodology: `
+      <h3 class="text-lg font-semibold text-foreground mb-2">TPC-H Decision Support Benchmark</h3>
+      <p class="text-muted mb-4">
+        These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>,
+        which simulates real-world decision support workloads with complex analytical queries
+        involving aggregations, joins, subqueries, and sorting.
+      </p>
+
+      <ul class="space-y-2 text-muted">
+        <li><strong>Hardware:</strong> GitHub Actions runners (ubuntu-latest, 2-core CPU)</li>
+        <li><strong>Benchmark Framework:</strong> Criterion.rs (Rust native benchmarking)</li>
+        <li><strong>Scale Factor:</strong> SF 0.01 (~60,000 rows across 6 tables)</li>
+        <li><strong>Data:</strong> Deterministic TPC-H compliant dataset</li>
+        <li><strong>Databases Tested:</strong> VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs), MySQL 8.0 (via mysql crate)</li>
+        <li><strong>Execution Mode:</strong> All databases run in-memory (no disk I/O)</li>
+        <li><strong>Measurement:</strong> Native Rust API calls (no Python/FFI overhead)</li>
+      </ul>
+
+      <p class="mt-4 text-muted">
+        All benchmarks measure end-to-end query execution time including parsing,
+        planning, execution, and result materialization. This represents <strong>real-world
+        SQL engine performance</strong> for analytical workloads. Results are automatically
+        updated on every commit to the main branch.
+      </p>
+
+      <p class="mt-2 text-muted text-sm">
+        <strong>Note:</strong> TPC-H queries test different aspects of SQL performance:
+        simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15),
+        and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
+      </p>
+    `,
+  },
+  tpcc: {
+    id: 'tpcc',
+    name: 'TPC-C',
+    dataFile: 'tpcc_results.json',
+    opsLabel: 'TPC-C transactions',
+    descriptions: {
+      'new_order': 'New Order - Complex transaction with inventory checks and order creation',
+      'payment': 'Payment - Update customer balance and warehouse/district totals',
+      'order_status': 'Order Status - Read-only query for customer order history',
+      'delivery': 'Delivery - Batch processing of pending orders',
+      'stock_level': 'Stock Level - Count items below threshold in recent orders',
+    },
+    methodology: `
+      <h3 class="text-lg font-semibold text-foreground mb-2">TPC-C Online Transaction Processing Benchmark</h3>
+      <p class="text-muted mb-4">
+        The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment
+        with a mix of complex transactions including order entry, payment processing,
+        order status queries, delivery processing, and stock level monitoring.
+      </p>
+
+      <ul class="space-y-2 text-muted">
+        <li><strong>Workload:</strong> OLTP (Online Transaction Processing)</li>
+        <li><strong>Transaction Mix:</strong> 45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level</li>
+        <li><strong>Warehouses:</strong> 1 warehouse (scaled for in-memory testing)</li>
+        <li><strong>Concurrency:</strong> Single-threaded baseline measurements</li>
+        <li><strong>ACID Compliance:</strong> Full transaction isolation testing</li>
+      </ul>
+
+      <p class="mt-4 text-muted">
+        TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle
+        concurrent transactions with complex business logic. This benchmark is critical for
+        evaluating <strong>transactional workload performance</strong>.
+      </p>
+
+      <p class="mt-2 text-muted text-sm">
+        <strong>Note:</strong> Results show average transaction latency. Lower is better.
+        TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
+      </p>
+    `,
+  },
+  sysbench: {
+    id: 'sysbench',
+    name: 'Sysbench',
+    dataFile: 'sysbench_results.json',
+    opsLabel: 'Sysbench operations',
+    descriptions: {
+      'point_select': 'Point Select - Single row lookup by primary key',
+      'range_select': 'Range Select - Fetch rows within a key range',
+      'simple_update': 'Simple Update - Update single row by primary key',
+      'index_update': 'Index Update - Update indexed column',
+      'delete_insert': 'Delete/Insert - Remove and re-insert row',
+      'read_write': 'Read/Write Mix - Combined read and write operations',
+    },
+    methodology: `
+      <h3 class="text-lg font-semibold text-foreground mb-2">Sysbench Micro-Benchmarks</h3>
+      <p class="text-muted mb-4">
+        <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific
+        database operations. These tests measure raw performance for fundamental operations
+        without the complexity of full transaction workloads.
+      </p>
+
+      <ul class="space-y-2 text-muted">
+        <li><strong>Workload Types:</strong> Point queries, range scans, updates, inserts, deletes</li>
+        <li><strong>Table Size:</strong> 10,000 rows per table</li>
+        <li><strong>Index Types:</strong> Primary key and secondary indexes</li>
+        <li><strong>Operations:</strong> Single-statement operations (no multi-statement transactions)</li>
+        <li><strong>Measurement:</strong> Operations per second and latency percentiles</li>
+      </ul>
+
+      <p class="mt-4 text-muted">
+        Sysbench micro-benchmarks help identify <strong>bottlenecks in specific operations</strong>
+        and are useful for comparing raw SQL engine performance without application-level complexity.
+      </p>
+
+      <p class="mt-2 text-muted text-sm">
+        <strong>Note:</strong> Point selects and simple updates are the most common operations
+        in typical web applications. Range selects test scan performance for reporting queries.
+      </p>
+    `,
+  },
+};
 
 interface BenchmarkStats {
   mean: number;
@@ -51,39 +216,17 @@ function formatTime(seconds: number): string | null {
 }
 
 /**
- * TPC-H Query descriptions
+ * Current benchmark suite state
  */
-const TPCH_DESCRIPTIONS: Record<string, string> = {
-  'q1': 'Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY',
-  'q2': 'Minimum Cost Supplier - 3-table JOIN with ORDER BY and LIMIT',
-  'q3': 'Shipping Priority - 3-table JOIN with aggregation',
-  'q4': 'Order Priority Checking - Correlated EXISTS subquery',
-  'q5': 'Local Supplier Volume - 6-table JOIN with complex filtering',
-  'q6': 'Forecasting Revenue Change - WHERE filters with BETWEEN and SUM',
-  'q7': 'Volume Shipping - 6-table JOIN with SUBSTR and date filtering',
-  'q8': 'National Market Share - 7-table JOIN with CASE expressions',
-  'q9': 'Product Type Profit Measure - 4-table JOIN with aggregation',
-  'q10': 'Returned Item Reporting - 4-table JOIN with TOP-N LIMIT',
-  'q11': 'Important Stock Identification - Subquery in HAVING clause',
-  'q12': 'Shipping Modes Priority - CASE aggregation with date logic',
-  'q13': 'Customer Distribution - LEFT OUTER JOIN with subquery',
-  'q14': 'Promotion Effect - Conditional aggregation with CASE',
-  'q15': 'Top Supplier - Nested subqueries with MAX',
-  'q16': 'Parts/Supplier Relationship - NOT IN subquery with DISTINCT',
-  'q17': 'Small-Quantity-Order Revenue - Correlated subquery in WHERE',
-  'q18': 'Large Volume Customer - GROUP BY with HAVING',
-  'q19': 'Discounted Revenue - Complex OR conditions',
-  'q20': 'Potential Part Promotion - IN subquery with GROUP BY/HAVING',
-  'q21': 'Suppliers Who Kept Orders Waiting - Multi-table EXISTS',
-  'q22': 'Global Sales Opportunity - SUBSTR with NOT EXISTS subquery',
-};
+let currentSuite: BenchmarkSuite = 'tpch';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let currentChart: any = null;
 
 /**
  * Parse benchmark name to extract database and operation info
  */
-function parseBenchmarkName(name: string): { operation: string; database: string; queryNum?: string; description?: string } {
-  // TPC-H format: "tpch_q1_pricing_summary_report_vibesql"
-  // Legacy format: "test_simple_select_1k_vibesql"
+function parseBenchmarkName(name: string, suite: BenchmarkSuite): { operation: string; database: string; queryNum?: string; description?: string } {
+  const config = SUITE_CONFIGS[suite];
   const parts = name.split('_');
   const database = parts[parts.length - 1]; // Last part is database name
 
@@ -91,13 +234,27 @@ function parseBenchmarkName(name: string): { operation: string; database: string
   if (name.startsWith('tpch_')) {
     // Extract query number (q1, q2, etc.)
     const queryNum = parts[1]; // e.g., "q1"
-    const description = TPCH_DESCRIPTIONS[queryNum];
+    const description = config.descriptions[queryNum];
 
     // Operation name is everything except "tpch_", query number, and database
     // e.g., "tpch_q1_pricing_summary_report_vibesql" -> "pricing_summary_report"
     const operation = parts.slice(2, -1).join('_');
 
     return { operation, database, queryNum, description };
+  }
+
+  // TPC-C format: "tpcc_new_order_vibesql"
+  if (name.startsWith('tpcc_')) {
+    const operation = parts.slice(1, -1).join('_');
+    const description = config.descriptions[operation];
+    return { operation, database, description };
+  }
+
+  // Sysbench format: "sysbench_point_select_vibesql"
+  if (name.startsWith('sysbench_')) {
+    const operation = parts.slice(1, -1).join('_');
+    const description = config.descriptions[operation];
+    return { operation, database, description };
   }
 
   // Legacy format
@@ -108,11 +265,11 @@ function parseBenchmarkName(name: string): { operation: string; database: string
 /**
  * Group benchmarks by operation
  */
-function groupBenchmarksByOperation(benchmarks: Benchmark[]): Map<string, Map<string, Benchmark>> {
+function groupBenchmarksByOperation(benchmarks: Benchmark[], suite: BenchmarkSuite): Map<string, Map<string, Benchmark>> {
   const grouped = new Map<string, Map<string, Benchmark>>();
 
   for (const bench of benchmarks) {
-    const { operation, database } = parseBenchmarkName(bench.name);
+    const { operation, database } = parseBenchmarkName(bench.name, suite);
 
     if (!grouped.has(operation)) {
       grouped.set(operation, new Map());
@@ -134,11 +291,12 @@ function calculateSpeedup(vibesql: number, sqlite: number): number {
 /**
  * Render results table
  */
-function renderResultsTable(data: BenchmarkResults) {
+function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void {
   const tbody = document.getElementById('results-tbody');
   if (!tbody) return;
 
-  const grouped = groupBenchmarksByOperation(data.benchmarks);
+  const config = SUITE_CONFIGS[suite];
+  const grouped = groupBenchmarksByOperation(data.benchmarks, suite);
 
   tbody.innerHTML = '';
 
@@ -156,19 +314,26 @@ function renderResultsTable(data: BenchmarkResults) {
     const row = document.createElement('tr');
     row.className = 'hover:bg-card/50 transition-colors';
 
-    // Operation name (with tooltip for TPC-H queries)
+    // Operation name (with tooltip)
     const opCell = document.createElement('td');
     opCell.className = 'px-4 py-3 font-medium text-foreground';
 
     // Get the first benchmark to extract query info
     const firstBench = vibesql || sqlite || duckdb;
     if (firstBench) {
-      const parsed = parseBenchmarkName(firstBench.name);
+      const parsed = parseBenchmarkName(firstBench.name, suite);
       if (parsed.queryNum && parsed.description) {
         // TPC-H query - show query number and add tooltip
         opCell.innerHTML = `
           <span class="cursor-help" title="${parsed.description}">
-            TPC-H ${parsed.queryNum.toUpperCase()}
+            ${config.name} ${parsed.queryNum.toUpperCase()}
+          </span>
+        `;
+      } else if (parsed.description) {
+        // TPC-C or Sysbench - show operation name with tooltip
+        opCell.innerHTML = `
+          <span class="cursor-help" title="${parsed.description}">
+            ${operation.replace(/_/g, ' ').toUpperCase()}
           </span>
         `;
       } else {
@@ -315,11 +480,19 @@ function renderResultsTable(data: BenchmarkResults) {
 /**
  * Render performance chart
  */
-function renderChart(data: BenchmarkResults) {
+function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
   const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
   if (!canvas) return;
 
-  const grouped = groupBenchmarksByOperation(data.benchmarks);
+  const config = SUITE_CONFIGS[suite];
+
+  // Destroy existing chart if any
+  if (currentChart) {
+    currentChart.destroy();
+    currentChart = null;
+  }
+
+  const grouped = groupBenchmarksByOperation(data.benchmarks, suite);
 
   const labels: string[] = [];
   const vibesqlData: number[] = [];
@@ -340,13 +513,13 @@ function renderChart(data: BenchmarkResults) {
     const mysqlValid = mysql && mysql.stats.mean > 0;
 
     if (vibesqlValid || sqliteValid || duckdbValid || mysqlValid) {
-      // Get label - prefer TPC-H query number if available
+      // Get label - prefer query number if available (TPC-H)
       let label = operation.replace(/_/g, ' ').toUpperCase();
       const firstBench = vibesql || sqlite || duckdb || mysql;
       if (firstBench) {
-        const parsed = parseBenchmarkName(firstBench.name);
+        const parsed = parseBenchmarkName(firstBench.name, suite);
         if (parsed.queryNum) {
-          label = `TPC-H ${parsed.queryNum.toUpperCase()}`;
+          label = `${config.name} ${parsed.queryNum.toUpperCase()}`;
         }
       }
 
@@ -358,7 +531,7 @@ function renderChart(data: BenchmarkResults) {
     }
   }
 
-  new Chart(canvas, {
+  currentChart = new Chart(canvas, {
     type: 'bar',
     data: {
       labels,
@@ -436,11 +609,37 @@ function renderChart(data: BenchmarkResults) {
 }
 
 /**
- * Load and display benchmark data
+ * Update the methodology section
  */
-async function loadBenchmarkData() {
+function updateMethodology(suite: BenchmarkSuite): void {
+  const methodologyEl = document.getElementById('methodology-content');
+  if (methodologyEl) {
+    methodologyEl.innerHTML = SUITE_CONFIGS[suite].methodology;
+  }
+}
+
+/**
+ * Update the ops label
+ */
+function updateOpsLabel(suite: BenchmarkSuite): void {
+  const opsLabelEl = document.querySelector('#ops-tested + p');
+  if (opsLabelEl) {
+    opsLabelEl.textContent = SUITE_CONFIGS[suite].opsLabel;
+  }
+}
+
+/**
+ * Load and display benchmark data for a specific suite
+ */
+async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
+  const config = SUITE_CONFIGS[suite];
+
+  // Update methodology and ops label
+  updateMethodology(suite);
+  updateOpsLabel(suite);
+
   try {
-    const response = await fetch(`${import.meta.env.BASE_URL}benchmarks/benchmark_results.json`);
+    const response = await fetch(`${import.meta.env.BASE_URL}benchmarks/${config.dataFile}`);
 
     if (!response.ok) {
       throw new Error(`Failed to load benchmark data: ${response.status}`);
@@ -456,8 +655,8 @@ async function loadBenchmarkData() {
       lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
     }
 
-    renderResultsTable(data);
-    renderChart(data);
+    renderResultsTable(data, suite);
+    renderChart(data, suite);
   } catch (error) {
     console.error('Error loading benchmark data:', error);
 
@@ -465,8 +664,9 @@ async function loadBenchmarkData() {
     if (tbody) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="7" class="px-4 py-8 text-center text-red-500">
-            ⚠️ Failed to load benchmark results. Please check back later.
+          <td colspan="7" class="px-4 py-8 text-center text-muted">
+            <p class="mb-2">No ${config.name} benchmark results available yet.</p>
+            <p class="text-sm">Results will be generated when CI runs for this benchmark suite.</p>
           </td>
         </tr>
       `;
@@ -477,7 +677,43 @@ async function loadBenchmarkData() {
       avgSpeedupEl.textContent = 'N/A';
       avgSpeedupEl.className = 'text-xl font-bold text-muted';
     }
+
+    const opsTestedEl = document.getElementById('ops-tested');
+    if (opsTestedEl) {
+      opsTestedEl.textContent = '-';
+    }
+
+    // Destroy chart if exists
+    if (currentChart) {
+      currentChart.destroy();
+      currentChart = null;
+    }
   }
+}
+
+/**
+ * Initialize tab switching
+ */
+function initTabs(): void {
+  const tabs = document.querySelectorAll('.benchmark-tab');
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const tabId = tab.id.replace('tab-', '') as BenchmarkSuite;
+
+      // Update active state
+      tabs.forEach((t) => {
+        t.classList.remove('benchmark-tab--active');
+        t.setAttribute('aria-selected', 'false');
+      });
+      tab.classList.add('benchmark-tab--active');
+      tab.setAttribute('aria-selected', 'true');
+
+      // Load new data
+      currentSuite = tabId;
+      loadBenchmarkData(tabId);
+    });
+  });
 }
 
 // Initialize page
@@ -488,6 +724,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize navigation component
   new NavigationComponent('benchmarks', theme);
 
-  // Load benchmark data
-  loadBenchmarkData();
+  // Initialize tabs
+  initTabs();
+
+  // Load benchmark data for default suite (TPC-H)
+  loadBenchmarkData(currentSuite);
 });
