@@ -16,11 +16,13 @@
 #![allow(unused_imports)]
 
 pub mod data;
+pub mod memory;
 pub mod queries;
 pub mod schema;
 
 // Re-export commonly used items for convenience
 pub use data::{TPCDSConfig, TPCDSData, TimeGranularity};
+pub use memory::{get_memory_usage, hint_memory_release, MemoryStats, MemoryTracker};
 pub use queries::*;
 pub use schema::load_vibesql;
 
