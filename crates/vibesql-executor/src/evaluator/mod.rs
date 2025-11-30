@@ -2,6 +2,7 @@
 pub(crate) mod casting;
 pub mod coercion;
 mod combined;
+pub(crate) mod compiled;
 mod core;
 pub(crate) mod caching;
 mod parallel;
