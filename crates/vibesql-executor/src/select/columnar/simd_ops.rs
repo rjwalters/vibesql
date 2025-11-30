@@ -308,6 +308,377 @@ pub fn sum_product_f64_masked(
 }
 
 // ============================================================================
+// FILTERED AGGREGATION OPERATIONS (for fused filter+aggregate)
+// ============================================================================
+// These operations aggregate data directly using a filter mask, avoiding
+// intermediate allocations from creating filtered batches.
+
+/// Sum of f64 values where filter_mask[i] == true, using 4-accumulator pattern.
+///
+/// This fuses filtering and aggregation to avoid intermediate allocations.
+/// For simple aggregates like Q6, this can provide 2-3x speedup.
+///
+/// # Arguments
+/// * `values` - Array of values to aggregate
+/// * `filter_mask` - Boolean mask (true = include in aggregate)
+///
+/// # Returns
+/// Sum of values where filter_mask is true
+#[inline]
+pub fn sum_f64_filtered(values: &[f64], filter_mask: &[bool]) -> f64 {
+    debug_assert_eq!(values.len(), filter_mask.len(), "Arrays must have same length");
+
+    let len = values.len().min(filter_mask.len());
+    if len == 0 {
+        return 0.0;
+    }
+
+    // Use 4-accumulator pattern with conditional adds
+    let (mut s0, mut s1, mut s2, mut s3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        // 4-accumulator pattern: reduces loop-carried dependencies
+        // The compiler may auto-vectorize these conditional adds
+        if filter_mask[off] { s0 += values[off]; }
+        if filter_mask[off + 1] { s1 += values[off + 1]; }
+        if filter_mask[off + 2] { s2 += values[off + 2]; }
+        if filter_mask[off + 3] { s3 += values[off + 3]; }
+    }
+
+    let mut sum = s0 + s1 + s2 + s3;
+    for i in (chunks * 4)..len {
+        if filter_mask[i] {
+            sum += values[i];
+        }
+    }
+    sum
+}
+
+/// Sum of i64 values where filter_mask[i] == true.
+#[inline]
+pub fn sum_i64_filtered(values: &[i64], filter_mask: &[bool]) -> i64 {
+    debug_assert_eq!(values.len(), filter_mask.len(), "Arrays must have same length");
+
+    let len = values.len().min(filter_mask.len());
+    if len == 0 {
+        return 0;
+    }
+
+    let (mut s0, mut s1, mut s2, mut s3) = (0i64, 0i64, 0i64, 0i64);
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if filter_mask[off] { s0 = s0.wrapping_add(values[off]); }
+        if filter_mask[off + 1] { s1 = s1.wrapping_add(values[off + 1]); }
+        if filter_mask[off + 2] { s2 = s2.wrapping_add(values[off + 2]); }
+        if filter_mask[off + 3] { s3 = s3.wrapping_add(values[off + 3]); }
+    }
+
+    let mut sum = s0.wrapping_add(s1).wrapping_add(s2).wrapping_add(s3);
+    for i in (chunks * 4)..len {
+        if filter_mask[i] {
+            sum = sum.wrapping_add(values[i]);
+        }
+    }
+    sum
+}
+
+/// Count of true values in filter mask (number of rows passing filter).
+#[inline]
+pub fn count_filtered(filter_mask: &[bool]) -> i64 {
+    let len = filter_mask.len();
+    if len == 0 {
+        return 0;
+    }
+
+    // Use 4-accumulator pattern for count
+    let (mut c0, mut c1, mut c2, mut c3) = (0i64, 0i64, 0i64, 0i64);
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        c0 += filter_mask[off] as i64;
+        c1 += filter_mask[off + 1] as i64;
+        c2 += filter_mask[off + 2] as i64;
+        c3 += filter_mask[off + 3] as i64;
+    }
+
+    let mut count = c0 + c1 + c2 + c3;
+    for i in (chunks * 4)..len {
+        count += filter_mask[i] as i64;
+    }
+    count
+}
+
+/// Sum of element-wise product of two f64 arrays with filter mask.
+///
+/// This is the key operation for TPC-H Q6: SUM(l_extendedprice * l_discount)
+/// with WHERE clause filtering.
+///
+/// Fuses filtering and aggregation to avoid:
+/// 1. Creating intermediate filtered arrays
+/// 2. Multiple passes over the data
+///
+/// # Arguments
+/// * `a` - First array of values
+/// * `b` - Second array of values (must be same length as `a`)
+/// * `filter_mask` - Boolean mask (true = include in aggregate)
+///
+/// # Returns
+/// (sum, count) - Sum of products for filtered rows and count of passing rows
+#[inline]
+pub fn sum_product_f64_filtered(a: &[f64], b: &[f64], filter_mask: &[bool]) -> (f64, i64) {
+    debug_assert_eq!(a.len(), b.len(), "Arrays must have same length");
+    debug_assert_eq!(a.len(), filter_mask.len(), "Arrays and filter must have same length");
+
+    let len = a.len().min(b.len()).min(filter_mask.len());
+    if len == 0 {
+        return (0.0, 0);
+    }
+
+    // 4-accumulator pattern with filter
+    let (mut s0, mut s1, mut s2, mut s3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let (mut c0, mut c1, mut c2, mut c3) = (0i64, 0i64, 0i64, 0i64);
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if filter_mask[off] {
+            s0 += a[off] * b[off];
+            c0 += 1;
+        }
+        if filter_mask[off + 1] {
+            s1 += a[off + 1] * b[off + 1];
+            c1 += 1;
+        }
+        if filter_mask[off + 2] {
+            s2 += a[off + 2] * b[off + 2];
+            c2 += 1;
+        }
+        if filter_mask[off + 3] {
+            s3 += a[off + 3] * b[off + 3];
+            c3 += 1;
+        }
+    }
+
+    let mut sum = s0 + s1 + s2 + s3;
+    let mut count = c0 + c1 + c2 + c3;
+
+    for i in (chunks * 4)..len {
+        if filter_mask[i] {
+            sum += a[i] * b[i];
+            count += 1;
+        }
+    }
+
+    (sum, count)
+}
+
+/// Sum of element-wise product with filter mask AND null masks.
+///
+/// Full version that handles both filter predicates and NULL values.
+/// Used when columnar data has NULLs that also need to be excluded.
+///
+/// # Arguments
+/// * `a` - First array of values
+/// * `b` - Second array of values
+/// * `filter_mask` - Boolean mask from predicates (true = include)
+/// * `null_a` - Null bitmap for array `a` (true = null, false = valid)
+/// * `null_b` - Null bitmap for array `b` (true = null, false = valid)
+///
+/// # Returns
+/// (sum, count) - Sum of products and count of valid rows
+#[inline]
+pub fn sum_product_f64_filtered_masked(
+    a: &[f64],
+    b: &[f64],
+    filter_mask: &[bool],
+    null_a: Option<&[bool]>,
+    null_b: Option<&[bool]>,
+) -> (f64, i64) {
+    let len = a.len().min(b.len()).min(filter_mask.len());
+    if len == 0 {
+        return (0.0, 0);
+    }
+
+    // Fast path: no nulls
+    let no_nulls_a = null_a.is_none_or(|n| n.len() < len || !n[..len].iter().any(|&x| x));
+    let no_nulls_b = null_b.is_none_or(|n| n.len() < len || !n[..len].iter().any(|&x| x));
+
+    if no_nulls_a && no_nulls_b {
+        return sum_product_f64_filtered(a, b, filter_mask);
+    }
+
+    // Slow path with null handling
+    let null_mask_a = null_a.unwrap_or(&[]);
+    let null_mask_b = null_b.unwrap_or(&[]);
+
+    let mut sum = 0.0f64;
+    let mut count = 0i64;
+
+    for i in 0..len {
+        let is_null_a = null_mask_a.get(i).copied().unwrap_or(false);
+        let is_null_b = null_mask_b.get(i).copied().unwrap_or(false);
+
+        if filter_mask[i] && !is_null_a && !is_null_b {
+            sum += a[i] * b[i];
+            count += 1;
+        }
+    }
+
+    (sum, count)
+}
+
+/// Min of f64 values where filter_mask[i] == true.
+#[inline]
+pub fn min_f64_filtered(values: &[f64], filter_mask: &[bool]) -> Option<f64> {
+    debug_assert_eq!(values.len(), filter_mask.len(), "Arrays must have same length");
+
+    let len = values.len().min(filter_mask.len());
+    if len == 0 {
+        return None;
+    }
+
+    let (mut m0, mut m1, mut m2, mut m3) =
+        (f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if filter_mask[off] { m0 = m0.min(values[off]); }
+        if filter_mask[off + 1] { m1 = m1.min(values[off + 1]); }
+        if filter_mask[off + 2] { m2 = m2.min(values[off + 2]); }
+        if filter_mask[off + 3] { m3 = m3.min(values[off + 3]); }
+    }
+
+    let mut result = m0.min(m1).min(m2).min(m3);
+    for i in (chunks * 4)..len {
+        if filter_mask[i] {
+            result = result.min(values[i]);
+        }
+    }
+
+    if result == f64::INFINITY {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+/// Max of f64 values where filter_mask[i] == true.
+#[inline]
+pub fn max_f64_filtered(values: &[f64], filter_mask: &[bool]) -> Option<f64> {
+    debug_assert_eq!(values.len(), filter_mask.len(), "Arrays must have same length");
+
+    let len = values.len().min(filter_mask.len());
+    if len == 0 {
+        return None;
+    }
+
+    let (mut m0, mut m1, mut m2, mut m3) = (
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if filter_mask[off] { m0 = m0.max(values[off]); }
+        if filter_mask[off + 1] { m1 = m1.max(values[off + 1]); }
+        if filter_mask[off + 2] { m2 = m2.max(values[off + 2]); }
+        if filter_mask[off + 3] { m3 = m3.max(values[off + 3]); }
+    }
+
+    let mut result = m0.max(m1).max(m2).max(m3);
+    for i in (chunks * 4)..len {
+        if filter_mask[i] {
+            result = result.max(values[i]);
+        }
+    }
+
+    if result == f64::NEG_INFINITY {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+/// Min of i64 values where filter_mask[i] == true.
+#[inline]
+pub fn min_i64_filtered(values: &[i64], filter_mask: &[bool]) -> Option<i64> {
+    debug_assert_eq!(values.len(), filter_mask.len(), "Arrays must have same length");
+
+    let len = values.len().min(filter_mask.len());
+    if len == 0 {
+        return None;
+    }
+
+    let (mut m0, mut m1, mut m2, mut m3) = (i64::MAX, i64::MAX, i64::MAX, i64::MAX);
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if filter_mask[off] { m0 = m0.min(values[off]); }
+        if filter_mask[off + 1] { m1 = m1.min(values[off + 1]); }
+        if filter_mask[off + 2] { m2 = m2.min(values[off + 2]); }
+        if filter_mask[off + 3] { m3 = m3.min(values[off + 3]); }
+    }
+
+    let mut result = m0.min(m1).min(m2).min(m3);
+    for i in (chunks * 4)..len {
+        if filter_mask[i] {
+            result = result.min(values[i]);
+        }
+    }
+
+    if result == i64::MAX {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+/// Max of i64 values where filter_mask[i] == true.
+#[inline]
+pub fn max_i64_filtered(values: &[i64], filter_mask: &[bool]) -> Option<i64> {
+    debug_assert_eq!(values.len(), filter_mask.len(), "Arrays must have same length");
+
+    let len = values.len().min(filter_mask.len());
+    if len == 0 {
+        return None;
+    }
+
+    let (mut m0, mut m1, mut m2, mut m3) = (i64::MIN, i64::MIN, i64::MIN, i64::MIN);
+    let chunks = len / 4;
+
+    for i in 0..chunks {
+        let off = i * 4;
+        if filter_mask[off] { m0 = m0.max(values[off]); }
+        if filter_mask[off + 1] { m1 = m1.max(values[off + 1]); }
+        if filter_mask[off + 2] { m2 = m2.max(values[off + 2]); }
+        if filter_mask[off + 3] { m3 = m3.max(values[off + 3]); }
+    }
+
+    let mut result = m0.max(m1).max(m2).max(m3);
+    for i in (chunks * 4)..len {
+        if filter_mask[i] {
+            result = result.max(values[i]);
+        }
+    }
+
+    if result == i64::MIN {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+// ============================================================================
 // COMPARISON OPERATIONS (Filtering)
 // ============================================================================
 
@@ -489,5 +860,124 @@ mod tests {
         let (sum, count) = sum_product_f64_masked(&[], &[], None, None);
         assert_eq!(sum, 0.0);
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_sum_f64_filtered() {
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let filter = vec![true, false, true, false, true, false, true, false];
+        // Sum only odd positions: 1 + 3 + 5 + 7 = 16
+        assert!((sum_f64_filtered(&values, &filter) - 16.0).abs() < 0.001);
+
+        // All true
+        let filter_all = vec![true; 8];
+        assert!((sum_f64_filtered(&values, &filter_all) - 36.0).abs() < 0.001);
+
+        // All false
+        let filter_none = vec![false; 8];
+        assert_eq!(sum_f64_filtered(&values, &filter_none), 0.0);
+
+        // Empty
+        assert_eq!(sum_f64_filtered(&[], &[]), 0.0);
+    }
+
+    #[test]
+    fn test_sum_i64_filtered() {
+        let values = vec![1i64, 2, 3, 4, 5, 6, 7, 8];
+        let filter = vec![true, false, true, false, true, false, true, false];
+        assert_eq!(sum_i64_filtered(&values, &filter), 16);
+
+        let filter_all = vec![true; 8];
+        assert_eq!(sum_i64_filtered(&values, &filter_all), 36);
+    }
+
+    #[test]
+    fn test_count_filtered() {
+        let filter = vec![true, false, true, false, true, false, true, false];
+        assert_eq!(count_filtered(&filter), 4);
+
+        let filter_all = vec![true; 8];
+        assert_eq!(count_filtered(&filter_all), 8);
+
+        let filter_none = vec![false; 8];
+        assert_eq!(count_filtered(&filter_none), 0);
+
+        assert_eq!(count_filtered(&[]), 0);
+    }
+
+    #[test]
+    fn test_sum_product_f64_filtered() {
+        // TPC-H Q6 scenario: SUM(price * discount) WHERE filter
+        let prices = vec![100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0];
+        let discounts = vec![0.05, 0.06, 0.07, 0.05, 0.06, 0.07, 0.05, 0.06];
+        let filter = vec![true, false, true, false, true, false, true, false];
+
+        // Only indices 0, 2, 4, 6: 100*0.05 + 300*0.07 + 500*0.06 + 700*0.05
+        //                        = 5 + 21 + 30 + 35 = 91
+        let (sum, count) = sum_product_f64_filtered(&prices, &discounts, &filter);
+        assert!((sum - 91.0).abs() < 0.001);
+        assert_eq!(count, 4);
+
+        // All pass filter
+        let filter_all = vec![true; 8];
+        let (sum, count) = sum_product_f64_filtered(&prices, &discounts, &filter_all);
+        assert!((sum - 213.0).abs() < 0.001);  // Same as unfiltered sum_product test
+        assert_eq!(count, 8);
+
+        // None pass filter
+        let filter_none = vec![false; 8];
+        let (sum, count) = sum_product_f64_filtered(&prices, &discounts, &filter_none);
+        assert_eq!(sum, 0.0);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_sum_product_f64_filtered_masked() {
+        let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let b = vec![2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0];
+        let filter = vec![true, true, true, true, false, false, false, false];
+        let null_a = vec![false, true, false, false, false, false, false, false];
+
+        // Filter passes 0-3, null excludes 1, so: 0,2,3 → 1*2 + 3*2 + 4*2 = 16
+        let (sum, count) = sum_product_f64_filtered_masked(&a, &b, &filter, Some(&null_a), None);
+        assert!((sum - 16.0).abs() < 0.001);
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_min_max_f64_filtered() {
+        let values = vec![5.0, 2.0, 8.0, 1.0, 9.0, 3.0, 7.0, 4.0];
+        let filter = vec![true, false, true, false, true, false, true, false];
+
+        // Only indices 0, 2, 4, 6: values 5, 8, 9, 7
+        assert_eq!(min_f64_filtered(&values, &filter), Some(5.0));
+        assert_eq!(max_f64_filtered(&values, &filter), Some(9.0));
+
+        // No rows pass filter
+        let filter_none = vec![false; 8];
+        assert_eq!(min_f64_filtered(&values, &filter_none), None);
+        assert_eq!(max_f64_filtered(&values, &filter_none), None);
+    }
+
+    #[test]
+    fn test_min_max_i64_filtered() {
+        let values = vec![5i64, 2, 8, 1, 9, 3, 7, 4];
+        let filter = vec![true, false, true, false, true, false, true, false];
+
+        assert_eq!(min_i64_filtered(&values, &filter), Some(5));
+        assert_eq!(max_i64_filtered(&values, &filter), Some(9));
+
+        let filter_none = vec![false; 8];
+        assert_eq!(min_i64_filtered(&values, &filter_none), None);
+        assert_eq!(max_i64_filtered(&values, &filter_none), None);
+    }
+
+    #[test]
+    fn test_filtered_remainder_handling() {
+        // Test with non-multiple-of-4 lengths
+        let values: Vec<f64> = (1..=7).map(|x| x as f64).collect();  // 7 elements
+        let filter = vec![true, false, true, false, true, false, true];  // 1, 3, 5, 7 = 16
+        assert!((sum_f64_filtered(&values, &filter) - 16.0).abs() < 0.001);
+        assert_eq!(count_filtered(&filter), 4);
     }
 }

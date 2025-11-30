@@ -160,7 +160,11 @@ pub fn simd_filter_batch(
 /// Returns a Vec<bool> where true means the row passes all predicates.
 /// This function uses SIMD operations for numeric columns (i64/f64) and
 /// falls back to scalar evaluation for other types.
-fn simd_create_filter_mask(
+///
+/// This function is public to enable fused filter+aggregate optimization,
+/// where the filter mask is used directly for aggregation without creating
+/// an intermediate filtered batch.
+pub fn simd_create_filter_mask(
     batch: &ColumnarBatch,
     predicates: &[ColumnPredicate],
 ) -> Result<Vec<bool>, ExecutorError> {
