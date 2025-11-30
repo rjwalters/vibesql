@@ -611,7 +611,7 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             SqlValue::Integer(ex.ex_open as i64),
             SqlValue::Integer(ex.ex_close as i64),
             SqlValue::Varchar(ex.ex_desc),
-            SqlValue::Integer(ex.ex_ad_id),
+            SqlValue::Bigint(ex.ex_ad_id),
         ])).unwrap();
     }
 
@@ -689,7 +689,7 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
     for b_id in 1..=num_brokers as i64 {
         let broker = data.gen_broker(b_id);
         db.insert_row("broker", Row::new(vec![
-            SqlValue::Integer(broker.b_id),
+            SqlValue::Bigint(broker.b_id),
             SqlValue::Varchar(broker.b_st_id),
             SqlValue::Varchar(broker.b_name),
             SqlValue::Integer(broker.b_num_trades as i64),
@@ -710,7 +710,7 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         // Customer address
         let addr = data.gen_address();
         db.insert_row("address", Row::new(vec![
-            SqlValue::Integer(addr.ad_id),
+            SqlValue::Bigint(addr.ad_id),
             SqlValue::Varchar(addr.ad_line1),
             SqlValue::Varchar(addr.ad_line2),
             SqlValue::Varchar(addr.ad_zc_code),
@@ -720,7 +720,7 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         // Customer
         let cust = data.gen_customer(c_id);
         db.insert_row("customer", Row::new(vec![
-            SqlValue::Integer(cust.c_id),
+            SqlValue::Bigint(cust.c_id),
             SqlValue::Varchar(cust.c_tax_id),
             SqlValue::Varchar(cust.c_st_id),
             SqlValue::Varchar(cust.c_l_name),
@@ -729,7 +729,7 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             SqlValue::Varchar(cust.c_gndr),
             SqlValue::Integer(cust.c_tier as i64),
             SqlValue::Varchar(cust.c_dob),
-            SqlValue::Integer(cust.c_ad_id),
+            SqlValue::Bigint(cust.c_ad_id),
             SqlValue::Varchar(cust.c_ctry_1),
             SqlValue::Varchar(cust.c_area_1),
             SqlValue::Varchar(cust.c_local_1),
@@ -751,9 +751,9 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             let b_id = (account_id % num_brokers as i64) + 1;
             let acct = data.gen_customer_account(account_id, c_id, b_id);
             db.insert_row("customer_account", Row::new(vec![
-                SqlValue::Integer(acct.ca_id),
-                SqlValue::Integer(acct.ca_b_id),
-                SqlValue::Integer(acct.ca_c_id),
+                SqlValue::Bigint(acct.ca_id),
+                SqlValue::Bigint(acct.ca_b_id),
+                SqlValue::Bigint(acct.ca_c_id),
                 SqlValue::Varchar(acct.ca_name),
                 SqlValue::Integer(acct.ca_tax_st as i64),
                 SqlValue::Numeric(acct.ca_bal),
@@ -764,15 +764,15 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         // Watch list
         let wl = data.gen_watch_list(watch_list_id, c_id);
         db.insert_row("watch_list", Row::new(vec![
-            SqlValue::Integer(wl.wl_id),
-            SqlValue::Integer(wl.wl_c_id),
+            SqlValue::Bigint(wl.wl_id),
+            SqlValue::Bigint(wl.wl_c_id),
         ])).unwrap();
 
         // Watch items (random securities)
         let num_items = data.rng.random_int(5, 20) as usize;
         for i in 0..num_items.min(symbols.len()) {
             db.insert_row("watch_item", Row::new(vec![
-                SqlValue::Integer(watch_list_id),
+                SqlValue::Bigint(watch_list_id),
                 SqlValue::Varchar(symbols[i].clone()),
             ])).unwrap();
         }
@@ -792,7 +792,7 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         // Company address
         let addr = data.gen_address();
         db.insert_row("address", Row::new(vec![
-            SqlValue::Integer(addr.ad_id),
+            SqlValue::Bigint(addr.ad_id),
             SqlValue::Varchar(addr.ad_line1),
             SqlValue::Varchar(addr.ad_line2),
             SqlValue::Varchar(addr.ad_zc_code),
@@ -801,13 +801,13 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
 
         let company = data.gen_company(co_id);
         db.insert_row("company", Row::new(vec![
-            SqlValue::Integer(company.co_id),
+            SqlValue::Bigint(company.co_id),
             SqlValue::Varchar(company.co_st_id),
             SqlValue::Varchar(company.co_name),
             SqlValue::Varchar(company.co_in_id),
             SqlValue::Varchar(company.co_sp_rate),
             SqlValue::Varchar(company.co_ceo),
-            SqlValue::Integer(company.co_ad_id),
+            SqlValue::Bigint(company.co_ad_id),
             SqlValue::Varchar(company.co_desc),
             SqlValue::Varchar(company.co_open_date),
         ])).unwrap();
@@ -817,7 +817,7 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             for qtr in 1..=4 {
                 let fin = data.gen_financial(co_id, year, qtr);
                 db.insert_row("financial", Row::new(vec![
-                    SqlValue::Integer(fin.fi_co_id),
+                    SqlValue::Bigint(fin.fi_co_id),
                     SqlValue::Integer(fin.fi_year as i64),
                     SqlValue::Integer(fin.fi_qtr as i64),
                     SqlValue::Varchar(fin.fi_qtr_start_date),
@@ -829,8 +829,8 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                     SqlValue::Numeric(fin.fi_inventory),
                     SqlValue::Numeric(fin.fi_assets),
                     SqlValue::Numeric(fin.fi_liability),
-                    SqlValue::Integer(fin.fi_out_basic),
-                    SqlValue::Integer(fin.fi_out_dilut),
+                    SqlValue::Bigint(fin.fi_out_basic),
+                    SqlValue::Bigint(fin.fi_out_dilut),
                 ])).unwrap();
             }
         }
@@ -848,8 +848,8 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             SqlValue::Varchar(sec.s_st_id),
             SqlValue::Varchar(sec.s_name),
             SqlValue::Varchar(sec.s_ex_id),
-            SqlValue::Integer(sec.s_co_id),
-            SqlValue::Integer(sec.s_num_out),
+            SqlValue::Bigint(sec.s_co_id),
+            SqlValue::Bigint(sec.s_num_out),
             SqlValue::Varchar(sec.s_start_date),
             SqlValue::Varchar(sec.s_exch_date),
             SqlValue::Numeric(sec.s_pe),
@@ -868,7 +868,7 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             SqlValue::Varchar(lt.lt_dts),
             SqlValue::Numeric(lt.lt_price),
             SqlValue::Numeric(lt.lt_open_price),
-            SqlValue::Integer(lt.lt_vol),
+            SqlValue::Bigint(lt.lt_vol),
         ])).unwrap();
     }
 }
@@ -891,8 +891,8 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             let holding = data.gen_holding(ca_id, &symb);
 
             db.insert_row("holding", Row::new(vec![
-                SqlValue::Integer(holding.h_t_id),
-                SqlValue::Integer(holding.h_ca_id),
+                SqlValue::Bigint(holding.h_t_id),
+                SqlValue::Bigint(holding.h_ca_id),
                 SqlValue::Varchar(holding.h_s_symb.clone()),
                 SqlValue::Varchar(holding.h_dts),
                 SqlValue::Numeric(holding.h_price),
@@ -902,7 +902,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             // Holding summary
             let hs = data.gen_holding_summary(ca_id, &symb, holding.h_qty);
             db.insert_row("holding_summary", Row::new(vec![
-                SqlValue::Integer(hs.hs_ca_id),
+                SqlValue::Bigint(hs.hs_ca_id),
                 SqlValue::Varchar(hs.hs_s_symb),
                 SqlValue::Integer(hs.hs_qty as i64),
             ])).unwrap();
@@ -915,7 +915,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             let trade = data.gen_trade(ca_id, &symb);
 
             db.insert_row("trade", Row::new(vec![
-                SqlValue::Integer(trade.t_id),
+                SqlValue::Bigint(trade.t_id),
                 SqlValue::Varchar(trade.t_dts.clone()),
                 SqlValue::Varchar(trade.t_st_id.clone()),
                 SqlValue::Varchar(trade.t_tt_id),
@@ -923,7 +923,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                 SqlValue::Varchar(trade.t_s_symb),
                 SqlValue::Integer(trade.t_qty as i64),
                 SqlValue::Numeric(trade.t_bid_price),
-                SqlValue::Integer(trade.t_ca_id),
+                SqlValue::Bigint(trade.t_ca_id),
                 SqlValue::Varchar(trade.t_exec_name),
                 SqlValue::Numeric(trade.t_trade_price),
                 SqlValue::Numeric(trade.t_chrg),
@@ -935,7 +935,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             // Trade history
             let th = data.gen_trade_history(trade.t_id, &trade.t_st_id);
             db.insert_row("trade_history", Row::new(vec![
-                SqlValue::Integer(th.th_t_id),
+                SqlValue::Bigint(th.th_t_id),
                 SqlValue::Varchar(th.th_dts),
                 SqlValue::Varchar(th.th_st_id),
             ])).unwrap();
@@ -945,7 +945,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                 let amount = trade.t_trade_price * trade.t_qty as f64;
                 let se = data.gen_settlement(trade.t_id, amount);
                 db.insert_row("settlement", Row::new(vec![
-                    SqlValue::Integer(se.se_t_id),
+                    SqlValue::Bigint(se.se_t_id),
                     SqlValue::Varchar(se.se_cash_type),
                     SqlValue::Varchar(se.se_cash_due_date),
                     SqlValue::Numeric(se.se_amt),
@@ -955,7 +955,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                 if trade.t_is_cash {
                     let ct = data.gen_cash_transaction(trade.t_id, amount);
                     db.insert_row("cash_transaction", Row::new(vec![
-                        SqlValue::Integer(ct.ct_t_id),
+                        SqlValue::Bigint(ct.ct_t_id),
                         SqlValue::Varchar(ct.ct_dts),
                         SqlValue::Numeric(ct.ct_amt),
                         SqlValue::Varchar(ct.ct_name),
