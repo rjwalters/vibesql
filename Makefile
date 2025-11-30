@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
+.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
 
 # Default target - fully qualify and update the state of the repo
 # Runs build-all (including Python), all tests, benchmarks, and records results to database
@@ -27,7 +27,8 @@ help:
 	@echo "  make benchmark          - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
 	@echo "  make benchmark-tpch     - Run TPC-H benchmark suite (30s timeout)"
 	@echo "  make benchmark-tpcc     - Run TPC-C benchmark suite (60s duration)"
-	@echo "  make benchmark-tpcds    - Run TPC-DS benchmark suite (99 queries)"
+	@echo "  make benchmark-tpcds    - Run TPC-DS benchmark suite (isolated, memory-safe)"
+	@echo "  make benchmark-tpcds-all - Run TPC-DS with all engines simultaneously (may OOM)"
 	@echo "  make benchmark-sysbench - Run Sysbench OLTP benchmarks"
 	@echo ""
 	@echo "Profiling targets:"
@@ -133,8 +134,19 @@ benchmark-tpcc:
 	./scripts/process_tpcc_results.py --input /tmp/tpcc_results.txt --scale-factor 1 --duration 60
 
 # Run TPC-DS benchmarks with database tracking
+# Uses isolated execution (each database engine in separate process) to avoid memory pressure
 benchmark-tpcds:
-	@echo "Running TPC-DS benchmarks..."
+	@echo "Running TPC-DS benchmarks (isolated mode)..."
+	./scripts/bench-tpcds-isolated.sh /tmp/tpcds_results.txt
+	@echo ""
+	@echo "Processing TPC-DS results into database..."
+	./scripts/process_tpcds_results.py --stdin < /tmp/tpcds_results.txt || \
+		./scripts/process_tpcds_results.py --criterion-dir target/criterion
+
+# Run TPC-DS benchmarks with all engines simultaneously (may cause memory pressure)
+benchmark-tpcds-all:
+	@echo "Running TPC-DS benchmarks (all engines simultaneously)..."
+	@echo "WARNING: This may cause memory pressure. Use 'make benchmark-tpcds' for isolated execution."
 	cargo bench --package vibesql-executor --bench tpcds_benchmark --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/tpcds_results.txt
 	@echo ""
 	@echo "Processing TPC-DS results into database..."

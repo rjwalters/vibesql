@@ -74,6 +74,25 @@ pub fn load_duckdb(table_size: usize) -> DuckDBConn {
     conn
 }
 
+/// Load MySQL with sysbench schema and data
+/// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/sysbench)
+/// Returns None if MYSQL_URL is not set or connection fails
+#[cfg(feature = "benchmark-comparison")]
+pub fn load_mysql(table_size: usize) -> Option<PooledConn> {
+    let url = std::env::var("MYSQL_URL").ok()?;
+    let pool = Pool::new(url.as_str()).ok()?;
+    let mut conn = pool.get_conn().ok()?;
+    let mut data = SysbenchData::new(table_size);
+
+    // Create schema (drops and recreates table)
+    create_sbtest_schema_mysql(&mut conn);
+
+    // Load data
+    load_sbtest_mysql(&mut conn, &mut data);
+
+    Some(conn)
+}
+
 // =============================================================================
 // Schema Creation - VibeSQL
 // =============================================================================
@@ -228,47 +247,27 @@ fn load_sbtest_duckdb(conn: &DuckDBConn, data: &mut SysbenchData) {
 }
 
 // =============================================================================
-// MySQL Support
+// Schema Creation - MySQL
 // =============================================================================
-
-/// Load MySQL with sysbench schema and data
-/// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/sysbench)
-/// Returns None if MYSQL_URL is not set or connection fails
-#[cfg(feature = "benchmark-comparison")]
-pub fn load_mysql(table_size: usize) -> Option<PooledConn> {
-    let url = std::env::var("MYSQL_URL").ok()?;
-    let pool = Pool::new(url.as_str()).ok()?;
-    let mut conn = pool.get_conn().ok()?;
-    let mut data = SysbenchData::new(table_size);
-
-    // Create schema (drops and recreates table)
-    create_sbtest_schema_mysql(&mut conn);
-
-    // Load data
-    load_sbtest_mysql(&mut conn, &mut data);
-
-    Some(conn)
-}
 
 #[cfg(feature = "benchmark-comparison")]
 fn create_sbtest_schema_mysql(conn: &mut PooledConn) {
-    // Drop table if it exists
+    // Drop table if exists
     conn.query_drop("DROP TABLE IF EXISTS sbtest1").unwrap();
 
-    // Create table matching sysbench schema
     conn.query_drop(
         r#"
         CREATE TABLE sbtest1 (
             id INTEGER PRIMARY KEY,
             k INTEGER NOT NULL DEFAULT 0,
-            c CHAR(120) NOT NULL DEFAULT '',
-            pad CHAR(60) NOT NULL DEFAULT ''
+            c VARCHAR(120) NOT NULL DEFAULT '',
+            pad VARCHAR(60) NOT NULL DEFAULT ''
         ) ENGINE=InnoDB
-        "#,
+    "#,
     )
     .unwrap();
 
-    // Create secondary index on k column
+    // Create index on k column
     conn.query_drop("CREATE INDEX k_1 ON sbtest1(k)").unwrap();
 }
 

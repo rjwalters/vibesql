@@ -173,14 +173,12 @@ pub fn simd_create_filter_mask(
     // Start with all rows passing
     let mut mask = vec![true; row_count];
 
-    // Evaluate each predicate and AND the results
+    // Evaluate each predicate and AND the results using vectorized operation
     for predicate in predicates {
         let predicate_mask = evaluate_predicate_simd(batch, predicate)?;
 
-        // AND with existing mask
-        for i in 0..row_count {
-            mask[i] = mask[i] && predicate_mask[i];
-        }
+        // Vectorized AND with existing mask
+        simd_ops::and_masks_inplace(&mut mask, &predicate_mask);
     }
 
     Ok(mask)
@@ -314,7 +312,7 @@ fn evaluate_predicate_i64_simd(
 
         ColumnPredicate::Between { low, high, .. } => {
             // BETWEEN is equivalent to: value >= low AND value <= high
-            // Use i64 SIMD operations to avoid precision loss from i64->f64 conversion
+            // Use single-pass BETWEEN operation for better performance
             let low_i64 = match low {
                 SqlValue::Integer(v) => *v,
                 SqlValue::Bigint(v) => *v,
@@ -338,16 +336,8 @@ fn evaluate_predicate_i64_simd(
                 }
             };
 
-            // Use i64 SIMD operations to avoid precision loss
-            let ge_low = simd_ge_i64(values, low_i64);
-            let le_high = simd_le_i64(values, high_i64);
-
-            // AND the two masks
-            ge_low
-                .iter()
-                .zip(le_high.iter())
-                .map(|(&a, &b)| a && b)
-                .collect()
+            // Single-pass BETWEEN check (more cache-efficient)
+            simd_ops::between_i64(values, low_i64, high_i64)
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
@@ -494,15 +484,8 @@ fn evaluate_predicate_i32_simd(
                     right_type: Some(format!("{:?}", high)),
                 })?;
 
-            let ge_low = simd_ge_i32(values, low_i32);
-            let le_high = simd_le_i32(values, high_i32);
-
-            // AND the two masks
-            ge_low
-                .iter()
-                .zip(le_high.iter())
-                .map(|(&a, &b)| a && b)
-                .collect()
+            // Single-pass BETWEEN check (more cache-efficient)
+            simd_ops::between_i32(values, low_i32, high_i32)
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
@@ -608,15 +591,8 @@ fn evaluate_predicate_f64_simd(
                     right_type: Some(format!("{:?}", high)),
                 })?;
 
-            let ge_low = simd_ge_f64(values, low_f64);
-            let le_high = simd_le_f64(values, high_f64);
-
-            // AND the two masks
-            ge_low
-                .iter()
-                .zip(le_high.iter())
-                .map(|(&a, &b)| a && b)
-                .collect()
+            // Single-pass BETWEEN check (more cache-efficient)
+            simd_ops::between_f64(values, low_f64, high_f64)
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
