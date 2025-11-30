@@ -16,7 +16,12 @@ impl JoinOrderSearch {
         analyzer: &JoinOrderAnalyzer,
         database: &vibesql_storage::Database,
     ) -> Self {
-        Self::from_analyzer_with_predicates(analyzer, database, &std::collections::HashMap::new())
+        Self::from_analyzer_with_predicates(
+            analyzer,
+            database,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        )
     }
 
     /// Create a new join order search with WHERE clause selectivity applied
@@ -24,13 +29,19 @@ impl JoinOrderSearch {
     /// This version accounts for table-local predicates when estimating cardinalities,
     /// which helps choose better join orders for queries like TPC-H Q3 where filter
     /// predicates significantly reduce table sizes before joining.
+    ///
+    /// # Parameters
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation").
+    ///   This is critical for queries with self-joins (like TPC-H Q7 with two nation aliases)
+    ///   to correctly look up table cardinalities and statistics.
     pub fn from_analyzer_with_predicates(
         analyzer: &JoinOrderAnalyzer,
         database: &vibesql_storage::Database,
         table_local_predicates: &std::collections::HashMap<String, Vec<vibesql_ast::Expression>>,
+        alias_to_table: &std::collections::HashMap<String, String>,
     ) -> Self {
         let edges = analyzer.edges().to_vec();
-        let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database);
+        let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
 
         let num_tables = analyzer.tables().len();
         let context = JoinOrderContext {
@@ -40,6 +51,7 @@ impl JoinOrderSearch {
                 analyzer,
                 database,
                 table_local_predicates,
+                alias_to_table,
             ),
             edge_selectivities,
             config: ParallelSearchConfig::with_table_count(num_tables),
@@ -54,14 +66,18 @@ impl JoinOrderSearch {
     /// This version accepts aggregate analysis results and can adjust join order
     /// decisions based on GROUP BY/HAVING clauses. When HAVING filters are selective,
     /// the optimizer may prefer different join orders that enable early aggregation.
+    ///
+    /// # Parameters
+    /// - `alias_to_table`: Maps table aliases to actual table names for database lookups.
     pub fn from_analyzer_with_aggregates(
         analyzer: &JoinOrderAnalyzer,
         database: &vibesql_storage::Database,
         table_local_predicates: &std::collections::HashMap<String, Vec<vibesql_ast::Expression>>,
+        alias_to_table: &std::collections::HashMap<String, String>,
         aggregate_analysis: AggregateAnalysis,
     ) -> Self {
         let edges = analyzer.edges().to_vec();
-        let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database);
+        let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
 
         let num_tables = analyzer.tables().len();
         let context = JoinOrderContext {
@@ -71,6 +87,7 @@ impl JoinOrderSearch {
                 analyzer,
                 database,
                 table_local_predicates,
+                alias_to_table,
             ),
             edge_selectivities,
             config: ParallelSearchConfig::with_table_count(num_tables),
