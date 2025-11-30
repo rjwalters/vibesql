@@ -1,11 +1,18 @@
 //! Common Table Expression (CTE) handling for SELECT queries
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::errors::ExecutorError;
 
-/// CTE result: (schema, rows)
-pub type CteResult = (vibesql_catalog::TableSchema, Vec<vibesql_storage::Row>);
+/// CTE result: (schema, shared rows)
+///
+/// Uses `Arc<Vec<Row>>` to enable O(1) cloning when CTEs are:
+/// - Propagated from outer queries to subqueries
+/// - Referenced multiple times without filtering
+///
+/// This avoids deep-cloning all rows on every CTE reference.
+pub type CteResult = (vibesql_catalog::TableSchema, Arc<Vec<vibesql_storage::Row>>);
 
 /// Execute all CTEs and return their results
 ///
@@ -32,8 +39,8 @@ where
         //  Determine the schema for this CTE
         let schema = derive_cte_schema(cte, &rows)?;
 
-        // Store the CTE result
-        cte_results.insert(cte.name.clone(), (schema, rows));
+        // Store the CTE result wrapped in Arc for efficient sharing
+        cte_results.insert(cte.name.clone(), (schema, Arc::new(rows)));
     }
 
     Ok(cte_results)

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::combine_with_and,
     schema::CombinedSchema, timeout::TimeoutContext,
@@ -43,20 +45,32 @@ pub(super) enum FromData {
     /// Materialized rows (for JOINs, CTEs, operations needing multiple passes)
     Materialized(Vec<vibesql_storage::Row>),
 
+    /// Shared rows (for zero-copy CTE references without filtering)
+    ///
+    /// This variant enables O(1) cloning when CTEs are referenced multiple times
+    /// without any filtering. Only materializes to Vec when mutation is needed.
+    SharedRows(Arc<Vec<vibesql_storage::Row>>),
+
     /// Lazy iterator (for streaming table scans)
     Iterator(FromIterator),
 }
 
 impl FromData {
     /// Get rows, materializing if needed
+    ///
+    /// For SharedRows, this will clone only if the Arc is shared.
+    /// If the Arc has a single reference, the Vec is moved out efficiently.
     pub fn into_rows(self) -> Vec<vibesql_storage::Row> {
         match self {
             Self::Materialized(rows) => rows,
+            Self::SharedRows(arc) => Arc::try_unwrap(arc).unwrap_or_else(|arc| (*arc).clone()),
             Self::Iterator(iter) => iter.collect_vec(),
         }
     }
 
     /// Get a reference to materialized rows, or materialize if iterator
+    ///
+    /// For SharedRows, returns a reference to the shared data without cloning.
     pub fn as_rows(&mut self) -> &Vec<vibesql_storage::Row> {
         // If we have an iterator, materialize it
         if let Self::Iterator(iter) = self {
@@ -76,9 +90,10 @@ impl FromData {
             }
         }
 
-        // Now we're guaranteed to have materialized rows
+        // Now we're guaranteed to have materialized or shared rows
         match self {
-            Self::Materialized(rows) => rows,
+            Self::Materialized(ref rows) => rows,
+            Self::SharedRows(ref arc) => arc.as_ref(),
             Self::Iterator(_) => unreachable!(),
         }
     }
@@ -93,6 +108,7 @@ impl FromData {
     pub fn as_slice(&self) -> &[vibesql_storage::Row] {
         match self {
             Self::Materialized(rows) => rows.as_slice(),
+            Self::SharedRows(arc) => arc.as_slice(),
             Self::Iterator(iter) => iter.as_slice(),
         }
     }
@@ -117,6 +133,14 @@ impl FromResult {
     /// Create a FromResult from materialized rows
     pub(super) fn from_rows(schema: CombinedSchema, rows: Vec<vibesql_storage::Row>) -> Self {
         Self { schema, data: FromData::Materialized(rows), sorted_by: None, where_filtered: false }
+    }
+
+    /// Create a FromResult from shared rows (zero-copy for CTEs)
+    ///
+    /// This variant is used when CTE rows can be shared without cloning,
+    /// enabling O(1) memory usage for CTE references without filtering.
+    pub(super) fn from_shared_rows(schema: CombinedSchema, rows: Arc<Vec<vibesql_storage::Row>>) -> Self {
+        Self { schema, data: FromData::SharedRows(rows), sorted_by: None, where_filtered: false }
     }
 
     /// Create a FromResult from materialized rows with sorting metadata
@@ -148,15 +172,29 @@ impl FromResult {
     }
 
     /// Get a mutable reference to the rows, materializing if needed
+    ///
+    /// For SharedRows, this triggers copy-on-write: the shared data is cloned
+    /// into owned Materialized data to allow mutation.
     #[allow(dead_code)]
     pub(super) fn rows_mut(&mut self) -> &mut Vec<vibesql_storage::Row> {
-        // First materialize if needed
-        self.data.as_rows();
+        // Convert iterator or shared to materialized
+        match &mut self.data {
+            FromData::Iterator(iter) => {
+                let rows = std::mem::replace(iter, FromIterator::from_vec(vec![])).collect_vec();
+                self.data = FromData::Materialized(rows);
+            }
+            FromData::SharedRows(arc) => {
+                // Copy-on-write: clone the shared data to allow mutation
+                let rows = arc.as_ref().clone();
+                self.data = FromData::Materialized(rows);
+            }
+            FromData::Materialized(_) => {}
+        }
 
         // Now we're guaranteed to have materialized rows
         match &mut self.data {
             FromData::Materialized(rows) => rows,
-            FromData::Iterator(_) => unreachable!(),
+            FromData::SharedRows(_) | FromData::Iterator(_) => unreachable!(),
         }
     }
 

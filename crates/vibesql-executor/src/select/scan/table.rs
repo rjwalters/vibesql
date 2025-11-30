@@ -49,7 +49,6 @@ pub(crate) fn execute_table_scan(
         // Use CTE result
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         let schema = CombinedSchema::from_table(effective_name, cte_schema.clone());
-        let mut rows = cte_rows.clone();
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
         // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
@@ -59,8 +58,9 @@ pub(crate) fn execute_table_scan(
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
-            rows = apply_table_local_predicates(
-                rows,
+            // Must clone rows for filtering (copy-on-write semantics)
+            let rows = apply_table_local_predicates(
+                cte_rows.as_ref().clone(),
                 schema.clone(),
                 &predicate_plan,
                 table_name,
@@ -68,9 +68,12 @@ pub(crate) fn execute_table_scan(
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
             )?;
+            return Ok(super::FromResult::from_rows(schema, rows));
         }
 
-        return Ok(super::FromResult::from_rows(schema, rows));
+        // No filtering needed - use zero-copy shared rows
+        // This avoids O(n) cloning when CTE is referenced multiple times
+        return Ok(super::FromResult::from_shared_rows(schema, cte_rows.clone()));
     }
 
     // Check if it's a view
