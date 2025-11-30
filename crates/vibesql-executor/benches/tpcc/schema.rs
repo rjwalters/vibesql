@@ -760,6 +760,7 @@ fn create_tpcc_indexes_sqlite(conn: &SqliteConn) {
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
         CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
     .unwrap();
@@ -1042,6 +1043,7 @@ fn create_tpcc_indexes_duckdb(conn: &DuckDBConn) {
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
         CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
     .unwrap();
@@ -1381,6 +1383,9 @@ fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
     ).unwrap();
     conn.query_drop(
         "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id)"
+    ).unwrap();
+    conn.query_drop(
+        "CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id)"
     ).unwrap();
 }
 

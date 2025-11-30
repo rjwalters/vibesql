@@ -228,6 +228,46 @@ fn execute_query(db: &vibesql_storage::Database, sql: &str) -> Result<(), String
     result
 }
 
+/// Helper function to execute a SQL query and return the first integer value
+fn execute_query_for_int(db: &vibesql_storage::Database, sql: &str) -> Result<i64, String> {
+    use vibesql_types::SqlValue;
+
+    let parse_start = Instant::now();
+
+    let stmt = match Parser::parse_sql(sql) {
+        Ok(vibesql_ast::Statement::Select(s)) => s,
+        Ok(_) => return Err("Expected SELECT statement".to_string()),
+        Err(e) => return Err(format!("Parse error: {}", e)),
+    };
+
+    let parse_time = parse_start.elapsed().as_micros() as u64;
+    PARSE_TIME_US.with(|t| t.set(t.get() + parse_time));
+
+    let execute_start = Instant::now();
+
+    let executor = SelectExecutor::new(db);
+    let rows = match executor.execute(&stmt) {
+        Ok(r) => r,
+        Err(e) => return Err(format!("Execute error: {}", e)),
+    };
+
+    let execute_time = execute_start.elapsed().as_micros() as u64;
+    EXECUTE_TIME_US.with(|t| t.set(t.get() + execute_time));
+    QUERY_COUNT.with(|c| c.set(c.get() + 1));
+
+    // Extract first value from first row
+    if let Some(row) = rows.first() {
+        if let Some(value) = row.values.first() {
+            match value {
+                SqlValue::Integer(i) => return Ok(*i),
+                SqlValue::Bigint(i) => return Ok(*i),
+                _ => return Err("Expected integer value".to_string()),
+            }
+        }
+    }
+    Err("No result returned".to_string())
+}
+
 /// Print profiling summary (call at end of benchmark)
 pub fn print_profile_summary() {
     PARSE_TIME_US.with(|parse| {
@@ -472,6 +512,9 @@ impl<'a> VibesqlTransactionExecutor<'a> {
     }
 
     /// Execute Stock-Level transaction
+    ///
+    /// Per TPC-C spec 2.8, the Stock-Level transaction checks the last 20 orders
+    /// for items with stock below the threshold.
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
         let start = Instant::now();
 
@@ -480,20 +523,26 @@ impl<'a> VibesqlTransactionExecutor<'a> {
             "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
             input.w_id, input.d_id
         );
-        if let Err(e) = execute_query(self.db, &d_query) {
-            return TransactionResult {
-                success: false,
-                duration_us: start.elapsed().as_micros() as u64,
-                error: Some(format!("District query failed: {}", e)),
-            };
-        }
+        let d_next_o_id = match execute_query_for_int(self.db, &d_query) {
+            Ok(id) => id,
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("District query failed: {}", e)),
+                };
+            }
+        };
 
-        // Count low stock items (simplified query)
+        // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
+        // Use subquery approach: first get items from recent orders, then check stock
+        let ol_o_id_min = d_next_o_id - 20;
         let stock_query = format!(
-            "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+            "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
              WHERE ol_w_id = {} AND ol_d_id = {} \
-             AND s_w_id = {} AND s_i_id = ol_i_id AND s_quantity < {}",
-            input.w_id, input.d_id, input.w_id, input.threshold
+             AND ol_o_id >= {} AND ol_o_id < {} \
+             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
+            input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold
         );
         if let Err(e) = execute_query(self.db, &stock_query) {
             return TransactionResult {
@@ -712,21 +761,25 @@ impl<'a> SqliteTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get district next order ID
-        let _ = self.conn.execute(
+        let d_next_o_id: i32 = self.conn.query_row(
             &format!(
                 "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
                 input.w_id, input.d_id
             ),
             [],
-        );
+            |row| row.get(0),
+        ).unwrap_or(3001); // Default to 3001 if query fails
 
-        // Count low stock items (same query as VibeSQL)
+        // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
+        // Use subquery approach for better optimization
+        let ol_o_id_min = d_next_o_id - 20;
         let _ = self.conn.execute(
             &format!(
-                "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+                "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
                  WHERE ol_w_id = {} AND ol_d_id = {} \
-                 AND s_w_id = {} AND s_i_id = ol_i_id AND s_quantity < {}",
-                input.w_id, input.d_id, input.w_id, input.threshold
+                 AND ol_o_id >= {} AND ol_o_id < {} \
+                 AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
+                input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold
             ),
             [],
         );
@@ -941,21 +994,25 @@ impl<'a> DuckdbTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get district next order ID
-        let _ = self.conn.execute(
+        let d_next_o_id: i32 = self.conn.query_row(
             &format!(
                 "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
                 input.w_id, input.d_id
             ),
             [],
-        );
+            |row| row.get(0),
+        ).unwrap_or(3001); // Default to 3001 if query fails
 
-        // Count low stock items (same query as VibeSQL)
+        // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
+        // Use subquery approach for better optimization
+        let ol_o_id_min = d_next_o_id - 20;
         let _ = self.conn.execute(
             &format!(
-                "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+                "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
                  WHERE ol_w_id = {} AND ol_d_id = {} \
-                 AND s_w_id = {} AND s_i_id = ol_i_id AND s_quantity < {}",
-                input.w_id, input.d_id, input.w_id, input.threshold
+                 AND ol_o_id >= {} AND ol_o_id < {} \
+                 AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
+                input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold
             ),
             [],
         );
@@ -1139,17 +1196,20 @@ impl<'a> MysqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get district next order ID
-        let _: Option<(i32,)> = self.conn.exec_first(
+        let d_next_o_id: i32 = self.conn.exec_first(
             "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
             (input.w_id, input.d_id),
-        ).ok().flatten();
+        ).ok().flatten().map(|(id,): (i32,)| id).unwrap_or(3001);
 
-        // Count low stock items (same query as other engines)
+        // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
+        // Use subquery approach for better optimization
+        let ol_o_id_min = d_next_o_id - 20;
         let _: Option<(i64,)> = self.conn.exec_first(
-            "SELECT COUNT(DISTINCT s_i_id) FROM order_line, stock \
+            "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
              WHERE ol_w_id = ? AND ol_d_id = ? \
-             AND s_w_id = ? AND s_i_id = ol_i_id AND s_quantity < ?",
-            (input.w_id, input.d_id, input.w_id, input.threshold),
+             AND ol_o_id >= ? AND ol_o_id < ? \
+             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?)",
+            (input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold),
         ).ok().flatten();
 
         TransactionResult {
