@@ -730,6 +730,95 @@ pub fn ne_f64(values: &[f64], target: f64) -> Vec<bool> {
 }
 
 // ============================================================================
+// BETWEEN OPERATIONS (Range checks in single pass)
+// ============================================================================
+
+/// Check if i64 values are in range [low, high] (inclusive).
+/// More efficient than separate ge + le comparisons + AND.
+#[inline]
+pub fn between_i64(values: &[i64], low: i64, high: i64) -> Vec<bool> {
+    values.iter().map(|&v| v >= low && v <= high).collect()
+}
+
+/// Check if i32 values are in range [low, high] (inclusive).
+/// More efficient than separate ge + le comparisons + AND.
+#[inline]
+pub fn between_i32(values: &[i32], low: i32, high: i32) -> Vec<bool> {
+    values.iter().map(|&v| v >= low && v <= high).collect()
+}
+
+/// Check if f64 values are in range [low, high] (inclusive).
+/// More efficient than separate ge + le comparisons + AND.
+#[inline]
+pub fn between_f64(values: &[f64], low: f64, high: f64) -> Vec<bool> {
+    values.iter().map(|&v| v >= low && v <= high).collect()
+}
+
+// ============================================================================
+// MASK OPERATIONS (Boolean operations on filter masks)
+// ============================================================================
+
+/// In-place AND of two boolean masks.
+///
+/// This function ANDs `other` into `mask` in-place, modifying `mask`.
+/// Uses an unrolled loop that LLVM can auto-vectorize effectively.
+///
+/// # Panics
+/// Panics if `mask` and `other` have different lengths.
+#[inline]
+pub fn and_masks_inplace(mask: &mut [bool], other: &[bool]) {
+    assert_eq!(mask.len(), other.len(), "mask lengths must match");
+
+    let len = mask.len();
+
+    // Process in chunks of 8 for better vectorization
+    let chunks = len / 8;
+    let remainder = len % 8;
+
+    for i in 0..chunks {
+        let base = i * 8;
+        // Unrolled loop - LLVM vectorizes this well
+        mask[base] = mask[base] && other[base];
+        mask[base + 1] = mask[base + 1] && other[base + 1];
+        mask[base + 2] = mask[base + 2] && other[base + 2];
+        mask[base + 3] = mask[base + 3] && other[base + 3];
+        mask[base + 4] = mask[base + 4] && other[base + 4];
+        mask[base + 5] = mask[base + 5] && other[base + 5];
+        mask[base + 6] = mask[base + 6] && other[base + 6];
+        mask[base + 7] = mask[base + 7] && other[base + 7];
+    }
+
+    // Handle remainder
+    let base = chunks * 8;
+    for i in 0..remainder {
+        mask[base + i] = mask[base + i] && other[base + i];
+    }
+}
+
+/// Create a combined filter mask from multiple predicates using in-place AND.
+///
+/// Returns a mask where `result[i] = pred1[i] && pred2[i] && ...`
+/// This is more efficient than repeatedly allocating and ANDing masks.
+///
+/// # Arguments
+/// * `masks` - Iterator of boolean mask slices to combine
+/// * `len` - Expected length of each mask
+///
+/// # Returns
+/// Combined mask with all predicates ANDed together
+#[inline]
+pub fn combine_masks<'a>(masks: impl Iterator<Item = &'a [bool]>, len: usize) -> Vec<bool> {
+    let mut result = vec![true; len];
+
+    for mask in masks {
+        assert_eq!(mask.len(), len, "all masks must have same length");
+        and_masks_inplace(&mut result, mask);
+    }
+
+    result
+}
+
+// ============================================================================
 // TESTS
 // ============================================================================
 
@@ -979,5 +1068,40 @@ mod tests {
         let filter = vec![true, false, true, false, true, false, true];  // 1, 3, 5, 7 = 16
         assert!((sum_f64_filtered(&values, &filter) - 16.0).abs() < 0.001);
         assert_eq!(count_filtered(&filter), 4);
+    }
+
+    #[test]
+    fn test_and_masks_inplace() {
+        let mut mask = vec![true, true, false, true, true, false, true, true];
+        let other = vec![true, false, true, true, false, true, true, false];
+        and_masks_inplace(&mut mask, &other);
+        assert_eq!(mask, vec![true, false, false, true, false, false, true, false]);
+    }
+
+    #[test]
+    fn test_and_masks_inplace_remainder() {
+        // Test with non-multiple-of-8 length
+        let mut mask = vec![true, true, false, true, true];
+        let other = vec![true, false, true, true, false];
+        and_masks_inplace(&mut mask, &other);
+        assert_eq!(mask, vec![true, false, false, true, false]);
+    }
+
+    #[test]
+    fn test_between_i64() {
+        let values = vec![1, 5, 10, 15, 20, 25];
+        assert_eq!(between_i64(&values, 5, 20), vec![false, true, true, true, true, false]);
+    }
+
+    #[test]
+    fn test_between_i32() {
+        let values: Vec<i32> = vec![1, 5, 10, 15, 20, 25];
+        assert_eq!(between_i32(&values, 5, 20), vec![false, true, true, true, true, false]);
+    }
+
+    #[test]
+    fn test_between_f64() {
+        let values = vec![0.01, 0.05, 0.06, 0.07, 0.08];
+        assert_eq!(between_f64(&values, 0.05, 0.07), vec![false, true, true, true, false]);
     }
 }
