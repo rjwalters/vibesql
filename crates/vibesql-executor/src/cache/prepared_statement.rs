@@ -19,14 +19,13 @@
 //! - Store placeholder nodes in the AST
 //! - Bind parameters at execution time without re-parsing
 
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, RwLock,
-    },
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
 };
 
+use lru::LruCache;
+use std::num::NonZeroUsize;
 use vibesql_ast::Statement;
 use vibesql_types::SqlValue;
 
@@ -119,8 +118,6 @@ pub enum PreparedStatementError {
     ParameterCountMismatch { expected: usize, actual: usize },
     /// Failed to parse bound SQL
     ParseError(String),
-    /// Statement not found in cache
-    NotFound(String),
 }
 
 impl std::fmt::Display for PreparedStatementError {
@@ -130,7 +127,6 @@ impl std::fmt::Display for PreparedStatementError {
                 write!(f, "Parameter count mismatch: expected {}, got {}", expected, actual)
             }
             PreparedStatementError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            PreparedStatementError::NotFound(sql) => write!(f, "Statement not found: {}", sql),
         }
     }
 }
@@ -200,30 +196,35 @@ fn sql_value_to_sql(value: &SqlValue) -> String {
 pub struct PreparedStatementCacheStats {
     pub hits: usize,
     pub misses: usize,
+    pub evictions: usize,
     pub size: usize,
     pub hit_rate: f64,
 }
 
 /// Thread-safe cache for prepared statements with LRU eviction
 pub struct PreparedStatementCache {
-    /// Cache mapping SQL string to prepared statement
-    cache: RwLock<HashMap<String, Arc<PreparedStatement>>>,
+    /// LRU cache mapping SQL string to prepared statement
+    cache: Mutex<LruCache<String, Arc<PreparedStatement>>>,
     /// Maximum cache size
     max_size: usize,
     /// Cache hit count
     hits: AtomicUsize,
     /// Cache miss count
     misses: AtomicUsize,
+    /// Cache eviction count
+    evictions: AtomicUsize,
 }
 
 impl PreparedStatementCache {
     /// Create a new cache with specified max size
     pub fn new(max_size: usize) -> Self {
+        let cap = NonZeroUsize::new(max_size).unwrap_or(NonZeroUsize::new(1).unwrap());
         Self {
-            cache: RwLock::new(HashMap::new()),
+            cache: Mutex::new(LruCache::new(cap)),
             max_size,
             hits: AtomicUsize::new(0),
             misses: AtomicUsize::new(0),
+            evictions: AtomicUsize::new(0),
         }
     }
 
@@ -232,9 +233,9 @@ impl PreparedStatementCache {
         Self::new(1000)
     }
 
-    /// Get a prepared statement from cache
+    /// Get a prepared statement from cache (updates LRU order)
     pub fn get(&self, sql: &str) -> Option<Arc<PreparedStatement>> {
-        let cache = self.cache.read().unwrap();
+        let mut cache = self.cache.lock().unwrap();
         if let Some(stmt) = cache.get(sql) {
             self.hits.fetch_add(1, Ordering::Relaxed);
             Some(Arc::clone(stmt))
@@ -244,58 +245,65 @@ impl PreparedStatementCache {
         }
     }
 
-    /// Insert a prepared statement into cache
-    pub fn insert(&self, sql: String, stmt: PreparedStatement) -> Arc<PreparedStatement> {
-        let stmt = Arc::new(stmt);
-        let mut cache = self.cache.write().unwrap();
-
-        // LRU eviction if at capacity
-        if cache.len() >= self.max_size && !cache.contains_key(&sql) {
-            // Simple LRU: remove first entry (HashMap iteration order is arbitrary but consistent)
-            if let Some(key) = cache.keys().next().cloned() {
-                cache.remove(&key);
-            }
-        }
-
-        cache.insert(sql, Arc::clone(&stmt));
-        stmt
-    }
-
     /// Get or insert a prepared statement
     ///
     /// If the SQL is in cache, returns the cached statement.
     /// Otherwise, parses the SQL, caches it, and returns the new statement.
+    /// Uses double-checked locking to avoid duplicate parsing.
     pub fn get_or_prepare(
         &self,
         sql: &str,
     ) -> Result<Arc<PreparedStatement>, PreparedStatementError> {
-        // Fast path: check cache with read lock
-        if let Some(stmt) = self.get(sql) {
-            return Ok(stmt);
+        // Acquire lock for both read and potential write to avoid race condition
+        let mut cache = self.cache.lock().unwrap();
+
+        // Check if already in cache
+        if let Some(stmt) = cache.get(sql) {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(Arc::clone(stmt));
         }
 
-        // Slow path: parse and insert
+        // Not in cache - parse the SQL
+        self.misses.fetch_add(1, Ordering::Relaxed);
         let statement = vibesql_parser::Parser::parse_sql(sql)
             .map_err(|e| PreparedStatementError::ParseError(e.to_string()))?;
 
-        let prepared = PreparedStatement::new(sql.to_string(), statement);
-        Ok(self.insert(sql.to_string(), prepared))
+        let prepared = Arc::new(PreparedStatement::new(sql.to_string(), statement));
+
+        // Check if we'll evict an entry
+        if cache.len() >= self.max_size {
+            self.evictions.fetch_add(1, Ordering::Relaxed);
+        }
+
+        // Insert into cache (LRU will automatically evict if at capacity)
+        cache.put(sql.to_string(), Arc::clone(&prepared));
+
+        Ok(prepared)
     }
 
     /// Clear all cached statements
     pub fn clear(&self) {
-        self.cache.write().unwrap().clear();
+        self.cache.lock().unwrap().clear();
     }
 
     /// Invalidate all statements referencing a table
     pub fn invalidate_table(&self, table: &str) {
-        let mut cache = self.cache.write().unwrap();
-        cache.retain(|_, stmt| !stmt.tables.iter().any(|t| t.eq_ignore_ascii_case(table)));
+        let mut cache = self.cache.lock().unwrap();
+        // Collect keys to remove (can't modify while iterating)
+        let keys_to_remove: Vec<String> = cache
+            .iter()
+            .filter(|(_, stmt)| stmt.tables.iter().any(|t| t.eq_ignore_ascii_case(table)))
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for key in keys_to_remove {
+            cache.pop(&key);
+        }
     }
 
     /// Get cache statistics
     pub fn stats(&self) -> PreparedStatementCacheStats {
-        let cache = self.cache.read().unwrap();
+        let cache = self.cache.lock().unwrap();
         let hits = self.hits.load(Ordering::Relaxed);
         let misses = self.misses.load(Ordering::Relaxed);
         let total = hits + misses;
@@ -304,6 +312,7 @@ impl PreparedStatementCache {
         PreparedStatementCacheStats {
             hits,
             misses,
+            evictions: self.evictions.load(Ordering::Relaxed),
             size: cache.len(),
             hit_rate,
         }
@@ -430,10 +439,36 @@ mod tests {
         cache.get_or_prepare("SELECT * FROM users").unwrap();
         cache.get_or_prepare("SELECT * FROM orders").unwrap();
         assert_eq!(cache.stats().size, 2);
+        assert_eq!(cache.stats().evictions, 0);
 
-        // This should evict one entry
+        // This should evict the LRU entry (users)
         cache.get_or_prepare("SELECT * FROM products").unwrap();
         assert_eq!(cache.stats().size, 2);
+        assert_eq!(cache.stats().evictions, 1);
+
+        // users should be evicted, orders and products should remain
+        assert!(cache.get("SELECT * FROM users").is_none());
+        assert!(cache.get("SELECT * FROM orders").is_some());
+        assert!(cache.get("SELECT * FROM products").is_some());
+    }
+
+    #[test]
+    fn test_cache_lru_access_updates_order() {
+        let cache = PreparedStatementCache::new(2);
+
+        cache.get_or_prepare("SELECT * FROM users").unwrap();
+        cache.get_or_prepare("SELECT * FROM orders").unwrap();
+
+        // Access users to make it recently used
+        cache.get("SELECT * FROM users");
+
+        // Now insert products - orders should be evicted (it's now LRU)
+        cache.get_or_prepare("SELECT * FROM products").unwrap();
+
+        // users should still be in cache (was accessed), orders should be evicted
+        assert!(cache.get("SELECT * FROM users").is_some());
+        assert!(cache.get("SELECT * FROM orders").is_none());
+        assert!(cache.get("SELECT * FROM products").is_some());
     }
 
     #[test]
