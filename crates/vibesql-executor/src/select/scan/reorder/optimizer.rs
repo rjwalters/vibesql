@@ -128,9 +128,20 @@ where
             table_local_predicates.keys().collect::<Vec<_>>());
     }
 
+    // Step 6.6: Build alias-to-table mapping for cardinality estimation
+    // This is critical for queries with table aliases (e.g., "nation n1, nation n2" in TPC-H Q7)
+    // where we need to resolve the alias to the actual table name for database lookups
+    let alias_to_table: HashMap<String, String> = table_refs
+        .iter()
+        .map(|t| {
+            let key = t.alias.clone().unwrap_or_else(|| t.name.clone()).to_lowercase();
+            (key, t.name.clone())
+        })
+        .collect();
+
     // Step 7: Use search to find optimal join order (with real statistics + selectivity)
     let optimizer_start = std::time::Instant::now();
-    let search = JoinOrderSearch::from_analyzer_with_predicates(&analyzer, database, &table_local_predicates);
+    let search = JoinOrderSearch::from_analyzer_with_predicates(&analyzer, database, &table_local_predicates, &alias_to_table);
     let optimal_order = search.find_optimal_order();
     let optimizer_time = optimizer_start.elapsed();
 
@@ -172,7 +183,12 @@ where
             ExecutorError::UnsupportedFeature(format!("Table not found in map: {}", table_name))
         })?;
 
-        // Execute this table
+        // Execute this table with table-local predicates for early filtering
+        // Build a combined predicate from table-local predicates for this specific table
+        let table_filter = table_local_predicates
+            .get(&table_name.to_lowercase())
+            .and_then(|preds| utils::combine_predicates(preds));
+
         let scan_start = std::time::Instant::now();
         let table_result = if table_ref.is_subquery {
             if let Some(subquery) = &table_ref.subquery {
@@ -183,7 +199,10 @@ where
                 ));
             }
         } else {
-            execute_table_scan(&table_ref.name, table_ref.alias.as_ref(), cte_results, database, where_clause, None, outer_row, outer_schema)?
+            // Use table-local predicates instead of full WHERE clause for early filtering
+            // This allows pushing down filters like `l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'`
+            // to the table scan, significantly reducing rows before joins
+            execute_table_scan(&table_ref.name, table_ref.alias.as_ref(), cte_results, database, table_filter.as_ref(), None, outer_row, outer_schema)?
         };
         let scan_time = scan_start.elapsed();
         if profile {

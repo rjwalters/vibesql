@@ -270,6 +270,29 @@ pub(super) fn build_column_to_table_map(
     result
 }
 
+/// Combine a list of predicates into a single AND expression
+///
+/// If the list is empty, returns None.
+/// If the list has one element, returns that element.
+/// Otherwise, combines all predicates with AND.
+pub(super) fn combine_predicates(predicates: &[vibesql_ast::Expression]) -> Option<vibesql_ast::Expression> {
+    match predicates.len() {
+        0 => None,
+        1 => Some(predicates[0].clone()),
+        _ => {
+            let mut result = predicates[0].clone();
+            for pred in &predicates[1..] {
+                result = vibesql_ast::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::And,
+                    left: Box::new(result),
+                    right: Box::new(pred.clone()),
+                };
+            }
+            Some(result)
+        }
+    }
+}
+
 /// Resolve an unqualified column to its table using schema-based lookup
 ///
 /// Returns the table name if the column is found in exactly one table,

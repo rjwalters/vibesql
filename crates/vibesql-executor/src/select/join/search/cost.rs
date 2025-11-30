@@ -16,25 +16,35 @@ impl JoinOrderContext {
     ///
     /// Uses real row counts from database tables and applies selectivity estimation
     /// for WHERE clause predicates that filter specific tables.
+    ///
+    /// # Parameters
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation")
     pub(super) fn extract_cardinalities_with_selectivity(
         analyzer: &crate::select::join::reorder::JoinOrderAnalyzer,
         database: &vibesql_storage::Database,
         table_local_predicates: &HashMap<String, Vec<vibesql_ast::Expression>>,
+        alias_to_table: &HashMap<String, String>,
     ) -> std::collections::HashMap<String, usize> {
         let mut cardinalities = std::collections::HashMap::new();
 
         for table_name in analyzer.tables() {
-            // Get actual table row count from database
+            // Resolve alias to actual table name for database lookup
+            let actual_table_name = alias_to_table
+                .get(&table_name.to_lowercase())
+                .cloned()
+                .unwrap_or_else(|| table_name.clone());
+
+            // Get actual table row count from database using the resolved table name
             let base_rows = database
-                .get_table(table_name.as_str())
+                .get_table(&actual_table_name)
                 .map(|t| t.row_count())
                 .unwrap_or(10000); // Fallback for CTEs/subqueries
 
             // Apply selectivity estimation for local predicates on this table
             let estimated_rows = if let Some(predicates) = table_local_predicates.get(&table_name.to_lowercase()) {
-                // Get table statistics for selectivity estimation
+                // Get table statistics for selectivity estimation (using actual table name)
                 let stats = database
-                    .get_table(table_name.as_str())
+                    .get_table(&actual_table_name)
                     .and_then(|t| t.get_statistics());
 
                 if let Some(stats) = stats {
@@ -88,9 +98,13 @@ impl JoinOrderContext {
     /// - ps_partkey = l_partkey (selectivity ~0.05)
     ///
     /// Combined: 0.01 × 0.05 = 0.0005 (much more selective!)
+    ///
+    /// # Parameters
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation")
     pub(super) fn compute_edge_selectivities(
         edges: &[super::super::reorder::JoinEdge],
         database: &vibesql_storage::Database,
+        alias_to_table: &HashMap<String, String>,
     ) -> HashMap<(String, String), f64> {
         // First, compute individual edge selectivities
         let mut individual_selectivities = Vec::new();
@@ -99,9 +113,19 @@ impl JoinOrderContext {
             let left_table = edge.left_table.to_lowercase();
             let right_table = edge.right_table.to_lowercase();
 
-            // Get NDV for left column
+            // Resolve aliases to actual table names for database lookups
+            let actual_left_table = alias_to_table
+                .get(&left_table)
+                .cloned()
+                .unwrap_or_else(|| edge.left_table.clone());
+            let actual_right_table = alias_to_table
+                .get(&right_table)
+                .cloned()
+                .unwrap_or_else(|| edge.right_table.clone());
+
+            // Get NDV for left column (using actual table name)
             let left_ndv = database
-                .get_table(&edge.left_table)
+                .get_table(&actual_left_table)
                 .and_then(|t| t.get_statistics())
                 .and_then(|stats| {
                     // Try exact match, uppercase, lowercase
@@ -112,9 +136,9 @@ impl JoinOrderContext {
                 .map(|cs| cs.n_distinct)
                 .unwrap_or(1000); // Fallback
 
-            // Get NDV for right column
+            // Get NDV for right column (using actual table name)
             let right_ndv = database
-                .get_table(&edge.right_table)
+                .get_table(&actual_right_table)
                 .and_then(|t| t.get_statistics())
                 .and_then(|stats| {
                     stats.columns.get(&edge.right_column)
