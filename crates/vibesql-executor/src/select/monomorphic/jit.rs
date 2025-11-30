@@ -31,6 +31,8 @@
 //! This is **experimental research code** for Phase 5 of the optimization roadmap.
 
 #[cfg(feature = "jit")]
+use cranelift::codegen::ir::BlockArg;
+#[cfg(feature = "jit")]
 use cranelift::prelude::*;
 #[cfg(feature = "jit")]
 use cranelift_jit::{JITBuilder, JITModule};
@@ -40,9 +42,14 @@ use cranelift_module::{FuncId, Linkage, Module};
 use crate::errors::ExecutorError;
 use vibesql_storage::Row;
 
-
+#[cfg(feature = "jit")]
+use crate::select::monomorphic::MonomorphicPlan;
+#[cfg(feature = "jit")]
+use std::mem;
 #[cfg(feature = "jit")]
 use std::time::Instant;
+#[cfg(feature = "jit")]
+use vibesql_types::{Date, SqlValue};
 
 // ============================================================================
 // C-Callable Helper Functions for JIT Code
@@ -294,7 +301,8 @@ impl TpchQ6JitPlan {
             builder.append_block_param(loop_header, types::F64); // sum
 
             // Jump to loop header with initial values
-            builder.ins().jump(loop_header, &[zero, sum]);
+            let init_args = [BlockArg::Value(zero), BlockArg::Value(sum)];
+            builder.ins().jump(loop_header, &init_args);
 
             // Loop header: check if i < rows_len
             builder.switch_to_block(loop_header);
@@ -340,7 +348,8 @@ impl TpchQ6JitPlan {
             let next_i = builder.ins().iadd(i, one);
 
             // Jump back to loop header
-            builder.ins().jump(loop_header, &[next_i, new_sum]);
+            let loop_args = [BlockArg::Value(next_i), BlockArg::Value(new_sum)];
+            builder.ins().jump(loop_header, &loop_args);
 
             // Loop exit: return sum
             builder.switch_to_block(loop_exit);
@@ -461,6 +470,16 @@ impl MonomorphicPlan for TpchQ6JitPlan {
         }])
     }
 
+    fn execute_stream(
+        &self,
+        rows: Box<dyn Iterator<Item = Row>>,
+    ) -> Result<Vec<Row>, ExecutorError> {
+        // Collect rows and delegate to execute for now
+        // TODO: Implement streaming execution for JIT
+        let rows_vec: Vec<Row> = rows.collect();
+        self.execute(&rows_vec)
+    }
+
     fn description(&self) -> &str {
         "TPC-H Q6 (Forecasting Revenue Change) - JIT Compiled"
     }
@@ -483,6 +502,13 @@ impl TpchQ6JitPlan {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "jit")]
+    use super::TpchQ6JitPlan;
+    #[cfg(feature = "jit")]
+    use crate::select::monomorphic::MonomorphicPlan;
+    #[cfg(feature = "jit")]
+    use vibesql_types::SqlValue;
+
     #[test]
     #[cfg(feature = "jit")]
     fn test_jit_plan_creation() {
