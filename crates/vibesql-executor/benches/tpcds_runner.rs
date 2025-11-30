@@ -159,6 +159,10 @@ fn main() {
                     // Explicitly drop rows to allow memory reclamation
                     drop(rows);
 
+                    // Hint memory release after each query to reduce memory pressure
+                    // This is especially important for CTE-heavy queries like Q2
+                    hint_memory_release();
+
                     // Record memory after query
                     let rss_mb = memory_tracker.record()
                         .map(|s| format!("{:.1}", s.rss_mb()))
@@ -182,6 +186,9 @@ fn main() {
                     } else {
                         err_msg.clone()
                     };
+
+                    // Hint memory release even after errors
+                    hint_memory_release();
 
                     let rss_mb = memory_tracker.record()
                         .map(|s| format!("{:.1}", s.rss_mb()))
