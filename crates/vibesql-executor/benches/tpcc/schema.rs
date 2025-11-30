@@ -413,6 +413,16 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         false,
         vec![col("o_w_id"), col("o_d_id"), col("o_c_id")],
     ).ok();
+
+    // Stock-Level transaction index: enables efficient range scans on order_line
+    // for the last 20 orders per TPC-C spec 2.8. This matches the idx_order_line_district
+    // index added to SQLite, DuckDB, and MySQL for benchmark consistency.
+    db.create_index(
+        "idx_order_line_district".to_string(),
+        "order_line".to_string(),
+        false,
+        vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id")],
+    ).ok();
 }
 
 fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCCData) {
@@ -760,6 +770,7 @@ fn create_tpcc_indexes_sqlite(conn: &SqliteConn) {
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
         CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
     .unwrap();
@@ -1042,6 +1053,7 @@ fn create_tpcc_indexes_duckdb(conn: &DuckDBConn) {
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
         CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
     .unwrap();
@@ -1381,6 +1393,9 @@ fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
     ).unwrap();
     conn.query_drop(
         "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id)"
+    ).unwrap();
+    conn.query_drop(
+        "CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id)"
     ).unwrap();
 }
 
