@@ -55,6 +55,7 @@ rust_decimal = "1.33"
 paste = "1.0"
 env_logger = "0.11"
 libc = "0.2"
+sysinfo = "0.33"
 
 [features]
 default = ["parallel", "spatial"]
@@ -68,6 +69,8 @@ spatial = ["geo", "wkt", "rstar"]
 benchmark-comparison = ["rusqlite", "duckdb", "mysql"]
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
+# Enable detailed profiling output for TPC-C transactions
+profile-tpcc = []
 # Enable native columnar execution (Phase 2b - zero row materialization)
 # Now enabled by default for eligible queries. Set VIBESQL_DISABLE_COLUMNAR=1 to opt-out.
 native-columnar = []
@@ -179,6 +182,10 @@ harness = false
 
 [[bench]]
 name = "simd_filter_benchmark"
+harness = false
+
+[[bench]]
+name = "sysbench_benchmark"
 harness = false
 
 [[bench]]

@@ -312,9 +312,11 @@ impl IndexManager {
                             }
                             IndexData::DiskBacked { btree, .. } => {
                                 // Safely acquire lock and update B+tree: delete old key, insert new key
+                                // Use delete_specific to only remove the specific row_index, not all rows
+                                // with this key (important for non-unique indexes with duplicate keys)
                                 match acquire_btree_lock(btree) {
                                     Ok(mut guard) => {
-                                        let _ = guard.delete(&old_key_values);
+                                        let _ = guard.delete_specific(&old_key_values, row_index);
                                         if let Err(e) = guard.insert(new_key_values, row_index) {
                                             log::warn!("Failed to update disk-backed index '{}': {:?}", index_name, e);
                                         }
@@ -371,9 +373,11 @@ impl IndexManager {
                         }
                         IndexData::DiskBacked { btree, .. } => {
                             // Safely acquire lock and delete from B+tree
+                            // Use delete_specific to only remove the specific row_index, not all rows
+                            // with this key (important for non-unique indexes with duplicate keys)
                             match acquire_btree_lock(btree) {
                                 Ok(mut guard) => {
-                                    let _ = guard.delete(&key_values);
+                                    let _ = guard.delete_specific(&key_values, row_index);
                                 }
                                 Err(e) => {
                                     log::warn!("BTreeIndex lock acquisition failed in update_indexes_for_delete: {}", e);

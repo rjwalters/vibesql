@@ -19,4 +19,4 @@ pub use data::SysbenchData;
 pub use schema::load_vibesql;
 
 #[cfg(feature = "benchmark-comparison")]
-pub use schema::{load_duckdb, load_sqlite};
+pub use schema::{load_duckdb, load_mysql, load_sqlite};
