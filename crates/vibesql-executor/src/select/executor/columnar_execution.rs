@@ -443,6 +443,13 @@ impl SelectExecutor<'_> {
 
         // Phase 3: Handle expression aggregates by pre-computing them as new columns
         // This enables TPC-H Q1 style queries with SUM(col * expr) to use SIMD GROUP BY
+        //
+        // Optimization: Common Sub-Expression Elimination (CSE)
+        // For Q1-style queries with expressions like:
+        //   SUM(l_extendedprice * (1 - l_discount))         -- E1
+        //   SUM(l_extendedprice * (1 - l_discount) * (1 + l_tax))  -- E2 = E1 * (1 + l_tax)
+        // We detect that E1 is a sub-expression of E2 and compute E1 first,
+        // then use the cached column to compute E2, avoiding redundant arithmetic.
         let has_expression_aggs = aggregates.iter().any(|spec| {
             matches!(&spec.source, columnar::AggregateSource::Expression(_))
         });
@@ -455,7 +462,71 @@ impl SelectExecutor<'_> {
             let mut expanded = filtered_batch.clone();
             let mut expanded_agg_cols = Vec::with_capacity(aggregates.len());
 
-            for spec in aggregates {
+            // Expression cache: maps expression hash to column index
+            // This allows us to reuse previously computed expression columns
+            let mut expr_cache: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+
+            // First pass: collect all expressions and sort by complexity (simpler first)
+            // This ensures sub-expressions are evaluated before expressions that use them
+            let mut expr_indices: Vec<(usize, &columnar::AggregateSpec)> = aggregates
+                .iter()
+                .enumerate()
+                .filter(|(_, spec)| matches!(&spec.source, columnar::AggregateSource::Expression(_)))
+                .collect();
+
+            // Sort by expression depth (simpler expressions first for CSE)
+            expr_indices.sort_by_key(|(_, spec)| {
+                if let columnar::AggregateSource::Expression(expr) = &spec.source {
+                    expression_depth(expr)
+                } else {
+                    0
+                }
+            });
+
+            // Build a mapping of original expression index -> computed column index
+            let mut computed_expr_cols: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+
+            // Second pass: evaluate expressions in order of complexity
+            for (orig_idx, spec) in &expr_indices {
+                if let columnar::AggregateSource::Expression(expr) = &spec.source {
+                    let expr_hash = hash_expression(expr);
+
+                    if let Some(&cached_col_idx) = expr_cache.get(&expr_hash) {
+                        // Exact expression match - reuse cached column
+                        log::debug!("GROUP BY CSE: reusing cached column {} for expression", cached_col_idx);
+                        computed_expr_cols.insert(*orig_idx, cached_col_idx);
+                    } else {
+                        // Check if this expression can be computed using a cached sub-expression
+                        // For TPC-H Q1: E2 = E1 * (1 + l_tax) where E1 is already computed
+                        let expr_col = if let Some((sub_expr_col, remaining_expr)) =
+                            find_cached_subexpression(expr, &expr_cache, &expanded)
+                        {
+                            log::debug!(
+                                "GROUP BY CSE: using cached sub-expression from column {} for compound expression",
+                                sub_expr_col
+                            );
+                            // Evaluate only the remaining part using the cached column
+                            columnar::evaluate_expression_with_cached_column(
+                                &expanded,
+                                &remaining_expr,
+                                sub_expr_col,
+                                schema,
+                            )?
+                        } else {
+                            // No sub-expression found - evaluate full expression
+                            columnar::evaluate_expression_to_column(&expanded, expr, schema)?
+                        };
+
+                        expanded.add_column(expr_col)?;
+                        let col_idx = expanded.column_count() - 1;
+                        expr_cache.insert(expr_hash, col_idx);
+                        computed_expr_cols.insert(*orig_idx, col_idx);
+                    }
+                }
+            }
+
+            // Third pass: build final aggregate column indices in original order
+            for (orig_idx, spec) in aggregates.iter().enumerate() {
                 match &spec.source {
                     columnar::AggregateSource::Column(idx) => {
                         expanded_agg_cols.push((*idx, spec.op));
@@ -463,21 +534,22 @@ impl SelectExecutor<'_> {
                     columnar::AggregateSource::CountStar => {
                         expanded_agg_cols.push((0, columnar::AggregateOp::Count));
                     }
-                    columnar::AggregateSource::Expression(expr) => {
-                        // Evaluate expression using SIMD and add as new column
-                        let expr_col = columnar::evaluate_expression_to_column(&expanded, expr, schema)?;
-                        expanded.add_column(expr_col)?;
-                        // The new column is at the end of the batch
-                        expanded_agg_cols.push((expanded.column_count() - 1, spec.op));
+                    columnar::AggregateSource::Expression(_) => {
+                        let col_idx = computed_expr_cols.get(&orig_idx)
+                            .copied()
+                            .expect("Expression should have been computed in second pass");
+                        expanded_agg_cols.push((col_idx, spec.op));
                     }
                 }
             }
 
             log::debug!(
-                "GROUP BY: expanded batch with {} expression columns ({} -> {} columns)",
+                "GROUP BY: expanded batch with {} expression columns ({} -> {} columns), CSE cache hits: {}",
                 aggregates.iter().filter(|s| matches!(&s.source, columnar::AggregateSource::Expression(_))).count(),
                 filtered_batch.column_count(),
-                expanded.column_count()
+                expanded.column_count(),
+                aggregates.iter().filter(|s| matches!(&s.source, columnar::AggregateSource::Expression(_))).count()
+                    - (expanded.column_count() - filtered_batch.column_count())
             );
 
             (expanded, expanded_agg_cols)
@@ -1089,4 +1161,125 @@ fn extract_single_table_name(from_clause: &FromClause) -> Option<String> {
         FromClause::Join { .. } => None, // JOINs not supported in native columnar path
         FromClause::Subquery { .. } => None, // Subqueries not supported
     }
+}
+
+// =============================================================================
+// Common Sub-Expression Elimination (CSE) Helper Functions
+// =============================================================================
+
+/// Compute the depth of an expression tree (used for sorting by complexity)
+fn expression_depth(expr: &Expression) -> usize {
+    match expr {
+        Expression::ColumnRef { .. } | Expression::Literal(_) => 1,
+        Expression::BinaryOp { left, right, .. } => {
+            1 + expression_depth(left).max(expression_depth(right))
+        }
+        Expression::UnaryOp { expr: inner, .. } => 1 + expression_depth(inner),
+        _ => 1,
+    }
+}
+
+/// Hash an expression for cache lookup
+/// Uses a simple string-based hash that captures the expression structure
+fn hash_expression(expr: &Expression) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
+
+    let mut hasher = DefaultHasher::new();
+    hash_expression_recursive(expr, &mut hasher);
+    hasher.finish()
+}
+
+fn hash_expression_recursive<H: std::hash::Hasher>(expr: &Expression, hasher: &mut H) {
+    use std::hash::Hash;
+    match expr {
+        Expression::ColumnRef { table, column } => {
+            "col".hash(hasher);
+            table.hash(hasher);
+            column.hash(hasher);
+        }
+        Expression::Literal(val) => {
+            "lit".hash(hasher);
+            format!("{:?}", val).hash(hasher);
+        }
+        Expression::BinaryOp { left, op, right } => {
+            "binop".hash(hasher);
+            format!("{:?}", op).hash(hasher);
+            hash_expression_recursive(left, hasher);
+            hash_expression_recursive(right, hasher);
+        }
+        Expression::UnaryOp { op, expr: inner } => {
+            "unop".hash(hasher);
+            format!("{:?}", op).hash(hasher);
+            hash_expression_recursive(inner, hasher);
+        }
+        _ => {
+            // For unsupported expressions, use a unique hash
+            format!("{:?}", expr).hash(hasher);
+        }
+    }
+}
+
+/// Find a cached sub-expression that can be used to compute the given expression
+///
+/// For TPC-H Q1 style queries:
+/// - E1 = l_extendedprice * (1 - l_discount)
+/// - E2 = l_extendedprice * (1 - l_discount) * (1 + l_tax)
+///
+/// If E1 is already computed (in expr_cache), this function detects that E2 = E1 * (1 + l_tax)
+/// and returns (cached_column_for_E1, remaining_expression = (1 + l_tax))
+fn find_cached_subexpression(
+    expr: &Expression,
+    expr_cache: &std::collections::HashMap<u64, usize>,
+    _batch: &columnar::ColumnarBatch,
+) -> Option<(usize, Expression)> {
+    // Only handle binary multiply operations for now (most common pattern)
+    if let Expression::BinaryOp {
+        left,
+        op: BinaryOperator::Multiply,
+        right,
+    } = expr
+    {
+        // Check if left operand is a cached expression
+        let left_hash = hash_expression(left);
+        if let Some(&cached_col) = expr_cache.get(&left_hash) {
+            // E = cached_expr * right → use cached column
+            return Some((cached_col, *right.clone()));
+        }
+
+        // Check if right operand is a cached expression
+        let right_hash = hash_expression(right);
+        if let Some(&cached_col) = expr_cache.get(&right_hash) {
+            // E = left * cached_expr → use cached column
+            return Some((cached_col, *left.clone()));
+        }
+
+        // Recursively check if left or right contains a cached sub-expression
+        // This handles nested cases like: (A * B) * C where A * B is cached
+        if let Some((cached_col, remaining)) = find_cached_subexpression(left, expr_cache, _batch) {
+            // Build: remaining * right
+            return Some((
+                cached_col,
+                Expression::BinaryOp {
+                    left: Box::new(remaining),
+                    op: BinaryOperator::Multiply,
+                    right: right.clone(),
+                },
+            ));
+        }
+
+        if let Some((cached_col, remaining)) = find_cached_subexpression(right, expr_cache, _batch) {
+            // Build: left * remaining
+            return Some((
+                cached_col,
+                Expression::BinaryOp {
+                    left: left.clone(),
+                    op: BinaryOperator::Multiply,
+                    right: Box::new(remaining),
+                },
+            ));
+        }
+    }
+
+    None
 }
