@@ -2,7 +2,6 @@
 ///
 /// These tests verify that set operations evaluate left-to-right, not right-to-left.
 /// For example: (A EXCEPT B) EXCEPT C, not A EXCEPT (B EXCEPT C)
-
 #[cfg(test)]
 mod tests {
     use crate::SelectExecutor;

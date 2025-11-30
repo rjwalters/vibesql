@@ -163,6 +163,7 @@ pub fn parse_examples() -> Vec<(String, String, String)> {
 }
 
 /// Parse a single JSON example file
+#[allow(clippy::type_complexity)]
 fn parse_json_examples(
     content: &str,
 ) -> Result<Vec<(String, String, String)>, Box<dyn std::error::Error>> {

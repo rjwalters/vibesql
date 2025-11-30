@@ -116,10 +116,10 @@ impl QueryArena {
     ///
     /// let arena = QueryArena::new();
     /// let x = arena.alloc(42i64);
-    /// let y = arena.alloc(3.14f64);
+    /// let y = arena.alloc(3.5f64);
     ///
     /// assert_eq!(*x, 42);
-    /// assert_eq!(*y, 3.14);
+    /// assert_eq!(*y, 3.5);
     /// ```
     #[inline(always)]
     pub fn alloc<T>(&self, value: T) -> &T {
@@ -332,7 +332,7 @@ impl QueryArena {
     /// let arena = QueryArena::new();
     ///
     /// arena.alloc(42i64); // 8 bytes
-    /// arena.alloc(3.14f64); // 8 bytes
+    /// arena.alloc(3.5f64); // 8 bytes
     ///
     /// assert_eq!(arena.used_bytes(), 16);
     /// ```
@@ -391,10 +391,10 @@ mod tests {
         let arena = QueryArena::with_capacity(1024);
 
         let x = arena.alloc(42i64);
-        let y = arena.alloc(3.14f64);
+        let y = arena.alloc(3.5f64);
 
         assert_eq!(*x, 42);
-        assert_eq!(*y, 3.14);
+        assert_eq!(*y, 3.5);
     }
 
     #[test]
@@ -404,8 +404,8 @@ mod tests {
         let slice = arena.alloc_slice::<i32>(100);
 
         // Initialize the slice with MaybeUninit
-        for i in 0..100 {
-            slice[i] = MaybeUninit::new(i as i32);
+        for (i, elem) in slice.iter_mut().enumerate() {
+            *elem = MaybeUninit::new(i as i32);
         }
 
         // SAFETY: All elements have been initialized above
@@ -499,7 +499,7 @@ mod tests {
         arena.alloc(42i64); // 8 bytes
         assert_eq!(arena.used_bytes(), 8);
 
-        arena.alloc(3.14f64); // 8 bytes
+        arena.alloc(3.5f64); // 8 bytes
         assert_eq!(arena.used_bytes(), 16);
     }
 

@@ -296,7 +296,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         let hash = hash_password_argon2("secret123").unwrap();
         writeln!(file, "# Comment line").unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
         writeln!(file, "postgres:{}", hash).unwrap();
         file.flush().unwrap();
 

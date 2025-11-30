@@ -5,7 +5,6 @@ use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
-use vibesql_ast;
 
 /// Helper function to parse SELECT statements
 fn parse_select(sql: &str) -> vibesql_ast::SelectStmt {
@@ -59,7 +58,7 @@ fn setup_test_db() -> Database {
             SqlValue::Integer(i),
             SqlValue::Integer(custkey),
             SqlValue::Varchar(date.to_string()),
-            SqlValue::Integer((i % 3) as i64),
+            SqlValue::Integer(i % 3),
         ]);
         db.insert_row("ORDERS", row).unwrap();
     }

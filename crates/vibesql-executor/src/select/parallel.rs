@@ -536,7 +536,7 @@ mod tests {
                 values: vec![
                     vibesql_types::SqlValue::Integer(2),
                     vibesql_types::SqlValue::Varchar("test2".to_string()),
-                    vibesql_types::SqlValue::Double(3.14),
+                    vibesql_types::SqlValue::Double(3.5),
                 ],
             },
         ];
@@ -547,6 +547,6 @@ mod tests {
         assert_eq!(filtered[0].values.len(), 3);
         assert_eq!(filtered[1].values.len(), 3);
         assert!(matches!(filtered[0].values[2], vibesql_types::SqlValue::Null));
-        assert!(matches!(filtered[1].values[2], vibesql_types::SqlValue::Double(x) if x == 3.14));
+        assert!(matches!(filtered[1].values[2], vibesql_types::SqlValue::Double(x) if x == 3.5));
     }
 }

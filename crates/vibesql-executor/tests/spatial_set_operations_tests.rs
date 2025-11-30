@@ -166,7 +166,7 @@ fn test_st_symdifference_polygons() {
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Varchar(s) => {
-            assert!(s.len() > 0, "Expected result");
+            assert!(!s.is_empty(), "Expected result");
         }
         _ => panic!("Expected Varchar result"),
     }

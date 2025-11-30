@@ -544,7 +544,7 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCCData, d_id: i32, w_id: i3
                 SqlValue::Integer(ol.ol_number as i64),
                 SqlValue::Integer(ol.ol_i_id as i64),
                 SqlValue::Integer(ol.ol_supply_w_id as i64),
-                ol.ol_delivery_d.map(|v| SqlValue::Varchar(v)).unwrap_or(SqlValue::Null),
+                ol.ol_delivery_d.map(SqlValue::Varchar).unwrap_or(SqlValue::Null),
                 SqlValue::Integer(ol.ol_quantity as i64),
                 SqlValue::Numeric(ol.ol_amount),
                 SqlValue::Varchar(ol.ol_dist_info),

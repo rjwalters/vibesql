@@ -18,7 +18,7 @@ fn test_extract_range_predicate_greater_than() {
     let range = extract_range_predicate(&expr, "col0").unwrap();
     assert_eq!(range.start, Some(SqlValue::Integer(60)));
     assert_eq!(range.end, None);
-    assert_eq!(range.inclusive_start, false);
+    assert!(!range.inclusive_start);
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_extract_range_predicate_less_than_or_equal() {
     let range = extract_range_predicate(&expr, "col0").unwrap();
     assert_eq!(range.start, None);
     assert_eq!(range.end, Some(SqlValue::Integer(43)));
-    assert_eq!(range.inclusive_end, true);
+    assert!(range.inclusive_end);
 }
 
 #[test]
@@ -54,8 +54,8 @@ fn test_extract_range_predicate_between() {
     let range = extract_range_predicate(&expr, "col0").unwrap();
     assert_eq!(range.start, Some(SqlValue::Integer(10)));
     assert_eq!(range.end, Some(SqlValue::Integer(20)));
-    assert_eq!(range.inclusive_start, true);
-    assert_eq!(range.inclusive_end, true);
+    assert!(range.inclusive_start);
+    assert!(range.inclusive_end);
 }
 
 #[test]
@@ -84,8 +84,8 @@ fn test_extract_range_predicate_combined_and() {
     let range = extract_range_predicate(&expr, "col0").unwrap();
     assert_eq!(range.start, Some(SqlValue::Integer(10)));
     assert_eq!(range.end, Some(SqlValue::Integer(20)));
-    assert_eq!(range.inclusive_start, false);
-    assert_eq!(range.inclusive_end, false);
+    assert!(!range.inclusive_start);
+    assert!(!range.inclusive_end);
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_extract_range_predicate_flipped_comparison() {
     let range = extract_range_predicate(&expr, "col0").unwrap();
     assert_eq!(range.start, Some(SqlValue::Integer(60)));
     assert_eq!(range.end, None);
-    assert_eq!(range.inclusive_start, false);
+    assert!(!range.inclusive_start);
 }
 
 #[test]

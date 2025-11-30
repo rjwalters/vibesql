@@ -1,3 +1,4 @@
+#![allow(clippy::approx_constant)]
 //! Tests for type conversion functions
 //!
 //! Tests for SQL:1999 Section 6.10-6.12 type conversion functions:

@@ -224,7 +224,7 @@ mod tests {
 
         let combined_schema = CombinedSchema::from_table(table_name.to_string(), schema);
 
-        let rows = rows.into_iter().map(|values| Row::new(values)).collect();
+        let rows = rows.into_iter().map(Row::new).collect();
 
         FromResult::from_rows(combined_schema, rows)
     }

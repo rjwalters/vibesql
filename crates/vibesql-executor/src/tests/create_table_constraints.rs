@@ -42,7 +42,7 @@ fn test_create_table_with_column_primary_key() {
 
     let schema = db.catalog.get_table("users").unwrap();
     assert_eq!(schema.primary_key, Some(vec!["id".to_string()]));
-    assert_eq!(schema.get_column("id").unwrap().nullable, false); // PKs are implicitly NOT NULL
+    assert!(!schema.get_column("id").unwrap().nullable); // PKs are implicitly NOT NULL
 }
 
 #[test]
@@ -93,8 +93,8 @@ fn test_create_table_with_table_primary_key() {
 
     let schema = db.catalog.get_table("users").unwrap();
     assert_eq!(schema.primary_key, Some(vec!["id".to_string(), "tenant_id".to_string()]));
-    assert_eq!(schema.get_column("id").unwrap().nullable, false);
-    assert_eq!(schema.get_column("tenant_id").unwrap().nullable, false);
+    assert!(!schema.get_column("id").unwrap().nullable);
+    assert!(!schema.get_column("tenant_id").unwrap().nullable);
 }
 
 #[test]

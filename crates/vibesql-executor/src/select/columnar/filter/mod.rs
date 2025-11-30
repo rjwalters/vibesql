@@ -301,7 +301,7 @@ mod tests {
                 let year = 1994 + (i / 365);
                 let day = (i % 28) + 1;
                 Row::new(vec![SqlValue::Date(Date {
-                    year: year as i32,
+                    year,
                     month: 6,
                     day: day as u8,
                 })])
@@ -433,7 +433,7 @@ mod tests {
             }),
         ]);
 
-        let rows = vec![
+        let rows = [
             // Row 0: col0=5, col1=15, col2=5 -> (5<10 OR 15>20) AND 5=5 -> TRUE AND TRUE -> TRUE
             Row::new(vec![
                 SqlValue::Integer(5),
@@ -548,13 +548,11 @@ mod tests {
     fn test_filter_bitmap() {
         use vibesql_storage::Row;
 
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(5)]),
+        let rows = [Row::new(vec![SqlValue::Integer(5)]),
             Row::new(vec![SqlValue::Integer(10)]),
             Row::new(vec![SqlValue::Integer(15)]),
             Row::new(vec![SqlValue::Integer(20)]),
-            Row::new(vec![SqlValue::Integer(25)]),
-        ];
+            Row::new(vec![SqlValue::Integer(25)])];
 
         // Test with no predicates - all rows should pass
         let bitmap = create_filter_bitmap(rows.len(), &[], |row_idx, col_idx| {

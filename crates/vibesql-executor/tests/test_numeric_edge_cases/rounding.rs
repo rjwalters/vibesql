@@ -1,3 +1,4 @@
+#![allow(clippy::approx_constant)]
 //! Rounding function edge cases (ROUND, FLOOR, CEIL)
 
 use vibesql_types::SqlValue;

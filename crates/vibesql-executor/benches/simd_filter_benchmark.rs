@@ -96,7 +96,7 @@ fn bench_less_than_filter(c: &mut Criterion) {
                     let _result = black_box(
                         vibesql_executor::select::columnar::simd_filter::simd_filter_batch(
                             &batch,
-                            &[predicate.clone()],
+                            std::slice::from_ref(&predicate),
                         ),
                     );
                 });
@@ -141,7 +141,7 @@ fn bench_not_equal_filter(c: &mut Criterion) {
                     let _result = black_box(
                         vibesql_executor::select::columnar::simd_filter::simd_filter_batch(
                             &batch,
-                            &[predicate.clone()],
+                            std::slice::from_ref(&predicate),
                         ),
                     );
                 });
@@ -187,7 +187,7 @@ fn bench_between_filter(c: &mut Criterion) {
                     let _result = black_box(
                         vibesql_executor::select::columnar::simd_filter::simd_filter_batch(
                             &batch,
-                            &[predicate.clone()],
+                            std::slice::from_ref(&predicate),
                         ),
                     );
                 });

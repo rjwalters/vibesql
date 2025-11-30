@@ -92,7 +92,7 @@ mod tests {
         execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
 
         // Query the session variable
-        let value = select_single_value(&mut db, "SELECT @@sql_mode");
+        let value = select_single_value(&db, "SELECT @@sql_mode");
 
         // The session variable should reflect the mode change
         match value {
@@ -110,7 +110,7 @@ mod tests {
 
         // MySQL mode: 5 / 2 = 2.5 (decimal division)
         execute_set_variable(&mut db, "SET sql_mode = 'mysql'").unwrap();
-        let mysql_result = select_single_value(&mut db, "SELECT 5 / 2");
+        let mysql_result = select_single_value(&db, "SELECT 5 / 2");
 
         // Should be a decimal value close to 2.5
         match mysql_result {
@@ -131,7 +131,7 @@ mod tests {
 
         // SQLite mode: 5 / 2 = 2 (integer division)
         execute_set_variable(&mut db, "SET sql_mode = 'sqlite'").unwrap();
-        let sqlite_result = select_single_value(&mut db, "SELECT 5 / 2");
+        let sqlite_result = select_single_value(&db, "SELECT 5 / 2");
 
         // Should be an integer value of 2
         match sqlite_result {

@@ -47,7 +47,7 @@ mod memory_tracking_tests {
         executor.track_memory_allocation(3 * 1024 * 1024 * 1024).unwrap();
 
         // Deallocate 1 GB
-        executor.track_memory_deallocation(1 * 1024 * 1024 * 1024);
+        executor.track_memory_deallocation(1024 * 1024 * 1024);
 
         // Allocate another 3 GB (total would be 5 GB, which is below limit)
         let result = executor.track_memory_allocation(3 * 1024 * 1024 * 1024);

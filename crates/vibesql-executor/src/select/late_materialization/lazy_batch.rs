@@ -43,7 +43,7 @@ impl SourceData {
                 rows.get(row_idx)
                     .and_then(|row| row.get(col_idx))
                     .cloned()
-                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index: col_idx })
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_idx })
             }
             SourceData::Columnar(batch) => batch.get_value(row_idx, col_idx),
         }
@@ -55,7 +55,7 @@ impl SourceData {
             SourceData::Rows(rows) => {
                 rows.get(row_idx)
                     .cloned()
-                    .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index: row_idx })
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: row_idx })
             }
             SourceData::Columnar(batch) => {
                 let mut values = Vec::with_capacity(batch.column_count());
@@ -285,7 +285,7 @@ impl LazyMaterializedBatch {
         column_idx: usize,
     ) -> Result<SqlValue, ExecutorError> {
         let row_idx = self.selection.get(selection_idx)
-            .ok_or_else(|| ExecutorError::ColumnIndexOutOfBounds { index: selection_idx })?;
+            .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: selection_idx })?;
 
         self.source.get_value(row_idx as usize, column_idx)
     }

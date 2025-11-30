@@ -75,7 +75,7 @@ fn main() {
         if slow_queries.contains(name) {
             skipped_count += 1;
             results.push((name.to_string(), None, 0, "SKIPPED (slow)".to_string()));
-            println!("{:<8} {:>12} {:>10} {}", name, "-", "-", "SKIPPED");
+            println!("{:<8} {:>12} {:>10} SKIPPED", name, "-", "-");
             continue;
         }
 
@@ -86,7 +86,7 @@ fn main() {
             Ok(stmt) => stmt,
             Err(e) => {
                 let err_msg = format!("Parse error: {:?}", e);
-                println!("{:<8} {:>12} {:>10} {}", name, "-", "-", "PARSE_ERR");
+                println!("{:<8} {:>12} {:>10} PARSE_ERR", name, "-", "-");
                 error_count += 1;
                 results.push((name.to_string(), None, 0, err_msg));
                 continue;
@@ -105,11 +105,10 @@ fn main() {
                     let row_count = rows.len();
                     results.push((name.to_string(), Some(elapsed), row_count, "OK".to_string()));
                     println!(
-                        "{:<8} {:>12.2} {:>10} {}",
+                        "{:<8} {:>12.2} {:>10} OK",
                         name,
                         elapsed.as_secs_f64() * 1000.0,
-                        row_count,
-                        "OK"
+                        row_count
                     );
                 }
                 Err(e) => {
@@ -128,18 +127,18 @@ fn main() {
                         format!("Error: {}", err_msg),
                     ));
                     println!(
-                        "{:<8} {:>12.2} {:>10} {}",
+                        "{:<8} {:>12.2} {:>10} ERROR: {}",
                         name,
                         elapsed.as_secs_f64() * 1000.0,
                         "-",
-                        format!("ERROR: {}", short_err)
+                        short_err
                     );
                 }
             }
         } else {
             error_count += 1;
             results.push((name.to_string(), None, 0, "Not a SELECT".to_string()));
-            println!("{:<8} {:>12} {:>10} {}", name, "-", "-", "NOT_SELECT");
+            println!("{:<8} {:>12} {:>10} NOT_SELECT", name, "-", "-");
         }
     }
 

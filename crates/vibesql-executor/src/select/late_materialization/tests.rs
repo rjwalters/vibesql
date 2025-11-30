@@ -58,7 +58,7 @@ fn test_filter_with_late_materialization() {
         .map(|i| {
             let qty = (i % 50) as f64 + 1.0;
             let discount = (i % 11) as f64 / 100.0;
-            qty > 25.0 && discount >= 0.05 && discount <= 0.07
+            qty > 25.0 && (0.05..=0.07).contains(&discount)
         })
         .collect();
 

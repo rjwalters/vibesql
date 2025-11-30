@@ -357,7 +357,7 @@ fn test_table_local_predicate_with_multiple_conditions() {
     let result = executor.execute(&stmt).unwrap();
 
     // Verify all results satisfy both conditions
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
     for row in &result {
         let price = match &row.values[1] {
             vibesql_types::SqlValue::Integer(p) => *p,

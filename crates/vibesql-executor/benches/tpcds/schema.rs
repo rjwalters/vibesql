@@ -3671,11 +3671,11 @@ fn load_time_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             "second"
         };
         let sub_shift = if hour % 8 < 4 { "night" } else { "day" };
-        let meal_time = if hour >= 7 && hour < 9 {
+        let meal_time = if (7..9).contains(&hour) {
             "breakfast"
-        } else if hour >= 12 && hour < 14 {
+        } else if (12..14).contains(&hour) {
             "lunch"
-        } else if hour >= 18 && hour < 20 {
+        } else if (18..20).contains(&hour) {
             "dinner"
         } else {
             ""
@@ -4204,7 +4204,7 @@ fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(cp_catalog_page_id),
             SqlValue::Integer(((i - 1) / 1000 + 1) as i64),  // cp_start_date_sk
             SqlValue::Integer(((i - 1) / 1000 + 365) as i64),  // cp_end_date_sk
-            SqlValue::Varchar(format!("{}", data.random_varchar(80))),  // cp_department
+            SqlValue::Varchar(data.random_varchar(80).to_string()),  // cp_department
             SqlValue::Integer(catalog_number as i64),
             SqlValue::Integer(page_number as i64),
             SqlValue::Varchar(format!("Catalog page {}", i)),  // cp_description
@@ -4729,9 +4729,7 @@ fn load_income_band_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     let count = data.income_band_count.min(INCOME_BANDS.len());
     let mut rows = Vec::with_capacity(count);
 
-    for i in 0..count {
-        let (lower, upper) = INCOME_BANDS[i];
-
+    for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
         let row = Row::new(vec![
             SqlValue::Integer((i + 1) as i64),
             SqlValue::Integer(lower as i64),

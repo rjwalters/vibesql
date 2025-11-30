@@ -142,7 +142,7 @@ fn test_example_databases() {
 
     // Verify tables were created
     let tables = db.list_tables();
-    assert!(tables.len() > 0, "No tables created by load_employees");
+    assert!(!tables.is_empty(), "No tables created by load_employees");
 
     // Test loading northwind example
     let mut db2 = Database::new();
@@ -151,5 +151,5 @@ fn test_example_databases() {
 
     // Verify tables were created
     let tables = db2.list_tables();
-    assert!(tables.len() > 0, "No tables created by load_northwind");
+    assert!(!tables.is_empty(), "No tables created by load_northwind");
 }

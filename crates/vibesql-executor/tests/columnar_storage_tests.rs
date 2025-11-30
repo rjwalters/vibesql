@@ -113,7 +113,7 @@ fn test_columnar_table_insert_and_scan() {
         "metrics",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Double(3.14),
+            vibesql_types::SqlValue::Double(3.5),
         ]),
     )
     .unwrap();
@@ -122,7 +122,7 @@ fn test_columnar_table_insert_and_scan() {
         "metrics",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Double(2.71),
+            vibesql_types::SqlValue::Double(2.5),
         ]),
     )
     .unwrap();
@@ -156,7 +156,7 @@ fn test_columnar_table_scan_columnar_returns_native_data() {
             "native_scan",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Bigint(i as i64 * 100),
+                vibesql_types::SqlValue::Bigint(i * 100),
             ]),
         )
         .unwrap();

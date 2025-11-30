@@ -111,9 +111,9 @@ mod tests {
 
     #[test]
     fn test_boolean_comparison_with_float() {
-        // FALSE (0.0) < 3.14
+        // FALSE (0.0) < 3.5
         assert_eq!(
-            less_than(&SqlValue::Boolean(false), &SqlValue::Float(3.14)).unwrap(),
+            less_than(&SqlValue::Boolean(false), &SqlValue::Float(3.5)).unwrap(),
             SqlValue::Boolean(true)
         );
         // TRUE (1.0) > 0.5

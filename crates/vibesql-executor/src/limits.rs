@@ -96,6 +96,7 @@ pub const MEMORY_WARNING_BYTES: usize = 512 * 1024 * 1024; // 512 MB for WASM
 pub const MEMORY_WARNING_BYTES: usize = 5 * 1024 * 1024 * 1024; // 5 GB for native
 
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants)]
 mod tests {
     use super::*;
 

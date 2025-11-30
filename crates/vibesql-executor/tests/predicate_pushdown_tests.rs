@@ -3,11 +3,7 @@
 //! These tests verify that table-local predicates are correctly identified and applied
 //! during table scans, reducing memory consumption in multi-table joins.
 
-use vibesql_ast;
-use vibesql_catalog;
 use vibesql_executor::SelectExecutor;
-use vibesql_parser;
-use vibesql_types;
 
 /// Helper function to parse SELECT statements
 fn parse_select(sql: &str) -> vibesql_ast::SelectStmt {
@@ -91,7 +87,7 @@ fn test_table_local_predicate_with_two_tables() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should have results (exact count depends on join selectivity)
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
     assert!(result[0].values[0] > vibesql_types::SqlValue::Integer(0));
 }
 
@@ -109,7 +105,7 @@ fn test_three_table_join_with_local_predicates() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should successfully execute with reduced memory due to pushdown
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -127,7 +123,7 @@ fn test_four_table_join_with_predicates() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should successfully complete (would likely OOM without pushdown in extreme cases)
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -143,7 +139,7 @@ fn test_five_table_join_with_predicates() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should complete successfully
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -158,7 +154,7 @@ fn test_no_table_local_predicates() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should work correctly (not pushed down)
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -174,7 +170,7 @@ fn test_mixed_table_local_and_complex_predicates() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should work correctly with mixed predicates
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -188,7 +184,7 @@ fn test_aggregate_with_table_local_predicate() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should work correctly
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -204,7 +200,7 @@ fn test_predicate_pushdown_with_group_by() {
     let result = executor.execute(&stmt).unwrap();
 
     // Should work correctly with GROUP BY
-    assert!(result.len() > 0);
+    assert!(!result.is_empty());
 }
 
 #[test]

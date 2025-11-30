@@ -282,15 +282,15 @@ mod tests {
 
         // Test: 50.0 < 100.0 = true
         let row = create_test_row(vec![SqlValue::Double(50.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: 150.0 < 100.0 = false
         let row = create_test_row(vec![SqlValue::Double(150.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
 
         // Test: NULL < 100.0 = false
         let row = create_test_row(vec![SqlValue::Null]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
     }
 
     #[test]
@@ -299,15 +299,15 @@ mod tests {
 
         // Test: 20 > 10 = true
         let row = create_test_row(vec![SqlValue::Integer(20)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: 5 > 10 = false
         let row = create_test_row(vec![SqlValue::Integer(5)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
 
         // Test: NULL > 10 = false
         let row = create_test_row(vec![SqlValue::Null]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
     }
 
     #[test]
@@ -318,32 +318,32 @@ mod tests {
         // Test: Float(822.1) >= -10 = true
         let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Ge, -10);
         let row = create_test_row(vec![SqlValue::Float(822.1)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: Float(593.78) >= -77 = true
         let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Ge, -77);
         let row = create_test_row(vec![SqlValue::Float(593.78)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: Float(-100.5) >= -10 = false
         let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Ge, -10);
         let row = create_test_row(vec![SqlValue::Float(-100.5)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
 
         // Test: Double column with integer constant
         let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Lt, 100);
         let row = create_test_row(vec![SqlValue::Double(50.5)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: Real column with integer constant
         let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Gt, 0);
         let row = create_test_row(vec![SqlValue::Real(25.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: Numeric column with integer constant
         let evaluator = IntegerComparisonEvaluator::new(0, ComparisonOp::Le, 50);
         let row = create_test_row(vec![SqlValue::Numeric(49.99)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
     }
 
     #[test]
@@ -355,21 +355,21 @@ mod tests {
         // Test: '1994-06-01' in range = true
         let test_date: vibesql_types::Date = "1994-06-01".parse().unwrap();
         let row = create_test_row(vec![SqlValue::Date(test_date)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: '1993-12-31' before range = false
         let test_date: vibesql_types::Date = "1993-12-31".parse().unwrap();
         let row = create_test_row(vec![SqlValue::Date(test_date)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
 
         // Test: '1995-01-01' at upper bound (exclusive) = false
         let test_date: vibesql_types::Date = "1995-01-01".parse().unwrap();
         let row = create_test_row(vec![SqlValue::Date(test_date)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
 
         // Test: NULL = false
         let row = create_test_row(vec![SqlValue::Null]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
     }
 
     #[test]
@@ -378,26 +378,26 @@ mod tests {
 
         // Test: 50.0 in range = true
         let row = create_test_row(vec![SqlValue::Double(50.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: 10.0 at lower bound (inclusive) = true
         let row = create_test_row(vec![SqlValue::Double(10.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: 100.0 at upper bound (inclusive) = true
         let row = create_test_row(vec![SqlValue::Double(100.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), true);
+        assert!(evaluator.evaluate(&row).unwrap());
 
         // Test: 5.0 below range = false
         let row = create_test_row(vec![SqlValue::Double(5.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
 
         // Test: 150.0 above range = false
         let row = create_test_row(vec![SqlValue::Double(150.0)]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
 
         // Test: NULL = false
         let row = create_test_row(vec![SqlValue::Null]);
-        assert_eq!(evaluator.evaluate(&row).unwrap(), false);
+        assert!(!evaluator.evaluate(&row).unwrap());
     }
 }

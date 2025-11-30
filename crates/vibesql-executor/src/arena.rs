@@ -261,14 +261,14 @@ mod tests {
         let arena = QueryArena::new();
 
         let ints: &mut [i64] = arena.alloc_slice(10);
-        for i in 0..10 {
-            ints[i] = i as i64;
+        for (i, val) in ints.iter_mut().enumerate() {
+            *val = i as i64;
         }
         assert_eq!(ints[5], 5);
 
-        let floats = arena.alloc_slice_filled(5, 3.14);
+        let floats = arena.alloc_slice_filled(5, 3.5);
         assert_eq!(floats.len(), 5);
-        assert_eq!(floats[0], 3.14);
+        assert_eq!(floats[0], 3.5);
     }
 
     #[test]

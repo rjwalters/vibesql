@@ -529,11 +529,9 @@ fn test_all_with_null_in_subquery() {
     )
     .unwrap();
 
-    for val in vec![
-        vibesql_types::SqlValue::Integer(5),
+    for val in [vibesql_types::SqlValue::Integer(5),
         vibesql_types::SqlValue::Null,
-        vibesql_types::SqlValue::Integer(20),
-    ] {
+        vibesql_types::SqlValue::Integer(20)] {
         db.insert_row("t2", vibesql_storage::Row::new(vec![val])).unwrap();
     }
 

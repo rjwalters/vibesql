@@ -508,7 +508,7 @@ mod tests {
         // Nested: (0.75 OR 0.25) AND 0.33
         // OR part: 1 - ((1 - 0.75) * (1 - 0.25)) = 1 - (0.25 * 0.75) = 1 - 0.1875 = 0.8125
         // AND with 0.33: 0.8125 * 0.33 ≈ 0.27
-        assert!(selectivity >= 0.25 && selectivity <= 0.30,
+        assert!((0.25..=0.30).contains(&selectivity),
             "Expected nested selectivity ~0.27, got {}", selectivity);
     }
 }

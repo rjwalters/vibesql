@@ -168,7 +168,7 @@ fn test_tpch_q1_with_multiple_aggregates() {
 
     // Find group A
     let a_group = result.iter().find(|r: &&Row| {
-        matches!(r.get(0), Some(&SqlValue::Varchar(ref s)) if s == "A")
+        matches!(r.get(0), Some(SqlValue::Varchar(s)) if s == "A")
     }).unwrap();
 
     // Verify aggregates for group A

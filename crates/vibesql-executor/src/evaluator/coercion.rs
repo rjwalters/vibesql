@@ -72,7 +72,7 @@ mod tests {
     #[test]
     fn test_coerce_date_passthrough() {
         let date = vibesql_types::Date::new(2024, 1, 15).unwrap();
-        let result = coerce_to_date(&SqlValue::Date(date.clone())).unwrap();
+        let result = coerce_to_date(&SqlValue::Date(date)).unwrap();
         assert_eq!(result, SqlValue::Date(date));
     }
 
@@ -80,7 +80,7 @@ mod tests {
     fn test_coerce_timestamp_to_date() {
         let date = vibesql_types::Date::new(2024, 1, 15).unwrap();
         let time = vibesql_types::Time::new(10, 30, 45, 0).unwrap();
-        let timestamp = vibesql_types::Timestamp::new(date.clone(), time);
+        let timestamp = vibesql_types::Timestamp::new(date, time);
         let result = coerce_to_date(&SqlValue::Timestamp(timestamp)).unwrap();
         assert_eq!(result, SqlValue::Date(date));
     }

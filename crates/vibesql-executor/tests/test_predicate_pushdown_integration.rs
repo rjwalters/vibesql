@@ -4,11 +4,7 @@
 //! - Phase 2: Table-local predicates are pushed to table scans
 //! - Phase 3: Equijoin predicates are used during hash joins
 
-use vibesql_ast;
-use vibesql_catalog;
 use vibesql_executor::SelectExecutor;
-use vibesql_parser;
-use vibesql_types;
 
 fn parse_select(sql: &str) -> vibesql_ast::SelectStmt {
     match vibesql_parser::Parser::parse_sql(sql) {

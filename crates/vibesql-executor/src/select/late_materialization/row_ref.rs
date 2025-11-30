@@ -316,8 +316,8 @@ mod row_ref_tests {
 
     #[test]
     fn test_multi_table_resolver() {
-        let table0 = vec![Row::new(vec![SqlValue::Varchar("A".into())])];
-        let table1 = vec![Row::new(vec![SqlValue::Varchar("B".into())])];
+        let table0 = [Row::new(vec![SqlValue::Varchar("A".into())])];
+        let table1 = [Row::new(vec![SqlValue::Varchar("B".into())])];
 
         let resolver = MultiTableResolver::from_tables(vec![
             (0, &table0[..]),

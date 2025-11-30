@@ -56,8 +56,6 @@
 //! let result_rows = gather_columns(&source_batch, &final_selection, &projected_columns);
 //! ```
 
-#![allow(dead_code)]
-
 mod selection;
 mod row_ref;
 mod lazy_batch;

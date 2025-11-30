@@ -20,9 +20,9 @@ fn test_unary_plus_float() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::UnaryOp {
         op: vibesql_ast::UnaryOperator::Plus,
-        expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(3.14))),
+        expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(3.5))),
     };
-    assert_expression_result(&db, expr, vibesql_types::SqlValue::Float(3.14));
+    assert_expression_result(&db, expr, vibesql_types::SqlValue::Float(3.5));
 }
 
 #[test]

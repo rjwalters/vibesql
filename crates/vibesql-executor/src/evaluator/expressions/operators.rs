@@ -138,7 +138,7 @@ mod tests {
     fn test_not_float() {
         // Non-zero values are true, so NOT should return false
         assert_eq!(
-            eval_unary_op(&UnaryOperator::Not, &SqlValue::Float(3.14)).unwrap(),
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Float(3.5)).unwrap(),
             SqlValue::Boolean(false)
         );
         // Zero is false, so NOT should return true
@@ -166,7 +166,7 @@ mod tests {
     fn test_not_numeric() {
         // Non-zero values are true, so NOT should return false
         assert_eq!(
-            eval_unary_op(&UnaryOperator::Not, &SqlValue::Numeric(3.14)).unwrap(),
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Numeric(3.5)).unwrap(),
             SqlValue::Boolean(false)
         );
         // Zero is false, so NOT should return true

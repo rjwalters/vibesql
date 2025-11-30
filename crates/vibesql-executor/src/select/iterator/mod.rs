@@ -238,6 +238,5 @@ impl<'a> RowIterator for Box<dyn RowIterator + 'a> {
 ///    - `execute_table_scan()` uses `TableScanIterator`
 ///
 /// This proof-of-concept validates the approach and provides a clear path forward.
-
 #[cfg(test)]
 mod tests;

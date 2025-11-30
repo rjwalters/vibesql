@@ -477,7 +477,7 @@ mod tests {
             Row {
                 values: vec![
                     SqlValue::Integer(1),
-                    SqlValue::Double(3.14),
+                    SqlValue::Double(3.5),
                     SqlValue::Varchar("test".to_string()),
                     SqlValue::Boolean(true),
                 ],
@@ -485,7 +485,7 @@ mod tests {
             Row {
                 values: vec![
                     SqlValue::Integer(2),
-                    SqlValue::Double(2.718),
+                    SqlValue::Double(2.5),
                     SqlValue::Varchar("data".to_string()),
                     SqlValue::Boolean(false),
                 ],
@@ -513,7 +513,7 @@ mod tests {
             Row {
                 values: vec![
                     SqlValue::Integer(1),
-                    SqlValue::Double(3.14),
+                    SqlValue::Double(3.5),
                     SqlValue::Varchar("test".to_string()),
                     SqlValue::Boolean(true),
                 ],
@@ -521,7 +521,7 @@ mod tests {
             Row {
                 values: vec![
                     SqlValue::Integer(2),
-                    SqlValue::Double(2.718),
+                    SqlValue::Double(2.5),
                     SqlValue::Varchar("data".to_string()),
                     SqlValue::Boolean(false),
                 ],
@@ -550,6 +550,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_adaptive_batch_sizing() {
         // Test that different query contexts recommend different batch sizes
         assert_eq!(QueryContext::Scan.recommended_batch_size(), SCAN_BATCH_SIZE);
@@ -663,13 +664,13 @@ mod tests {
             Row {
                 values: vec![
                     SqlValue::Integer(100),
-                    SqlValue::Double(3.14),
+                    SqlValue::Double(3.5),
                 ],
             },
             Row {
                 values: vec![
                     SqlValue::Null,  // NULL integer
-                    SqlValue::Double(2.718),
+                    SqlValue::Double(2.5),
                 ],
             },
             Row {

@@ -203,8 +203,8 @@ fn test_lazy_nested_loop_join_early_termination() {
     assert_eq!(results.len(), 5);
 
     // Verify we got the expected rows (first left row with first 5 right rows)
-    for i in 0..5 {
-        assert_eq!(results[i].values[0], SqlValue::Integer(1)); // Left id stays 1
-        assert_eq!(results[i].values[1], SqlValue::Integer(10)); // Left value stays 10
+    for result in &results {
+        assert_eq!(result.values[0], SqlValue::Integer(1)); // Left id stays 1
+        assert_eq!(result.values[1], SqlValue::Integer(10)); // Left value stays 10
     }
 }
