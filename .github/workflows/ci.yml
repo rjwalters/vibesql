@@ -21,6 +21,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Free disk space
+        run: |
+          # Remove large pre-installed software to free disk space
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
@@ -45,6 +55,16 @@ jobs:
     timeout-minutes: 45
     needs: test
     steps:
+      - name: Free disk space
+        run: |
+          # Remove large pre-installed software to free disk space
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
