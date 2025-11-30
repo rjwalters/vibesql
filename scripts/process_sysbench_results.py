@@ -44,8 +44,8 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
 
 
 def get_db_path() -> Path:
-    """Get the path to the dogfooding database."""
-    return Path.home() / ".vibesql" / "test_results" / "sqllogictest_results.vbsql"
+    """Get the path to the benchmark results database."""
+    return Path.home() / ".vibesql" / "test_results" / "benchmark_results.db"
 
 
 def init_benchmark_schema(db_path: Path):
