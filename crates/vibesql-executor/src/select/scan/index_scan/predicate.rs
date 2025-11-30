@@ -209,6 +209,97 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
     None
 }
 
+/// Extract equality predicates for ALL columns in a composite index
+///
+/// For a query like: `WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 42`
+/// with index columns `[c_w_id, c_d_id, c_id]`, this returns `Some([1, 1, 42])`.
+///
+/// Returns None if:
+/// - Any index column doesn't have an equality predicate
+/// - The predicates use non-literal values
+/// - The WHERE clause structure doesn't support extraction
+///
+/// # Arguments
+/// * `expr` - The WHERE clause expression
+/// * `column_names` - The index column names in order
+///
+/// # Returns
+/// `Some(Vec<SqlValue>)` - Composite key values in index column order
+/// `None` - Cannot extract composite key (fall back to single-column predicate)
+pub(crate) fn extract_composite_equality_predicates(
+    expr: &Expression,
+    column_names: &[&str],
+) -> Option<Vec<SqlValue>> {
+    if column_names.is_empty() {
+        return None;
+    }
+
+    // Collect all equality predicates from the WHERE clause
+    let mut predicates: std::collections::HashMap<String, SqlValue> =
+        std::collections::HashMap::new();
+    collect_equality_predicates(expr, &mut predicates);
+
+    // Build composite key in index column order
+    let mut composite_key = Vec::with_capacity(column_names.len());
+    for col_name in column_names {
+        // Case-insensitive column matching
+        let col_upper = col_name.to_uppercase();
+        if let Some(value) = predicates.get(&col_upper) {
+            composite_key.push(value.clone());
+        } else {
+            // Missing predicate for this column - can't use composite key
+            return None;
+        }
+    }
+
+    Some(composite_key)
+}
+
+/// Collect equality predicates from WHERE clause into a map
+///
+/// Recursively walks the expression tree to find all `column = literal` predicates.
+/// Handles AND-connected predicates.
+fn collect_equality_predicates(
+    expr: &Expression,
+    predicates: &mut std::collections::HashMap<String, SqlValue>,
+) {
+    match expr {
+        // Handle equality: col = value or value = col
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::Equal,
+            right,
+        } => {
+            // Check col = literal (using ColumnRef variant)
+            if let Expression::ColumnRef { column, .. } = left.as_ref() {
+                if let Expression::Literal(value) = right.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        predicates.insert(column.to_uppercase(), value.clone());
+                    }
+                }
+            }
+            // Check literal = col (reversed)
+            if let Expression::ColumnRef { column, .. } = right.as_ref() {
+                if let Expression::Literal(value) = left.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        predicates.insert(column.to_uppercase(), value.clone());
+                    }
+                }
+            }
+        }
+        // Recursively process AND predicates
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            collect_equality_predicates(left, predicates);
+            collect_equality_predicates(right, predicates);
+        }
+        _ => {}
+    }
+}
+
 /// Extract index predicate (range or IN) for an indexed column from WHERE clause
 ///
 /// This extracts predicates that can be pushed down to the storage layer:
