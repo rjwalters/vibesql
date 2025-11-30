@@ -20,8 +20,9 @@
 #   - Docker Desktop (for MySQL/PostgreSQL compatibility testing)
 #
 # Usage:
-#   ./install.sh           # Install all prerequisites
-#   ./install.sh --check   # Check what's missing without installing
+#   ./install.sh                          # Install all prerequisites
+#   ./install.sh --check                  # Check what's missing without installing
+#   ./install.sh --with-comparison-databases  # Also install DuckDB, SQLite CLI, MySQL client
 #
 
 set -e
@@ -51,11 +52,19 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
-# Check mode - just report what's missing
+# Parse arguments
 check_only=false
-if [[ "$1" == "--check" ]]; then
-    check_only=true
-fi
+install_comparison_dbs=false
+for arg in "$@"; do
+    case $arg in
+        --check)
+            check_only=true
+            ;;
+        --with-comparison-databases)
+            install_comparison_dbs=true
+            ;;
+    esac
+done
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════════╗"
@@ -235,32 +244,37 @@ else
     missing+=("docker")
 fi
 
-# Check Docker (for MySQL/PostgreSQL compatibility testing)
-print_status "Checking Docker..."
-if command_exists docker; then
-    if docker info &> /dev/null; then
-        print_success "Docker is installed and running ($(docker --version | cut -d' ' -f3 | tr -d ','))"
-    else
-        print_warning "Docker is installed but not running"
-        missing+=("docker-running")
-    fi
-else
-    print_warning "Docker is not installed (needed for: MySQL/PostgreSQL compatibility testing)"
-    missing+=("docker")
-fi
+# Check comparison databases (only with --with-comparison-databases flag)
+if $install_comparison_dbs; then
+    echo ""
+    print_status "Checking comparison databases (--with-comparison-databases)..."
 
-# Check Docker (for MySQL/PostgreSQL compatibility testing)
-print_status "Checking Docker..."
-if command_exists docker; then
-    if docker info &> /dev/null; then
-        print_success "Docker is installed and running ($(docker --version | cut -d' ' -f3 | tr -d ','))"
+    # Check DuckDB
+    print_status "Checking DuckDB..."
+    if command_exists duckdb; then
+        print_success "DuckDB is installed ($(duckdb --version 2>/dev/null || echo 'version unknown'))"
     else
-        print_warning "Docker is installed but not running"
-        missing+=("docker-running")
+        print_warning "DuckDB is not installed (needed for: benchmark comparisons)"
+        missing+=("duckdb")
     fi
-else
-    print_warning "Docker is not installed (needed for: MySQL/PostgreSQL compatibility testing)"
-    missing+=("docker")
+
+    # Check SQLite CLI
+    print_status "Checking SQLite CLI..."
+    if command_exists sqlite3; then
+        print_success "SQLite CLI is installed ($(sqlite3 --version | cut -d' ' -f1))"
+    else
+        print_warning "SQLite CLI is not installed (needed for: benchmark comparisons)"
+        missing+=("sqlite3")
+    fi
+
+    # Check MySQL client
+    print_status "Checking MySQL client..."
+    if command_exists mysql; then
+        print_success "MySQL client is installed ($(mysql --version 2>/dev/null | head -1))"
+    else
+        print_warning "MySQL client is not installed (needed for: benchmark comparisons)"
+        missing+=("mysql-client")
+    fi
 fi
 
 echo ""
@@ -404,6 +418,28 @@ fi
 if [[ " ${missing[*]} " =~ " docker-running " ]]; then
     print_warning "Docker is installed but not running"
     print_warning "Please start Docker Desktop from Applications"
+fi
+
+# Install comparison databases (only with --with-comparison-databases flag)
+if [[ " ${missing[*]} " =~ " duckdb " ]]; then
+    print_status "Installing DuckDB via Homebrew..."
+    brew install duckdb
+    print_success "DuckDB installed"
+fi
+
+if [[ " ${missing[*]} " =~ " sqlite3 " ]]; then
+    print_status "Installing SQLite via Homebrew..."
+    brew install sqlite
+    print_success "SQLite installed"
+fi
+
+if [[ " ${missing[*]} " =~ " mysql-client " ]]; then
+    print_status "Installing MySQL client via Homebrew..."
+    brew install mysql-client
+    print_success "MySQL client installed"
+    echo ""
+    print_warning "To use mysql command, you may need to add to your PATH:"
+    echo '  export PATH="/opt/homebrew/opt/mysql-client/bin:$PATH"'
 fi
 
 # Configure sccache as rustc wrapper if needed
