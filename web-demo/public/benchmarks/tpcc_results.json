@@ -2,37 +2,81 @@
   "benchmarks": [
     {
       "name": "tpcc_mixed_vibesql",
-      "stats": { "tps": 32.87, "transactions": 1979, "duration_ms": 60203, "success_rate": 100.0 }
+      "stats": { "tps": 67.89, "transactions": 4074, "duration_ms": 60013, "success_rate": 100.0 }
     },
     {
       "name": "tpcc_mixed_sqlite",
-      "stats": { "tps": 1108.08, "transactions": 66506, "duration_ms": 60019, "success_rate": 100.0 }
+      "stats": { "tps": 2523.07, "transactions": 151387, "duration_ms": 60001, "success_rate": 100.0 }
+    },
+    {
+      "name": "tpcc_mixed_duckdb",
+      "stats": { "tps": 363.58, "transactions": 21816, "duration_ms": 60003, "success_rate": 100.0 }
     },
     {
       "name": "tpcc_new_order_vibesql",
-      "stats": { "count": 910, "avg_latency_us": 12664.49 }
+      "stats": { "count": 1785, "avg_latency_us": 13550.01 }
+    },
+    {
+      "name": "tpcc_new_order_sqlite",
+      "stats": { "count": 68361, "avg_latency_us": 55.87 }
+    },
+    {
+      "name": "tpcc_new_order_duckdb",
+      "stats": { "count": 9765, "avg_latency_us": 4636.31 }
     },
     {
       "name": "tpcc_payment_vibesql",
-      "stats": { "count": 822, "avg_latency_us": 11563.74 }
+      "stats": { "count": 1767, "avg_latency_us": 12338.83 }
+    },
+    {
+      "name": "tpcc_payment_sqlite",
+      "stats": { "count": 64979, "avg_latency_us": 10.71 }
+    },
+    {
+      "name": "tpcc_payment_duckdb",
+      "stats": { "count": 9459, "avg_latency_us": 824.18 }
     },
     {
       "name": "tpcc_order_status_vibesql",
-      "stats": { "count": 87, "avg_latency_us": 13940.90 }
+      "stats": { "count": 174, "avg_latency_us": 14690.20 }
+    },
+    {
+      "name": "tpcc_order_status_sqlite",
+      "stats": { "count": 6032, "avg_latency_us": 161.32 }
+    },
+    {
+      "name": "tpcc_order_status_duckdb",
+      "stats": { "count": 854, "avg_latency_us": 1134.37 }
     },
     {
       "name": "tpcc_delivery_vibesql",
-      "stats": { "count": 85, "avg_latency_us": 2446.36 }
+      "stats": { "count": 181, "avg_latency_us": 2659.33 }
+    },
+    {
+      "name": "tpcc_delivery_sqlite",
+      "stats": { "count": 6091, "avg_latency_us": 26.15 }
+    },
+    {
+      "name": "tpcc_delivery_duckdb",
+      "stats": { "count": 867, "avg_latency_us": 5420.40 }
     },
     {
       "name": "tpcc_stock_level_vibesql",
-      "stats": { "count": 75, "avg_latency_us": 503341.39 }
+      "stats": { "count": 167, "avg_latency_us": 65759.53 }
+    },
+    {
+      "name": "tpcc_stock_level_sqlite",
+      "stats": { "count": 5924, "avg_latency_us": 9156.90 }
+    },
+    {
+      "name": "tpcc_stock_level_duckdb",
+      "stats": { "count": 871, "avg_latency_us": 1432.60 }
     }
   ],
-  "datetime": "2025-11-30T08:00:00Z",
+  "datetime": "2025-11-30T20:15:00Z",
   "machine_info": {
     "system": "Darwin (Apple Silicon M-series)",
     "cpu": "Apple M-series",
-    "notes": "SF 1 (1 warehouse), 60s measurement, 10s warmup. Mixed workload."
+    "notes": "SF 1 (1 warehouse), 60s measurement, 10s warmup. Mixed TPC-C workload. Commit: 8527e224"
   }
 }
