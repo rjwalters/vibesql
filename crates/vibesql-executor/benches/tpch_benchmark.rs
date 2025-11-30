@@ -28,6 +28,10 @@ use vibesql_storage::Database as VibeDB;
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::prelude::*;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::PooledConn;
 
 use std::time::Duration;
 use tpch::queries::*;
@@ -155,6 +159,24 @@ fn benchmark_duckdb_query(c: &mut Criterion, name: &str, sql: &str) {
     });
 }
 
+/// Helper function to benchmark a query on MySQL
+/// Only runs if MYSQL_URL environment variable is set
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_mysql_query(c: &mut Criterion, name: &str, sql: &str) {
+    // MySQL benchmarks are optional - skip if no connection available
+    let Some(mut conn) = load_mysql(0.01) else {
+        eprintln!("Skipping MySQL benchmark {} - MYSQL_URL not set", name);
+        return;
+    };
+
+    c.bench_function(name, |b| {
+        b.iter(|| {
+            let result: Vec<mysql::Row> = conn.query(sql).unwrap();
+            black_box(result.len());
+        });
+    });
+}
+
 /// Helper function to benchmark a query on DuckDB with benchmark groups (for Q1)
 #[cfg(feature = "benchmark-comparison")]
 fn benchmark_duckdb_query_grouped(c: &mut Criterion, group_name: &str, sql: &str) {
@@ -193,11 +215,38 @@ fn benchmark_duckdb_query_grouped(c: &mut Criterion, group_name: &str, sql: &str
     group.finish();
 }
 
+/// Helper function to benchmark a query on MySQL with benchmark groups (for Q1)
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_mysql_query_grouped(c: &mut Criterion, group_name: &str, sql: &str) {
+    let Some(mut conn) = load_mysql(0.01) else {
+        eprintln!("Skipping MySQL grouped benchmark {} - MYSQL_URL not set", group_name);
+        return;
+    };
+
+    let mut group = c.benchmark_group(group_name);
+    group.measurement_time(Duration::from_secs(10));
+
+    for &sf in &[0.01] {
+        group.bench_with_input(
+            BenchmarkId::new("mysql", format!("SF{}", sf)),
+            &sf,
+            |b, _| {
+                b.iter(|| {
+                    let result: Vec<mysql::Row> = conn.query(sql).unwrap();
+                    black_box(result.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 // =============================================================================
 // Macro to Generate Benchmark Functions
 // =============================================================================
 
-/// Macro to generate three benchmark functions (vibesql, sqlite, duckdb) for a given query
+/// Macro to generate four benchmark functions (vibesql, sqlite, duckdb, mysql) for a given query
 macro_rules! tpch_benchmark {
     ($query_num:expr, $sql:expr) => {
         paste::paste! {
@@ -213,6 +262,11 @@ macro_rules! tpch_benchmark {
             #[cfg(feature = "benchmark-comparison")]
             fn [<benchmark_q $query_num _duckdb>](c: &mut Criterion) {
                 benchmark_duckdb_query(c, concat!("tpch_q", stringify!($query_num), "_duckdb"), $sql);
+            }
+
+            #[cfg(feature = "benchmark-comparison")]
+            fn [<benchmark_q $query_num _mysql>](c: &mut Criterion) {
+                benchmark_mysql_query(c, concat!("tpch_q", stringify!($query_num), "_mysql"), $sql);
             }
         }
     };
@@ -234,6 +288,11 @@ macro_rules! tpch_benchmark_grouped {
             #[cfg(feature = "benchmark-comparison")]
             fn [<benchmark_q $query_num _duckdb>](c: &mut Criterion) {
                 benchmark_duckdb_query_grouped(c, concat!("tpch_q", stringify!($query_num)), $sql);
+            }
+
+            #[cfg(feature = "benchmark-comparison")]
+            fn [<benchmark_q $query_num _mysql>](c: &mut Criterion) {
+                benchmark_mysql_query_grouped(c, concat!("tpch_q", stringify!($query_num)), $sql);
             }
         }
     };
@@ -306,69 +365,91 @@ criterion_group!(
     benchmark_q1_vibesql,
     benchmark_q1_sqlite,
     benchmark_q1_duckdb,
+    benchmark_q1_mysql,
     benchmark_q2_vibesql,
     benchmark_q2_sqlite,
     benchmark_q2_duckdb,
+    benchmark_q2_mysql,
     benchmark_q3_vibesql,
     benchmark_q3_sqlite,
     benchmark_q3_duckdb,
+    benchmark_q3_mysql,
     benchmark_q4_vibesql,
     benchmark_q4_sqlite,
     benchmark_q4_duckdb,
+    benchmark_q4_mysql,
     benchmark_q5_vibesql,
     benchmark_q5_sqlite,
     benchmark_q5_duckdb,
+    benchmark_q5_mysql,
     benchmark_q6_vibesql,
     benchmark_q6_sqlite,
     benchmark_q6_duckdb,
+    benchmark_q6_mysql,
     benchmark_q7_vibesql,
     benchmark_q7_sqlite,
     benchmark_q7_duckdb,
+    benchmark_q7_mysql,
     benchmark_q8_vibesql,
     benchmark_q8_sqlite,
     benchmark_q8_duckdb,
+    benchmark_q8_mysql,
     benchmark_q9_vibesql,
     benchmark_q9_sqlite,
     benchmark_q9_duckdb,
+    benchmark_q9_mysql,
     benchmark_q10_vibesql,
     benchmark_q10_sqlite,
     benchmark_q10_duckdb,
+    benchmark_q10_mysql,
     benchmark_q11_vibesql,
     benchmark_q11_sqlite,
     benchmark_q11_duckdb,
+    benchmark_q11_mysql,
     benchmark_q12_vibesql,
     benchmark_q12_sqlite,
     benchmark_q12_duckdb,
+    benchmark_q12_mysql,
     benchmark_q13_vibesql,
     benchmark_q13_sqlite,
     benchmark_q13_duckdb,
+    benchmark_q13_mysql,
     benchmark_q14_vibesql,
     benchmark_q14_sqlite,
     benchmark_q14_duckdb,
+    benchmark_q14_mysql,
     benchmark_q15_vibesql,
     benchmark_q15_sqlite,
     benchmark_q15_duckdb,
+    benchmark_q15_mysql,
     benchmark_q16_vibesql,
     benchmark_q16_sqlite,
     benchmark_q16_duckdb,
+    benchmark_q16_mysql,
     benchmark_q17_vibesql,
     benchmark_q17_sqlite,
     benchmark_q17_duckdb,
+    benchmark_q17_mysql,
     benchmark_q18_vibesql,
     benchmark_q18_sqlite,
     benchmark_q18_duckdb,
+    benchmark_q18_mysql,
     benchmark_q19_vibesql,
     benchmark_q19_sqlite,
     benchmark_q19_duckdb,
+    benchmark_q19_mysql,
     benchmark_q20_vibesql,
     benchmark_q20_sqlite,
     benchmark_q20_duckdb,
+    benchmark_q20_mysql,
     benchmark_q21_vibesql,
     benchmark_q21_sqlite,
     benchmark_q21_duckdb,
+    benchmark_q21_mysql,
     benchmark_q22_vibesql,
     benchmark_q22_sqlite,
-    benchmark_q22_duckdb
+    benchmark_q22_duckdb,
+    benchmark_q22_mysql
 );
 
 criterion_main!(benches);

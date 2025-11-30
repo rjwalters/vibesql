@@ -11,6 +11,10 @@ use vibesql_types::Date;
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::prelude::*;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::{Pool, PooledConn};
 
 use std::str::FromStr;
 
@@ -98,6 +102,32 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     load_lineitem_duckdb(&conn, &mut data);
 
     conn
+}
+
+/// Load MySQL TPC-H database
+/// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/tpch)
+/// Returns None if MYSQL_URL is not set or connection fails
+#[cfg(feature = "benchmark-comparison")]
+pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
+    let url = std::env::var("MYSQL_URL").ok()?;
+    let pool = Pool::new(url.as_str()).ok()?;
+    let mut conn = pool.get_conn().ok()?;
+    let mut data = TPCHData::new(scale_factor);
+
+    // Create schema (drops and recreates tables)
+    create_tpch_schema_mysql(&mut conn);
+
+    // Load data
+    load_region_mysql(&mut conn);
+    load_nation_mysql(&mut conn);
+    load_customer_mysql(&mut conn, &mut data);
+    load_supplier_mysql(&mut conn, &mut data);
+    load_part_mysql(&mut conn, &mut data);
+    load_partsupp_mysql(&mut conn, &mut data);
+    load_orders_mysql(&mut conn, &mut data);
+    load_lineitem_mysql(&mut conn, &mut data);
+
+    Some(conn)
 }
 
 // =============================================================================
@@ -891,6 +921,151 @@ fn create_tpch_schema_duckdb(conn: &DuckDBConn) {
     .unwrap();
 }
 
+#[cfg(feature = "benchmark-comparison")]
+fn create_tpch_schema_mysql(conn: &mut PooledConn) {
+    // Drop tables if they exist (in reverse dependency order)
+    let drop_tables = [
+        "DROP TABLE IF EXISTS lineitem",
+        "DROP TABLE IF EXISTS partsupp",
+        "DROP TABLE IF EXISTS orders",
+        "DROP TABLE IF EXISTS customer",
+        "DROP TABLE IF EXISTS supplier",
+        "DROP TABLE IF EXISTS part",
+        "DROP TABLE IF EXISTS nation",
+        "DROP TABLE IF EXISTS region",
+    ];
+    for stmt in drop_tables {
+        conn.query_drop(stmt).unwrap();
+    }
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE region (
+            r_regionkey INTEGER PRIMARY KEY,
+            r_name VARCHAR(25) NOT NULL,
+            r_comment VARCHAR(152)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE nation (
+            n_nationkey INTEGER PRIMARY KEY,
+            n_name VARCHAR(25) NOT NULL,
+            n_regionkey INTEGER NOT NULL,
+            n_comment VARCHAR(152)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE customer (
+            c_custkey INTEGER PRIMARY KEY,
+            c_name VARCHAR(25) NOT NULL,
+            c_address VARCHAR(40) NOT NULL,
+            c_nationkey INTEGER NOT NULL,
+            c_phone VARCHAR(15) NOT NULL,
+            c_acctbal DECIMAL(15,2) NOT NULL,
+            c_mktsegment VARCHAR(10) NOT NULL,
+            c_comment VARCHAR(117)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE orders (
+            o_orderkey INTEGER PRIMARY KEY,
+            o_custkey INTEGER NOT NULL,
+            o_orderstatus VARCHAR(1) NOT NULL,
+            o_totalprice DECIMAL(15,2) NOT NULL,
+            o_orderdate DATE NOT NULL,
+            o_orderpriority VARCHAR(15) NOT NULL,
+            o_clerk VARCHAR(15) NOT NULL,
+            o_shippriority INTEGER NOT NULL,
+            o_comment VARCHAR(79)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE lineitem (
+            l_orderkey INTEGER NOT NULL,
+            l_partkey INTEGER NOT NULL,
+            l_suppkey INTEGER NOT NULL,
+            l_linenumber INTEGER NOT NULL,
+            l_quantity DECIMAL(15,2) NOT NULL,
+            l_extendedprice DECIMAL(15,2) NOT NULL,
+            l_discount DECIMAL(15,2) NOT NULL,
+            l_tax DECIMAL(15,2) NOT NULL,
+            l_returnflag VARCHAR(1) NOT NULL,
+            l_linestatus VARCHAR(1) NOT NULL,
+            l_shipdate DATE NOT NULL,
+            l_commitdate DATE NOT NULL,
+            l_receiptdate DATE NOT NULL,
+            l_shipinstruct VARCHAR(25) NOT NULL,
+            l_shipmode VARCHAR(10) NOT NULL,
+            l_comment VARCHAR(44),
+            PRIMARY KEY (l_orderkey, l_linenumber)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE supplier (
+            s_suppkey INTEGER PRIMARY KEY,
+            s_name VARCHAR(25) NOT NULL,
+            s_address VARCHAR(40) NOT NULL,
+            s_nationkey INTEGER NOT NULL,
+            s_phone VARCHAR(15) NOT NULL,
+            s_acctbal DECIMAL(15,2) NOT NULL,
+            s_comment VARCHAR(101)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE part (
+            p_partkey INTEGER PRIMARY KEY,
+            p_name VARCHAR(55) NOT NULL,
+            p_mfgr VARCHAR(25) NOT NULL,
+            p_brand VARCHAR(10) NOT NULL,
+            p_type VARCHAR(25) NOT NULL,
+            p_size INTEGER NOT NULL,
+            p_container VARCHAR(10) NOT NULL,
+            p_retailprice DECIMAL(15,2) NOT NULL,
+            p_comment VARCHAR(23)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE partsupp (
+            ps_partkey INTEGER NOT NULL,
+            ps_suppkey INTEGER NOT NULL,
+            ps_availqty INTEGER NOT NULL,
+            ps_supplycost DECIMAL(15,2) NOT NULL,
+            ps_comment VARCHAR(199),
+            PRIMARY KEY (ps_partkey, ps_suppkey)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+}
+
 // =============================================================================
 // Data Loading (REGION - simple reference data)
 // =============================================================================
@@ -926,6 +1101,17 @@ fn load_region_duckdb(conn: &DuckDBConn) {
         conn.execute(
             "INSERT INTO region VALUES (?, ?, ?)",
             duckdb::params![i as i64, name, "comment"],
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_region_mysql(conn: &mut PooledConn) {
+    for (i, &name) in REGIONS.iter().enumerate() {
+        conn.exec_drop(
+            "INSERT INTO region VALUES (?, ?, ?)",
+            (i as i64, name, "comment"),
         )
         .unwrap();
     }
@@ -1506,6 +1692,195 @@ fn load_lineitem_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
                 SHIP_MODES[line_id % SHIP_MODES.len()],
                 data.random_varchar(44),
             ])
+            .unwrap();
+
+            line_id += 1;
+        }
+    }
+}
+
+// =============================================================================
+// MySQL Data Loading Functions
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_nation_mysql(conn: &mut PooledConn) {
+    for (i, &(name, region_key)) in NATIONS.iter().enumerate() {
+        conn.exec_drop(
+            "INSERT INTO nation VALUES (?, ?, ?, ?)",
+            (i as i64, name, region_key as i64, "comment"),
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
+    for i in 0..data.customer_count {
+        let nation_key = i % 25;
+        let acctbal = (i as f64 * 17.3) % 10000.0 - 999.99;
+        conn.exec_drop(
+            "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                i as i64 + 1,
+                format!("Customer#{:09}", i + 1),
+                data.random_varchar(40),
+                nation_key as i64,
+                data.random_phone(nation_key),
+                acctbal,
+                SEGMENTS[i % SEGMENTS.len()],
+                data.random_varchar(117),
+            ),
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_supplier_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
+    for i in 0..data.supplier_count {
+        let nation_key = i % 25;
+        let acctbal = (i as f64 * 13.7) % 10000.0 - 999.99;
+        conn.exec_drop(
+            "INSERT INTO supplier VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                i as i64 + 1,
+                format!("Supplier#{:09}", i + 1),
+                data.random_varchar(40),
+                nation_key as i64,
+                data.random_phone(nation_key),
+                acctbal,
+                data.random_varchar(101),
+            ),
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_part_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
+    use super::data::{COLORS, CONTAINERS, TYPES};
+
+    for i in 0..data.part_count {
+        let color1 = COLORS[i % COLORS.len()];
+        let color2 = COLORS[(i * 7) % COLORS.len()];
+        let p_name = format!("{} {} {}", color1, TYPES[i % TYPES.len()], color2);
+        let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
+
+        conn.exec_drop(
+            "INSERT INTO part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                i as i64 + 1,
+                p_name,
+                format!("Manufacturer#{}", (i % 5) + 1),
+                format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1),
+                TYPES[i % TYPES.len()],
+                ((i % 50) + 1) as i64,
+                CONTAINERS[i % CONTAINERS.len()],
+                retailprice,
+                data.random_varchar(23),
+            ),
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_partsupp_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
+    for part_key in 1..=data.part_count {
+        for j in 0..4 {
+            let supp_key = ((part_key + (j * (data.supplier_count / 4 + (part_key - 1) / data.supplier_count))) % data.supplier_count) + 1;
+            let availqty = ((part_key * 17 + j * 31) % 9999) + 1;
+            let supplycost = ((part_key * 13 + j * 7) % 100000) as f64 / 100.0 + 1.0;
+
+            conn.exec_drop(
+                "INSERT INTO partsupp VALUES (?, ?, ?, ?, ?)",
+                (
+                    part_key as i64,
+                    supp_key as i64,
+                    availqty as i64,
+                    supplycost,
+                    data.random_varchar(199),
+                ),
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
+    for i in 0..data.orders_count {
+        let cust_key = (i % data.customer_count) + 1;
+        let totalprice = (i as f64 * 271.3) % 500000.0 + 1000.0;
+        let order_date = data.random_date("1992-01-01", "1998-12-31");
+
+        conn.exec_drop(
+            "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                i as i64 + 1,
+                cust_key as i64,
+                ["O", "F", "P"][i % 3],
+                totalprice,
+                order_date,
+                PRIORITIES[i % PRIORITIES.len()],
+                format!("Clerk#{:09}", (i * 7) % 1000 + 1),
+                0,
+                data.random_varchar(79),
+            ),
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_lineitem_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
+    use mysql::Value;
+
+    let mut line_id = 0;
+    for order_num in 1..=data.orders_count {
+        let num_lines = (order_num * 3 % 7) + 1;
+
+        for line_num in 1..=num_lines {
+            if line_id >= data.lineitem_count {
+                break;
+            }
+
+            let part_key = (line_id * 13) % data.part_count + 1;
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, line_id);
+
+            let quantity = ((line_id * 11) % 50 + 1) as f64;
+            let extendedprice = quantity * ((line_id * 97) as f64 % 100000.0 + 900.0);
+            let discount = ((line_id * 7) % 10) as f64 / 100.0;
+            let tax = ((line_id * 3) % 8) as f64 / 100.0;
+            let ship_date = data.random_date("1992-01-01", "1998-12-31");
+            let commit_date = data.random_date("1992-01-01", "1998-12-31");
+            let receipt_date = data.random_date("1992-01-01", "1998-12-31");
+
+            // MySQL Params doesn't support 16-element tuples, so use Vec<Value>
+            let params: Vec<Value> = vec![
+                Value::from(order_num as i64),
+                Value::from(part_key as i64),
+                Value::from(supp_key as i64),
+                Value::from(line_num as i64),
+                Value::from(quantity),
+                Value::from(extendedprice),
+                Value::from(discount),
+                Value::from(tax),
+                Value::from(["N", "R", "A"][line_id % 3]),
+                Value::from(["O", "F"][line_id % 2]),
+                Value::from(ship_date),
+                Value::from(commit_date),
+                Value::from(receipt_date),
+                Value::from("DELIVER IN PERSON"),
+                Value::from(SHIP_MODES[line_id % SHIP_MODES.len()]),
+                Value::from(data.random_varchar(44)),
+            ];
+
+            conn.exec_drop(
+                "INSERT INTO lineitem VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params,
+            )
             .unwrap();
 
             line_id += 1;

@@ -38,6 +38,7 @@ arrow-select = "57.1"
 # Optional benchmark-comparison dependencies
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
+mysql = { version = "25.0", optional = true }
 
 # Optional JIT compilation dependencies
 cranelift = { version = "0.126", optional = true }
@@ -62,7 +63,8 @@ parallel = ["rayon"]
 spatial = ["geo", "wkt", "rstar"]
 # Enable this feature for benchmarks that compare against other SQL engines
 # Usage: cargo bench --features benchmark-comparison
-benchmark-comparison = ["rusqlite", "duckdb"]
+# MySQL requires MYSQL_URL env var (e.g., mysql://root:password@localhost:3306/tpch)
+benchmark-comparison = ["rusqlite", "duckdb", "mysql"]
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
 # Enable native columnar execution (Phase 2b - zero row materialization)

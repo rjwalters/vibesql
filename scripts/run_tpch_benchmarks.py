@@ -170,6 +170,8 @@ def convert_to_web_demo_format(parsed_data: Dict) -> Dict:
             database = 'sqlite'
         elif '/duckdb/' in name or name.endswith('_duckdb'):
             database = 'duckdb'
+        elif '/mysql/' in name or name.endswith('_mysql'):
+            database = 'mysql'
 
         # Extract query number (q1, q2, etc.)
         for q_num in range(1, 23):

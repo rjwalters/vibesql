@@ -57,6 +57,21 @@ jobs:
     timeout-minutes: 30
     needs: test
     continue-on-error: true
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: tpch
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MYSQL_URL: mysql://root:password@127.0.0.1:3306/tpch
     steps:
       - uses: actions/checkout@v6
         with:

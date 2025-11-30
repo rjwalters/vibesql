@@ -1,7 +1,7 @@
 /**
  * Benchmark results page
  *
- * Loads and displays performance benchmark data comparing VibeSQL to SQLite.
+ * Loads and displays performance benchmark data comparing VibeSQL to SQLite, DuckDB, and MySQL.
  */
 
 import './styles/main.css';
@@ -149,8 +149,9 @@ function renderResultsTable(data: BenchmarkResults) {
     const vibesql = databases.get('vibesql');
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
+    const mysql = databases.get('mysql');
 
-    if (!vibesql && !sqlite && !duckdb) continue;
+    if (!vibesql && !sqlite && !duckdb && !mysql) continue;
 
     const row = document.createElement('tr');
     row.className = 'hover:bg-card/50 transition-colors';
@@ -217,6 +218,19 @@ function renderResultsTable(data: BenchmarkResults) {
       duckdbCell.textContent = 'N/A';
     }
     row.appendChild(duckdbCell);
+
+    // MySQL time
+    const mysqlCell = document.createElement('td');
+    mysqlCell.className = 'px-4 py-3 text-right text-muted';
+    const mysqlTime = mysql ? formatTime(mysql.stats.mean) : null;
+    if (mysqlTime) {
+      mysqlCell.textContent = mysqlTime;
+    } else if (mysql && mysql.stats.mean < 0) {
+      mysqlCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
+    } else {
+      mysqlCell.textContent = 'N/A';
+    }
+    row.appendChild(mysqlCell);
 
     // Speedup vs SQLite
     const speedupCell = document.createElement('td');
@@ -311,21 +325,24 @@ function renderChart(data: BenchmarkResults) {
   const vibesqlData: number[] = [];
   const sqliteData: number[] = [];
   const duckdbData: number[] = [];
+  const mysqlData: number[] = [];
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
+    const mysql = databases.get('mysql');
 
     // Skip failed queries (negative mean) in the chart
     const vibesqlValid = vibesql && vibesql.stats.mean > 0;
     const sqliteValid = sqlite && sqlite.stats.mean > 0;
     const duckdbValid = duckdb && duckdb.stats.mean > 0;
+    const mysqlValid = mysql && mysql.stats.mean > 0;
 
-    if (vibesqlValid || sqliteValid || duckdbValid) {
+    if (vibesqlValid || sqliteValid || duckdbValid || mysqlValid) {
       // Get label - prefer TPC-H query number if available
       let label = operation.replace(/_/g, ' ').toUpperCase();
-      const firstBench = vibesql || sqlite || duckdb;
+      const firstBench = vibesql || sqlite || duckdb || mysql;
       if (firstBench) {
         const parsed = parseBenchmarkName(firstBench.name);
         if (parsed.queryNum) {
@@ -337,6 +354,7 @@ function renderChart(data: BenchmarkResults) {
       vibesqlData.push(vibesqlValid ? vibesql!.stats.mean * 1000 : 0); // Convert to ms
       sqliteData.push(sqliteValid ? sqlite!.stats.mean * 1000 : 0);
       duckdbData.push(duckdbValid ? duckdb!.stats.mean * 1000 : 0);
+      mysqlData.push(mysqlValid ? mysql!.stats.mean * 1000 : 0);
     }
   }
 
@@ -364,6 +382,13 @@ function renderChart(data: BenchmarkResults) {
           data: duckdbData,
           backgroundColor: 'rgba(59, 130, 246, 0.5)',
           borderColor: 'rgba(59, 130, 246, 1)',
+          borderWidth: 1,
+        },
+        {
+          label: 'MySQL',
+          data: mysqlData,
+          backgroundColor: 'rgba(249, 115, 22, 0.5)',
+          borderColor: 'rgba(249, 115, 22, 1)',
           borderWidth: 1,
         },
       ],
@@ -440,7 +465,7 @@ async function loadBenchmarkData() {
     if (tbody) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="6" class="px-4 py-8 text-center text-red-500">
+          <td colspan="7" class="px-4 py-8 text-center text-red-500">
             ⚠️ Failed to load benchmark results. Please check back later.
           </td>
         </tr>

@@ -56,16 +56,17 @@
             <thead class="text-xs uppercase bg-card text-muted border-b border-border">
               <tr>
                 <th class="px-4 py-3">Operation</th>
-                <th class="px-4 py-3 text-right">vibesql</th>
+                <th class="px-4 py-3 text-right">VibeSQL</th>
                 <th class="px-4 py-3 text-right">SQLite</th>
                 <th class="px-4 py-3 text-right">DuckDB</th>
+                <th class="px-4 py-3 text-right">MySQL</th>
                 <th class="px-4 py-3 text-right">Speedup</th>
                 <th class="px-4 py-3 text-center">Winner</th>
               </tr>
             </thead>
             <tbody id="results-tbody" class="divide-y divide-border">
               <tr>
-                <td colspan="6" class="px-4 py-8 text-center text-muted">
+                <td colspan="7" class="px-4 py-8 text-center text-muted">
                   Loading benchmark results...
                 </td>
               </tr>
@@ -102,7 +103,7 @@
             <li><strong>Benchmark Framework:</strong> Criterion.rs (Rust native benchmarking)</li>
             <li><strong>Scale Factor:</strong> SF 0.01 (~60,000 rows across 6 tables)</li>
             <li><strong>Data:</strong> Deterministic TPC-H compliant dataset</li>
-            <li><strong>Databases Tested:</strong> VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs)</li>
+            <li><strong>Databases Tested:</strong> VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs), MySQL 8.0 (via mysql crate)</li>
             <li><strong>Execution Mode:</strong> All databases run in-memory (no disk I/O)</li>
             <li><strong>Measurement:</strong> Native Rust API calls (no Python/FFI overhead)</li>
           </ul>
