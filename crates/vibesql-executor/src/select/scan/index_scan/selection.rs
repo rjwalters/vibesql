@@ -4,7 +4,34 @@
 //! Supports both rule-based (simple) and cost-based (statistics-aware) selection.
 
 use vibesql_ast::Expression;
+use vibesql_catalog::TableSchema;
 use vibesql_storage::{Database, statistics::{CostEstimator, AccessMethod}};
+
+/// Check if any ORDER BY column is nullable
+///
+/// BTreeMap orders NULLs first (NULL < everything), but SQL default is:
+/// - NULLS LAST for ASC
+/// - NULLS FIRST for DESC
+///
+/// When a nullable column is used for ORDER BY without explicit NULLS FIRST/LAST,
+/// using an index would produce incorrect NULL ordering. This function helps
+/// detect such cases to avoid using the index for ORDER BY.
+fn any_order_by_column_nullable(
+    order_items: &[vibesql_ast::OrderByItem],
+    table_schema: &TableSchema,
+) -> bool {
+    for item in order_items {
+        if let Expression::ColumnRef { column, .. } = &item.expr {
+            // Look up column in schema (case-insensitive)
+            if let Some(idx) = table_schema.get_column_index(column) {
+                if table_schema.columns[idx].nullable {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
 
 /// Determines if an index scan is beneficial for the given query
 ///
@@ -27,7 +54,7 @@ pub(crate) fn should_use_index_scan(
     // applied as a post-filter in execute_index_scan() to ensure correctness.
 
     // Get all indexes for this table
-    let _table = database.get_table(table_name)?;
+    let table = database.get_table(table_name)?;
     let indexes = database.list_indexes_for_table(table_name);
 
     if indexes.is_empty() {
@@ -47,8 +74,16 @@ pub(crate) fn should_use_index_scan(
             // Check if this index can be used for ORDER BY clause
             let can_use_for_order = if let Some(order_items) = order_by {
                 // Check if ORDER BY columns match the index columns
-                // Support multi-column ORDER BY matching
-                can_use_index_for_order_by(order_items, &index_metadata.columns)
+                let columns_match = can_use_index_for_order_by(order_items, &index_metadata.columns);
+
+                // Don't use index for ORDER BY if any column is nullable
+                // BTreeMap orders NULLs first, but SQL default is NULLS LAST for ASC
+                // This would produce incorrect results for nullable columns
+                if columns_match && any_order_by_column_nullable(order_items, &table.schema) {
+                    false
+                } else {
+                    columns_match
+                }
             } else {
                 false
             };
@@ -257,7 +292,16 @@ pub(crate) fn cost_based_index_selection(
                 .unwrap_or(false);
 
             let can_use_for_order = if let Some(order_items) = order_by {
-                can_use_index_for_order_by(order_items, &index_metadata.columns)
+                let columns_match = can_use_index_for_order_by(order_items, &index_metadata.columns);
+
+                // Don't use index for ORDER BY if any column is nullable
+                // BTreeMap orders NULLs first, but SQL default is NULLS LAST for ASC
+                // This would produce incorrect results for nullable columns
+                if columns_match && any_order_by_column_nullable(order_items, &table.schema) {
+                    false
+                } else {
+                    columns_match
+                }
             } else {
                 false
             };

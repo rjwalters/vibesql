@@ -207,7 +207,10 @@ impl IndexManager {
         row_index: usize,
     ) {
         for (index_name, metadata) in &self.indexes {
-            if metadata.table_name == table_name {
+            // Case-insensitive comparison for table name matching
+            // SQL parser normalizes identifiers to uppercase, but table/index metadata
+            // may store the original case from DDL statements
+            if metadata.table_name.eq_ignore_ascii_case(table_name) {
                 if let Some(index_data) = self.index_data.get_mut(index_name) {
                     // Build composite key from the indexed columns
                     // Normalize numeric types to ensure consistent comparison
@@ -261,7 +264,10 @@ impl IndexManager {
         row_index: usize,
     ) {
         for (index_name, metadata) in &self.indexes {
-            if metadata.table_name == table_name {
+            // Case-insensitive comparison for table name matching
+            // SQL parser normalizes identifiers to uppercase, but table/index metadata
+            // may store the original case from DDL statements
+            if metadata.table_name.eq_ignore_ascii_case(table_name) {
                 if let Some(index_data) = self.index_data.get_mut(index_name) {
                     // Build keys from old and new rows
                     // Normalize numeric types to ensure consistent comparison
@@ -343,7 +349,10 @@ impl IndexManager {
         row_index: usize,
     ) {
         for (index_name, metadata) in &self.indexes {
-            if metadata.table_name == table_name {
+            // Case-insensitive comparison for table name matching
+            // SQL parser normalizes identifiers to uppercase, but table/index metadata
+            // may store the original case from DDL statements
+            if metadata.table_name.eq_ignore_ascii_case(table_name) {
                 if let Some(index_data) = self.index_data.get_mut(index_name) {
                     // Build key from the row
                     let key_values: Vec<SqlValue> = metadata
@@ -398,10 +407,11 @@ impl IndexManager {
         table_rows: &[Row],
     ) {
         // Collect index names that need rebuilding
+        // Case-insensitive comparison for table name matching
         let indexes_to_rebuild: Vec<String> = self
             .indexes
             .iter()
-            .filter(|(_, metadata)| metadata.table_name == table_name)
+            .filter(|(_, metadata)| metadata.table_name.eq_ignore_ascii_case(table_name))
             .map(|(name, _)| name.clone())
             .collect();
 
