@@ -29,6 +29,11 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     // Create schema
     create_tpcc_schema_vibesql(&mut db);
 
+    // Create indexes BEFORE loading data - this avoids slow bulk B+ tree operations.
+    // Incremental index maintenance during inserts is faster than bulk building after
+    // loading 100K+ rows.
+    create_tpcc_indexes_vibesql(&mut db);
+
     // Load data
     load_item_vibesql(&mut db, &mut data);
 
@@ -43,9 +48,6 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
             load_orders_vibesql(&mut db, &mut data, d_id, w_id);
         }
     }
-
-    // Create indexes for performance
-    create_tpcc_indexes_vibesql(&mut db);
 
     // Compute statistics for join order optimization
     for table_name in [
@@ -290,9 +292,12 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
     use vibesql_ast::{IndexColumn, OrderDirection};
 
     // Helper to create index columns
+    // Column names are uppercased to match the SQL parser's normalization.
+    // The parser converts unquoted identifiers to uppercase, so index columns
+    // must use uppercase names for case-sensitive matching in cost-based selection.
     fn col(name: &str) -> IndexColumn {
         IndexColumn {
-            column_name: name.to_string(),
+            column_name: name.to_uppercase(),
             direction: OrderDirection::Asc,
             prefix_length: None,
         }
@@ -334,18 +339,29 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         vec![col("no_w_id"), col("no_d_id"), col("no_o_id")],
     ).ok();
 
-    // NOTE: The following indexes are skipped because their tables have >= 100k rows,
-    // which triggers disk-backed indexing that is currently very slow (causes benchmark
-    // to hang indefinitely). The disk-backed B+ tree bulk_load needs performance
-    // optimization. For now, we skip these indexes to allow the benchmark to complete.
-    // The transactions will still work correctly, just without optimal index performance.
+    // CRITICAL: The item and stock indexes are REQUIRED for TPC-C performance.
+    // Without them, each New-Order does 20 full table scans of 100K rows (2M rows/txn!).
     //
-    // Skipped indexes (tables with >= 100k rows trigger disk-backed mode):
-    // - idx_order_line_pk: order_line has ~300k rows
-    // - idx_item_pk: item has 100k rows
-    // - idx_stock_pk: stock has 100k rows per warehouse
+    // These indexes were previously skipped due to slow disk-backed B+ tree bulk_load.
+    // For the benchmark, we must enable them even if loading is slow.
     //
-    // See: https://github.com/rjwalters/vibesql/issues/2793
+    // See: https://github.com/rjwalters/vibesql/issues/2793 (disk-backed index perf)
+    // See: https://github.com/rjwalters/vibesql/issues/3012 (TPC-C New-Order 670x slower)
+    db.create_index(
+        "idx_item_pk".to_string(),
+        "item".to_string(),
+        true,
+        vec![col("i_id")],
+    ).ok();
+
+    // Note: Reordering to (s_i_id, s_w_id) puts the more selective column first.
+    // This helps the cost-based index selector choose the index for point queries.
+    db.create_index(
+        "idx_stock_pk".to_string(),
+        "stock".to_string(),
+        true,
+        vec![col("s_i_id"), col("s_w_id")],
+    ).ok();
 
     // Secondary indexes for queries (on smaller tables)
     db.create_index(

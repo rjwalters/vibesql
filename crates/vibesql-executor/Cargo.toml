@@ -65,6 +65,8 @@ spatial = ["geo", "wkt", "rstar"]
 benchmark-comparison = ["rusqlite", "duckdb"]
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
+# Enable detailed profiling output for TPC-C transactions
+profile-tpcc = []
 # Enable native columnar execution (Phase 2b - zero row materialization)
 # Now enabled by default for eligible queries. Set VIBESQL_DISABLE_COLUMNAR=1 to opt-out.
 native-columnar = []
