@@ -266,6 +266,7 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
 
     create_tpcds_schema_sqlite(&conn);
 
+    // Phase 1 tables (core dimension and fact tables)
     load_date_dim_sqlite(&conn, &mut data);
     load_time_dim_sqlite(&conn, &mut data);
     load_item_sqlite(&conn, &mut data);
@@ -273,6 +274,29 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     load_customer_sqlite(&conn, &mut data);
     load_store_sqlite(&conn, &mut data);
     load_store_sales_sqlite(&conn, &mut data);
+
+    // Phase 2 tables
+    load_promotion_sqlite(&conn, &mut data);
+    load_warehouse_sqlite(&conn, &mut data);
+    load_ship_mode_sqlite(&conn, &mut data);
+    load_reason_sqlite(&conn, &mut data);
+    load_store_returns_sqlite(&conn, &mut data);
+
+    // Phase 3 tables
+    load_catalog_page_sqlite(&conn, &mut data);
+    load_web_page_sqlite(&conn, &mut data);
+    load_web_site_sqlite(&conn, &mut data);
+    load_catalog_sales_sqlite(&conn, &mut data);
+    load_catalog_returns_sqlite(&conn, &mut data);
+    load_web_sales_sqlite(&conn, &mut data);
+    load_web_returns_sqlite(&conn, &mut data);
+
+    // Phase 4 tables
+    load_customer_demographics_sqlite(&conn, &mut data);
+    load_household_demographics_sqlite(&conn, &mut data);
+    load_income_band_sqlite(&conn, &mut data);
+    load_call_center_sqlite(&conn, &mut data);
+    load_inventory_sqlite(&conn, &mut data);
 
     conn
 }
@@ -284,6 +308,7 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 
     create_tpcds_schema_duckdb(&conn);
 
+    // Phase 1 tables (core dimension and fact tables)
     load_date_dim_duckdb(&conn, &mut data);
     load_time_dim_duckdb(&conn, &mut data);
     load_item_duckdb(&conn, &mut data);
@@ -291,6 +316,29 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     load_customer_duckdb(&conn, &mut data);
     load_store_duckdb(&conn, &mut data);
     load_store_sales_duckdb(&conn, &mut data);
+
+    // Phase 2 tables
+    load_promotion_duckdb(&conn, &mut data);
+    load_warehouse_duckdb(&conn, &mut data);
+    load_ship_mode_duckdb(&conn, &mut data);
+    load_reason_duckdb(&conn, &mut data);
+    load_store_returns_duckdb(&conn, &mut data);
+
+    // Phase 3 tables
+    load_catalog_page_duckdb(&conn, &mut data);
+    load_web_page_duckdb(&conn, &mut data);
+    load_web_site_duckdb(&conn, &mut data);
+    load_catalog_sales_duckdb(&conn, &mut data);
+    load_catalog_returns_duckdb(&conn, &mut data);
+    load_web_sales_duckdb(&conn, &mut data);
+    load_web_returns_duckdb(&conn, &mut data);
+
+    // Phase 4 tables
+    load_customer_demographics_duckdb(&conn, &mut data);
+    load_household_demographics_duckdb(&conn, &mut data);
+    load_income_band_duckdb(&conn, &mut data);
+    load_call_center_duckdb(&conn, &mut data);
+    load_inventory_duckdb(&conn, &mut data);
 
     conn
 }
@@ -5038,6 +5086,348 @@ fn create_tpcds_schema_sqlite(conn: &SqliteConn) {
         CREATE INDEX idx_ss_date ON store_sales(ss_sold_date_sk);
         CREATE INDEX idx_ss_customer ON store_sales(ss_customer_sk);
         CREATE INDEX idx_ss_store ON store_sales(ss_store_sk);
+
+        -- Phase 2 dimension tables
+        CREATE TABLE promotion (
+            p_promo_sk INTEGER PRIMARY KEY,
+            p_promo_id TEXT NOT NULL,
+            p_start_date_sk INTEGER,
+            p_end_date_sk INTEGER,
+            p_item_sk INTEGER,
+            p_cost REAL,
+            p_response_target INTEGER,
+            p_promo_name TEXT,
+            p_channel_dmail TEXT,
+            p_channel_email TEXT,
+            p_channel_catalog TEXT,
+            p_channel_tv TEXT,
+            p_channel_radio TEXT,
+            p_channel_press TEXT,
+            p_channel_event TEXT,
+            p_channel_demo TEXT,
+            p_channel_details TEXT,
+            p_purpose TEXT,
+            p_discount_active TEXT
+        );
+
+        CREATE TABLE warehouse (
+            w_warehouse_sk INTEGER PRIMARY KEY,
+            w_warehouse_id TEXT NOT NULL,
+            w_warehouse_name TEXT,
+            w_warehouse_sq_ft INTEGER,
+            w_street_number TEXT,
+            w_street_name TEXT,
+            w_street_type TEXT,
+            w_suite_number TEXT,
+            w_city TEXT,
+            w_county TEXT,
+            w_state TEXT,
+            w_zip TEXT,
+            w_country TEXT,
+            w_gmt_offset REAL
+        );
+
+        CREATE TABLE ship_mode (
+            sm_ship_mode_sk INTEGER PRIMARY KEY,
+            sm_ship_mode_id TEXT NOT NULL,
+            sm_type TEXT,
+            sm_code TEXT,
+            sm_carrier TEXT,
+            sm_contract TEXT
+        );
+
+        CREATE TABLE reason (
+            r_reason_sk INTEGER PRIMARY KEY,
+            r_reason_id TEXT NOT NULL,
+            r_reason_desc TEXT
+        );
+
+        CREATE TABLE store_returns (
+            sr_returned_date_sk INTEGER,
+            sr_return_time_sk INTEGER,
+            sr_item_sk INTEGER NOT NULL,
+            sr_customer_sk INTEGER,
+            sr_cdemo_sk INTEGER,
+            sr_hdemo_sk INTEGER,
+            sr_addr_sk INTEGER,
+            sr_store_sk INTEGER,
+            sr_reason_sk INTEGER,
+            sr_ticket_number INTEGER NOT NULL,
+            sr_return_quantity INTEGER,
+            sr_return_amt REAL,
+            sr_return_tax REAL,
+            sr_return_amt_inc_tax REAL,
+            sr_fee REAL,
+            sr_return_ship_cost REAL,
+            sr_refunded_cash REAL,
+            sr_reversed_charge REAL,
+            sr_store_credit REAL,
+            sr_net_loss REAL,
+            PRIMARY KEY (sr_item_sk, sr_ticket_number)
+        );
+
+        -- Phase 3 dimension tables
+        CREATE TABLE catalog_page (
+            cp_catalog_page_sk INTEGER PRIMARY KEY,
+            cp_catalog_page_id TEXT NOT NULL,
+            cp_start_date_sk INTEGER,
+            cp_end_date_sk INTEGER,
+            cp_department TEXT,
+            cp_catalog_number INTEGER,
+            cp_catalog_page_number INTEGER,
+            cp_description TEXT,
+            cp_type TEXT
+        );
+
+        CREATE TABLE web_page (
+            wp_web_page_sk INTEGER PRIMARY KEY,
+            wp_web_page_id TEXT NOT NULL,
+            wp_rec_start_date TEXT,
+            wp_rec_end_date TEXT,
+            wp_creation_date_sk INTEGER,
+            wp_access_date_sk INTEGER,
+            wp_autogen_flag TEXT,
+            wp_customer_sk INTEGER,
+            wp_url TEXT,
+            wp_type TEXT,
+            wp_char_count INTEGER,
+            wp_link_count INTEGER,
+            wp_image_count INTEGER,
+            wp_max_ad_count INTEGER
+        );
+
+        CREATE TABLE web_site (
+            web_site_sk INTEGER PRIMARY KEY,
+            web_site_id TEXT NOT NULL,
+            web_rec_start_date TEXT,
+            web_rec_end_date TEXT,
+            web_name TEXT,
+            web_open_date_sk INTEGER,
+            web_close_date_sk INTEGER,
+            web_class TEXT,
+            web_manager TEXT,
+            web_mkt_id INTEGER,
+            web_mkt_class TEXT,
+            web_mkt_desc TEXT,
+            web_market_manager TEXT,
+            web_company_id INTEGER,
+            web_company_name TEXT,
+            web_street_number TEXT,
+            web_street_name TEXT,
+            web_street_type TEXT,
+            web_suite_number TEXT,
+            web_city TEXT,
+            web_county TEXT,
+            web_state TEXT,
+            web_zip TEXT,
+            web_country TEXT,
+            web_gmt_offset REAL,
+            web_tax_percentage REAL
+        );
+
+        CREATE TABLE catalog_sales (
+            cs_sold_date_sk INTEGER,
+            cs_sold_time_sk INTEGER,
+            cs_ship_date_sk INTEGER,
+            cs_bill_customer_sk INTEGER,
+            cs_bill_cdemo_sk INTEGER,
+            cs_bill_hdemo_sk INTEGER,
+            cs_bill_addr_sk INTEGER,
+            cs_ship_customer_sk INTEGER,
+            cs_ship_cdemo_sk INTEGER,
+            cs_ship_hdemo_sk INTEGER,
+            cs_ship_addr_sk INTEGER,
+            cs_call_center_sk INTEGER,
+            cs_catalog_page_sk INTEGER,
+            cs_ship_mode_sk INTEGER,
+            cs_warehouse_sk INTEGER,
+            cs_item_sk INTEGER NOT NULL,
+            cs_promo_sk INTEGER,
+            cs_order_number INTEGER NOT NULL,
+            cs_quantity INTEGER,
+            cs_wholesale_cost REAL,
+            cs_list_price REAL,
+            cs_sales_price REAL,
+            cs_ext_discount_amt REAL,
+            cs_ext_sales_price REAL,
+            cs_ext_wholesale_cost REAL,
+            cs_ext_list_price REAL,
+            cs_ext_tax REAL,
+            cs_coupon_amt REAL,
+            cs_ext_ship_cost REAL,
+            cs_net_paid REAL,
+            cs_net_paid_inc_tax REAL,
+            cs_net_paid_inc_ship REAL,
+            cs_net_paid_inc_ship_tax REAL,
+            cs_net_profit REAL,
+            PRIMARY KEY (cs_item_sk, cs_order_number)
+        );
+
+        CREATE TABLE catalog_returns (
+            cr_returned_date_sk INTEGER,
+            cr_returned_time_sk INTEGER,
+            cr_item_sk INTEGER NOT NULL,
+            cr_refunded_customer_sk INTEGER,
+            cr_refunded_cdemo_sk INTEGER,
+            cr_refunded_hdemo_sk INTEGER,
+            cr_refunded_addr_sk INTEGER,
+            cr_returning_customer_sk INTEGER,
+            cr_returning_cdemo_sk INTEGER,
+            cr_returning_hdemo_sk INTEGER,
+            cr_returning_addr_sk INTEGER,
+            cr_call_center_sk INTEGER,
+            cr_catalog_page_sk INTEGER,
+            cr_ship_mode_sk INTEGER,
+            cr_warehouse_sk INTEGER,
+            cr_reason_sk INTEGER,
+            cr_order_number INTEGER NOT NULL,
+            cr_return_quantity INTEGER,
+            cr_return_amount REAL,
+            cr_return_tax REAL,
+            cr_return_amt_inc_tax REAL,
+            cr_fee REAL,
+            cr_return_ship_cost REAL,
+            cr_refunded_cash REAL,
+            cr_reversed_charge REAL,
+            cr_store_credit REAL,
+            cr_net_loss REAL,
+            PRIMARY KEY (cr_item_sk, cr_order_number)
+        );
+
+        CREATE TABLE web_sales (
+            ws_sold_date_sk INTEGER,
+            ws_sold_time_sk INTEGER,
+            ws_ship_date_sk INTEGER,
+            ws_item_sk INTEGER NOT NULL,
+            ws_bill_customer_sk INTEGER,
+            ws_bill_cdemo_sk INTEGER,
+            ws_bill_hdemo_sk INTEGER,
+            ws_bill_addr_sk INTEGER,
+            ws_ship_customer_sk INTEGER,
+            ws_ship_cdemo_sk INTEGER,
+            ws_ship_hdemo_sk INTEGER,
+            ws_ship_addr_sk INTEGER,
+            ws_web_page_sk INTEGER,
+            ws_web_site_sk INTEGER,
+            ws_ship_mode_sk INTEGER,
+            ws_warehouse_sk INTEGER,
+            ws_promo_sk INTEGER,
+            ws_order_number INTEGER NOT NULL,
+            ws_quantity INTEGER,
+            ws_wholesale_cost REAL,
+            ws_list_price REAL,
+            ws_sales_price REAL,
+            ws_ext_discount_amt REAL,
+            ws_ext_sales_price REAL,
+            ws_ext_wholesale_cost REAL,
+            ws_ext_list_price REAL,
+            ws_ext_tax REAL,
+            ws_coupon_amt REAL,
+            ws_ext_ship_cost REAL,
+            ws_net_paid REAL,
+            ws_net_paid_inc_tax REAL,
+            ws_net_paid_inc_ship REAL,
+            ws_net_paid_inc_ship_tax REAL,
+            ws_net_profit REAL,
+            PRIMARY KEY (ws_item_sk, ws_order_number)
+        );
+
+        CREATE TABLE web_returns (
+            wr_returned_date_sk INTEGER,
+            wr_returned_time_sk INTEGER,
+            wr_item_sk INTEGER NOT NULL,
+            wr_refunded_customer_sk INTEGER,
+            wr_refunded_cdemo_sk INTEGER,
+            wr_refunded_hdemo_sk INTEGER,
+            wr_refunded_addr_sk INTEGER,
+            wr_returning_customer_sk INTEGER,
+            wr_returning_cdemo_sk INTEGER,
+            wr_returning_hdemo_sk INTEGER,
+            wr_returning_addr_sk INTEGER,
+            wr_web_page_sk INTEGER,
+            wr_reason_sk INTEGER,
+            wr_order_number INTEGER NOT NULL,
+            wr_return_quantity INTEGER,
+            wr_return_amt REAL,
+            wr_return_tax REAL,
+            wr_return_amt_inc_tax REAL,
+            wr_fee REAL,
+            wr_return_ship_cost REAL,
+            wr_refunded_cash REAL,
+            wr_reversed_charge REAL,
+            wr_account_credit REAL,
+            wr_net_loss REAL,
+            PRIMARY KEY (wr_item_sk, wr_order_number)
+        );
+
+        -- Phase 4 dimension tables
+        CREATE TABLE customer_demographics (
+            cd_demo_sk INTEGER PRIMARY KEY,
+            cd_gender TEXT,
+            cd_marital_status TEXT,
+            cd_education_status TEXT,
+            cd_purchase_estimate INTEGER,
+            cd_credit_rating TEXT,
+            cd_dep_count INTEGER,
+            cd_dep_employed_count INTEGER,
+            cd_dep_college_count INTEGER
+        );
+
+        CREATE TABLE household_demographics (
+            hd_demo_sk INTEGER PRIMARY KEY,
+            hd_income_band_sk INTEGER,
+            hd_buy_potential TEXT,
+            hd_dep_count INTEGER,
+            hd_vehicle_count INTEGER
+        );
+
+        CREATE TABLE income_band (
+            ib_income_band_sk INTEGER PRIMARY KEY,
+            ib_lower_bound INTEGER,
+            ib_upper_bound INTEGER
+        );
+
+        CREATE TABLE call_center (
+            cc_call_center_sk INTEGER PRIMARY KEY,
+            cc_call_center_id TEXT NOT NULL,
+            cc_rec_start_date TEXT,
+            cc_rec_end_date TEXT,
+            cc_closed_date_sk INTEGER,
+            cc_open_date_sk INTEGER,
+            cc_name TEXT,
+            cc_class TEXT,
+            cc_employees INTEGER,
+            cc_sq_ft INTEGER,
+            cc_hours TEXT,
+            cc_manager TEXT,
+            cc_mkt_id INTEGER,
+            cc_mkt_class TEXT,
+            cc_mkt_desc TEXT,
+            cc_market_manager TEXT,
+            cc_division INTEGER,
+            cc_division_name TEXT,
+            cc_company INTEGER,
+            cc_company_name TEXT,
+            cc_street_number TEXT,
+            cc_street_name TEXT,
+            cc_street_type TEXT,
+            cc_suite_number TEXT,
+            cc_city TEXT,
+            cc_county TEXT,
+            cc_state TEXT,
+            cc_zip TEXT,
+            cc_country TEXT,
+            cc_gmt_offset REAL,
+            cc_tax_percentage REAL
+        );
+
+        CREATE TABLE inventory (
+            inv_date_sk INTEGER NOT NULL,
+            inv_item_sk INTEGER NOT NULL,
+            inv_warehouse_sk INTEGER NOT NULL,
+            inv_quantity_on_hand INTEGER,
+            PRIMARY KEY (inv_date_sk, inv_item_sk, inv_warehouse_sk)
+        );
     "#,
     )
     .unwrap();
@@ -5515,6 +5905,348 @@ fn create_tpcds_schema_duckdb(conn: &DuckDBConn) {
         CREATE INDEX idx_ss_date ON store_sales(ss_sold_date_sk);
         CREATE INDEX idx_ss_customer ON store_sales(ss_customer_sk);
         CREATE INDEX idx_ss_store ON store_sales(ss_store_sk);
+
+        -- Phase 2 dimension tables
+        CREATE TABLE promotion (
+            p_promo_sk INTEGER PRIMARY KEY,
+            p_promo_id VARCHAR(16) NOT NULL,
+            p_start_date_sk INTEGER,
+            p_end_date_sk INTEGER,
+            p_item_sk INTEGER,
+            p_cost DECIMAL(15,2),
+            p_response_target INTEGER,
+            p_promo_name VARCHAR(50),
+            p_channel_dmail VARCHAR(1),
+            p_channel_email VARCHAR(1),
+            p_channel_catalog VARCHAR(1),
+            p_channel_tv VARCHAR(1),
+            p_channel_radio VARCHAR(1),
+            p_channel_press VARCHAR(1),
+            p_channel_event VARCHAR(1),
+            p_channel_demo VARCHAR(1),
+            p_channel_details VARCHAR(100),
+            p_purpose VARCHAR(15),
+            p_discount_active VARCHAR(1)
+        );
+
+        CREATE TABLE warehouse (
+            w_warehouse_sk INTEGER PRIMARY KEY,
+            w_warehouse_id VARCHAR(16) NOT NULL,
+            w_warehouse_name VARCHAR(20),
+            w_warehouse_sq_ft INTEGER,
+            w_street_number VARCHAR(10),
+            w_street_name VARCHAR(60),
+            w_street_type VARCHAR(15),
+            w_suite_number VARCHAR(10),
+            w_city VARCHAR(60),
+            w_county VARCHAR(30),
+            w_state VARCHAR(2),
+            w_zip VARCHAR(10),
+            w_country VARCHAR(20),
+            w_gmt_offset DECIMAL(5,2)
+        );
+
+        CREATE TABLE ship_mode (
+            sm_ship_mode_sk INTEGER PRIMARY KEY,
+            sm_ship_mode_id VARCHAR(16) NOT NULL,
+            sm_type VARCHAR(30),
+            sm_code VARCHAR(10),
+            sm_carrier VARCHAR(20),
+            sm_contract VARCHAR(20)
+        );
+
+        CREATE TABLE reason (
+            r_reason_sk INTEGER PRIMARY KEY,
+            r_reason_id VARCHAR(16) NOT NULL,
+            r_reason_desc VARCHAR(100)
+        );
+
+        CREATE TABLE store_returns (
+            sr_returned_date_sk INTEGER,
+            sr_return_time_sk INTEGER,
+            sr_item_sk INTEGER NOT NULL,
+            sr_customer_sk INTEGER,
+            sr_cdemo_sk INTEGER,
+            sr_hdemo_sk INTEGER,
+            sr_addr_sk INTEGER,
+            sr_store_sk INTEGER,
+            sr_reason_sk INTEGER,
+            sr_ticket_number INTEGER NOT NULL,
+            sr_return_quantity INTEGER,
+            sr_return_amt DECIMAL(7,2),
+            sr_return_tax DECIMAL(7,2),
+            sr_return_amt_inc_tax DECIMAL(7,2),
+            sr_fee DECIMAL(7,2),
+            sr_return_ship_cost DECIMAL(7,2),
+            sr_refunded_cash DECIMAL(7,2),
+            sr_reversed_charge DECIMAL(7,2),
+            sr_store_credit DECIMAL(7,2),
+            sr_net_loss DECIMAL(7,2),
+            PRIMARY KEY (sr_item_sk, sr_ticket_number)
+        );
+
+        -- Phase 3 dimension tables
+        CREATE TABLE catalog_page (
+            cp_catalog_page_sk INTEGER PRIMARY KEY,
+            cp_catalog_page_id VARCHAR(16) NOT NULL,
+            cp_start_date_sk INTEGER,
+            cp_end_date_sk INTEGER,
+            cp_department VARCHAR(50),
+            cp_catalog_number INTEGER,
+            cp_catalog_page_number INTEGER,
+            cp_description VARCHAR(100),
+            cp_type VARCHAR(100)
+        );
+
+        CREATE TABLE web_page (
+            wp_web_page_sk INTEGER PRIMARY KEY,
+            wp_web_page_id VARCHAR(16) NOT NULL,
+            wp_rec_start_date DATE,
+            wp_rec_end_date DATE,
+            wp_creation_date_sk INTEGER,
+            wp_access_date_sk INTEGER,
+            wp_autogen_flag VARCHAR(1),
+            wp_customer_sk INTEGER,
+            wp_url VARCHAR(100),
+            wp_type VARCHAR(50),
+            wp_char_count INTEGER,
+            wp_link_count INTEGER,
+            wp_image_count INTEGER,
+            wp_max_ad_count INTEGER
+        );
+
+        CREATE TABLE web_site (
+            web_site_sk INTEGER PRIMARY KEY,
+            web_site_id VARCHAR(16) NOT NULL,
+            web_rec_start_date DATE,
+            web_rec_end_date DATE,
+            web_name VARCHAR(50),
+            web_open_date_sk INTEGER,
+            web_close_date_sk INTEGER,
+            web_class VARCHAR(50),
+            web_manager VARCHAR(40),
+            web_mkt_id INTEGER,
+            web_mkt_class VARCHAR(50),
+            web_mkt_desc VARCHAR(100),
+            web_market_manager VARCHAR(40),
+            web_company_id INTEGER,
+            web_company_name VARCHAR(50),
+            web_street_number VARCHAR(10),
+            web_street_name VARCHAR(60),
+            web_street_type VARCHAR(15),
+            web_suite_number VARCHAR(10),
+            web_city VARCHAR(60),
+            web_county VARCHAR(30),
+            web_state VARCHAR(2),
+            web_zip VARCHAR(10),
+            web_country VARCHAR(20),
+            web_gmt_offset DECIMAL(5,2),
+            web_tax_percentage DECIMAL(5,2)
+        );
+
+        CREATE TABLE catalog_sales (
+            cs_sold_date_sk INTEGER,
+            cs_sold_time_sk INTEGER,
+            cs_ship_date_sk INTEGER,
+            cs_bill_customer_sk INTEGER,
+            cs_bill_cdemo_sk INTEGER,
+            cs_bill_hdemo_sk INTEGER,
+            cs_bill_addr_sk INTEGER,
+            cs_ship_customer_sk INTEGER,
+            cs_ship_cdemo_sk INTEGER,
+            cs_ship_hdemo_sk INTEGER,
+            cs_ship_addr_sk INTEGER,
+            cs_call_center_sk INTEGER,
+            cs_catalog_page_sk INTEGER,
+            cs_ship_mode_sk INTEGER,
+            cs_warehouse_sk INTEGER,
+            cs_item_sk INTEGER NOT NULL,
+            cs_promo_sk INTEGER,
+            cs_order_number INTEGER NOT NULL,
+            cs_quantity INTEGER,
+            cs_wholesale_cost DECIMAL(7,2),
+            cs_list_price DECIMAL(7,2),
+            cs_sales_price DECIMAL(7,2),
+            cs_ext_discount_amt DECIMAL(7,2),
+            cs_ext_sales_price DECIMAL(7,2),
+            cs_ext_wholesale_cost DECIMAL(7,2),
+            cs_ext_list_price DECIMAL(7,2),
+            cs_ext_tax DECIMAL(7,2),
+            cs_coupon_amt DECIMAL(7,2),
+            cs_ext_ship_cost DECIMAL(7,2),
+            cs_net_paid DECIMAL(7,2),
+            cs_net_paid_inc_tax DECIMAL(7,2),
+            cs_net_paid_inc_ship DECIMAL(7,2),
+            cs_net_paid_inc_ship_tax DECIMAL(7,2),
+            cs_net_profit DECIMAL(7,2),
+            PRIMARY KEY (cs_item_sk, cs_order_number)
+        );
+
+        CREATE TABLE catalog_returns (
+            cr_returned_date_sk INTEGER,
+            cr_returned_time_sk INTEGER,
+            cr_item_sk INTEGER NOT NULL,
+            cr_refunded_customer_sk INTEGER,
+            cr_refunded_cdemo_sk INTEGER,
+            cr_refunded_hdemo_sk INTEGER,
+            cr_refunded_addr_sk INTEGER,
+            cr_returning_customer_sk INTEGER,
+            cr_returning_cdemo_sk INTEGER,
+            cr_returning_hdemo_sk INTEGER,
+            cr_returning_addr_sk INTEGER,
+            cr_call_center_sk INTEGER,
+            cr_catalog_page_sk INTEGER,
+            cr_ship_mode_sk INTEGER,
+            cr_warehouse_sk INTEGER,
+            cr_reason_sk INTEGER,
+            cr_order_number INTEGER NOT NULL,
+            cr_return_quantity INTEGER,
+            cr_return_amount DECIMAL(7,2),
+            cr_return_tax DECIMAL(7,2),
+            cr_return_amt_inc_tax DECIMAL(7,2),
+            cr_fee DECIMAL(7,2),
+            cr_return_ship_cost DECIMAL(7,2),
+            cr_refunded_cash DECIMAL(7,2),
+            cr_reversed_charge DECIMAL(7,2),
+            cr_store_credit DECIMAL(7,2),
+            cr_net_loss DECIMAL(7,2),
+            PRIMARY KEY (cr_item_sk, cr_order_number)
+        );
+
+        CREATE TABLE web_sales (
+            ws_sold_date_sk INTEGER,
+            ws_sold_time_sk INTEGER,
+            ws_ship_date_sk INTEGER,
+            ws_item_sk INTEGER NOT NULL,
+            ws_bill_customer_sk INTEGER,
+            ws_bill_cdemo_sk INTEGER,
+            ws_bill_hdemo_sk INTEGER,
+            ws_bill_addr_sk INTEGER,
+            ws_ship_customer_sk INTEGER,
+            ws_ship_cdemo_sk INTEGER,
+            ws_ship_hdemo_sk INTEGER,
+            ws_ship_addr_sk INTEGER,
+            ws_web_page_sk INTEGER,
+            ws_web_site_sk INTEGER,
+            ws_ship_mode_sk INTEGER,
+            ws_warehouse_sk INTEGER,
+            ws_promo_sk INTEGER,
+            ws_order_number INTEGER NOT NULL,
+            ws_quantity INTEGER,
+            ws_wholesale_cost DECIMAL(7,2),
+            ws_list_price DECIMAL(7,2),
+            ws_sales_price DECIMAL(7,2),
+            ws_ext_discount_amt DECIMAL(7,2),
+            ws_ext_sales_price DECIMAL(7,2),
+            ws_ext_wholesale_cost DECIMAL(7,2),
+            ws_ext_list_price DECIMAL(7,2),
+            ws_ext_tax DECIMAL(7,2),
+            ws_coupon_amt DECIMAL(7,2),
+            ws_ext_ship_cost DECIMAL(7,2),
+            ws_net_paid DECIMAL(7,2),
+            ws_net_paid_inc_tax DECIMAL(7,2),
+            ws_net_paid_inc_ship DECIMAL(7,2),
+            ws_net_paid_inc_ship_tax DECIMAL(7,2),
+            ws_net_profit DECIMAL(7,2),
+            PRIMARY KEY (ws_item_sk, ws_order_number)
+        );
+
+        CREATE TABLE web_returns (
+            wr_returned_date_sk INTEGER,
+            wr_returned_time_sk INTEGER,
+            wr_item_sk INTEGER NOT NULL,
+            wr_refunded_customer_sk INTEGER,
+            wr_refunded_cdemo_sk INTEGER,
+            wr_refunded_hdemo_sk INTEGER,
+            wr_refunded_addr_sk INTEGER,
+            wr_returning_customer_sk INTEGER,
+            wr_returning_cdemo_sk INTEGER,
+            wr_returning_hdemo_sk INTEGER,
+            wr_returning_addr_sk INTEGER,
+            wr_web_page_sk INTEGER,
+            wr_reason_sk INTEGER,
+            wr_order_number INTEGER NOT NULL,
+            wr_return_quantity INTEGER,
+            wr_return_amt DECIMAL(7,2),
+            wr_return_tax DECIMAL(7,2),
+            wr_return_amt_inc_tax DECIMAL(7,2),
+            wr_fee DECIMAL(7,2),
+            wr_return_ship_cost DECIMAL(7,2),
+            wr_refunded_cash DECIMAL(7,2),
+            wr_reversed_charge DECIMAL(7,2),
+            wr_account_credit DECIMAL(7,2),
+            wr_net_loss DECIMAL(7,2),
+            PRIMARY KEY (wr_item_sk, wr_order_number)
+        );
+
+        -- Phase 4 dimension tables
+        CREATE TABLE customer_demographics (
+            cd_demo_sk INTEGER PRIMARY KEY,
+            cd_gender VARCHAR(1),
+            cd_marital_status VARCHAR(1),
+            cd_education_status VARCHAR(20),
+            cd_purchase_estimate INTEGER,
+            cd_credit_rating VARCHAR(10),
+            cd_dep_count INTEGER,
+            cd_dep_employed_count INTEGER,
+            cd_dep_college_count INTEGER
+        );
+
+        CREATE TABLE household_demographics (
+            hd_demo_sk INTEGER PRIMARY KEY,
+            hd_income_band_sk INTEGER,
+            hd_buy_potential VARCHAR(15),
+            hd_dep_count INTEGER,
+            hd_vehicle_count INTEGER
+        );
+
+        CREATE TABLE income_band (
+            ib_income_band_sk INTEGER PRIMARY KEY,
+            ib_lower_bound INTEGER,
+            ib_upper_bound INTEGER
+        );
+
+        CREATE TABLE call_center (
+            cc_call_center_sk INTEGER PRIMARY KEY,
+            cc_call_center_id VARCHAR(16) NOT NULL,
+            cc_rec_start_date DATE,
+            cc_rec_end_date DATE,
+            cc_closed_date_sk INTEGER,
+            cc_open_date_sk INTEGER,
+            cc_name VARCHAR(50),
+            cc_class VARCHAR(50),
+            cc_employees INTEGER,
+            cc_sq_ft INTEGER,
+            cc_hours VARCHAR(20),
+            cc_manager VARCHAR(40),
+            cc_mkt_id INTEGER,
+            cc_mkt_class VARCHAR(50),
+            cc_mkt_desc VARCHAR(100),
+            cc_market_manager VARCHAR(40),
+            cc_division INTEGER,
+            cc_division_name VARCHAR(50),
+            cc_company INTEGER,
+            cc_company_name VARCHAR(50),
+            cc_street_number VARCHAR(10),
+            cc_street_name VARCHAR(60),
+            cc_street_type VARCHAR(15),
+            cc_suite_number VARCHAR(10),
+            cc_city VARCHAR(60),
+            cc_county VARCHAR(30),
+            cc_state VARCHAR(2),
+            cc_zip VARCHAR(10),
+            cc_country VARCHAR(20),
+            cc_gmt_offset DECIMAL(5,2),
+            cc_tax_percentage DECIMAL(5,2)
+        );
+
+        CREATE TABLE inventory (
+            inv_date_sk INTEGER NOT NULL,
+            inv_item_sk INTEGER NOT NULL,
+            inv_warehouse_sk INTEGER NOT NULL,
+            inv_quantity_on_hand INTEGER,
+            PRIMARY KEY (inv_date_sk, inv_item_sk, inv_warehouse_sk)
+        );
     "#,
     )
     .unwrap();
@@ -5832,6 +6564,1414 @@ fn load_store_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             net_paid_inc_tax,
             net_profit
         ]).unwrap();
+    }
+}
+
+// =============================================================================
+// Additional SQLite Data Loaders (Phase 2-4 tables)
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_promotion_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let channels = ["Y", "N"];
+    let purposes = ["Unknown", "Direct", "Digital"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO promotion VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.promotion_count {
+        let p_promo_id = format!("AAAAAA{:010}", i);
+        let start_date_sk = data.random_i32(1, 500);
+        let end_date_sk = start_date_sk + data.random_i32(7, 30);
+
+        stmt.execute(rusqlite::params![
+            i,
+            p_promo_id,
+            start_date_sk,
+            end_date_sk,
+            (i % data.item_count) + 1,
+            data.random_f64(100.0, 10000.0),
+            data.random_i32(1, 10),
+            format!("Promo {}", i),
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            format!("Details for promo {}", i),
+            purposes[i % 3],
+            channels[i % 2]
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.warehouse_count {
+        let w_warehouse_id = format!("AAAAAA{:010}", i);
+        let state_idx = i % STATES.len();
+
+        stmt.execute(rusqlite::params![
+            i,
+            w_warehouse_id,
+            format!("Warehouse {}", i),
+            data.random_i32(50000, 500000),
+            format!("{}", data.random_i32(1, 9999)),
+            data.random_varchar(40),
+            "Street",
+            format!("Suite {}", data.random_i32(100, 999)),
+            data.random_city(),
+            format!("{} County", STATES[state_idx]),
+            STATES[state_idx],
+            data.random_zip(),
+            "United States",
+            -5.0 - (state_idx % 4) as f64
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_ship_mode_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let ship_types = ["REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "ECONOMY"];
+    let carriers = ["DHL", "FEDEX", "UPS", "USPS", "AIRBORNE"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO ship_mode VALUES (?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.ship_mode_count.min(20) {
+        let sm_ship_mode_id = format!("AAAAAA{:010}", i);
+        let type_idx = i % ship_types.len();
+        let carrier_idx = i % carriers.len();
+
+        stmt.execute(rusqlite::params![
+            i,
+            sm_ship_mode_id,
+            ship_types[type_idx],
+            format!("{}{}", &carriers[carrier_idx][0..2], i),
+            carriers[carrier_idx],
+            format!("Contract {}", i)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_reason_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let reasons = [
+        "Did not like the color", "Did not fit", "Wrong item shipped",
+        "Found better price elsewhere", "Product quality issue", "Changed mind",
+        "Gift returned", "Damaged in shipping", "Not as described", "Duplicate order",
+        "Ordered by mistake", "Product defective", "Size too small", "Size too large",
+        "Wrong product received"
+    ];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO reason VALUES (?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.reason_count.min(reasons.len()) {
+        let r_reason_id = format!("AAAAAA{:010}", i);
+
+        stmt.execute(rusqlite::params![
+            i,
+            r_reason_id,
+            reasons[i - 1]
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_store_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO store_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.store_returns_count {
+        let sr_returned_date_sk = (i % num_dates) + 1;
+        let sr_return_time_sk = (i % 24) * 3600;
+        let sr_item_sk = (i % data.item_count) + 1;
+        let sr_customer_sk = (i % data.customer_count) + 1;
+        let sr_store_sk = (i % data.store_count) + 1;
+        let sr_ticket_number = (i / 3) + 1;
+        let sr_reason_sk = (i % data.reason_count.min(15)) + 1;
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let store_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - store_credit + fee;
+
+        stmt.execute(rusqlite::params![
+            sr_returned_date_sk,
+            sr_return_time_sk,
+            sr_item_sk,
+            sr_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            sr_store_sk,
+            sr_reason_sk,
+            sr_ticket_number,
+            return_quantity,
+            return_amt,
+            return_tax,
+            return_amt_inc_tax,
+            fee,
+            return_ship_cost,
+            refunded_cash,
+            reversed_charge,
+            store_credit,
+            net_loss
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let departments = ["Men", "Women", "Children", "Electronics", "Home", "Garden"];
+    let page_types = ["Cover", "Regular", "Index", "Special"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO catalog_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.catalog_page_count {
+        let cp_catalog_page_id = format!("AAAAAA{:010}", i);
+        let dept_idx = i % departments.len();
+        let type_idx = i % page_types.len();
+
+        stmt.execute(rusqlite::params![
+            i,
+            cp_catalog_page_id,
+            data.random_i32(1, 500),
+            data.random_i32(501, 1000),
+            departments[dept_idx],
+            (i / 100) + 1,
+            i % 100 + 1,
+            format!("Catalog page {} description", i),
+            page_types[type_idx]
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let page_types = ["Home", "Product", "Category", "Search", "Checkout", "Cart"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.web_page_count {
+        let wp_web_page_id = format!("AAAAAA{:010}", i);
+        let type_idx = i % page_types.len();
+
+        stmt.execute(rusqlite::params![
+            i,
+            wp_web_page_id,
+            rusqlite::types::Null,
+            rusqlite::types::Null,
+            data.random_i32(1, 500),
+            data.random_i32(501, 1000),
+            if i % 2 == 0 { "Y" } else { "N" },
+            (i % data.customer_count) + 1,
+            format!("http://www.example.com/page{}", i),
+            page_types[type_idx],
+            data.random_i32(100, 10000),
+            data.random_i32(5, 50),
+            data.random_i32(1, 20),
+            data.random_i32(1, 10)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_site_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_site VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.web_site_count {
+        let web_site_id = format!("AAAAAA{:010}", i);
+        let state_idx = i % STATES.len();
+
+        stmt.execute(rusqlite::params![
+            i,
+            web_site_id,
+            rusqlite::types::Null,
+            rusqlite::types::Null,
+            format!("Site {}", i),
+            data.random_i32(1, 500),
+            rusqlite::types::Null,
+            "medium",
+            data.random_varchar(30),
+            (i % 6) + 1,
+            format!("Market Class {}", i % 10),
+            format!("Market description for site {}", i),
+            data.random_varchar(30),
+            (i % 3) + 1,
+            format!("Company {}", (i % 3) + 1),
+            format!("{}", data.random_i32(100, 9999)),
+            data.random_varchar(40),
+            "Street",
+            format!("Suite {}", data.random_i32(100, 999)),
+            data.random_city(),
+            format!("{} County", STATES[state_idx]),
+            STATES[state_idx],
+            data.random_zip(),
+            "United States",
+            -5.0 - (state_idx % 4) as f64,
+            data.random_f64(0.0, 0.11)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO catalog_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.catalog_sales_count {
+        let cs_sold_date_sk = (i % num_dates) + 1;
+        let cs_sold_time_sk = (i % 24) * 3600;
+        let cs_ship_date_sk = cs_sold_date_sk + data.random_i32(1, 14) as usize;
+        let cs_item_sk = (i % data.item_count) + 1;
+        let cs_bill_customer_sk = (i % data.customer_count) + 1;
+        let cs_order_number = (i / 5) + 1;
+
+        let quantity = data.random_i32(1, 100);
+        let wholesale_cost = data.random_f64(1.0, 50.0);
+        let list_price = wholesale_cost * data.random_f64(1.5, 3.0);
+        let sales_price = list_price * data.random_f64(0.8, 1.0);
+        let ext_sales_price = sales_price * quantity as f64;
+        let ext_wholesale_cost = wholesale_cost * quantity as f64;
+        let ext_list_price = list_price * quantity as f64;
+        let ext_discount_amt = ext_list_price - ext_sales_price;
+        let ext_tax = ext_sales_price * 0.08;
+        let coupon_amt = data.random_f64(0.0, 20.0);
+        let ext_ship_cost = data.random_f64(5.0, 30.0);
+        let net_paid = ext_sales_price - coupon_amt;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship_cost;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale_cost;
+
+        stmt.execute(rusqlite::params![
+            cs_sold_date_sk,
+            cs_sold_time_sk,
+            cs_ship_date_sk,
+            cs_bill_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            cs_bill_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            (i % data.call_center_count) + 1,
+            (i % data.catalog_page_count) + 1,
+            (i % data.ship_mode_count.min(20)) + 1,
+            (i % data.warehouse_count) + 1,
+            cs_item_sk,
+            (i % data.promotion_count) + 1,
+            cs_order_number,
+            quantity,
+            wholesale_cost,
+            list_price,
+            sales_price,
+            ext_discount_amt,
+            ext_sales_price,
+            ext_wholesale_cost,
+            ext_list_price,
+            ext_tax,
+            coupon_amt,
+            ext_ship_cost,
+            net_paid,
+            net_paid_inc_tax,
+            net_paid_inc_ship,
+            net_paid_inc_ship_tax,
+            net_profit
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO catalog_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.catalog_returns_count {
+        let cr_returned_date_sk = (i % num_dates) + 1;
+        let cr_returned_time_sk = (i % 24) * 3600;
+        let cr_item_sk = (i % data.item_count) + 1;
+        let cr_refunded_customer_sk = (i % data.customer_count) + 1;
+        let cr_order_number = (i / 3) + 1;
+        let cr_reason_sk = (i % data.reason_count.min(15)) + 1;
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let store_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - store_credit + fee;
+
+        stmt.execute(rusqlite::params![
+            cr_returned_date_sk,
+            cr_returned_time_sk,
+            cr_item_sk,
+            cr_refunded_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            cr_refunded_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            (i % data.call_center_count) + 1,
+            (i % data.catalog_page_count) + 1,
+            (i % data.ship_mode_count.min(20)) + 1,
+            (i % data.warehouse_count) + 1,
+            cr_reason_sk,
+            cr_order_number,
+            return_quantity,
+            return_amt,
+            return_tax,
+            return_amt_inc_tax,
+            fee,
+            return_ship_cost,
+            refunded_cash,
+            reversed_charge,
+            store_credit,
+            net_loss
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.web_sales_count {
+        let ws_sold_date_sk = (i % num_dates) + 1;
+        let ws_sold_time_sk = (i % 24) * 3600;
+        let ws_ship_date_sk = ws_sold_date_sk + data.random_i32(1, 14) as usize;
+        let ws_item_sk = (i % data.item_count) + 1;
+        let ws_bill_customer_sk = (i % data.customer_count) + 1;
+        let ws_order_number = (i / 5) + 1;
+
+        let quantity = data.random_i32(1, 100);
+        let wholesale_cost = data.random_f64(1.0, 50.0);
+        let list_price = wholesale_cost * data.random_f64(1.5, 3.0);
+        let sales_price = list_price * data.random_f64(0.8, 1.0);
+        let ext_sales_price = sales_price * quantity as f64;
+        let ext_wholesale_cost = wholesale_cost * quantity as f64;
+        let ext_list_price = list_price * quantity as f64;
+        let ext_discount_amt = ext_list_price - ext_sales_price;
+        let ext_tax = ext_sales_price * 0.08;
+        let coupon_amt = data.random_f64(0.0, 20.0);
+        let ext_ship_cost = data.random_f64(5.0, 30.0);
+        let net_paid = ext_sales_price - coupon_amt;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship_cost;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale_cost;
+
+        stmt.execute(rusqlite::params![
+            ws_sold_date_sk,
+            ws_sold_time_sk,
+            ws_ship_date_sk,
+            ws_item_sk,
+            ws_bill_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            ws_bill_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            (i % data.web_page_count) + 1,
+            (i % data.web_site_count) + 1,
+            (i % data.ship_mode_count.min(20)) + 1,
+            (i % data.warehouse_count) + 1,
+            (i % data.promotion_count) + 1,
+            ws_order_number,
+            quantity,
+            wholesale_cost,
+            list_price,
+            sales_price,
+            ext_discount_amt,
+            ext_sales_price,
+            ext_wholesale_cost,
+            ext_list_price,
+            ext_tax,
+            coupon_amt,
+            ext_ship_cost,
+            net_paid,
+            net_paid_inc_tax,
+            net_paid_inc_ship,
+            net_paid_inc_ship_tax,
+            net_profit
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.web_returns_count {
+        let wr_returned_date_sk = (i % num_dates) + 1;
+        let wr_returned_time_sk = (i % 24) * 3600;
+        let wr_item_sk = (i % data.item_count) + 1;
+        let wr_refunded_customer_sk = (i % data.customer_count) + 1;
+        let wr_order_number = (i / 3) + 1;
+        let wr_reason_sk = (i % data.reason_count.min(15)) + 1;
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let account_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - account_credit + fee;
+
+        stmt.execute(rusqlite::params![
+            wr_returned_date_sk,
+            wr_returned_time_sk,
+            wr_item_sk,
+            wr_refunded_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            wr_refunded_customer_sk,
+            i % 1920 + 1,
+            i % 7200 + 1,
+            (i % data.customer_address_count) + 1,
+            (i % data.web_page_count) + 1,
+            wr_reason_sk,
+            wr_order_number,
+            return_quantity,
+            return_amt,
+            return_tax,
+            return_amt_inc_tax,
+            fee,
+            return_ship_cost,
+            refunded_cash,
+            reversed_charge,
+            account_credit,
+            net_loss
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_customer_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    let mut sk = 0;
+    'outer: for gender in GENDERS.iter() {
+        for marital in MARITAL_STATUS.iter() {
+            for education in EDUCATION_STATUS.iter() {
+                for &credit in CREDIT_RATINGS.iter() {
+                    for &dep_count in &DEP_COUNTS[0..3] {
+                        sk += 1;
+                        if sk > data.customer_demographics_count {
+                            break 'outer;
+                        }
+
+                        let purchase_estimate = data.random_i32(500, 10000);
+                        let dep_employed = data.random_i32(0, dep_count);
+                        let dep_college = data.random_i32(0, dep_count);
+
+                        stmt.execute(rusqlite::params![
+                            sk,
+                            gender,
+                            marital,
+                            education,
+                            purchase_estimate,
+                            credit,
+                            dep_count,
+                            dep_employed,
+                            dep_college
+                        ]).unwrap();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_household_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    let mut sk = 0;
+    'outer: for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
+        for &buy_potential in BUY_POTENTIALS.iter() {
+            for &dep_count in DEP_COUNTS.iter() {
+                for &vehicle_count in VEHICLE_COUNTS.iter() {
+                    sk += 1;
+                    if sk > data.household_demographics_count {
+                        break 'outer;
+                    }
+
+                    stmt.execute(rusqlite::params![
+                        sk,
+                        income_band_sk,
+                        buy_potential,
+                        dep_count,
+                        vehicle_count
+                    ]).unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_income_band_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO income_band VALUES (?, ?, ?)"
+    ).unwrap();
+
+    let count = data.income_band_count.min(INCOME_BANDS.len());
+    for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
+        stmt.execute(rusqlite::params![
+            i + 1,
+            lower,
+            upper
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_call_center_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let classes = ["small", "medium", "large", "unknown"];
+    let hours = ["8AM-4PM", "8AM-8PM", "8AM-12AM"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO call_center VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.call_center_count {
+        let cc_call_center_id = format!("AAAAAA{:010}", i);
+        let class_idx = i % classes.len();
+        let hours_idx = i % hours.len();
+        let state_idx = i % STATES.len();
+
+        stmt.execute(rusqlite::params![
+            i,
+            cc_call_center_id,
+            rusqlite::types::Null,
+            rusqlite::types::Null,
+            rusqlite::types::Null,
+            data.random_i32(1, 500),
+            format!("Call Center {}", i),
+            classes[class_idx],
+            data.random_i32(10, 500),
+            data.random_i32(1000, 50000),
+            hours[hours_idx],
+            data.random_varchar(30),
+            (i % 6) + 1,
+            format!("Market Class {}", i % 10),
+            format!("Market Description {}", i),
+            data.random_varchar(30),
+            (i % 3) + 1,
+            format!("Division {}", (i % 3) + 1),
+            (i % 2) + 1,
+            format!("Company {}", (i % 2) + 1),
+            format!("{}", data.random_i32(100, 9999)),
+            data.random_varchar(40),
+            "Street",
+            format!("Suite {}", data.random_i32(100, 999)),
+            data.random_city(),
+            format!("{} County", STATES[state_idx]),
+            STATES[state_idx],
+            data.random_zip(),
+            "United States",
+            -5.0 - (state_idx % 4) as f64,
+            data.random_f64(0.0, 0.11)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_inventory_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
+    let num_dates = 52.min(data.date_dim_count);
+    let num_items = data.item_count;
+    let num_warehouses = data.warehouse_count;
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO inventory VALUES (?, ?, ?, ?)"
+    ).unwrap();
+
+    let mut count = 0;
+    'outer: for week in 0..num_dates {
+        let date_sk = week * 7 + 1;
+        let items_per_week = (data.inventory_count / num_dates).min(num_items * num_warehouses);
+        let items_sample = (items_per_week / num_warehouses).max(1);
+
+        for item_offset in 0..items_sample {
+            let item_sk = (item_offset % num_items) + 1;
+
+            for warehouse_sk in 1..=num_warehouses {
+                count += 1;
+                if count > data.inventory_count {
+                    break 'outer;
+                }
+
+                stmt.execute(rusqlite::params![
+                    date_sk,
+                    item_sk,
+                    warehouse_sk,
+                    data.random_i32(0, 1000)
+                ]).unwrap();
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Additional DuckDB Data Loaders (Phase 2-4 tables)
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_promotion_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let channels = ["Y", "N"];
+    let purposes = ["Unknown", "Direct", "Digital"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO promotion VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.promotion_count {
+        let p_promo_id = format!("AAAAAA{:010}", i);
+        let start_date_sk = data.random_i32(1, 500);
+        let end_date_sk = start_date_sk + data.random_i32(7, 30);
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            p_promo_id,
+            start_date_sk,
+            end_date_sk,
+            ((i % data.item_count) + 1) as i64,
+            data.random_f64(100.0, 10000.0),
+            data.random_i32(1, 10),
+            format!("Promo {}", i),
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            channels[i % 2],
+            channels[(i + 1) % 2],
+            format!("Details for promo {}", i),
+            purposes[i % 3],
+            channels[i % 2]
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.warehouse_count {
+        let w_warehouse_id = format!("AAAAAA{:010}", i);
+        let state_idx = i % STATES.len();
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            w_warehouse_id,
+            format!("Warehouse {}", i),
+            data.random_i32(50000, 500000),
+            format!("{}", data.random_i32(1, 9999)),
+            data.random_varchar(40),
+            "Street",
+            format!("Suite {}", data.random_i32(100, 999)),
+            data.random_city(),
+            format!("{} County", STATES[state_idx]),
+            STATES[state_idx],
+            data.random_zip(),
+            "United States",
+            -5.0 - (state_idx % 4) as f64
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_ship_mode_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let ship_types = ["REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "ECONOMY"];
+    let carriers = ["DHL", "FEDEX", "UPS", "USPS", "AIRBORNE"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO ship_mode VALUES (?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.ship_mode_count.min(20) {
+        let sm_ship_mode_id = format!("AAAAAA{:010}", i);
+        let type_idx = i % ship_types.len();
+        let carrier_idx = i % carriers.len();
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            sm_ship_mode_id,
+            ship_types[type_idx],
+            format!("{}{}", &carriers[carrier_idx][0..2], i),
+            carriers[carrier_idx],
+            format!("Contract {}", i)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_reason_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let reasons = [
+        "Did not like the color", "Did not fit", "Wrong item shipped",
+        "Found better price elsewhere", "Product quality issue", "Changed mind",
+        "Gift returned", "Damaged in shipping", "Not as described", "Duplicate order",
+        "Ordered by mistake", "Product defective", "Size too small", "Size too large",
+        "Wrong product received"
+    ];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO reason VALUES (?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.reason_count.min(reasons.len()) {
+        let r_reason_id = format!("AAAAAA{:010}", i);
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            r_reason_id,
+            reasons[i - 1]
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_store_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO store_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.store_returns_count {
+        let sr_returned_date_sk = (i % num_dates) + 1;
+        let sr_return_time_sk = (i % 24) * 3600;
+        let sr_item_sk = (i % data.item_count) + 1;
+        let sr_customer_sk = (i % data.customer_count) + 1;
+        let sr_store_sk = (i % data.store_count) + 1;
+        let sr_ticket_number = (i / 3) + 1;
+        let sr_reason_sk = (i % data.reason_count.min(15)) + 1;
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let store_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - store_credit + fee;
+
+        stmt.execute(duckdb::params![
+            sr_returned_date_sk as i64,
+            sr_return_time_sk as i64,
+            sr_item_sk as i64,
+            sr_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            sr_store_sk as i64,
+            sr_reason_sk as i64,
+            sr_ticket_number as i64,
+            return_quantity,
+            return_amt,
+            return_tax,
+            return_amt_inc_tax,
+            fee,
+            return_ship_cost,
+            refunded_cash,
+            reversed_charge,
+            store_credit,
+            net_loss
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let departments = ["Men", "Women", "Children", "Electronics", "Home", "Garden"];
+    let page_types = ["Cover", "Regular", "Index", "Special"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO catalog_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.catalog_page_count {
+        let cp_catalog_page_id = format!("AAAAAA{:010}", i);
+        let dept_idx = i % departments.len();
+        let type_idx = i % page_types.len();
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            cp_catalog_page_id,
+            data.random_i32(1, 500),
+            data.random_i32(501, 1000),
+            departments[dept_idx],
+            ((i / 100) + 1) as i64,
+            ((i % 100) + 1) as i64,
+            format!("Catalog page {} description", i),
+            page_types[type_idx]
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let page_types = ["Home", "Product", "Category", "Search", "Checkout", "Cart"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.web_page_count {
+        let wp_web_page_id = format!("AAAAAA{:010}", i);
+        let type_idx = i % page_types.len();
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            wp_web_page_id,
+            duckdb::types::Value::Null,
+            duckdb::types::Value::Null,
+            data.random_i32(1, 500),
+            data.random_i32(501, 1000),
+            if i % 2 == 0 { "Y" } else { "N" },
+            ((i % data.customer_count) + 1) as i64,
+            format!("http://www.example.com/page{}", i),
+            page_types[type_idx],
+            data.random_i32(100, 10000),
+            data.random_i32(5, 50),
+            data.random_i32(1, 20),
+            data.random_i32(1, 10)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_site_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_site VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.web_site_count {
+        let web_site_id = format!("AAAAAA{:010}", i);
+        let state_idx = i % STATES.len();
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            web_site_id,
+            duckdb::types::Value::Null,
+            duckdb::types::Value::Null,
+            format!("Site {}", i),
+            data.random_i32(1, 500),
+            duckdb::types::Value::Null,
+            "medium",
+            data.random_varchar(30),
+            ((i % 6) + 1) as i64,
+            format!("Market Class {}", i % 10),
+            format!("Market description for site {}", i),
+            data.random_varchar(30),
+            ((i % 3) + 1) as i64,
+            format!("Company {}", (i % 3) + 1),
+            format!("{}", data.random_i32(100, 9999)),
+            data.random_varchar(40),
+            "Street",
+            format!("Suite {}", data.random_i32(100, 999)),
+            data.random_city(),
+            format!("{} County", STATES[state_idx]),
+            STATES[state_idx],
+            data.random_zip(),
+            "United States",
+            -5.0 - (state_idx % 4) as f64,
+            data.random_f64(0.0, 0.11)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO catalog_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.catalog_sales_count {
+        let cs_sold_date_sk = (i % num_dates) + 1;
+        let cs_sold_time_sk = (i % 24) * 3600;
+        let cs_ship_date_sk = cs_sold_date_sk + data.random_i32(1, 14) as usize;
+        let cs_item_sk = (i % data.item_count) + 1;
+        let cs_bill_customer_sk = (i % data.customer_count) + 1;
+        let cs_order_number = (i / 5) + 1;
+
+        let quantity = data.random_i32(1, 100);
+        let wholesale_cost = data.random_f64(1.0, 50.0);
+        let list_price = wholesale_cost * data.random_f64(1.5, 3.0);
+        let sales_price = list_price * data.random_f64(0.8, 1.0);
+        let ext_sales_price = sales_price * quantity as f64;
+        let ext_wholesale_cost = wholesale_cost * quantity as f64;
+        let ext_list_price = list_price * quantity as f64;
+        let ext_discount_amt = ext_list_price - ext_sales_price;
+        let ext_tax = ext_sales_price * 0.08;
+        let coupon_amt = data.random_f64(0.0, 20.0);
+        let ext_ship_cost = data.random_f64(5.0, 30.0);
+        let net_paid = ext_sales_price - coupon_amt;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship_cost;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale_cost;
+
+        stmt.execute(duckdb::params![
+            cs_sold_date_sk as i64,
+            cs_sold_time_sk as i64,
+            cs_ship_date_sk as i64,
+            cs_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            cs_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.call_center_count) + 1) as i64,
+            ((i % data.catalog_page_count) + 1) as i64,
+            ((i % data.ship_mode_count.min(20)) + 1) as i64,
+            ((i % data.warehouse_count) + 1) as i64,
+            cs_item_sk as i64,
+            ((i % data.promotion_count) + 1) as i64,
+            cs_order_number as i64,
+            quantity,
+            wholesale_cost,
+            list_price,
+            sales_price,
+            ext_discount_amt,
+            ext_sales_price,
+            ext_wholesale_cost,
+            ext_list_price,
+            ext_tax,
+            coupon_amt,
+            ext_ship_cost,
+            net_paid,
+            net_paid_inc_tax,
+            net_paid_inc_ship,
+            net_paid_inc_ship_tax,
+            net_profit
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO catalog_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.catalog_returns_count {
+        let cr_returned_date_sk = (i % num_dates) + 1;
+        let cr_returned_time_sk = (i % 24) * 3600;
+        let cr_item_sk = (i % data.item_count) + 1;
+        let cr_refunded_customer_sk = (i % data.customer_count) + 1;
+        let cr_order_number = (i / 3) + 1;
+        let cr_reason_sk = (i % data.reason_count.min(15)) + 1;
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let store_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - store_credit + fee;
+
+        stmt.execute(duckdb::params![
+            cr_returned_date_sk as i64,
+            cr_returned_time_sk as i64,
+            cr_item_sk as i64,
+            cr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            cr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.call_center_count) + 1) as i64,
+            ((i % data.catalog_page_count) + 1) as i64,
+            ((i % data.ship_mode_count.min(20)) + 1) as i64,
+            ((i % data.warehouse_count) + 1) as i64,
+            cr_reason_sk as i64,
+            cr_order_number as i64,
+            return_quantity,
+            return_amt,
+            return_tax,
+            return_amt_inc_tax,
+            fee,
+            return_ship_cost,
+            refunded_cash,
+            reversed_charge,
+            store_credit,
+            net_loss
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.web_sales_count {
+        let ws_sold_date_sk = (i % num_dates) + 1;
+        let ws_sold_time_sk = (i % 24) * 3600;
+        let ws_ship_date_sk = ws_sold_date_sk + data.random_i32(1, 14) as usize;
+        let ws_item_sk = (i % data.item_count) + 1;
+        let ws_bill_customer_sk = (i % data.customer_count) + 1;
+        let ws_order_number = (i / 5) + 1;
+
+        let quantity = data.random_i32(1, 100);
+        let wholesale_cost = data.random_f64(1.0, 50.0);
+        let list_price = wholesale_cost * data.random_f64(1.5, 3.0);
+        let sales_price = list_price * data.random_f64(0.8, 1.0);
+        let ext_sales_price = sales_price * quantity as f64;
+        let ext_wholesale_cost = wholesale_cost * quantity as f64;
+        let ext_list_price = list_price * quantity as f64;
+        let ext_discount_amt = ext_list_price - ext_sales_price;
+        let ext_tax = ext_sales_price * 0.08;
+        let coupon_amt = data.random_f64(0.0, 20.0);
+        let ext_ship_cost = data.random_f64(5.0, 30.0);
+        let net_paid = ext_sales_price - coupon_amt;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship_cost;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale_cost;
+
+        stmt.execute(duckdb::params![
+            ws_sold_date_sk as i64,
+            ws_sold_time_sk as i64,
+            ws_ship_date_sk as i64,
+            ws_item_sk as i64,
+            ws_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ws_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.web_page_count) + 1) as i64,
+            ((i % data.web_site_count) + 1) as i64,
+            ((i % data.ship_mode_count.min(20)) + 1) as i64,
+            ((i % data.warehouse_count) + 1) as i64,
+            ((i % data.promotion_count) + 1) as i64,
+            ws_order_number as i64,
+            quantity,
+            wholesale_cost,
+            list_price,
+            sales_price,
+            ext_discount_amt,
+            ext_sales_price,
+            ext_wholesale_cost,
+            ext_list_price,
+            ext_tax,
+            coupon_amt,
+            ext_ship_cost,
+            net_paid,
+            net_paid_inc_tax,
+            net_paid_inc_ship,
+            net_paid_inc_ship_tax,
+            net_profit
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let num_dates = 2191.min(data.date_dim_count);
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO web_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 0..data.web_returns_count {
+        let wr_returned_date_sk = (i % num_dates) + 1;
+        let wr_returned_time_sk = (i % 24) * 3600;
+        let wr_item_sk = (i % data.item_count) + 1;
+        let wr_refunded_customer_sk = (i % data.customer_count) + 1;
+        let wr_order_number = (i / 3) + 1;
+        let wr_reason_sk = (i % data.reason_count.min(15)) + 1;
+
+        let return_quantity = data.random_i32(1, 10);
+        let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_f64(5.0, 25.0);
+        let return_ship_cost = data.random_f64(5.0, 50.0);
+        let refunded_cash = return_amt * 0.7;
+        let reversed_charge = return_amt * 0.1;
+        let account_credit = return_amt * 0.2;
+        let net_loss = return_amt - refunded_cash - reversed_charge - account_credit + fee;
+
+        stmt.execute(duckdb::params![
+            wr_returned_date_sk as i64,
+            wr_returned_time_sk as i64,
+            wr_item_sk as i64,
+            wr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            wr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.web_page_count) + 1) as i64,
+            wr_reason_sk as i64,
+            wr_order_number as i64,
+            return_quantity,
+            return_amt,
+            return_tax,
+            return_amt_inc_tax,
+            fee,
+            return_ship_cost,
+            refunded_cash,
+            reversed_charge,
+            account_credit,
+            net_loss
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_customer_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    let mut sk = 0;
+    'outer: for gender in GENDERS.iter() {
+        for marital in MARITAL_STATUS.iter() {
+            for education in EDUCATION_STATUS.iter() {
+                for &credit in CREDIT_RATINGS.iter() {
+                    for &dep_count in &DEP_COUNTS[0..3] {
+                        sk += 1;
+                        if sk > data.customer_demographics_count {
+                            break 'outer;
+                        }
+
+                        let purchase_estimate = data.random_i32(500, 10000);
+                        let dep_employed = data.random_i32(0, dep_count);
+                        let dep_college = data.random_i32(0, dep_count);
+
+                        stmt.execute(duckdb::params![
+                            sk as i64,
+                            *gender,
+                            *marital,
+                            *education,
+                            purchase_estimate,
+                            credit,
+                            dep_count,
+                            dep_employed,
+                            dep_college
+                        ]).unwrap();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_household_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    let mut sk = 0;
+    'outer: for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
+        for &buy_potential in BUY_POTENTIALS.iter() {
+            for &dep_count in DEP_COUNTS.iter() {
+                for &vehicle_count in VEHICLE_COUNTS.iter() {
+                    sk += 1;
+                    if sk > data.household_demographics_count {
+                        break 'outer;
+                    }
+
+                    stmt.execute(duckdb::params![
+                        sk as i64,
+                        income_band_sk as i64,
+                        buy_potential,
+                        dep_count,
+                        vehicle_count
+                    ]).unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_income_band_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let mut stmt = conn.prepare(
+        "INSERT INTO income_band VALUES (?, ?, ?)"
+    ).unwrap();
+
+    let count = data.income_band_count.min(INCOME_BANDS.len());
+    for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
+        stmt.execute(duckdb::params![
+            (i + 1) as i64,
+            lower,
+            upper
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_call_center_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let classes = ["small", "medium", "large", "unknown"];
+    let hours = ["8AM-4PM", "8AM-8PM", "8AM-12AM"];
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO call_center VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).unwrap();
+
+    for i in 1..=data.call_center_count {
+        let cc_call_center_id = format!("AAAAAA{:010}", i);
+        let class_idx = i % classes.len();
+        let hours_idx = i % hours.len();
+        let state_idx = i % STATES.len();
+
+        stmt.execute(duckdb::params![
+            i as i64,
+            cc_call_center_id,
+            duckdb::types::Value::Null,
+            duckdb::types::Value::Null,
+            duckdb::types::Value::Null,
+            data.random_i32(1, 500),
+            format!("Call Center {}", i),
+            classes[class_idx],
+            data.random_i32(10, 500),
+            data.random_i32(1000, 50000),
+            hours[hours_idx],
+            data.random_varchar(30),
+            ((i % 6) + 1) as i64,
+            format!("Market Class {}", i % 10),
+            format!("Market Description {}", i),
+            data.random_varchar(30),
+            ((i % 3) + 1) as i64,
+            format!("Division {}", (i % 3) + 1),
+            ((i % 2) + 1) as i64,
+            format!("Company {}", (i % 2) + 1),
+            format!("{}", data.random_i32(100, 9999)),
+            data.random_varchar(40),
+            "Street",
+            format!("Suite {}", data.random_i32(100, 999)),
+            data.random_city(),
+            format!("{} County", STATES[state_idx]),
+            STATES[state_idx],
+            data.random_zip(),
+            "United States",
+            -5.0 - (state_idx % 4) as f64,
+            data.random_f64(0.0, 0.11)
+        ]).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_inventory_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
+    let num_dates = 52.min(data.date_dim_count);
+    let num_items = data.item_count;
+    let num_warehouses = data.warehouse_count;
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO inventory VALUES (?, ?, ?, ?)"
+    ).unwrap();
+
+    let mut count = 0;
+    'outer: for week in 0..num_dates {
+        let date_sk = week * 7 + 1;
+        let items_per_week = (data.inventory_count / num_dates).min(num_items * num_warehouses);
+        let items_sample = (items_per_week / num_warehouses).max(1);
+
+        for item_offset in 0..items_sample {
+            let item_sk = (item_offset % num_items) + 1;
+
+            for warehouse_sk in 1..=num_warehouses {
+                count += 1;
+                if count > data.inventory_count {
+                    break 'outer;
+                }
+
+                stmt.execute(duckdb::params![
+                    date_sk as i64,
+                    item_sk as i64,
+                    warehouse_sk as i64,
+                    data.random_i32(0, 1000)
+                ]).unwrap();
+            }
+        }
     }
 }
 
