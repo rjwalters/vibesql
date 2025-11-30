@@ -197,10 +197,24 @@ pub(crate) fn execute_table_scan(
             .map_err(ExecutorError::InvalidWhereClause)?;
 
         // Check if there are actually table-local predicates for this table
-        if predicate_plan.has_table_filters(table_name) {
+        // Note: has_table_filters does case-sensitive lookup - try lowercase first
+        let has_filters = predicate_plan.has_table_filters(table_name)
+            || predicate_plan.has_table_filters(&table_name.to_lowercase());
+
+        if std::env::var("COLUMNAR_DEBUG").is_ok() {
+            eprintln!("[COLUMNAR_DEBUG] {} table: has_table_filters={}, checking lowercase={}",
+                table_name, predicate_plan.has_table_filters(table_name),
+                predicate_plan.has_table_filters(&table_name.to_lowercase()));
+        }
+
+        if has_filters {
             // Try columnar filter optimization for simple predicates
             // Extract predicates once and choose the best execution path (#2972)
             if let Some(column_predicates) = crate::select::columnar::extract_column_predicates(where_expr, &schema) {
+                if std::env::var("COLUMNAR_DEBUG").is_ok() {
+                    eprintln!("[COLUMNAR_DEBUG] {} table: extracted {} predicates for {} rows",
+                        table_name, column_predicates.len(), row_slice.len());
+                }
                 // For native columnar tables, use SIMD filtering on typed columns
                 // This avoids SqlValue overhead by working directly on i64/f64/String arrays
                 if table.is_native_columnar() && row_slice.len() >= SIMD_COLUMNAR_THRESHOLD {
@@ -216,6 +230,11 @@ pub(crate) fn execute_table_scan(
                 return Ok(super::FromResult::from_rows(schema, filtered_rows));
             }
 
+            // extract_column_predicates returned None - fall back
+            if std::env::var("COLUMNAR_DEBUG").is_ok() {
+                eprintln!("[COLUMNAR_DEBUG] {} table: extract_column_predicates returned None, using generic path",
+                    table_name);
+            }
             // Fall back to generic predicate evaluation for complex expressions
             let filtered_rows = apply_table_local_predicates_ref(
                 row_slice,

@@ -132,9 +132,17 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
                 | vibesql_ast::BinaryOperator::GreaterThanOrEqual
                 | vibesql_ast::BinaryOperator::LessThan
                 | vibesql_ast::BinaryOperator::LessThanOrEqual => {
-                    // Check if either side is our column
-                    if is_column_reference(left, column_name) || is_column_reference(right, column_name)
-                    {
+                    // Index can only filter when comparing column to a LITERAL value
+                    // NOT when comparing column to another column (equijoin conditions)
+                    // e.g., `l_shipdate > '1995-03-15'` CAN use index
+                    // e.g., `l_orderkey = o_orderkey` CANNOT use index
+                    let left_is_col = is_column_reference(left, column_name);
+                    let right_is_col = is_column_reference(right, column_name);
+                    let left_is_literal = is_literal(left);
+                    let right_is_literal = is_literal(right);
+
+                    // column op literal OR literal op column
+                    if (left_is_col && right_is_literal) || (left_is_literal && right_is_col) {
                         return true;
                     }
                 }
@@ -168,6 +176,14 @@ pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool 
         Expression::ColumnRef { column, .. } => column.eq_ignore_ascii_case(column_name),
         _ => false,
     }
+}
+
+/// Check if an expression is a literal value
+///
+/// Index scans can only filter on columns compared to literal values,
+/// not columns compared to other columns (which are equijoin conditions).
+fn is_literal(expr: &Expression) -> bool {
+    matches!(expr, Expression::Literal(_))
 }
 
 /// Case-insensitive lookup of column statistics
