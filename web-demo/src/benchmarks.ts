@@ -15,7 +15,7 @@ declare const Chart: any;
 /**
  * Benchmark suite types
  */
-type BenchmarkSuite = 'tpch' | 'tpcc' | 'sysbench';
+type BenchmarkSuite = 'tpch' | 'tpcc' | 'sysbench' | 'footprint';
 
 /**
  * Suite configuration
@@ -174,6 +174,42 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
     `,
   },
+  footprint: {
+    id: 'footprint',
+    name: 'Footprint',
+    dataFile: 'footprint_results.json',
+    opsLabel: 'databases compared',
+    descriptions: {
+      'binary_size': 'Binary Size - Size of the compiled database binary on disk',
+      'startup_time': 'Startup Time - Time to cold-start and execute first query',
+      'peak_memory': 'Peak Memory - Maximum resident set size during initialization',
+    },
+    methodology: `
+      <h3 class="text-lg font-semibold text-foreground mb-2">Binary Footprint Benchmarks</h3>
+      <p class="text-muted mb-4">
+        <strong>Footprint benchmarks</strong> measure the resource efficiency of database binaries,
+        comparing binary size, cold startup time, and peak memory usage during initialization.
+      </p>
+
+      <ul class="space-y-2 text-muted">
+        <li><strong>Binary Size:</strong> Size of the compiled binary in bytes (stripped release build)</li>
+        <li><strong>Startup Time:</strong> Time from process start to first query result (CREATE TABLE, INSERT, SELECT)</li>
+        <li><strong>Peak Memory:</strong> Maximum resident set size (RSS) during cold startup</li>
+        <li><strong>Measurement:</strong> macOS /usr/bin/time -l for memory, perf_counter for timing</li>
+        <li><strong>Runs:</strong> 5-10 iterations with standard deviation reported</li>
+      </ul>
+
+      <p class="mt-4 text-muted">
+        Footprint benchmarks are critical for <strong>embedded and edge deployments</strong> where
+        binary size, startup latency, and memory consumption directly impact user experience and costs.
+      </p>
+
+      <p class="mt-2 text-muted text-sm">
+        <strong>Note:</strong> VibeSQL is designed for minimal footprint while maintaining SQL:1999 compliance.
+        Smaller binaries mean faster downloads, quicker cold starts, and lower memory pressure.
+      </p>
+    `,
+  },
 };
 
 interface BenchmarkStats {
@@ -196,6 +232,35 @@ interface BenchmarkResults {
     system?: string;
     python_version?: string;
   };
+}
+
+/**
+ * Footprint benchmark interfaces (different format from TPC benchmarks)
+ */
+interface FootprintBenchmark {
+  database: string;
+  binary_path: string;
+  binary_size_bytes: number;
+  startup_time_ms: number;
+  startup_time_stddev_ms: number;
+  peak_memory_kb: number;
+  peak_memory_stddev_kb: number;
+  version: string;
+  available: boolean;
+  error: string | null;
+}
+
+interface FootprintResults {
+  benchmarks: FootprintBenchmark[];
+  datetime: string;
+  machine_info?: {
+    system?: string;
+    release?: string;
+    machine?: string;
+    processor?: string;
+    python_version?: string;
+  };
+  num_runs: number;
 }
 
 /**
@@ -609,6 +674,237 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
 }
 
 /**
+ * Format bytes as human-readable size
+ */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
+ * Format memory in KB as human-readable
+ */
+function formatMemory(kb: number): string {
+  if (kb < 1024) return `${kb.toFixed(0)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Render footprint results table (different format from TPC benchmarks)
+ */
+function renderFootprintTable(data: FootprintResults): void {
+  const tbody = document.getElementById('results-tbody');
+  const table = document.getElementById('results-table');
+  if (!tbody || !table) return;
+
+  // Update table headers for footprint view
+  const thead = table.querySelector('thead tr');
+  if (thead) {
+    thead.innerHTML = `
+      <th class="px-4 py-3">Database</th>
+      <th class="px-4 py-3 text-right">Binary Size</th>
+      <th class="px-4 py-3 text-right">Startup Time</th>
+      <th class="px-4 py-3 text-right">Peak Memory</th>
+      <th class="px-4 py-3 text-right">Version</th>
+      <th class="px-4 py-3 text-center">Best</th>
+    `;
+  }
+
+  tbody.innerHTML = '';
+
+  // Find best values for highlighting
+  const availableBenchmarks = data.benchmarks.filter(b => b.available);
+  const minBinarySize = Math.min(...availableBenchmarks.map(b => b.binary_size_bytes));
+  const minStartupTime = Math.min(...availableBenchmarks.map(b => b.startup_time_ms));
+  const minMemory = Math.min(...availableBenchmarks.map(b => b.peak_memory_kb));
+
+  // Database display names and colors
+  const dbDisplayNames: Record<string, string> = {
+    'vibesql': 'VibeSQL',
+    'sqlite': 'SQLite',
+    'duckdb': 'DuckDB',
+    'mysql': 'MySQL',
+  };
+
+  for (const benchmark of data.benchmarks) {
+    if (!benchmark.available) continue;
+
+    const row = document.createElement('tr');
+    row.className = 'hover:bg-card/50 transition-colors';
+
+    // Database name
+    const dbCell = document.createElement('td');
+    dbCell.className = 'px-4 py-3 font-medium text-foreground';
+    dbCell.textContent = dbDisplayNames[benchmark.database] || benchmark.database;
+    row.appendChild(dbCell);
+
+    // Binary size
+    const sizeCell = document.createElement('td');
+    sizeCell.className = 'px-4 py-3 text-right';
+    const isBestSize = benchmark.binary_size_bytes === minBinarySize;
+    sizeCell.innerHTML = isBestSize
+      ? `<span class="text-green-600 dark:text-green-400 font-semibold">${formatBytes(benchmark.binary_size_bytes)}</span>`
+      : `<span class="text-muted">${formatBytes(benchmark.binary_size_bytes)}</span>`;
+    row.appendChild(sizeCell);
+
+    // Startup time
+    const startupCell = document.createElement('td');
+    startupCell.className = 'px-4 py-3 text-right';
+    const isBestStartup = benchmark.startup_time_ms === minStartupTime;
+    const startupText = `${benchmark.startup_time_ms.toFixed(2)} ms`;
+    startupCell.innerHTML = isBestStartup
+      ? `<span class="text-green-600 dark:text-green-400 font-semibold">${startupText}</span>`
+      : `<span class="text-muted">${startupText}</span>`;
+    row.appendChild(startupCell);
+
+    // Peak memory
+    const memCell = document.createElement('td');
+    memCell.className = 'px-4 py-3 text-right';
+    const isBestMem = benchmark.peak_memory_kb === minMemory;
+    memCell.innerHTML = isBestMem
+      ? `<span class="text-green-600 dark:text-green-400 font-semibold">${formatMemory(benchmark.peak_memory_kb)}</span>`
+      : `<span class="text-muted">${formatMemory(benchmark.peak_memory_kb)}</span>`;
+    row.appendChild(memCell);
+
+    // Version
+    const versionCell = document.createElement('td');
+    versionCell.className = 'px-4 py-3 text-right text-muted text-xs';
+    versionCell.textContent = benchmark.version;
+    row.appendChild(versionCell);
+
+    // Best indicator
+    const bestCell = document.createElement('td');
+    bestCell.className = 'px-4 py-3 text-center text-2xl';
+    const bestCount = (isBestSize ? 1 : 0) + (isBestStartup ? 1 : 0) + (isBestMem ? 1 : 0);
+    if (bestCount === 3) {
+      bestCell.textContent = '🏆';
+      bestCell.title = 'Best in all categories';
+    } else if (bestCount >= 1) {
+      bestCell.textContent = '⭐';
+      bestCell.title = `Best in ${bestCount} category(ies)`;
+    } else {
+      bestCell.textContent = '-';
+    }
+    row.appendChild(bestCell);
+
+    tbody.appendChild(row);
+  }
+
+  // Update summary cards for footprint
+  const vibesql = data.benchmarks.find(b => b.database === 'vibesql');
+  const sqlite = data.benchmarks.find(b => b.database === 'sqlite');
+
+  const avgSpeedupEl = document.getElementById('avg-speedup');
+  if (avgSpeedupEl && vibesql && sqlite && vibesql.available && sqlite.available) {
+    const startupSpeedup = sqlite.startup_time_ms / vibesql.startup_time_ms;
+    if (startupSpeedup > 1) {
+      avgSpeedupEl.textContent = `${startupSpeedup.toFixed(2)}x faster startup`;
+      avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
+    } else {
+      const slower = 1 / startupSpeedup;
+      avgSpeedupEl.textContent = `${slower.toFixed(2)}x slower startup`;
+      avgSpeedupEl.className = 'text-xl font-bold text-red-600 dark:text-red-400';
+    }
+  }
+
+  const opsTestedEl = document.getElementById('ops-tested');
+  if (opsTestedEl) {
+    opsTestedEl.textContent = availableBenchmarks.length.toString();
+  }
+}
+
+/**
+ * Render footprint comparison chart
+ */
+function renderFootprintChart(data: FootprintResults): void {
+  const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  // Destroy existing chart if any
+  if (currentChart) {
+    currentChart.destroy();
+    currentChart = null;
+  }
+
+  const availableBenchmarks = data.benchmarks.filter(b => b.available);
+
+  // Database display names and colors
+  const dbColors: Record<string, { bg: string; border: string }> = {
+    'vibesql': { bg: 'rgba(34, 197, 94, 0.5)', border: 'rgba(34, 197, 94, 1)' },
+    'sqlite': { bg: 'rgba(239, 68, 68, 0.5)', border: 'rgba(239, 68, 68, 1)' },
+    'duckdb': { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgba(59, 130, 246, 1)' },
+    'mysql': { bg: 'rgba(249, 115, 22, 0.5)', border: 'rgba(249, 115, 22, 1)' },
+  };
+
+  const dbDisplayNames: Record<string, string> = {
+    'vibesql': 'VibeSQL',
+    'sqlite': 'SQLite',
+    'duckdb': 'DuckDB',
+    'mysql': 'MySQL',
+  };
+
+  const labels = ['Binary Size (MB)', 'Startup Time (ms)', 'Peak Memory (MB)'];
+
+  const datasets = availableBenchmarks.map(bench => ({
+    label: dbDisplayNames[bench.database] || bench.database,
+    data: [
+      bench.binary_size_bytes / (1024 * 1024), // Convert to MB
+      bench.startup_time_ms,
+      bench.peak_memory_kb / 1024, // Convert to MB
+    ],
+    backgroundColor: dbColors[bench.database]?.bg || 'rgba(156, 163, 175, 0.5)',
+    borderColor: dbColors[bench.database]?.border || 'rgba(156, 163, 175, 1)',
+    borderWidth: 1,
+  }));
+
+  currentChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Value (lower is better)',
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+        },
+        tooltip: {
+          callbacks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            label: function (context: any) {
+              const label = context.dataset.label;
+              const value = context.parsed.y;
+              const category = context.label;
+
+              if (category.includes('Size')) {
+                return `${label}: ${value.toFixed(2)} MB`;
+              } else if (category.includes('Time')) {
+                return `${label}: ${value.toFixed(2)} ms`;
+              } else {
+                return `${label}: ${value.toFixed(1)} MB`;
+              }
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
  * Update the methodology section
  */
 function updateMethodology(suite: BenchmarkSuite): void {
@@ -629,6 +925,27 @@ function updateOpsLabel(suite: BenchmarkSuite): void {
 }
 
 /**
+ * Restore table headers for TPC benchmarks
+ */
+function restoreTPCTableHeaders(): void {
+  const table = document.getElementById('results-table');
+  if (!table) return;
+
+  const thead = table.querySelector('thead tr');
+  if (thead) {
+    thead.innerHTML = `
+      <th class="px-4 py-3">Operation</th>
+      <th class="px-4 py-3 text-right">VibeSQL</th>
+      <th class="px-4 py-3 text-right">SQLite</th>
+      <th class="px-4 py-3 text-right">DuckDB</th>
+      <th class="px-4 py-3 text-right">MySQL</th>
+      <th class="px-4 py-3 text-right">Speedup</th>
+      <th class="px-4 py-3 text-center">Winner</th>
+    `;
+  }
+}
+
+/**
  * Load and display benchmark data for a specific suite
  */
 async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
@@ -638,6 +955,11 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
   updateMethodology(suite);
   updateOpsLabel(suite);
 
+  // Restore TPC headers if not footprint
+  if (suite !== 'footprint') {
+    restoreTPCTableHeaders();
+  }
+
   try {
     const response = await fetch(`${import.meta.env.BASE_URL}benchmarks/${config.dataFile}`);
 
@@ -645,6 +967,24 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
       throw new Error(`Failed to load benchmark data: ${response.status}`);
     }
 
+    // Handle footprint suite differently (different data format)
+    if (suite === 'footprint') {
+      const data: FootprintResults = await response.json();
+
+      // Update last updated timestamp
+      const lastUpdatedEl = document.getElementById('last-updated');
+      if (lastUpdatedEl && data.datetime) {
+        const date = new Date(data.datetime);
+        lastUpdatedEl.textContent = date.toLocaleDateString();
+        lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+      }
+
+      renderFootprintTable(data);
+      renderFootprintChart(data);
+      return;
+    }
+
+    // Standard TPC benchmark handling
     const data: BenchmarkResults = await response.json();
 
     // Update last updated timestamp
