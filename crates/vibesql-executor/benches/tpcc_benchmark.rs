@@ -228,6 +228,139 @@ fn run_benchmark<E: TPCCExecutor>(
     results
 }
 
+/// Run MySQL benchmark separately since it requires &mut self for queries
+#[cfg(feature = "benchmark-comparison")]
+fn run_mysql_benchmark(
+    conn: &mut mysql::PooledConn,
+    transaction_type: TransactionType,
+    num_warehouses: i32,
+    duration: Duration,
+    warmup: Duration,
+    print_phases: bool,
+) -> TPCCBenchmarkResults {
+    let mut workload = TPCCWorkload::new(42, num_warehouses);
+    let executor = MysqlTransactionExecutor::new(conn);
+
+    let mut results = TPCCBenchmarkResults::new();
+    let mut new_order_times: Vec<u64> = Vec::new();
+    let mut payment_times: Vec<u64> = Vec::new();
+    let mut order_status_times: Vec<u64> = Vec::new();
+    let mut delivery_times: Vec<u64> = Vec::new();
+    let mut stock_level_times: Vec<u64> = Vec::new();
+
+    // Warmup phase
+    if print_phases {
+        eprintln!("Warmup phase ({:?})...", warmup);
+    }
+    let warmup_start = Instant::now();
+    while warmup_start.elapsed() < warmup {
+        let txn_type = match transaction_type {
+            TransactionType::Mixed => workload.next_transaction_type(),
+            TransactionType::NewOrder => 0,
+            TransactionType::Payment => 1,
+            TransactionType::OrderStatus => 2,
+            TransactionType::Delivery => 3,
+            TransactionType::StockLevel => 4,
+        };
+
+        match txn_type {
+            0 => { let _ = executor.new_order(&workload.generate_new_order()); }
+            1 => { let _ = executor.payment(&workload.generate_payment()); }
+            2 => { let _ = executor.order_status(&workload.generate_order_status()); }
+            3 => { let _ = executor.delivery(&workload.generate_delivery()); }
+            4 => { let _ = executor.stock_level(&workload.generate_stock_level()); }
+            _ => unreachable!(),
+        }
+    }
+
+    // Measurement phase
+    if print_phases {
+        eprintln!("Measurement phase ({:?})...", duration);
+    }
+    let benchmark_start = Instant::now();
+    while benchmark_start.elapsed() < duration {
+        let txn_type = match transaction_type {
+            TransactionType::Mixed => workload.next_transaction_type(),
+            TransactionType::NewOrder => 0,
+            TransactionType::Payment => 1,
+            TransactionType::OrderStatus => 2,
+            TransactionType::Delivery => 3,
+            TransactionType::StockLevel => 4,
+        };
+
+        let result = match txn_type {
+            0 => {
+                let r = executor.new_order(&workload.generate_new_order());
+                new_order_times.push(r.duration_us);
+                r
+            }
+            1 => {
+                let r = executor.payment(&workload.generate_payment());
+                payment_times.push(r.duration_us);
+                r
+            }
+            2 => {
+                let r = executor.order_status(&workload.generate_order_status());
+                order_status_times.push(r.duration_us);
+                r
+            }
+            3 => {
+                let r = executor.delivery(&workload.generate_delivery());
+                delivery_times.push(r.duration_us);
+                r
+            }
+            4 => {
+                let r = executor.stock_level(&workload.generate_stock_level());
+                stock_level_times.push(r.duration_us);
+                r
+            }
+            _ => unreachable!(),
+        };
+
+        results.total_transactions += 1;
+        if result.success {
+            results.successful_transactions += 1;
+        } else {
+            results.failed_transactions += 1;
+        }
+    }
+
+    results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
+    if results.total_duration_ms > 0 {
+        results.transactions_per_second =
+            results.total_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
+    }
+
+    // Calculate averages
+    if !new_order_times.is_empty() {
+        results.new_order_count = new_order_times.len() as u64;
+        results.new_order_avg_us =
+            new_order_times.iter().sum::<u64>() as f64 / new_order_times.len() as f64;
+    }
+    if !payment_times.is_empty() {
+        results.payment_count = payment_times.len() as u64;
+        results.payment_avg_us =
+            payment_times.iter().sum::<u64>() as f64 / payment_times.len() as f64;
+    }
+    if !order_status_times.is_empty() {
+        results.order_status_count = order_status_times.len() as u64;
+        results.order_status_avg_us =
+            order_status_times.iter().sum::<u64>() as f64 / order_status_times.len() as f64;
+    }
+    if !delivery_times.is_empty() {
+        results.delivery_count = delivery_times.len() as u64;
+        results.delivery_avg_us =
+            delivery_times.iter().sum::<u64>() as f64 / delivery_times.len() as f64;
+    }
+    if !stock_level_times.is_empty() {
+        results.stock_level_count = stock_level_times.len() as u64;
+        results.stock_level_avg_us =
+            stock_level_times.iter().sum::<u64>() as f64 / stock_level_times.len() as f64;
+    }
+
+    results
+}
+
 fn main() {
     eprintln!("=== TPC-C Benchmark Profiling ===");
 
@@ -317,7 +450,7 @@ fn main() {
     // Comparison benchmarks (if feature enabled)
     #[cfg(feature = "benchmark-comparison")]
     {
-        use tpcc::schema::{load_duckdb, load_sqlite};
+        use tpcc::schema::{load_duckdb, load_mysql, load_sqlite};
 
         // SQLite benchmark
         eprintln!("\n\n--- SQLite Benchmark ---");
@@ -341,6 +474,28 @@ fn main() {
         let duckdb_results = run_benchmark(&duckdb_executor, transaction_type, num_warehouses, duration, warmup, true);
         print_results(&duckdb_results, transaction_type);
 
+        // MySQL benchmark (if MYSQL_URL is set)
+        let mysql_results = if let Some(mut mysql_conn) = load_mysql(scale_factor) {
+            eprintln!("\n\n--- MySQL Benchmark ---");
+            eprintln!("MySQL connected and loaded");
+
+            // MySQL requires &mut self, so we run it manually instead of using run_benchmark
+            let mysql_results = run_mysql_benchmark(
+                &mut mysql_conn,
+                transaction_type,
+                num_warehouses,
+                duration,
+                warmup,
+                true,
+            );
+            print_results(&mysql_results, transaction_type);
+            Some(mysql_results)
+        } else {
+            eprintln!("\n\n--- MySQL Benchmark ---");
+            eprintln!("Skipping MySQL (set MYSQL_URL env var to enable)");
+            None
+        };
+
         // Summary comparison
         eprintln!("\n\n=== Comparison Summary ===");
         eprintln!("Transaction type: {}", transaction_type.name());
@@ -363,6 +518,9 @@ fn main() {
         eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, compute_avg(&vibesql_results));
         eprintln!("{:<12} {:>12.2} {:>12.2}", "SQLite", sqlite_results.transactions_per_second, compute_avg(&sqlite_results));
         eprintln!("{:<12} {:>12.2} {:>12.2}", "DuckDB", duckdb_results.transactions_per_second, compute_avg(&duckdb_results));
+        if let Some(ref mysql_res) = mysql_results {
+            eprintln!("{:<12} {:>12.2} {:>12.2}", "MySQL", mysql_res.transactions_per_second, compute_avg(mysql_res));
+        }
     }
 
     #[cfg(not(feature = "benchmark-comparison"))]

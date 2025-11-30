@@ -10,6 +10,10 @@ use vibesql_storage::Database as VibeDB;
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::prelude::*;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::{Pool, PooledConn};
 
 // =============================================================================
 // Database Loaders
@@ -108,6 +112,38 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 
     create_tpcc_indexes_duckdb(&conn);
     conn
+}
+
+/// Load MySQL TPC-C database
+/// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/tpcc)
+/// Returns None if MYSQL_URL is not set or connection fails
+#[cfg(feature = "benchmark-comparison")]
+pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
+    let url = std::env::var("MYSQL_URL").ok()?;
+    let pool = Pool::new(url.as_str()).ok()?;
+    let mut conn = pool.get_conn().ok()?;
+    let mut data = TPCCData::new(scale_factor);
+
+    // Create schema (drops and recreates tables)
+    create_tpcc_schema_mysql(&mut conn);
+
+    // Load data
+    load_item_mysql(&mut conn, &mut data);
+
+    let districts_per_warehouse = data.districts_per_warehouse();
+    for w_id in 1..=data.num_warehouses() {
+        load_warehouse_mysql(&mut conn, &mut data, w_id);
+        load_stock_mysql(&mut conn, &mut data, w_id);
+
+        for d_id in 1..=districts_per_warehouse {
+            load_district_mysql(&mut conn, &mut data, d_id, w_id);
+            load_customer_mysql(&mut conn, &mut data, d_id, w_id);
+            load_orders_mysql(&mut conn, &mut data, d_id, w_id);
+        }
+    }
+
+    create_tpcc_indexes_mysql(&mut conn);
+    Some(conn)
 }
 
 // =============================================================================
@@ -1125,6 +1161,394 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i
         if o_id > delivered_threshold {
             let no = data.gen_new_order(o_id, d_id, w_id);
             no_stmt.execute(duckdb::params![no.no_o_id, no.no_d_id, no.no_w_id]).unwrap();
+        }
+    }
+}
+
+// =============================================================================
+// MySQL Schema and Loading (for comparison)
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn create_tpcc_schema_mysql(conn: &mut PooledConn) {
+    // Drop tables if they exist (in reverse dependency order)
+    let drop_tables = [
+        "DROP TABLE IF EXISTS order_line",
+        "DROP TABLE IF EXISTS new_order",
+        "DROP TABLE IF EXISTS orders",
+        "DROP TABLE IF EXISTS history",
+        "DROP TABLE IF EXISTS customer",
+        "DROP TABLE IF EXISTS stock",
+        "DROP TABLE IF EXISTS district",
+        "DROP TABLE IF EXISTS warehouse",
+        "DROP TABLE IF EXISTS item",
+    ];
+    for stmt in drop_tables {
+        conn.query_drop(stmt).unwrap();
+    }
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE warehouse (
+            w_id INTEGER PRIMARY KEY,
+            w_name VARCHAR(10) NOT NULL,
+            w_street_1 VARCHAR(20) NOT NULL,
+            w_street_2 VARCHAR(20) NOT NULL,
+            w_city VARCHAR(20) NOT NULL,
+            w_state VARCHAR(2) NOT NULL,
+            w_zip VARCHAR(9) NOT NULL,
+            w_tax DECIMAL(4,4) NOT NULL,
+            w_ytd DECIMAL(12,2) NOT NULL
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE district (
+            d_id INTEGER NOT NULL,
+            d_w_id INTEGER NOT NULL,
+            d_name VARCHAR(10) NOT NULL,
+            d_street_1 VARCHAR(20) NOT NULL,
+            d_street_2 VARCHAR(20) NOT NULL,
+            d_city VARCHAR(20) NOT NULL,
+            d_state VARCHAR(2) NOT NULL,
+            d_zip VARCHAR(9) NOT NULL,
+            d_tax DECIMAL(4,4) NOT NULL,
+            d_ytd DECIMAL(12,2) NOT NULL,
+            d_next_o_id INTEGER NOT NULL,
+            PRIMARY KEY (d_w_id, d_id)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE customer (
+            c_id INTEGER NOT NULL,
+            c_d_id INTEGER NOT NULL,
+            c_w_id INTEGER NOT NULL,
+            c_first VARCHAR(16) NOT NULL,
+            c_middle VARCHAR(2) NOT NULL,
+            c_last VARCHAR(16) NOT NULL,
+            c_street_1 VARCHAR(20) NOT NULL,
+            c_street_2 VARCHAR(20) NOT NULL,
+            c_city VARCHAR(20) NOT NULL,
+            c_state VARCHAR(2) NOT NULL,
+            c_zip VARCHAR(9) NOT NULL,
+            c_phone VARCHAR(16) NOT NULL,
+            c_since VARCHAR(25) NOT NULL,
+            c_credit VARCHAR(2) NOT NULL,
+            c_credit_lim DECIMAL(12,2) NOT NULL,
+            c_discount DECIMAL(4,4) NOT NULL,
+            c_balance DECIMAL(12,2) NOT NULL,
+            c_ytd_payment DECIMAL(12,2) NOT NULL,
+            c_payment_cnt INTEGER NOT NULL,
+            c_delivery_cnt INTEGER NOT NULL,
+            c_data VARCHAR(500) NOT NULL,
+            PRIMARY KEY (c_w_id, c_d_id, c_id)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE history (
+            h_c_id INTEGER NOT NULL,
+            h_c_d_id INTEGER NOT NULL,
+            h_c_w_id INTEGER NOT NULL,
+            h_d_id INTEGER NOT NULL,
+            h_w_id INTEGER NOT NULL,
+            h_date VARCHAR(25) NOT NULL,
+            h_amount DECIMAL(6,2) NOT NULL,
+            h_data VARCHAR(24) NOT NULL
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE new_order (
+            no_o_id INTEGER NOT NULL,
+            no_d_id INTEGER NOT NULL,
+            no_w_id INTEGER NOT NULL,
+            PRIMARY KEY (no_w_id, no_d_id, no_o_id)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE orders (
+            o_id INTEGER NOT NULL,
+            o_d_id INTEGER NOT NULL,
+            o_w_id INTEGER NOT NULL,
+            o_c_id INTEGER NOT NULL,
+            o_entry_d VARCHAR(25) NOT NULL,
+            o_carrier_id INTEGER,
+            o_ol_cnt INTEGER NOT NULL,
+            o_all_local INTEGER NOT NULL,
+            PRIMARY KEY (o_w_id, o_d_id, o_id)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE order_line (
+            ol_o_id INTEGER NOT NULL,
+            ol_d_id INTEGER NOT NULL,
+            ol_w_id INTEGER NOT NULL,
+            ol_number INTEGER NOT NULL,
+            ol_i_id INTEGER NOT NULL,
+            ol_supply_w_id INTEGER NOT NULL,
+            ol_delivery_d VARCHAR(25),
+            ol_quantity INTEGER NOT NULL,
+            ol_amount DECIMAL(6,2) NOT NULL,
+            ol_dist_info VARCHAR(24) NOT NULL,
+            PRIMARY KEY (ol_w_id, ol_d_id, ol_o_id, ol_number)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE item (
+            i_id INTEGER PRIMARY KEY,
+            i_im_id INTEGER NOT NULL,
+            i_name VARCHAR(24) NOT NULL,
+            i_price DECIMAL(5,2) NOT NULL,
+            i_data VARCHAR(50) NOT NULL
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE stock (
+            s_i_id INTEGER NOT NULL,
+            s_w_id INTEGER NOT NULL,
+            s_quantity INTEGER NOT NULL,
+            s_dist_01 VARCHAR(24) NOT NULL,
+            s_dist_02 VARCHAR(24) NOT NULL,
+            s_dist_03 VARCHAR(24) NOT NULL,
+            s_dist_04 VARCHAR(24) NOT NULL,
+            s_dist_05 VARCHAR(24) NOT NULL,
+            s_dist_06 VARCHAR(24) NOT NULL,
+            s_dist_07 VARCHAR(24) NOT NULL,
+            s_dist_08 VARCHAR(24) NOT NULL,
+            s_dist_09 VARCHAR(24) NOT NULL,
+            s_dist_10 VARCHAR(24) NOT NULL,
+            s_ytd INTEGER NOT NULL,
+            s_order_cnt INTEGER NOT NULL,
+            s_remote_cnt INTEGER NOT NULL,
+            s_data VARCHAR(50) NOT NULL,
+            PRIMARY KEY (s_w_id, s_i_id)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
+    conn.query_drop(
+        "CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first)"
+    ).unwrap();
+    conn.query_drop(
+        "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id)"
+    ).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_item_mysql(conn: &mut PooledConn, data: &mut TPCCData) {
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
+        let item = data.gen_item(i_id);
+        conn.exec_drop(
+            "INSERT INTO item VALUES (?, ?, ?, ?, ?)",
+            (item.i_id, item.i_im_id, &item.i_name, item.i_price, &item.i_data),
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
+    let warehouse = data.gen_warehouse(w_id);
+    conn.exec_drop(
+        "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            warehouse.w_id, &warehouse.w_name, &warehouse.w_street_1, &warehouse.w_street_2,
+            &warehouse.w_city, &warehouse.w_state, &warehouse.w_zip, warehouse.w_tax, warehouse.w_ytd
+        ),
+    ).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_stock_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
+    use mysql::Value;
+
+    let num_items = data.num_items();
+    for i_id in 1..=num_items {
+        let stock = data.gen_stock(i_id, w_id);
+        // MySQL Params doesn't support 17-element tuples, so use Vec<Value>
+        let params: Vec<Value> = vec![
+            Value::from(stock.s_i_id),
+            Value::from(stock.s_w_id),
+            Value::from(stock.s_quantity),
+            Value::from(stock.s_dist_01),
+            Value::from(stock.s_dist_02),
+            Value::from(stock.s_dist_03),
+            Value::from(stock.s_dist_04),
+            Value::from(stock.s_dist_05),
+            Value::from(stock.s_dist_06),
+            Value::from(stock.s_dist_07),
+            Value::from(stock.s_dist_08),
+            Value::from(stock.s_dist_09),
+            Value::from(stock.s_dist_10),
+            Value::from(stock.s_ytd),
+            Value::from(stock.s_order_cnt),
+            Value::from(stock.s_remote_cnt),
+            Value::from(stock.s_data),
+        ];
+        conn.exec_drop(
+            "INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_district_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
+    use mysql::Value;
+
+    let district = data.gen_district(d_id, w_id);
+    let params: Vec<Value> = vec![
+        Value::from(district.d_id),
+        Value::from(district.d_w_id),
+        Value::from(district.d_name),
+        Value::from(district.d_street_1),
+        Value::from(district.d_street_2),
+        Value::from(district.d_city),
+        Value::from(district.d_state),
+        Value::from(district.d_zip),
+        Value::from(district.d_tax),
+        Value::from(district.d_ytd),
+        Value::from(district.d_next_o_id),
+    ];
+    conn.exec_drop(
+        "INSERT INTO district VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params,
+    ).unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
+    use mysql::Value;
+
+    let customers_per_district = data.customers_per_district();
+    for c_id in 1..=customers_per_district {
+        let customer = data.gen_customer(c_id, d_id, w_id);
+        let params: Vec<Value> = vec![
+            Value::from(customer.c_id),
+            Value::from(customer.c_d_id),
+            Value::from(customer.c_w_id),
+            Value::from(customer.c_first),
+            Value::from(customer.c_middle),
+            Value::from(customer.c_last),
+            Value::from(customer.c_street_1),
+            Value::from(customer.c_street_2),
+            Value::from(customer.c_city),
+            Value::from(customer.c_state),
+            Value::from(customer.c_zip),
+            Value::from(customer.c_phone),
+            Value::from(customer.c_since),
+            Value::from(customer.c_credit),
+            Value::from(customer.c_credit_lim),
+            Value::from(customer.c_discount),
+            Value::from(customer.c_balance),
+            Value::from(customer.c_ytd_payment),
+            Value::from(customer.c_payment_cnt),
+            Value::from(customer.c_delivery_cnt),
+            Value::from(customer.c_data),
+        ];
+        conn.exec_drop(
+            "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+
+        let history = data.gen_history(c_id, d_id, w_id);
+        conn.exec_drop(
+            "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                history.h_c_id, history.h_c_d_id, history.h_c_w_id,
+                history.h_d_id, history.h_w_id, &history.h_date, history.h_amount, &history.h_data
+            ),
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
+    use mysql::Value;
+
+    let customers_per_district = data.customers_per_district();
+    let orders_per_district = data.orders_per_district();
+    let delivered_threshold = (orders_per_district as f64 * 0.7) as i32;
+
+    let mut c_ids: Vec<i32> = (1..=customers_per_district).collect();
+    for i in (1..c_ids.len()).rev() {
+        let j = data.rng.random_int(0, i as i64) as usize;
+        c_ids.swap(i, j);
+    }
+
+    for o_id in 1..=orders_per_district {
+        let c_id = c_ids[(o_id - 1) as usize];
+        let order = data.gen_order(o_id, d_id, w_id, c_id);
+
+        conn.exec_drop(
+            "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                order.o_id, order.o_d_id, order.o_w_id, order.o_c_id,
+                &order.o_entry_d, order.o_carrier_id, order.o_ol_cnt, order.o_all_local
+            ),
+        ).unwrap();
+
+        let delivered = o_id <= delivered_threshold;
+        for ol_number in 1..=order.o_ol_cnt {
+            let ol = data.gen_order_line(o_id, d_id, w_id, ol_number, delivered);
+            let params: Vec<Value> = vec![
+                Value::from(ol.ol_o_id),
+                Value::from(ol.ol_d_id),
+                Value::from(ol.ol_w_id),
+                Value::from(ol.ol_number),
+                Value::from(ol.ol_i_id),
+                Value::from(ol.ol_supply_w_id),
+                ol.ol_delivery_d.map(Value::from).unwrap_or(Value::NULL),
+                Value::from(ol.ol_quantity),
+                Value::from(ol.ol_amount),
+                Value::from(ol.ol_dist_info),
+            ];
+            conn.exec_drop(
+                "INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params,
+            ).unwrap();
+        }
+
+        if o_id > delivered_threshold {
+            let no = data.gen_new_order(o_id, d_id, w_id);
+            conn.exec_drop(
+                "INSERT INTO new_order VALUES (?, ?, ?)",
+                (no.no_o_id, no.no_d_id, no.no_w_id),
+            ).unwrap();
         }
     }
 }
