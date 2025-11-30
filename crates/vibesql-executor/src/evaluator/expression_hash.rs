@@ -135,11 +135,13 @@ impl ExpressionHasher {
 
             vibesql_ast::Expression::Extract { expr, .. } => Self::is_deterministic(expr),
 
-            // Literals are deterministic, but column references, pseudo-variables, and session variables are NOT
+            // Literals and placeholders are deterministic, but column references, pseudo-variables, and session variables are NOT
             // Column references and pseudo-variables depend on the current row data, so they should not be cached
             // across multiple rows in row-iteration contexts
             // Session variables can change during execution, so they should not be cached
-            vibesql_ast::Expression::Literal(_) => true,
+            // Placeholders should be bound to values before evaluation, so treat them as deterministic
+            vibesql_ast::Expression::Literal(_)
+            | vibesql_ast::Expression::Placeholder(_) => true,
             vibesql_ast::Expression::ColumnRef { .. }
             | vibesql_ast::Expression::PseudoVariable { .. }
             | vibesql_ast::Expression::SessionVariable { .. } => false,
@@ -391,6 +393,10 @@ impl ExpressionHasher {
 
             vibesql_ast::Expression::SessionVariable { name } => {
                 name.hash(hasher);
+            }
+
+            vibesql_ast::Expression::Placeholder(idx) => {
+                idx.hash(hasher);
             }
         }
     }

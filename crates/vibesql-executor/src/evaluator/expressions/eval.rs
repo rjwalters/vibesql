@@ -324,6 +324,13 @@ impl ExpressionEvaluator<'_> {
                     ))
                 }
             }
+
+            // Placeholder (?) - must be bound before evaluation
+            vibesql_ast::Expression::Placeholder(idx) => {
+                Err(ExecutorError::UnsupportedExpression(
+                    format!("Unbound placeholder ?{} - placeholders must be bound to values before execution", idx)
+                ))
+            }
         }
     }
 

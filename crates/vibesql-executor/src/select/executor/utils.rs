@@ -106,6 +106,9 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
             // MATCH AGAINST references columns and the search term
             !columns.is_empty() || expression_references_column(search_modifier)
         }
+
+        // Placeholders don't reference columns (they're parameter markers)
+        vibesql_ast::Expression::Placeholder(_) => false,
     }
 }
 

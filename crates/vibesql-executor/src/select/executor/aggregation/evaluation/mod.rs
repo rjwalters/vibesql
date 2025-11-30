@@ -126,6 +126,13 @@ impl SelectExecutor<'_> {
                     "MATCH...AGAINST not supported in aggregate context".to_string(),
                 ))
             }
+
+            // Placeholders should have been bound before evaluation
+            vibesql_ast::Expression::Placeholder(_) => {
+                Err(ExecutorError::UnsupportedExpression(
+                    "Unbound placeholder in aggregate context - placeholders must be bound before execution".to_string(),
+                ))
+            }
         }
     }
 

@@ -23,6 +23,9 @@ pub enum Token {
     SessionVariable(String),
     /// User variable (@variable)
     UserVariable(String),
+    /// Parameter placeholder (?) for prepared statements
+    /// The index is assigned during parsing (0-indexed, in order of appearance)
+    Placeholder,
     /// Semicolon (statement terminator)
     Semicolon,
     /// Comma (separator)
@@ -47,6 +50,7 @@ impl fmt::Display for Token {
             Token::Operator(op) => write!(f, "Operator({})", op),
             Token::SessionVariable(v) => write!(f, "SessionVariable({})", v),
             Token::UserVariable(v) => write!(f, "UserVariable({})", v),
+            Token::Placeholder => write!(f, "Placeholder"),
             Token::Semicolon => write!(f, "Semicolon"),
             Token::Comma => write!(f, "Comma"),
             Token::LParen => write!(f, "LParen"),
