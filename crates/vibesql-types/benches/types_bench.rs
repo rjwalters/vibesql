@@ -35,7 +35,7 @@ fn bench_construction(c: &mut Criterion) {
     });
 
     group.bench_function("double", |b| {
-        b.iter(|| black_box(SqlValue::Double(3.14159265359)));
+        b.iter(|| black_box(SqlValue::Double(123.456789)));
     });
 
     group.bench_function("boolean", |b| {
@@ -81,7 +81,7 @@ fn bench_clone(c: &mut Criterion) {
         b.iter(|| black_box(varchar_long.clone()));
     });
 
-    let double_val = SqlValue::Double(3.14159265359);
+    let double_val = SqlValue::Double(123.456789);
     group.bench_function("double", |b| {
         b.iter(|| black_box(double_val.clone()));
     });
@@ -217,10 +217,10 @@ fn bench_hashing(c: &mut Criterion) {
 fn bench_type_checking(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_checking");
 
-    let values = vec![
+    let values = [
         SqlValue::Integer(42),
         SqlValue::Varchar("hello".to_string()),
-        SqlValue::Double(3.14),
+        SqlValue::Double(99.99),
         SqlValue::Boolean(true),
         SqlValue::Null,
         SqlValue::Date(Date::new(2024, 11, 29).unwrap()),
