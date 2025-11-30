@@ -153,7 +153,16 @@ impl CombinedExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
-                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                // Pass CTE context for queries referencing CTEs from outer scope (#3044)
+                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database,
+                        cte_ctx,
+                        self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                };
                 let rows = select_executor.execute(subquery)?;
                 self.subquery_cache.borrow_mut().put(cache_key, rows.clone());
                 rows
@@ -196,13 +205,26 @@ impl CombinedExpressionEvaluator<'_> {
             None
         };
 
+        // Pass CTE context for queries referencing CTEs from outer scope (#3044)
         let select_executor = if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
-            crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                database,
-                outer_row,
-                schema,
-                self.depth,
-            )
+            if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                    database,
+                    outer_row,
+                    schema,
+                    cte_ctx,
+                    self.depth,
+                )
+            } else {
+                crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                    database,
+                    outer_row,
+                    schema,
+                    self.depth,
+                )
+            }
+        } else if let Some(cte_ctx) = self.cte_context {
+            crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
         } else {
             crate::select::SelectExecutor::new(database)
         };
