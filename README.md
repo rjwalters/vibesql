@@ -104,9 +104,16 @@ See [Python Bindings Guide](docs/PYTHON_BINDINGS.md) for full API reference.
 ## Development
 
 ```bash
+# Full build, test, and benchmark (runs in background)
+make all            # Starts in background, shows monitoring instructions
+make status         # Check progress
+make logs           # Follow full output
+
+# Individual targets
 make build          # Build all crates
 make test           # Run all tests
-make benchmark      # Run TPC-H benchmarks
+make benchmark      # Run TPC-H/TPC-C/TPC-DS benchmarks
+make all-fg         # Run everything in foreground (blocking)
 make help           # Show all targets
 ```
 

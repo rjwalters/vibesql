@@ -1,11 +1,61 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
 
-# Default target - fully qualify and update the state of the repo
-# Runs build-all (including Python), all tests, benchmarks, and records results to database
-all: build-all test benchmark
+# Log file location for background runs
+LOG_FILE := /tmp/vibesql-make-all.log
+PID_FILE := /tmp/vibesql-make-all.pid
+
+# Default target - runs in background since it takes a long time
+# Use 'make all-fg' for foreground execution
+all:
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "  Starting 'make all' in background (build + test + benchmark)"
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "  Log file: $(LOG_FILE)"
+	@echo ""
+	@echo "  Monitor progress:"
+	@echo "    make status    - Quick status check with last 10 lines"
+	@echo "    make logs      - Follow full output (Ctrl+C to stop)"
+	@echo "    tail -f $(LOG_FILE)"
+	@echo ""
+	@nohup $(MAKE) all-fg > $(LOG_FILE) 2>&1 & echo $$! > $(PID_FILE)
+	@echo "  PID: $$(cat $(PID_FILE))"
+	@echo ""
+	@echo "══════════════════════════════════════════════════════════════════"
+
+# Run all targets in foreground (build, test, benchmark)
+# This is what 'make all' runs in the background
+all-fg: build-all test benchmark
+
+# Tail the background make output
+logs:
+	@if [ -f $(LOG_FILE) ]; then \
+		tail -f $(LOG_FILE); \
+	else \
+		echo "No log file found. Run 'make all' first."; \
+	fi
+
+# Check status of background make
+status:
+	@if [ -f $(PID_FILE) ]; then \
+		PID=$$(cat $(PID_FILE)); \
+		if ps -p $$PID > /dev/null 2>&1; then \
+			echo "✓ make all is running (PID: $$PID)"; \
+			echo ""; \
+			echo "Last 10 lines of output:"; \
+			tail -10 $(LOG_FILE) 2>/dev/null || echo "(no output yet)"; \
+		else \
+			echo "✗ make all has finished"; \
+			echo ""; \
+			echo "Exit status (last 20 lines):"; \
+			tail -20 $(LOG_FILE) 2>/dev/null; \
+		fi; \
+	else \
+		echo "No background make running. Use 'make all' to start."; \
+	fi
 
 # Help target
 help:
@@ -50,7 +100,10 @@ help:
 	@echo ""
 	@echo "Utility targets:"
 	@echo "  make clean              - Clean build artifacts"
-	@echo "  make all                - Build, test, benchmark, and record all results"
+	@echo "  make all                - Build, test, benchmark (runs in BACKGROUND by default)"
+	@echo "  make all-fg             - Run 'make all' in foreground (blocking)"
+	@echo "  make logs               - Tail the background make output"
+	@echo "  make status             - Check if background make is running and show recent output"
 	@echo "  make help               - Show this help message"
 
 #
