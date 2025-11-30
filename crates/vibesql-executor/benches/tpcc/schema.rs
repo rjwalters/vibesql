@@ -413,6 +413,16 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         false,
         vec![col("o_w_id"), col("o_d_id"), col("o_c_id")],
     ).ok();
+
+    // Stock-Level transaction index: enables efficient range scans on order_line
+    // for the last 20 orders per TPC-C spec 2.8. This matches the idx_order_line_district
+    // index added to SQLite, DuckDB, and MySQL for benchmark consistency.
+    db.create_index(
+        "idx_order_line_district".to_string(),
+        "order_line".to_string(),
+        false,
+        vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id")],
+    ).ok();
 }
 
 fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCCData) {
