@@ -193,19 +193,66 @@ pub fn generate_stock_level_input(rng: &mut TPCCRng, num_warehouses: i32) -> Sto
     }
 }
 
+/// Thread-local profiling accumulators for query breakdown
+thread_local! {
+    static PARSE_TIME_US: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static EXECUTE_TIME_US: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static QUERY_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Helper function to execute a SQL query
 fn execute_query(db: &vibesql_storage::Database, sql: &str) -> Result<(), String> {
+    let parse_start = Instant::now();
+
     let stmt = match Parser::parse_sql(sql) {
         Ok(vibesql_ast::Statement::Select(s)) => s,
         Ok(_) => return Ok(()), // Non-select statements are OK
         Err(e) => return Err(format!("Parse error: {}", e)),
     };
 
+    let parse_time = parse_start.elapsed().as_micros() as u64;
+    PARSE_TIME_US.with(|t| t.set(t.get() + parse_time));
+
+    let execute_start = Instant::now();
+
     let executor = SelectExecutor::new(db);
-    match executor.execute(&stmt) {
+    let result = match executor.execute(&stmt) {
         Ok(_) => Ok(()),
         Err(e) => Err(format!("Execute error: {}", e)),
-    }
+    };
+
+    let execute_time = execute_start.elapsed().as_micros() as u64;
+    EXECUTE_TIME_US.with(|t| t.set(t.get() + execute_time));
+    QUERY_COUNT.with(|c| c.set(c.get() + 1));
+
+    result
+}
+
+/// Print profiling summary (call at end of benchmark)
+pub fn print_profile_summary() {
+    PARSE_TIME_US.with(|parse| {
+        EXECUTE_TIME_US.with(|execute| {
+            QUERY_COUNT.with(|count| {
+                let p = parse.get();
+                let e = execute.get();
+                let c = count.get();
+                if c > 0 {
+                    eprintln!("\n--- Query Profiling ---");
+                    eprintln!("Total queries: {}", c);
+                    eprintln!("Parse time:   {} us total, {:.2} us avg", p, p as f64 / c as f64);
+                    eprintln!("Execute time: {} us total, {:.2} us avg", e, e as f64 / c as f64);
+                    eprintln!("Parse %:      {:.1}%", p as f64 / (p + e) as f64 * 100.0);
+                }
+            });
+        });
+    });
+}
+
+/// Reset profiling counters
+pub fn reset_profile_counters() {
+    PARSE_TIME_US.with(|t| t.set(0));
+    EXECUTE_TIME_US.with(|t| t.set(0));
+    QUERY_COUNT.with(|c| c.set(0));
 }
 
 /// TPC-C transaction executor for VibeSQL

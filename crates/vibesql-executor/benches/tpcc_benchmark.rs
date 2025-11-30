@@ -310,9 +310,13 @@ fn main() {
 
     // Run VibeSQL benchmark
     eprintln!("\n--- VibeSQL Benchmark ---");
+    tpcc::transactions::reset_profile_counters();
+
     let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
     let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
     print_results(&vibesql_results, transaction_type);
+
+    tpcc::transactions::print_profile_summary();
 
     // Comparison benchmarks (if feature enabled)
     #[cfg(feature = "benchmark-comparison")]
