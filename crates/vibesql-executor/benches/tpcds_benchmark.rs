@@ -16,7 +16,7 @@ mod tpcds;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::hint::black_box;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
@@ -86,6 +86,8 @@ fn print_query_summary() {
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
+#[cfg(feature = "benchmark-comparison")]
+use std::sync::Mutex;
 
 use std::time::Duration;
 use tpcds::queries::{TPCDS_QUERIES, TPCDS_SANITY_QUERIES};
