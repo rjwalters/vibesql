@@ -8,13 +8,20 @@
 //! Parse errors are handled gracefully - queries that fail to parse are skipped
 //! with a warning, allowing the benchmark suite to continue.
 //!
+//! Memory monitoring:
+//!   The benchmark monitors system memory and skips queries when memory pressure
+//!   exceeds the threshold (default 80%). Override with VIBESQL_MEMORY_THRESHOLD env var.
+//!
 //! Usage:
 //!   cargo bench --bench tpcds_benchmark
 //!   cargo bench --bench tpcds_benchmark --features benchmark-comparison
+//!   VIBESQL_MEMORY_THRESHOLD=70 cargo bench --bench tpcds_benchmark  # Lower threshold
 
+mod memory_monitor;
 mod tpcds;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use memory_monitor::{format_bytes, MemoryMonitor, MemoryPressure};
 use std::hint::black_box;
 use std::sync::{Mutex, OnceLock};
 use vibesql_executor::SelectExecutor;
@@ -36,8 +43,44 @@ enum QueryResult {
 /// Global tracker for query results
 static QUERY_RESULTS: OnceLock<Mutex<Vec<QueryResult>>> = OnceLock::new();
 
+/// Global memory monitor for tracking memory pressure
+static MEMORY_MONITOR: OnceLock<Mutex<MemoryMonitor>> = OnceLock::new();
+
 fn get_query_results() -> &'static Mutex<Vec<QueryResult>> {
     QUERY_RESULTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn get_memory_monitor() -> &'static Mutex<MemoryMonitor> {
+    MEMORY_MONITOR.get_or_init(|| {
+        let monitor = MemoryMonitor::new();
+        eprintln!(
+            "Memory monitor initialized (threshold: {:.0}%)",
+            monitor.threshold_percent()
+        );
+        Mutex::new(monitor)
+    })
+}
+
+/// Check memory pressure and return a skip reason if pressure is high
+fn check_memory_before_query(query_name: &str) -> Option<String> {
+    if let Ok(mut monitor) = get_memory_monitor().lock() {
+        match monitor.check_pressure() {
+            MemoryPressure::High { stats, threshold_percent } => {
+                let reason = format!(
+                    "Memory pressure ({:.1}% > {:.0}% threshold, {} used of {})",
+                    stats.usage_percent,
+                    threshold_percent,
+                    format_bytes(stats.used_bytes),
+                    format_bytes(stats.total_bytes)
+                );
+                eprintln!("[MEMORY] Skipping {} - {}", query_name, reason);
+                Some(reason)
+            }
+            MemoryPressure::Ok(_) => None,
+        }
+    } else {
+        None
+    }
 }
 
 fn record_query_result(result: QueryResult) {
@@ -61,13 +104,36 @@ fn print_query_summary() {
             .iter()
             .filter(|r| matches!(r, QueryResult::Skipped { .. }))
             .collect();
+        let memory_skipped: Vec<_> = skipped
+            .iter()
+            .filter(|r| {
+                if let QueryResult::Skipped { reason, .. } = r {
+                    reason.contains("Memory pressure")
+                } else {
+                    false
+                }
+            })
+            .collect();
 
         eprintln!("\n{}", "=".repeat(60));
         eprintln!("TPC-DS BENCHMARK SUMMARY");
         eprintln!("{}", "=".repeat(60));
         eprintln!("Passed:  {} queries", passed.len());
-        eprintln!("Skipped: {} queries", skipped.len());
+        eprintln!("Skipped: {} queries ({} due to memory pressure)", skipped.len(), memory_skipped.len());
         eprintln!("{}", "-".repeat(60));
+
+        // Print memory statistics
+        if let Ok(mut monitor) = get_memory_monitor().lock() {
+            let stats = monitor.current_stats();
+            eprintln!("\nMemory Statistics:");
+            eprintln!("  Current usage: {} / {} ({:.1}%)",
+                format_bytes(stats.used_bytes),
+                format_bytes(stats.total_bytes),
+                stats.usage_percent
+            );
+            eprintln!("  High-water mark: {}", format_bytes(monitor.high_water_mark_bytes()));
+            eprintln!("  Threshold: {:.0}%", monitor.threshold_percent());
+        }
 
         if !skipped.is_empty() {
             eprintln!("\nSkipped queries:");
@@ -228,11 +294,22 @@ fn bench_sanity_queries(c: &mut Criterion) {
     let db = get_vibesql_db();
 
     for (name, sql) in TPCDS_SANITY_QUERIES {
+        let query_name = format!("sanity_{}", name);
+
+        // Check memory pressure before executing query
+        if let Some(reason) = check_memory_before_query(&query_name) {
+            record_query_result(QueryResult::Skipped {
+                name: query_name,
+                reason,
+            });
+            continue;
+        }
+
         // Validate query before benchmarking
         match try_vibesql_query(db, sql) {
             Ok(row_count) => {
                 record_query_result(QueryResult::Passed {
-                    name: format!("sanity_{}", name),
+                    name: query_name,
                     row_count,
                 });
                 group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
@@ -266,6 +343,17 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
     let duckdb_conn = get_duckdb_conn();
 
     for (name, sql) in TPCDS_SANITY_QUERIES {
+        let query_name = format!("comparison_{}", name);
+
+        // Check memory pressure before executing query
+        if let Some(reason) = check_memory_before_query(&query_name) {
+            record_query_result(QueryResult::Skipped {
+                name: query_name,
+                reason,
+            });
+            continue;
+        }
+
         // Only benchmark if VibeSQL can parse and execute the query
         if let Err(e) = try_vibesql_query(vibesql_db, sql) {
             eprintln!("[SKIP] comparison_{}: {}", name, e);
@@ -311,11 +399,22 @@ fn bench_tpcds_queries(c: &mut Criterion) {
     let db = get_vibesql_db();
 
     for (name, sql) in TPCDS_QUERIES {
+        let query_name = name.to_string();
+
+        // Check memory pressure before executing query
+        if let Some(reason) = check_memory_before_query(&query_name) {
+            record_query_result(QueryResult::Skipped {
+                name: query_name,
+                reason,
+            });
+            continue;
+        }
+
         // Validate query before benchmarking
         match try_vibesql_query(db, sql) {
             Ok(row_count) => {
                 record_query_result(QueryResult::Passed {
-                    name: name.to_string(),
+                    name: query_name,
                     row_count,
                 });
                 group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
