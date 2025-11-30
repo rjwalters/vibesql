@@ -78,7 +78,7 @@ build_benchmark() {
 
 find_benchmark_binary() {
     local bench_name="$1"
-    local binary=$(find "$PROJECT_ROOT/target/release/deps" -maxdepth 1 -name "${bench_name}-*" -type f ! -name "*.d" | head -1)
+    local binary=$(find "$PROJECT_ROOT/target/release/deps" -maxdepth 1 -name "${bench_name}-*" -type f ! -name "*.d" ! -name "*.o" | head -1)
 
     if [[ -z "$binary" ]]; then
         error "Could not find benchmark binary for $bench_name"

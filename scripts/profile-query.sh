@@ -43,7 +43,7 @@ profile_tpch_query() {
     info "Building TPC-H profiling benchmark..."
     cargo build --release --package vibesql-executor --bench tpch_profiling --features benchmark-comparison 2>/dev/null
 
-    local binary=$(find "$PROJECT_ROOT/target/release/deps" -maxdepth 1 -name "tpch_profiling-*" -type f ! -name "*.d" | head -1)
+    local binary=$(find "$PROJECT_ROOT/target/release/deps" -maxdepth 1 -name "tpch_profiling-*" -type f ! -name "*.d" ! -name "*.o" | head -1)
 
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════"
