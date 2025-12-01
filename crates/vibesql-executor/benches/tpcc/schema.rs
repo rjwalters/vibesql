@@ -88,6 +88,10 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     }
 
     create_tpcc_indexes_sqlite(&conn);
+
+    // Compute statistics for query optimization (ensures fair comparison with VibeSQL)
+    conn.execute("ANALYZE", []).unwrap();
+
     conn
 }
 
@@ -113,6 +117,10 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     }
 
     create_tpcc_indexes_duckdb(&conn);
+
+    // Compute statistics for query optimization (ensures fair comparison with VibeSQL)
+    conn.execute_batch("ANALYZE").unwrap();
+
     conn
 }
 
@@ -145,6 +153,10 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     }
 
     create_tpcc_indexes_mysql(&mut conn);
+
+    // Compute statistics for query optimization (ensures fair comparison with VibeSQL)
+    conn.query_drop("ANALYZE TABLE warehouse, district, customer, history, new_order, orders, order_line, item, stock").unwrap();
+
     Some(conn)
 }
 

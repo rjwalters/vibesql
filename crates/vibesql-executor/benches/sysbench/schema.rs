@@ -56,6 +56,9 @@ pub fn load_sqlite(table_size: usize) -> SqliteConn {
     // Load data
     load_sbtest_sqlite(&conn, &mut data);
 
+    // Compute statistics for query optimization (ensures fair comparison with VibeSQL)
+    conn.execute("ANALYZE", []).unwrap();
+
     conn
 }
 
@@ -70,6 +73,9 @@ pub fn load_duckdb(table_size: usize) -> DuckDBConn {
 
     // Load data
     load_sbtest_duckdb(&conn, &mut data);
+
+    // Compute statistics for query optimization (ensures fair comparison with VibeSQL)
+    conn.execute_batch("ANALYZE").unwrap();
 
     conn
 }
@@ -89,6 +95,9 @@ pub fn load_mysql(table_size: usize) -> Option<PooledConn> {
 
     // Load data
     load_sbtest_mysql(&mut conn, &mut data);
+
+    // Compute statistics for query optimization (ensures fair comparison with VibeSQL)
+    conn.query_drop("ANALYZE TABLE sbtest1").unwrap();
 
     Some(conn)
 }
