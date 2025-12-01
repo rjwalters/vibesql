@@ -48,7 +48,10 @@ use vibesql_ast::Statement;
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
-use crate::cache::{PreparedStatement, PreparedStatementCache, PreparedStatementError};
+use crate::cache::{
+    CachedPlan, PkPointLookupPlan, PreparedStatement, PreparedStatementCache,
+    PreparedStatementError, ProjectionPlan,
+};
 use crate::errors::ExecutorError;
 use crate::{DeleteExecutor, InsertExecutor, SelectExecutor, SelectResult, UpdateExecutor};
 
@@ -197,6 +200,9 @@ impl<'a> Session<'a> {
     /// Binds the parameters to the prepared statement and executes it.
     /// This is the fast path for repeated queries - no SQL parsing occurs.
     ///
+    /// For simple PK point lookups, uses cached execution plan to bypass
+    /// the full query execution pipeline.
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -208,11 +214,132 @@ impl<'a> Session<'a> {
         stmt: &PreparedStatement,
         params: &[SqlValue],
     ) -> Result<PreparedExecutionResult, SessionError> {
+        // Check parameter count first
+        if params.len() != stmt.param_count() {
+            return Err(SessionError::PreparedStatement(
+                PreparedStatementError::ParameterCountMismatch {
+                    expected: stmt.param_count(),
+                    actual: params.len(),
+                },
+            ));
+        }
+
+        // Try fast-path execution using cached plan
+        if let CachedPlan::PkPointLookup(plan) = stmt.cached_plan() {
+            if let Some(result) = self.try_execute_pk_lookup(plan, params)? {
+                return Ok(result);
+            }
+            // Fall through to standard execution if fast path fails
+        }
+
         // Bind parameters to get executable statement
         let bound_stmt = stmt.bind(params)?;
 
         // Execute based on statement type
         self.execute_statement(&bound_stmt)
+    }
+
+    /// Try to execute a PK point lookup using the cached plan
+    ///
+    /// Returns `Ok(Some(result))` if execution succeeded via fast path,
+    /// `Ok(None)` if we need to fall back to standard execution,
+    /// or `Err` if a real error occurred.
+    fn try_execute_pk_lookup(
+        &self,
+        plan: &PkPointLookupPlan,
+        params: &[SqlValue],
+    ) -> Result<Option<PreparedExecutionResult>, SessionError> {
+        // Get the table
+        let table = match self.db.get_table(&plan.table_name) {
+            Some(t) => t,
+            None => return Ok(None), // Table doesn't exist or it's a view - fall back
+        };
+
+        // Verify PK columns match what we expected
+        let actual_pk_columns = match &table.schema.primary_key {
+            Some(cols) if cols.len() == plan.pk_columns.len() => cols,
+            _ => return Ok(None), // PK structure changed - fall back
+        };
+
+        // Build PK values in the correct order
+        let mut pk_values = Vec::with_capacity(plan.pk_columns.len());
+        for (param_idx, pk_col_idx) in &plan.param_to_pk_col {
+            if *param_idx >= params.len() || *pk_col_idx >= plan.pk_columns.len() {
+                return Ok(None); // Invalid mapping - fall back
+            }
+
+            // Verify the column name still matches
+            let expected_col = &plan.pk_columns[*pk_col_idx];
+            let actual_col = &actual_pk_columns[*pk_col_idx];
+            if !expected_col.eq_ignore_ascii_case(actual_col) {
+                return Ok(None); // Column mismatch - fall back
+            }
+
+            pk_values.push(params[*param_idx].clone());
+        }
+
+        // Perform the PK lookup
+        let row = if pk_values.len() == 1 {
+            self.db
+                .get_row_by_pk(&plan.table_name, &pk_values[0])
+                .map_err(|e| SessionError::Execution(ExecutorError::StorageError(e.to_string())))?
+        } else {
+            self.db
+                .get_row_by_composite_pk(&plan.table_name, &pk_values)
+                .map_err(|e| SessionError::Execution(ExecutorError::StorageError(e.to_string())))?
+        };
+
+        let rows = match row {
+            Some(r) => vec![r.clone()],
+            None => vec![],
+        };
+
+        // Apply projection if needed
+        let (columns, result_rows) = match &plan.projection {
+            ProjectionPlan::Wildcard => {
+                // Return all columns
+                let columns: Vec<String> = table.schema.columns.iter().map(|c| c.name.clone()).collect();
+                (columns, rows)
+            }
+            ProjectionPlan::Columns(projections) => {
+                // Build column indices for projection
+                let mut col_indices = Vec::with_capacity(projections.len());
+                let mut column_names = Vec::with_capacity(projections.len());
+
+                for proj in projections {
+                    let idx = table
+                        .schema
+                        .columns
+                        .iter()
+                        .position(|c| c.name.eq_ignore_ascii_case(&proj.column_name));
+
+                    match idx {
+                        Some(i) => {
+                            col_indices.push(i);
+                            column_names.push(proj.alias.clone().unwrap_or_else(|| proj.column_name.clone()));
+                        }
+                        None => return Ok(None), // Column not found - fall back
+                    }
+                }
+
+                // Project rows
+                let projected_rows: Vec<Row> = rows
+                    .into_iter()
+                    .map(|row| {
+                        let projected_values: Vec<SqlValue> =
+                            col_indices.iter().map(|&i| row.values[i].clone()).collect();
+                        Row::new(projected_values)
+                    })
+                    .collect();
+
+                (column_names, projected_rows)
+            }
+        };
+
+        Ok(Some(PreparedExecutionResult::Select(SelectResult {
+            columns,
+            rows: result_rows,
+        })))
     }
 
     /// Execute a bound statement (internal helper)
