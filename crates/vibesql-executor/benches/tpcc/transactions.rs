@@ -320,52 +320,39 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         Self { db }
     }
 
-    /// Direct index lookup for single-column primary key
-    /// Returns the row if found, None otherwise
+    /// Direct index lookup for single-column primary key using the new high-performance API
+    /// Returns true if row exists, false otherwise
     #[inline]
-    fn lookup_by_pk(&self, table_name: &str, index_name: &str, key: i64) -> Option<vibesql_storage::Row> {
+    fn exists_by_pk(&self, index_name: &str, key: i64) -> bool {
         use vibesql_types::SqlValue;
-
-        let index_data = self.db.get_index_data(index_name)?;
-        let table = self.db.get_table(table_name)?;
-
-        let key_values = vec![SqlValue::Integer(key)];
-        let row_indices = index_data.get(&key_values)?;
-
-        let all_rows = table.scan();
-        row_indices.first().and_then(|idx| all_rows.get(*idx).cloned())
+        let key_values = [SqlValue::Integer(key)];
+        self.db.lookup_one_by_index(index_name, &key_values).ok().flatten().is_some()
     }
 
-    /// Direct index lookup for two-column composite primary key
-    /// Returns the row if found, None otherwise
+    /// Direct index lookup for two-column composite primary key using the new high-performance API
+    /// Returns true if row exists, false otherwise
     #[inline]
-    fn lookup_by_pk2(&self, table_name: &str, index_name: &str, key1: i64, key2: i64) -> Option<vibesql_storage::Row> {
+    fn exists_by_pk2(&self, index_name: &str, key1: i64, key2: i64) -> bool {
         use vibesql_types::SqlValue;
-
-        let index_data = self.db.get_index_data(index_name)?;
-        let table = self.db.get_table(table_name)?;
-
-        let key_values = vec![SqlValue::Integer(key1), SqlValue::Integer(key2)];
-        let row_indices = index_data.get(&key_values)?;
-
-        let all_rows = table.scan();
-        row_indices.first().and_then(|idx| all_rows.get(*idx).cloned())
+        let key_values = [SqlValue::Integer(key1), SqlValue::Integer(key2)];
+        self.db.lookup_one_by_index(index_name, &key_values).ok().flatten().is_some()
     }
 
-    /// Direct index lookup for three-column composite primary key
-    /// Returns the row if found, None otherwise
+    /// Direct index lookup for three-column composite primary key using the new high-performance API
+    /// Returns true if row exists, false otherwise
     #[inline]
-    fn lookup_by_pk3(&self, table_name: &str, index_name: &str, key1: i64, key2: i64, key3: i64) -> Option<vibesql_storage::Row> {
+    fn exists_by_pk3(&self, index_name: &str, key1: i64, key2: i64, key3: i64) -> bool {
         use vibesql_types::SqlValue;
+        let key_values = [SqlValue::Integer(key1), SqlValue::Integer(key2), SqlValue::Integer(key3)];
+        self.db.lookup_one_by_index(index_name, &key_values).ok().flatten().is_some()
+    }
 
-        let index_data = self.db.get_index_data(index_name)?;
-        let table = self.db.get_table(table_name)?;
-
-        let key_values = vec![SqlValue::Integer(key1), SqlValue::Integer(key2), SqlValue::Integer(key3)];
-        let row_indices = index_data.get(&key_values)?;
-
-        let all_rows = table.scan();
-        row_indices.first().and_then(|idx| all_rows.get(*idx).cloned())
+    /// Direct index lookup returning the row reference - use when you need the row data
+    #[inline]
+    fn lookup_row_by_pk2(&self, index_name: &str, key1: i64, key2: i64) -> Option<&vibesql_storage::Row> {
+        use vibesql_types::SqlValue;
+        let key_values = [SqlValue::Integer(key1), SqlValue::Integer(key2)];
+        self.db.lookup_one_by_index(index_name, &key_values).ok().flatten()
     }
 
     /// Execute New-Order transaction using optimized direct lookups
@@ -374,7 +361,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Get warehouse (single-column PK lookup)
         // Index: idx_warehouse_pk on warehouse(W_ID)
-        if self.lookup_by_pk("warehouse", "idx_warehouse_pk", input.w_id as i64).is_none() {
+        if !self.exists_by_pk("idx_warehouse_pk", input.w_id as i64) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -384,7 +371,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Get district (two-column composite PK lookup)
         // Index: idx_district_pk on district(D_W_ID, D_ID)
-        if self.lookup_by_pk2("district", "idx_district_pk", input.w_id as i64, input.d_id as i64).is_none() {
+        if !self.exists_by_pk2("idx_district_pk", input.w_id as i64, input.d_id as i64) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -394,7 +381,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Get customer (three-column composite PK lookup)
         // Index: idx_customer_pk on customer(C_W_ID, C_D_ID, C_ID)
-        if self.lookup_by_pk3("customer", "idx_customer_pk", input.w_id as i64, input.d_id as i64, input.c_id as i64).is_none() {
+        if !self.exists_by_pk3("idx_customer_pk", input.w_id as i64, input.d_id as i64, input.c_id as i64) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -406,7 +393,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         for item in &input.items {
             // Get item (single-column PK lookup)
             // Index: idx_item_pk on item(I_ID)
-            if self.lookup_by_pk("item", "idx_item_pk", item.ol_i_id as i64).is_none() {
+            if !self.exists_by_pk("idx_item_pk", item.ol_i_id as i64) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -416,7 +403,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
             // Get stock (two-column composite PK lookup)
             // Index: idx_stock_pk on stock(S_I_ID, S_W_ID)
-            if self.lookup_by_pk2("stock", "idx_stock_pk", item.ol_i_id as i64, item.ol_supply_w_id as i64).is_none() {
+            if !self.exists_by_pk2("idx_stock_pk", item.ol_i_id as i64, item.ol_supply_w_id as i64) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -437,7 +424,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse
-        if self.lookup_by_pk("warehouse", "idx_warehouse_pk", input.w_id as i64).is_none() {
+        if !self.exists_by_pk("idx_warehouse_pk", input.w_id as i64) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -446,7 +433,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
 
         // Get district
-        if self.lookup_by_pk2("district", "idx_district_pk", input.w_id as i64, input.d_id as i64).is_none() {
+        if !self.exists_by_pk2("idx_district_pk", input.w_id as i64, input.d_id as i64) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -457,7 +444,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         // Get customer (by ID or last name)
         if let Some(c_id) = input.c_id {
             // Direct PK lookup
-            if self.lookup_by_pk3("customer", "idx_customer_pk", input.c_w_id as i64, input.c_d_id as i64, c_id as i64).is_none() {
+            if !self.exists_by_pk3("idx_customer_pk", input.c_w_id as i64, input.c_d_id as i64, c_id as i64) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -492,7 +479,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Get customer (by ID or last name)
         if let Some(c_id) = input.c_id {
-            if self.lookup_by_pk3("customer", "idx_customer_pk", input.w_id as i64, input.d_id as i64, c_id as i64).is_none() {
+            if !self.exists_by_pk3("idx_customer_pk", input.w_id as i64, input.d_id as i64, c_id as i64) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -560,8 +547,8 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
         let start = Instant::now();
 
-        // Get district next order ID via direct lookup
-        let district = match self.lookup_by_pk2("district", "idx_district_pk", input.w_id as i64, input.d_id as i64) {
+        // Get district next order ID via direct lookup - need the row data here
+        let district = match self.lookup_row_by_pk2("idx_district_pk", input.w_id as i64, input.d_id as i64) {
             Some(row) => row,
             None => {
                 return TransactionResult {
