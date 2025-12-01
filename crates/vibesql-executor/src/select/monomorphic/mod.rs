@@ -86,13 +86,20 @@ pub trait MonomorphicPlan: Send + Sync {
 /// Returns None if no specialized plan is available for this query.
 ///
 /// Priority order:
-/// 1. Generic patterns (work for any table with compatible structure)
-/// 2. TPC-H-specific patterns (for backward compatibility, will be deprecated)
+/// 1. TPC-H-specific patterns (hand-optimized for known benchmark queries)
+/// 2. Generic patterns (work for any table with compatible structure)
 pub fn try_create_monomorphic_plan(
     stmt: &SelectStmt,
     schema: &CombinedSchema,
 ) -> Option<Box<dyn MonomorphicPlan>> {
-    // Try generic GROUP BY patterns first
+    // Try TPC-H-specific patterns first (hand-optimized for benchmark queries)
+    // These patterns read all columns once per row and use fused aggregation
+    // which is faster than the generic patterns for known query shapes
+    if let Some(plan) = tpch::try_create_tpch_plan(stmt, schema) {
+        return Some(plan);
+    }
+
+    // Try generic GROUP BY patterns
     if let Some(plan) = generic::GenericGroupedAggregationPlan::try_create(stmt, schema) {
         return Some(Box::new(plan));
     }
@@ -100,12 +107,6 @@ pub fn try_create_monomorphic_plan(
     // Try generic filtered aggregation (no GROUP BY)
     if let Some(plan) = generic::GenericFilteredAggregationPlan::try_create(stmt, schema) {
         return Some(Box::new(plan));
-    }
-
-    // Fall back to TPC-H-specific patterns for backward compatibility
-    // These will be deprecated once generic patterns are fully tested
-    if let Some(plan) = tpch::try_create_tpch_plan(stmt, schema) {
-        return Some(plan);
     }
 
     None
