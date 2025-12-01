@@ -4,17 +4,10 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-mod auth;
-mod config;
-mod connection;
-mod observability;
-mod protocol;
-mod session;
-
-use auth::PasswordStore;
-use config::Config;
-use connection::ConnectionHandler;
-use observability::ObservabilityProvider;
+use vibesql_server::auth::PasswordStore;
+use vibesql_server::config::Config;
+use vibesql_server::connection::ConnectionHandler;
+use vibesql_server::observability::ObservabilityProvider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
