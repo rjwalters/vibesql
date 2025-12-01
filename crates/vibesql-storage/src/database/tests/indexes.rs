@@ -1405,7 +1405,7 @@ fn test_lookup_by_index_prefix_empty_prefix() {
         ],
     ).unwrap();
 
-    // Empty prefix should return empty results (by design)
+    // Empty prefix matches everything - returns all rows
     let rows = db.lookup_by_index_prefix("idx_ab", &[]).unwrap();
-    assert!(rows.is_empty(), "Empty prefix should return no rows");
+    assert_eq!(rows.len(), 1, "Empty prefix should return all rows");
 }
