@@ -762,6 +762,7 @@ fn benchmark_delete_vibesql(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("sysbench_delete");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each iteration loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter_batched(
@@ -789,6 +790,7 @@ fn benchmark_delete_sqlite(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("sysbench_delete");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each iteration loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
         b.iter_batched(
@@ -814,6 +816,7 @@ fn benchmark_delete_duckdb(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("sysbench_delete");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each iteration loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
         b.iter_batched(
