@@ -1,0 +1,182 @@
+name: Fuzz Testing
+
+on:
+  schedule:
+    # Run nightly at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzzing duration in seconds'
+        required: false
+        default: '300'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - sql_parser
+          - expr_eval
+          - type_convert
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo-fuzz
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-0.11
+
+      - name: Install cargo-fuzz
+        run: |
+          if ! command -v cargo-fuzz &> /dev/null; then
+            cargo install cargo-fuzz
+          fi
+
+      - name: Cache fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: |
+            fuzz/corpus/${{ matrix.target }}
+            fuzz/artifacts/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Run fuzzer - ${{ matrix.target }}
+        id: fuzz
+        continue-on-error: true
+        run: |
+          cd fuzz
+          FUZZ_DURATION="${{ github.event.inputs.duration || '300' }}"
+
+          # Create artifacts directory
+          mkdir -p artifacts/${{ matrix.target }}
+
+          # Run fuzzer with dictionary if available
+          DICT_ARGS=""
+          if [[ -f "dictionaries/sql.dict" ]]; then
+            DICT_ARGS="-dict=dictionaries/sql.dict"
+          fi
+
+          # Run fuzzer - capture crashes
+          timeout "${FUZZ_DURATION}s" cargo +nightly fuzz run ${{ matrix.target }} \
+            -- \
+            -max_total_time="${FUZZ_DURATION}" \
+            -artifact_prefix=artifacts/${{ matrix.target }}/ \
+            $DICT_ARGS \
+            2>&1 | tee fuzz_output.txt || true
+
+          # Check for crashes
+          if ls artifacts/${{ matrix.target }}/crash-* 1> /dev/null 2>&1; then
+            echo "crash_found=true" >> $GITHUB_OUTPUT
+            echo "Crashes found!"
+          else
+            echo "crash_found=false" >> $GITHUB_OUTPUT
+            echo "No crashes found"
+          fi
+
+      - name: Upload crash artifacts
+        if: steps.fuzz.outputs.crash_found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/crash-*
+          retention-days: 30
+
+      - name: Create issue on crash
+        if: steps.fuzz.outputs.crash_found == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read crash files
+            const crashDir = 'fuzz/artifacts/${{ matrix.target }}';
+            const crashes = fs.readdirSync(crashDir)
+              .filter(f => f.startsWith('crash-'))
+              .slice(0, 5);  // Limit to first 5 crashes
+
+            let crashDetails = '';
+            for (const crash of crashes) {
+              const content = fs.readFileSync(`${crashDir}/${crash}`);
+              crashDetails += `### ${crash}\n\`\`\`\n${content.toString('utf8').slice(0, 500)}\n\`\`\`\n\n`;
+            }
+
+            const body = `## Fuzzing found crashes in \`${{ matrix.target }}\`
+
+            The nightly fuzzing job found ${crashes.length} crash(es) in the \`${{ matrix.target }}\` fuzz target.
+
+            ### Crash Inputs
+            ${crashDetails}
+
+            ### Reproduce
+            \`\`\`bash
+            # Install cargo-fuzz
+            cargo install cargo-fuzz
+
+            # Download crash artifact and reproduce
+            cd fuzz
+            cargo +nightly fuzz run ${{ matrix.target }} artifacts/${{ matrix.target }}/<crash-file>
+            \`\`\`
+
+            ### Run Details
+            - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Fuzz Duration: ${{ github.event.inputs.duration || '300' }}s
+            `;
+
+            // Check if similar issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'bug,fuzzing',
+              per_page: 100
+            });
+
+            const existingIssue = issues.data.find(issue =>
+              issue.title.includes('${{ matrix.target }}')
+            );
+
+            if (existingIssue) {
+              // Add comment to existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: `New crashes found in run ${{ github.run_id }}:\n\n${crashDetails}`
+              });
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[Fuzzing] Crashes found in ${{ matrix.target }}`,
+                body: body,
+                labels: ['bug', 'fuzzing']
+              });
+            }
