@@ -546,8 +546,15 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Stock-Level transaction using the public lookup_by_index API
+    /// Execute Stock-Level transaction using direct index API (no SQL)
+    ///
+    /// This optimization replaces the SQL query with direct index lookups:
+    /// 1. Batch lookup order_lines for the last 20 orders using idx_order_line_district
+    /// 2. Collect unique item IDs
+    /// 3. Batch lookup stock quantities using idx_stock_pk
+    /// 4. Count items with quantity below threshold
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        use std::collections::HashSet;
         use vibesql_types::SqlValue;
         let start = Instant::now();
 
@@ -575,21 +582,73 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
             }
         };
 
-        // Stock-Level query requires complex aggregation with subquery - use SQL
+        // Build keys for order_line batch lookup: (ol_w_id, ol_d_id, ol_o_id)
+        // Using idx_order_line_district index
         let ol_o_id_min = d_next_o_id - 20;
-        let stock_query = format!(
-            "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
-             WHERE ol_w_id = {} AND ol_d_id = {} \
-             AND ol_o_id >= {} AND ol_o_id < {} \
-             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
-            input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold
-        );
-        if let Err(e) = execute_query(self.db, &stock_query) {
-            return TransactionResult {
-                success: false,
-                duration_us: start.elapsed().as_micros() as u64,
-                error: Some(format!("Stock level query failed: {}", e)),
-            };
+        let order_keys: Vec<Vec<SqlValue>> = (ol_o_id_min..d_next_o_id)
+            .map(|o_id| vec![
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(o_id),
+            ])
+            .collect();
+
+        // Batch lookup all order_lines for the last 20 orders
+        let order_line_results = match self.db.lookup_by_index_batch("idx_order_line_district", &order_keys) {
+            Ok(results) => results,
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Order line lookup failed: {}", e)),
+                };
+            }
+        };
+
+        // Collect unique item IDs from order_lines (column 4 = ol_i_id)
+        let mut unique_item_ids: HashSet<i64> = HashSet::new();
+        for order_lines_opt in &order_line_results {
+            if let Some(order_lines) = order_lines_opt {
+                for row in order_lines {
+                    if let Some(SqlValue::Integer(ol_i_id)) = row.values.get(4) {
+                        unique_item_ids.insert(*ol_i_id);
+                    }
+                }
+            }
+        }
+
+        // Build keys for stock batch lookup: (s_i_id, s_w_id)
+        // Using idx_stock_pk index
+        let stock_keys: Vec<Vec<SqlValue>> = unique_item_ids
+            .iter()
+            .map(|&i_id| vec![
+                SqlValue::Integer(i_id),
+                SqlValue::Integer(input.w_id as i64),
+            ])
+            .collect();
+
+        // Batch lookup stock quantities
+        let stock_results = match self.db.lookup_one_by_index_batch("idx_stock_pk", &stock_keys) {
+            Ok(results) => results,
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Stock lookup failed: {}", e)),
+                };
+            }
+        };
+
+        // Count items with quantity below threshold (column 2 = s_quantity)
+        let mut _low_stock_count = 0i64;
+        for stock_row_opt in &stock_results {
+            if let Some(row) = stock_row_opt {
+                if let Some(SqlValue::Integer(s_quantity)) = row.values.get(2) {
+                    if *s_quantity < input.threshold as i64 {
+                        _low_stock_count += 1;
+                    }
+                }
+            }
         }
 
         TransactionResult {
