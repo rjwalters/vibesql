@@ -45,7 +45,7 @@ use crate::schema::CombinedSchema;
 // Re-exports
 pub(crate) use classification::classify_predicate_branch;
 pub(crate) use or_conditions::{combine_predicates_with_and, extract_implied_filters_from_or_predicates};
-pub(crate) use table_refs::flatten_conjuncts;
+pub(crate) use table_refs::{extract_referenced_tables_branch, flatten_conjuncts};
 
 // ============================================================================
 // Unified WHERE Clause Decomposition API

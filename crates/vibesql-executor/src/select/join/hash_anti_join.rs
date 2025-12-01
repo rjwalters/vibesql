@@ -3,9 +3,11 @@
 use ahash::AHashMap;
 
 use super::hash_join::build_existence_hash_table_parallel;
+use super::hash_semi_join::partition_filter_predicates;
 use super::{combine_rows, FromResult};
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
+use crate::schema::CombinedSchema;
 use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 
 /// Hash anti-join implementation
@@ -90,22 +92,29 @@ pub(super) fn hash_anti_join(
 /// )
 /// ```
 ///
+/// ## Optimization: Right-Side Predicate Pushdown
+///
+/// When the filter contains predicates that reference only the right table (e.g., `s_quantity < 10`),
+/// these predicates are applied during the hash table build phase, reducing the hash table size.
+/// This is critical for NOT IN subquery performance.
+///
 /// Algorithm:
-/// 1. Build phase: Hash the RIGHT table on the equi-join column (O(n))
-/// 2. Probe phase: For each LEFT row:
+/// 1. **Predicate partitioning**: Split filter into right-only and cross-table predicates
+/// 2. **Build phase**: Hash the RIGHT table, applying right-only predicates as a pre-filter
+/// 3. **Probe phase**: For each LEFT row:
 ///    a. Check if hash table contains matching key
-///    b. If yes, verify additional filter conditions against ALL matching right rows
-///    c. If NO right row passes the filter, emit the left row (only once)
+///    b. If yes, verify cross-table predicates against ALL matching right rows
+///    c. If NO right row passes, emit the left row
 ///    d. If no matching key, emit the left row
 ///
-/// Performance: Still O(n + m) average case, much faster than nested loop O(n*m)
+/// Performance: O(n + m) average case with reduced hash table size
 pub(super) fn hash_anti_join_with_filter(
     left: FromResult,
     right: FromResult,
     left_col_idx: usize,
     right_col_idx: usize,
     additional_filter: Option<&vibesql_ast::Expression>,
-    combined_schema: &crate::schema::CombinedSchema,
+    combined_schema: &CombinedSchema,
     database: &vibesql_storage::Database,
 ) -> Result<FromResult, ExecutorError> {
     // If no additional filter, use the simpler version
@@ -122,28 +131,78 @@ pub(super) fn hash_anti_join_with_filter(
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
 
-    // Build phase: Create hash table from right side
-    // Unlike simple hash_anti_join, we need to store row indices to check the filter
+    // Partition the filter into right-only and cross-table predicates
+    let (right_only_filter, probe_filter) = partition_filter_predicates(
+        filter,
+        combined_schema,
+        &left.schema,
+        &right.schema,
+    );
+
+    // Create evaluators for build and probe phases
+    let right_only_evaluator = right_only_filter.as_ref().map(|_| {
+        CombinedExpressionEvaluator::with_database(&right.schema, database)
+    });
+
+    let probe_evaluator = probe_filter.as_ref().map(|_| {
+        CombinedExpressionEvaluator::with_database(combined_schema, database)
+    });
+
+    // Build phase: Create hash table from right side with right-only predicate filtering
     let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
+    let mut filtered_count = 0usize;
 
     for (idx, row) in right_slice.iter().enumerate() {
         // Check timeout periodically during build phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
         }
+
         let key = row.values[right_col_idx].clone();
         // Skip NULL values - they never match in equi-joins
-        if key != vibesql_types::SqlValue::Null {
+        if key == vibesql_types::SqlValue::Null {
+            continue;
+        }
+
+        // Apply right-only predicates as a pre-filter during build
+        if let (Some(right_filter), Some(evaluator)) = (&right_only_filter, &right_only_evaluator) {
+            evaluator.clear_cse_cache();
+            match evaluator.eval(right_filter, row) {
+                Ok(vibesql_types::SqlValue::Boolean(true)) => {
+                    // Row passes filter, add to hash table
+                    hash_table.entry(key).or_default().push(idx);
+                }
+                Ok(vibesql_types::SqlValue::Boolean(false))
+                | Ok(vibesql_types::SqlValue::Null) => {
+                    // Row doesn't pass filter, skip it
+                    filtered_count += 1;
+                    continue;
+                }
+                Err(_) | Ok(_) => {
+                    // Filter evaluation error or non-boolean, skip this row
+                    filtered_count += 1;
+                    continue;
+                }
+            }
+        } else {
+            // No right-only filter, add all rows
             hash_table.entry(key).or_default().push(idx);
         }
+    }
+
+    // Log build-time filtering if significant
+    if std::env::var("SEMI_JOIN_DEBUG").is_ok() && filtered_count > 0 {
+        eprintln!(
+            "[ANTI_JOIN] Build-time filtering: {} rows filtered out of {} ({:.1}%)",
+            filtered_count,
+            right_slice.len(),
+            (filtered_count as f64 / right_slice.len() as f64) * 100.0
+        );
     }
 
     // Probe phase: Check each left row for absence of a match that passes the filter
     let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
-
-    // Create evaluator for filter evaluation
-    let evaluator = CombinedExpressionEvaluator::with_database(combined_schema, database);
     let mut probe_iterations = 0;
 
     for left_row in left_slice.iter() {
@@ -164,8 +223,20 @@ pub(super) fn hash_anti_join_with_filter(
 
         // Check if key exists in hash table
         if let Some(right_indices) = hash_table.get(key) {
-            // Check if ANY matching right row passes the additional filter
+            // If no probe filter, any match means we skip this left row
+            if probe_filter.is_none() {
+                if right_indices.is_empty() {
+                    result_rows.push(left_row.clone());
+                }
+                // Otherwise, there's a match, so don't emit this left row
+                continue;
+            }
+
+            // Check if ANY matching right row passes the probe filter
             let mut found_match = false;
+            let evaluator = probe_evaluator.as_ref().unwrap();
+            let pf = probe_filter.as_ref().unwrap();
+
             for &right_idx in right_indices {
                 let right_row = &right_slice[right_idx];
 
@@ -175,8 +246,8 @@ pub(super) fn hash_anti_join_with_filter(
                 // Clear CSE cache before evaluation
                 evaluator.clear_cse_cache();
 
-                // Evaluate the additional filter
-                match evaluator.eval(filter, &combined_row) {
+                // Evaluate the probe filter
+                match evaluator.eval(pf, &combined_row) {
                     Ok(vibesql_types::SqlValue::Boolean(true)) => {
                         found_match = true;
                         break; // Anti-join: if we find one match, skip this left row

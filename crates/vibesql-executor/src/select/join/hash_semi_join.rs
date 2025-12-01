@@ -1,9 +1,14 @@
 #![allow(clippy::doc_lazy_continuation)]
 
+use std::collections::HashSet;
+
 use super::hash_join::build_existence_hash_table_parallel;
 use super::{combine_rows, FromResult};
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
+use crate::optimizer::where_pushdown::{extract_referenced_tables_branch, flatten_conjuncts};
+use crate::optimizer::combine_with_and;
+use crate::schema::CombinedSchema;
 use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 
 /// Hash semi-join implementation
@@ -87,21 +92,34 @@ pub(super) fn hash_semi_join(
 /// )
 /// ```
 ///
-/// Algorithm:
-/// 1. Build phase: Hash the RIGHT table on the equi-join column (O(n))
-/// 2. Probe phase: For each LEFT row:
-///    a. Check if hash table contains matching key
-///    b. If yes, verify additional filter conditions against ALL matching right rows
-///    c. If any right row passes the filter, emit the left row (only once)
+/// ## Optimization: Right-Side Predicate Pushdown
 ///
-/// Performance: Still O(n + m) average case, much faster than nested loop O(n*m)
+/// When the filter contains predicates that reference only the right table (e.g., `s_quantity < 10`),
+/// these predicates are applied during the hash table build phase, reducing the hash table size
+/// and avoiding unnecessary probing. This is critical for IN subquery performance.
+///
+/// Example (TPC-C Stock-Level):
+/// ```sql
+/// ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = 1 AND s_quantity < 10)
+/// ```
+/// The predicates `s_w_id = 1 AND s_quantity < 10` are applied during build, not probe.
+///
+/// Algorithm:
+/// 1. **Predicate partitioning**: Split filter into right-only and cross-table predicates
+/// 2. **Build phase**: Hash the RIGHT table, applying right-only predicates as a pre-filter
+/// 3. **Probe phase**: For each LEFT row:
+///    a. Check if hash table contains matching key
+///    b. If yes, verify cross-table predicates against matching right rows
+///    c. If any right row passes, emit the left row (only once)
+///
+/// Performance: O(n + m) average case with reduced hash table size
 pub(super) fn hash_semi_join_with_filter(
     left: FromResult,
     right: FromResult,
     left_col_idx: usize,
     right_col_idx: usize,
     additional_filter: Option<&vibesql_ast::Expression>,
-    combined_schema: &crate::schema::CombinedSchema,
+    combined_schema: &CombinedSchema,
     database: &vibesql_storage::Database,
 ) -> Result<FromResult, ExecutorError> {
     // If no additional filter, use the simpler version
@@ -118,29 +136,82 @@ pub(super) fn hash_semi_join_with_filter(
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
 
-    // Build phase: Create hash table from right side
-    // Unlike simple hash_semi_join, we need to store row indices to check the filter
+    // Partition the filter into right-only and cross-table predicates
+    // Right-only predicates are applied during build, cross-table during probe
+    let (right_only_filter, probe_filter) = partition_filter_predicates(
+        filter,
+        combined_schema,
+        &left.schema,
+        &right.schema,
+    );
+
+    // Create evaluators for build and probe phases
+    // Right-only evaluator uses only right schema
+    let right_only_evaluator = right_only_filter.as_ref().map(|_| {
+        CombinedExpressionEvaluator::with_database(&right.schema, database)
+    });
+
+    // Combined evaluator for probe phase (if we have cross-table predicates)
+    let probe_evaluator = probe_filter.as_ref().map(|_| {
+        CombinedExpressionEvaluator::with_database(combined_schema, database)
+    });
+
+    // Build phase: Create hash table from right side with right-only predicate filtering
     use ahash::AHashMap;
     let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
+    let mut filtered_count = 0usize;
 
     for (idx, row) in right_slice.iter().enumerate() {
         // Check timeout periodically during build phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
         }
+
         let key = row.values[right_col_idx].clone();
         // Skip NULL values - they never match in equi-joins
-        if key != vibesql_types::SqlValue::Null {
+        if key == vibesql_types::SqlValue::Null {
+            continue;
+        }
+
+        // Apply right-only predicates as a pre-filter during build
+        if let (Some(right_filter), Some(evaluator)) = (&right_only_filter, &right_only_evaluator) {
+            evaluator.clear_cse_cache();
+            match evaluator.eval(right_filter, row) {
+                Ok(vibesql_types::SqlValue::Boolean(true)) => {
+                    // Row passes filter, add to hash table
+                    hash_table.entry(key).or_default().push(idx);
+                }
+                Ok(vibesql_types::SqlValue::Boolean(false))
+                | Ok(vibesql_types::SqlValue::Null) => {
+                    // Row doesn't pass filter, skip it
+                    filtered_count += 1;
+                    continue;
+                }
+                Err(_) | Ok(_) => {
+                    // Filter evaluation error or non-boolean, skip this row
+                    filtered_count += 1;
+                    continue;
+                }
+            }
+        } else {
+            // No right-only filter, add all rows
             hash_table.entry(key).or_default().push(idx);
         }
     }
 
-    // Probe phase: Check each left row for a match that passes the filter
+    // Log build-time filtering if significant
+    if std::env::var("SEMI_JOIN_DEBUG").is_ok() && filtered_count > 0 {
+        eprintln!(
+            "[SEMI_JOIN] Build-time filtering: {} rows filtered out of {} ({:.1}%)",
+            filtered_count,
+            right_slice.len(),
+            (filtered_count as f64 / right_slice.len() as f64) * 100.0
+        );
+    }
+
+    // Probe phase: Check each left row for a match that passes the probe filter
     let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
-
-    // Create evaluator for filter evaluation
-    let evaluator = CombinedExpressionEvaluator::with_database(combined_schema, database);
     let mut probe_iterations = 0;
 
     for left_row in left_slice.iter() {
@@ -159,8 +230,19 @@ pub(super) fn hash_semi_join_with_filter(
 
         // Check if key exists in hash table
         if let Some(right_indices) = hash_table.get(key) {
-            // Check if any matching right row passes the additional filter
+            // If no probe filter, any match is sufficient (right-only filter already applied)
+            if probe_filter.is_none() {
+                if !right_indices.is_empty() {
+                    result_rows.push(left_row.clone());
+                }
+                continue;
+            }
+
+            // Check if any matching right row passes the probe filter
             let mut found_match = false;
+            let evaluator = probe_evaluator.as_ref().unwrap();
+            let pf = probe_filter.as_ref().unwrap();
+
             for &right_idx in right_indices {
                 let right_row = &right_slice[right_idx];
 
@@ -170,8 +252,8 @@ pub(super) fn hash_semi_join_with_filter(
                 // Clear CSE cache before evaluation
                 evaluator.clear_cse_cache();
 
-                // Evaluate the additional filter
-                match evaluator.eval(filter, &combined_row) {
+                // Evaluate the probe filter
+                match evaluator.eval(pf, &combined_row) {
                     Ok(vibesql_types::SqlValue::Boolean(true)) => {
                         found_match = true;
                         break; // Semi-join: we only need one match
@@ -191,6 +273,66 @@ pub(super) fn hash_semi_join_with_filter(
 
     // Return result with left schema only
     Ok(FromResult::from_rows(left.schema.clone(), result_rows))
+}
+
+/// Partition filter predicates into right-only and cross-table predicates
+///
+/// Right-only predicates reference only columns from the right table and can be
+/// applied during the hash table build phase for early filtering.
+///
+/// Cross-table predicates reference columns from both tables and must be
+/// evaluated during the probe phase.
+pub(super) fn partition_filter_predicates(
+    filter: &vibesql_ast::Expression,
+    combined_schema: &CombinedSchema,
+    left_schema: &CombinedSchema,
+    right_schema: &CombinedSchema,
+) -> (Option<vibesql_ast::Expression>, Option<vibesql_ast::Expression>) {
+    // Get the set of right-only table names
+    let right_table_names: HashSet<String> = right_schema
+        .table_schemas
+        .keys()
+        .cloned()
+        .collect();
+
+    // Get the set of left table names
+    let left_table_names: HashSet<String> = left_schema
+        .table_schemas
+        .keys()
+        .cloned()
+        .collect();
+
+    // Flatten the filter into individual conjuncts
+    let conjuncts = flatten_conjuncts(filter);
+
+    let mut right_only_predicates = Vec::new();
+    let mut cross_table_predicates = Vec::new();
+
+    for conjunct in conjuncts {
+        // Extract tables referenced by this predicate
+        if let Some(referenced_tables) = extract_referenced_tables_branch(&conjunct, combined_schema) {
+            // Check if predicate references only right tables
+            let refs_left = referenced_tables.iter().any(|t| left_table_names.contains(t));
+            let refs_right = referenced_tables.iter().any(|t| right_table_names.contains(t));
+
+            if refs_right && !refs_left {
+                // Right-only predicate: can be applied during build phase
+                right_only_predicates.push(conjunct);
+            } else {
+                // Cross-table or left-only predicate: apply during probe
+                cross_table_predicates.push(conjunct);
+            }
+        } else {
+            // Couldn't determine table references, treat as cross-table
+            cross_table_predicates.push(conjunct);
+        }
+    }
+
+    // Combine predicates back into expressions
+    let right_only = combine_with_and(right_only_predicates);
+    let cross_table = combine_with_and(cross_table_predicates);
+
+    (right_only, cross_table)
 }
 
 #[cfg(test)]
