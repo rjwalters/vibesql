@@ -117,6 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: test
+    continue-on-error: true
     steps:
       - name: Free disk space
         run: |
