@@ -67,14 +67,12 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
     );
 
     // Load password store if configured
-    let password_store = if let Some(ref password_file) = config.auth.password_file {
-        Some(Arc::new(
+    let password_store = config.auth.password_file.as_ref().map(|password_file| {
+        Arc::new(
             PasswordStore::load_from_file(password_file)
                 .expect("Failed to load password file"),
-        ))
-    } else {
-        None
-    };
+        )
+    });
 
     // Track active connections
     let active_connections = Arc::new(AtomicUsize::new(0));

@@ -33,6 +33,112 @@
 use sysinfo::System;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// macOS-specific memory detection using host_statistics64
+///
+/// The sysinfo crate's `available_memory()` can return incorrect values (often 0)
+/// on macOS, particularly on Apple Silicon systems with large amounts of RAM.
+/// This module provides a fallback using direct Mach API calls.
+#[cfg(target_os = "macos")]
+mod macos_memory {
+    use std::mem::MaybeUninit;
+
+    // Mach types and constants
+    type MachPort = u32;
+    type KernReturn = i32;
+
+    const HOST_VM_INFO64: i32 = 4;
+    const HOST_VM_INFO64_COUNT: u32 = 38; // sizeof(vm_statistics64_data_t) / sizeof(integer_t)
+    const KERN_SUCCESS: i32 = 0;
+
+    #[repr(C)]
+    #[derive(Debug, Default)]
+    struct VmStatistics64 {
+        free_count: u64,
+        active_count: u64,
+        inactive_count: u64,
+        wire_count: u64,
+        zero_fill_count: u64,
+        reactivations: u64,
+        pageins: u64,
+        pageouts: u64,
+        faults: u64,
+        cow_faults: u64,
+        lookups: u64,
+        hits: u64,
+        purges: u64,
+        purgeable_count: u64,
+        speculative_count: u64,
+        decompressions: u64,
+        compressions: u64,
+        swapins: u64,
+        swapouts: u64,
+        compressor_page_count: u64,
+        throttled_count: u64,
+        external_page_count: u64,
+        internal_page_count: u64,
+        total_uncompressed_pages_in_compressor: u64,
+    }
+
+    extern "C" {
+        fn mach_host_self() -> MachPort;
+        fn host_statistics64(
+            host: MachPort,
+            flavor: i32,
+            host_info: *mut VmStatistics64,
+            count: *mut u32,
+        ) -> KernReturn;
+        fn vm_page_size() -> u64;
+    }
+
+    /// Get available memory on macOS using Mach APIs
+    /// Returns (total_bytes, available_bytes) or None if the call fails
+    pub fn get_available_memory() -> Option<(u64, u64)> {
+        unsafe {
+            let host = mach_host_self();
+            let page_size = vm_page_size();
+
+            let mut vm_stats = MaybeUninit::<VmStatistics64>::zeroed();
+            let mut count = HOST_VM_INFO64_COUNT;
+
+            let result = host_statistics64(
+                host,
+                HOST_VM_INFO64,
+                vm_stats.as_mut_ptr(),
+                &mut count,
+            );
+
+            if result != KERN_SUCCESS {
+                return None;
+            }
+
+            let stats = vm_stats.assume_init();
+
+            // Available memory includes:
+            // - Free pages (never used or explicitly freed)
+            // - Inactive pages (recently used but can be reclaimed)
+            // - Purgeable pages (cached but deletable)
+            // - Speculative pages (prefetched but unused)
+            let available_pages = stats.free_count
+                + stats.inactive_count
+                + stats.purgeable_count
+                + stats.speculative_count;
+
+            // Total physical memory pages
+            let total_pages = stats.free_count
+                + stats.active_count
+                + stats.inactive_count
+                + stats.wire_count
+                + stats.compressor_page_count
+                + stats.speculative_count;
+
+            let available_bytes = available_pages * page_size;
+            let total_bytes = total_pages * page_size;
+
+            Some((total_bytes, available_bytes))
+        }
+    }
+}
+
 /// Default memory pressure threshold (80% of available RAM)
 const DEFAULT_THRESHOLD_PERCENT: f64 = 80.0;
 
@@ -118,11 +224,39 @@ impl MemoryMonitor {
     }
 
     /// Refresh memory information and get current stats
+    ///
+    /// On macOS, this uses a fallback to direct Mach API calls when sysinfo
+    /// returns suspicious values (like 0 available memory), which can happen
+    /// on Apple Silicon systems with large amounts of RAM.
     pub fn current_stats(&mut self) -> MemoryStats {
         self.system.refresh_memory();
 
         let total = self.system.total_memory();
-        let available = self.system.available_memory();
+        let sysinfo_available = self.system.available_memory();
+
+        // On macOS, sysinfo can return 0 for available_memory on some systems
+        // (particularly Apple Silicon with high RAM). Use our native fallback
+        // when this happens.
+        #[cfg(target_os = "macos")]
+        let (total, available) = {
+            // If sysinfo returns 0 or suspiciously low available memory (< 1% of total),
+            // fall back to native Mach API
+            if sysinfo_available == 0 || (total > 0 && sysinfo_available < total / 100) {
+                if let Some((_native_total, native_available)) = macos_memory::get_available_memory() {
+                    // Use sysinfo's total (from sysctl) as it's more reliable,
+                    // but use our native available memory calculation
+                    (total, native_available.min(total))
+                } else {
+                    (total, sysinfo_available)
+                }
+            } else {
+                (total, sysinfo_available)
+            }
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let available = sysinfo_available;
+
         let used = total.saturating_sub(available);
         let usage_percent = if total > 0 {
             (used as f64 / total as f64) * 100.0
@@ -264,6 +398,23 @@ mod tests {
         assert!(stats.total_bytes > 0);
         assert!(stats.usage_percent >= 0.0);
         assert!(stats.usage_percent <= 100.0);
+
+        // The fix for issue #3197: verify that available_bytes is not 0
+        // (which would incorrectly indicate 100% memory usage)
+        assert!(
+            stats.available_bytes > 0,
+            "available_bytes should not be 0 (was {}, total: {}, usage: {:.1}%)",
+            stats.available_bytes,
+            stats.total_bytes,
+            stats.usage_percent
+        );
+
+        // Sanity check: usage should not be 100% on a functioning system
+        assert!(
+            stats.usage_percent < 99.0,
+            "Memory usage should not be 100% on a normal system (was {:.1}%)",
+            stats.usage_percent
+        );
     }
 
     #[test]
@@ -286,5 +437,29 @@ mod tests {
         assert_eq!(format_bytes(1536), "1.50 KB");
         assert_eq!(format_bytes(1_572_864), "1.50 MB");
         assert_eq!(format_bytes(1_610_612_736), "1.50 GB");
+    }
+
+    /// Test macOS-specific memory detection fallback
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_macos_native_memory_detection() {
+        use super::macos_memory;
+
+        // Verify our native Mach API implementation works
+        let result = macos_memory::get_available_memory();
+        assert!(result.is_some(), "macOS native memory detection should succeed");
+
+        let (total, available) = result.unwrap();
+        assert!(total > 0, "total memory should be positive");
+        assert!(available > 0, "available memory should be positive");
+        assert!(available <= total, "available should not exceed total");
+
+        // On a running system, there should be some available memory
+        let usage_percent = ((total - available) as f64 / total as f64) * 100.0;
+        assert!(
+            usage_percent < 99.0,
+            "Native macOS detection: usage should not be 100% (was {:.1}%)",
+            usage_percent
+        );
     }
 }

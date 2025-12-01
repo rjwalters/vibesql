@@ -376,20 +376,20 @@ fn filter_expression(
         } => {
             // Check col = literal
             if let Expression::ColumnRef { column, .. } = left.as_ref() {
-                if covered_columns.contains(&column.to_uppercase()) {
-                    if matches!(right.as_ref(), Expression::Literal(_)) {
-                        // This predicate is covered - remove it
-                        return None;
-                    }
+                if covered_columns.contains(&column.to_uppercase())
+                    && matches!(right.as_ref(), Expression::Literal(_))
+                {
+                    // This predicate is covered - remove it
+                    return None;
                 }
             }
             // Check literal = col
             if let Expression::ColumnRef { column, .. } = right.as_ref() {
-                if covered_columns.contains(&column.to_uppercase()) {
-                    if matches!(left.as_ref(), Expression::Literal(_)) {
-                        // This predicate is covered - remove it
-                        return None;
-                    }
+                if covered_columns.contains(&column.to_uppercase())
+                    && matches!(left.as_ref(), Expression::Literal(_))
+                {
+                    // This predicate is covered - remove it
+                    return None;
                 }
             }
             // Not a covered predicate - keep it

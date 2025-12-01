@@ -103,7 +103,7 @@ impl ColumnarBatch {
                     // Must use the same formula as simd_filter.rs:date_to_days_since_epoch
                     // for predicate evaluation to work correctly
                     let i32_values: Vec<i32> =
-                        values.iter().map(|d| date_to_days_since_epoch(d)).collect();
+                        values.iter().map(date_to_days_since_epoch).collect();
                     let null_bitmap = if nulls.iter().any(|&n| n) {
                         Some(Arc::clone(nulls))
                     } else {

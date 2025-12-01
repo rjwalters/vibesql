@@ -273,7 +273,6 @@ async fn test_concurrent_session_operations() {
 
     let handles: Vec<_> = (0..3)
         .map(|i| {
-            let addr = addr;
             tokio::spawn(async move {
                 let mut client = TestClient::connect(addr).await.expect("Failed to connect");
                 client.send_startup(&format!("user{}", i), "testdb").await.expect("Failed to startup");

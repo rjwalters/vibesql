@@ -97,7 +97,7 @@ pub fn lt_i64_packed(values: &[i64], threshold: i64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -123,7 +123,7 @@ pub fn gt_i64_packed(values: &[i64], threshold: i64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -149,7 +149,7 @@ pub fn le_i64_packed(values: &[i64], threshold: i64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -175,7 +175,7 @@ pub fn ge_i64_packed(values: &[i64], threshold: i64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -201,7 +201,7 @@ pub fn eq_i64_packed(values: &[i64], target: i64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -227,7 +227,7 @@ pub fn ne_i64_packed(values: &[i64], target: i64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -253,7 +253,7 @@ pub fn lt_i32_packed(values: &[i32], threshold: i32) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -279,7 +279,7 @@ pub fn gt_i32_packed(values: &[i32], threshold: i32) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -305,7 +305,7 @@ pub fn le_i32_packed(values: &[i32], threshold: i32) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -331,7 +331,7 @@ pub fn ge_i32_packed(values: &[i32], threshold: i32) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -357,7 +357,7 @@ pub fn eq_i32_packed(values: &[i32], target: i32) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -383,7 +383,7 @@ pub fn ne_i32_packed(values: &[i32], target: i32) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -409,7 +409,7 @@ pub fn lt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -435,7 +435,7 @@ pub fn gt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -461,7 +461,7 @@ pub fn le_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -487,7 +487,7 @@ pub fn ge_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -513,7 +513,7 @@ pub fn eq_f64_packed(values: &[f64], target: f64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -539,7 +539,7 @@ pub fn ne_f64_packed(values: &[f64], target: f64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -569,7 +569,7 @@ pub fn between_i64_packed(values: &[i64], low: i64, high: i64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -595,7 +595,7 @@ pub fn between_i32_packed(values: &[i32], low: i32, high: i32) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {
@@ -621,7 +621,7 @@ pub fn between_f64_packed(values: &[f64], low: f64, high: f64) -> PackedMask {
         return PackedMask::new_all_clear(0);
     }
 
-    let num_words = (len + 63) / 64;
+    let num_words = len.div_ceil(64);
     let mut words = vec![0u64; num_words];
 
     for (word_idx, word) in words.iter_mut().enumerate() {

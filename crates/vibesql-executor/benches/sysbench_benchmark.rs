@@ -245,10 +245,8 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
 
     fn delete(&mut self, id: i64) {
         let sql = format!("DELETE FROM sbtest1 WHERE id = {}", id);
-        if let Ok(stmt) = Parser::parse_sql(&sql) {
-            if let vibesql_ast::Statement::Delete(delete) = stmt {
-                let _ = vibesql_executor::DeleteExecutor::execute(&delete, self.db);
-            }
+        if let Ok(vibesql_ast::Statement::Delete(delete)) = Parser::parse_sql(&sql) {
+            let _ = vibesql_executor::DeleteExecutor::execute(&delete, self.db);
         }
     }
 
@@ -257,12 +255,10 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
             "SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {}",
             start, end
         );
-        if let Ok(stmt) = Parser::parse_sql(&sql) {
-            if let vibesql_ast::Statement::Select(select) = stmt {
-                let executor = SelectExecutor::new(self.db);
-                if let Ok(result) = executor.execute(&select) {
-                    return result.len();
-                }
+        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
+            let executor = SelectExecutor::new(self.db);
+            if let Ok(result) = executor.execute(&select) {
+                return result.len();
             }
         }
         0
@@ -273,12 +269,10 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
             "SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN {} AND {}",
             start, end
         );
-        if let Ok(stmt) = Parser::parse_sql(&sql) {
-            if let vibesql_ast::Statement::Select(select) = stmt {
-                let executor = SelectExecutor::new(self.db);
-                if let Ok(result) = executor.execute(&select) {
-                    return result.len();
-                }
+        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
+            let executor = SelectExecutor::new(self.db);
+            if let Ok(result) = executor.execute(&select) {
+                return result.len();
             }
         }
         0
@@ -289,12 +283,10 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
             "SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
             start, end
         );
-        if let Ok(stmt) = Parser::parse_sql(&sql) {
-            if let vibesql_ast::Statement::Select(select) = stmt {
-                let executor = SelectExecutor::new(self.db);
-                if let Ok(result) = executor.execute(&select) {
-                    return result.len();
-                }
+        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
+            let executor = SelectExecutor::new(self.db);
+            if let Ok(result) = executor.execute(&select) {
+                return result.len();
             }
         }
         0
@@ -305,12 +297,10 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
             "SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
             start, end
         );
-        if let Ok(stmt) = Parser::parse_sql(&sql) {
-            if let vibesql_ast::Statement::Select(select) = stmt {
-                let executor = SelectExecutor::new(self.db);
-                if let Ok(result) = executor.execute(&select) {
-                    return result.len();
-                }
+        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
+            let executor = SelectExecutor::new(self.db);
+            if let Ok(result) = executor.execute(&select) {
+                return result.len();
             }
         }
         0
@@ -1163,7 +1153,6 @@ fn main() {
                 vibesql_results
                     .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
                 // Reload for insert benchmark (needs fresh DB)
-                drop(executor);
                 let mut db2 = load_vibesql(table_size);
                 let mut executor2 = VibesqlExecutor::new(&mut db2);
                 vibesql_results.push(run_insert_benchmark(

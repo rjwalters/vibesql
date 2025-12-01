@@ -770,10 +770,10 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
 
         // Watch items (random securities)
         let num_items = data.rng.random_int(5, 20) as usize;
-        for i in 0..num_items.min(symbols.len()) {
+        for symbol in symbols.iter().take(num_items) {
             db.insert_row("watch_item", Row::new(vec![
                 SqlValue::Bigint(watch_list_id),
-                SqlValue::Varchar(symbols[i].clone()),
+                SqlValue::Varchar(symbol.clone()),
             ])).unwrap();
         }
         watch_list_id += 1;
@@ -886,7 +886,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
     for ca_id in 1..=num_accounts as i64 {
         // Holdings
         for h in 0..holdings_per_account {
-            let s_idx = ((ca_id as i32 + h) % num_securities) as i32;
+            let s_idx = (ca_id as i32 + h) % num_securities;
             let symb = data.gen_symbol(s_idx);
             let holding = data.gen_holding(ca_id, &symb);
 
