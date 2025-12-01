@@ -456,6 +456,10 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
 // TPC-DS Query Benchmarks
 // =============================================================================
 
+/// Queries that are known to be slow and need reduced sample sizes
+/// These queries take >100ms per iteration, so 100 samples would exceed the 10s target
+const SLOW_QUERIES: &[&str] = &["Q2"];
+
 fn bench_tpcds_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_queries");
     group.measurement_time(Duration::from_secs(10));
@@ -464,6 +468,67 @@ fn bench_tpcds_queries(c: &mut Criterion) {
     let db = get_vibesql_db();
 
     for (name, sql) in TPCDS_QUERIES {
+        // Skip slow queries - they have their own benchmark group
+        if SLOW_QUERIES.contains(name) {
+            continue;
+        }
+        let query_name = name.to_string();
+
+        // Check memory pressure before executing query
+        if let Some(reason) = check_memory_before_query(&query_name) {
+            record_query_result(QueryResult::Skipped {
+                name: query_name,
+                reason,
+            });
+            continue;
+        }
+
+        // Validate query before benchmarking
+        match try_vibesql_query(db, sql) {
+            Ok(row_count) => {
+                record_query_result(QueryResult::Passed {
+                    name: query_name,
+                    row_count,
+                });
+                group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                    b.iter(|| {
+                        let count = benchmark_vibesql_query(db, sql);
+                        black_box(count);
+                    });
+                });
+            }
+            Err(e) => {
+                eprintln!("[SKIP] {}: {}", name, e);
+                record_query_result(QueryResult::Skipped {
+                    name: name.to_string(),
+                    reason: e.to_string(),
+                });
+            }
+        }
+    }
+
+    group.finish();
+
+    // Release memory between benchmark groups to prevent OOM
+    clear_in_subquery_cache();
+    hint_memory_release();
+}
+
+/// Benchmark slow TPC-DS queries with reduced sample size
+fn bench_tpcds_slow_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tpcds_queries");
+    group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: these queries take >100ms per iteration
+
+    // Use cached database
+    let db = get_vibesql_db();
+
+    for (name, sql) in TPCDS_QUERIES {
+        // Only benchmark slow queries in this group
+        if !SLOW_QUERIES.contains(name) {
+            continue;
+        }
+
         let query_name = name.to_string();
 
         // Check memory pressure before executing query
@@ -518,6 +583,7 @@ criterion_group!(
     benches,
     bench_sanity_queries,
     bench_tpcds_queries,
+    bench_tpcds_slow_queries,
 );
 
 #[cfg(feature = "benchmark-comparison")]
@@ -526,6 +592,7 @@ criterion_group!(
     bench_sanity_queries,
     bench_sanity_queries_comparison,
     bench_tpcds_queries,
+    bench_tpcds_slow_queries,
 );
 
 criterion_main!(benches);
