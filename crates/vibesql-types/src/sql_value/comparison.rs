@@ -49,9 +49,10 @@ impl PartialEq for SqlValue {
                 }
             }
 
-            // String types
+            // String types (Character and Varchar are interoperable)
             (Character(a), Character(b)) => a == b,
             (Varchar(a), Varchar(b)) => a == b,
+            (Character(a), Varchar(b)) | (Varchar(a), Character(b)) => a == b,
 
             // Boolean
             (Boolean(a), Boolean(b)) => a == b,
@@ -100,9 +101,10 @@ impl PartialOrd for SqlValue {
             (Real(a), Real(b)) => a.partial_cmp(b),
             (Double(a), Double(b)) => a.partial_cmp(b),
 
-            // String types (lexicographic comparison)
+            // String types (lexicographic comparison, Character and Varchar are interoperable)
             (Character(a), Character(b)) => a.partial_cmp(b),
             (Varchar(a), Varchar(b)) => a.partial_cmp(b),
+            (Character(a), Varchar(b)) | (Varchar(a), Character(b)) => a.partial_cmp(b),
 
             // Numeric (f64 - direct comparison)
             (Numeric(a), Numeric(b)) => a.partial_cmp(b),
