@@ -203,3 +203,7 @@ harness = false
 [[bench]]
 name = "tpce_benchmark"
 harness = false
+
+[[bench]]
+name = "prepared_statement_benchmark"
+harness = false

@@ -30,6 +30,7 @@ pub use late_materialization::{
 pub use window::WindowFunctionKey;
 
 /// Result of a SELECT query including column metadata
+#[derive(Debug)]
 pub struct SelectResult {
     /// Column names derived from the SELECT list
     pub columns: Vec<String>,
