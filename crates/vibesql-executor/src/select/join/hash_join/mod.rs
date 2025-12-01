@@ -24,6 +24,7 @@ mod tests;
 
 // Re-export public API
 pub(super) use inner::hash_join_inner;
+pub(super) use inner::hash_join_inner_arithmetic;
 pub(super) use inner::hash_join_inner_multi;
 pub(super) use outer::hash_join_left_outer;
 
