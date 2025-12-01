@@ -66,6 +66,8 @@ dirs = "6.0"
 rand = "0.9"
 
 [dev-dependencies]
+bytes = "1.0"
 tempfile = "3"
+tokio = { version = "1.0", features = ["full", "test-util"] }
 tokio-test = "0.4"
 tokio-postgres = "0.7"
