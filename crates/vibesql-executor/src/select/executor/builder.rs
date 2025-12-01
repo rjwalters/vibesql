@@ -8,6 +8,7 @@ use instant::Instant;
 
 use crate::{
     errors::ExecutorError,
+    evaluator::compiled_pivot::PivotAggregateGroup,
     limits::{MAX_MEMORY_BYTES, MEMORY_WARNING_BYTES},
     memory::QueryArena,
 };
@@ -43,6 +44,10 @@ pub struct SelectExecutor<'a> {
     /// All allocations are freed when query completes
     /// Lazily initialized - only created when first allocation is needed
     pub(super) arena: OnceCell<RefCell<QueryArena>>,
+    /// Pivot aggregate group for batched SUM(CASE...) optimization
+    /// Detected once per query, executed once per group
+    /// Stores results directly in aggregate_cache
+    pub(super) pivot_group: RefCell<Option<PivotAggregateGroup>>,
 }
 
 impl<'a> SelectExecutor<'a> {
@@ -68,6 +73,7 @@ impl<'a> SelectExecutor<'a> {
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
         }
     }
 
@@ -90,6 +96,7 @@ impl<'a> SelectExecutor<'a> {
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
         }
     }
 
@@ -109,6 +116,7 @@ impl<'a> SelectExecutor<'a> {
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
         }
     }
 
@@ -147,6 +155,7 @@ impl<'a> SelectExecutor<'a> {
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
         }
     }
 
@@ -168,6 +177,7 @@ impl<'a> SelectExecutor<'a> {
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
         }
     }
 
@@ -191,6 +201,7 @@ impl<'a> SelectExecutor<'a> {
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
         }
     }
 
@@ -216,6 +227,7 @@ impl<'a> SelectExecutor<'a> {
             timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
         }
     }
 
@@ -336,5 +348,44 @@ impl<'a> SelectExecutor<'a> {
         if let Some(cache) = self.aggregate_cache.get() {
             cache.borrow_mut().clear();
         }
+
+        // Clear pivot group
+        *self.pivot_group.borrow_mut() = None;
+    }
+
+    /// Set the pivot aggregate group for this query
+    ///
+    /// Called once during query planning when a pivot pattern is detected.
+    /// The pivot group is then executed once per group in aggregation.
+    pub(super) fn set_pivot_group(&self, group: PivotAggregateGroup) {
+        *self.pivot_group.borrow_mut() = Some(group);
+    }
+
+    /// Execute pivot aggregates for the current group and cache results
+    ///
+    /// This executes all pivot aggregates in a single pass over the rows,
+    /// storing results in the aggregate cache. Subsequent calls to evaluate
+    /// individual pivot aggregates will hit the cache.
+    pub(super) fn execute_pivot_aggregates(
+        &self,
+        group_rows: &[vibesql_storage::Row],
+    ) -> Result<(), ExecutorError> {
+        let pivot_group = self.pivot_group.borrow();
+        if let Some(ref pivot) = *pivot_group {
+            let results = pivot.execute(group_rows)?;
+
+            // Store all pivot results in the aggregate cache
+            let cache = self.get_aggregate_cache();
+            let mut cache_mut = cache.borrow_mut();
+            for (cache_key, value) in results {
+                cache_mut.insert(cache_key, value);
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if a pivot group is set for this query
+    pub(super) fn has_pivot_group(&self) -> bool {
+        self.pivot_group.borrow().is_some()
     }
 }

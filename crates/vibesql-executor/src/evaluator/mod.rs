@@ -4,6 +4,7 @@ pub mod coercion;
 mod combined;
 pub(crate) mod compiled;
 pub(crate) mod compiled_case;
+pub(crate) mod compiled_pivot;
 mod core;
 pub(crate) mod caching;
 mod parallel;
