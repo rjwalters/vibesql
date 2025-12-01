@@ -571,6 +571,10 @@ impl SelectExecutor<'_> {
             return Ok(rows);
         }
 
+        // Validate that all column references exist in the schema.
+        // This is important even when there are no rows to return a proper error.
+        self.validate_select_columns(select_list, schema)?;
+
         let evaluator = CombinedExpressionEvaluator::with_database(schema, self.database);
         let buffer_pool = self.query_buffer_pool();
 
@@ -581,6 +585,59 @@ impl SelectExecutor<'_> {
         }
 
         Ok(projected)
+    }
+
+    /// Validate that all column references in the SELECT list exist in the schema
+    fn validate_select_columns(
+        &self,
+        select_list: &[SelectItem],
+        schema: &CombinedSchema,
+    ) -> Result<(), ExecutorError> {
+        for item in select_list {
+            if let SelectItem::Expression { expr, .. } = item {
+                self.validate_expression_columns(expr, schema)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Recursively validate column references in an expression
+    fn validate_expression_columns(
+        &self,
+        expr: &Expression,
+        schema: &CombinedSchema,
+    ) -> Result<(), ExecutorError> {
+        match expr {
+            Expression::ColumnRef { table, column } => {
+                if schema.get_column_index(table.as_deref(), column).is_none() {
+                    // Collect available column names for the error message
+                    let available_columns: Vec<String> = schema
+                        .table_schemas
+                        .values()
+                        .flat_map(|(_, s)| s.columns.iter().map(|c| c.name.clone()))
+                        .collect();
+                    return Err(ExecutorError::ColumnNotFound {
+                        column_name: column.clone(),
+                        table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
+                        searched_tables: schema.table_schemas.keys().cloned().collect(),
+                        available_columns,
+                    });
+                }
+            }
+            Expression::BinaryOp { left, right, .. } => {
+                self.validate_expression_columns(left, schema)?;
+                self.validate_expression_columns(right, schema)?;
+            }
+            Expression::UnaryOp { expr, .. } => {
+                self.validate_expression_columns(expr, schema)?;
+            }
+            Expression::Cast { expr, .. } => {
+                self.validate_expression_columns(expr, schema)?;
+            }
+            // Literals and other expressions don't need column validation
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Apply ORDER BY sorting in fast path
