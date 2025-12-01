@@ -6,9 +6,17 @@
 //! - Have no aggregates, window functions, or GROUP BY
 //! - Have simple column references in SELECT
 //! - Have simple equality predicates in WHERE
+//! - Have simple ORDER BY clauses (column references only, no expressions)
 //!
 //! These queries skip expensive optimizer passes and go directly to index scan,
 //! providing 5-10x speedup for TPC-C style point lookups.
+//!
+//! # ORDER BY Support
+//!
+//! The fast path supports ORDER BY with simple column references:
+//! - If an index exists that matches the ORDER BY column(s), results are
+//!   returned pre-sorted from the index scan (zero-cost sorting)
+//! - If no matching index exists, explicit sorting is applied after filtering
 //!
 //! # Performance Impact
 //!
@@ -23,11 +31,13 @@
 //! SELECT col FROM table WHERE pk = 1
 //! SELECT col1, col2 FROM table WHERE pk1 = 1 AND pk2 = 2
 //! SELECT * FROM table WHERE id = 123
+//! SELECT no_o_id FROM new_order WHERE no_w_id = 1 ORDER BY no_o_id  -- with ORDER BY
 //!
 //! -- These queries use the standard path:
 //! SELECT COUNT(*) FROM table WHERE id = 1  -- aggregate
 //! SELECT a FROM t1, t2 WHERE t1.id = t2.id  -- join
 //! SELECT a FROM t WHERE id IN (SELECT id FROM t2)  -- subquery
+//! SELECT a FROM t ORDER BY UPPER(a)  -- complex ORDER BY expression
 //! ```
 
 use std::collections::HashMap;
@@ -95,13 +105,114 @@ pub fn is_simple_point_query(stmt: &SelectStmt) -> bool {
         }
     }
 
-    // Fast path doesn't support ORDER BY (more complex sorting logic needed)
-    // Most TPC-C point lookups don't have ORDER BY anyway
-    if stmt.order_by.is_some() {
-        return false;
+    // ORDER BY is allowed if it's simple (column references only, no complex expressions)
+    // and doesn't use SELECT list aliases (which require post-projection sorting)
+    // The index scan logic will automatically use index ordering when possible
+    if let Some(order_by) = &stmt.order_by {
+        if !is_simple_order_by(order_by) {
+            return false;
+        }
+        // Check that ORDER BY doesn't use SELECT list aliases
+        // Fast path sorts before projection, so aliases can't be resolved
+        if uses_select_alias(order_by, &stmt.select_list) {
+            return false;
+        }
     }
 
     true
+}
+
+/// Check if an ORDER BY clause is simple enough for the fast path
+///
+/// Returns true if all ORDER BY items are simple column references.
+/// Complex expressions (functions, arithmetic, subqueries) are not supported.
+///
+/// Examples:
+/// - `ORDER BY col ASC` -> true
+/// - `ORDER BY col1, col2 DESC` -> true
+/// - `ORDER BY col LIMIT 1` -> true (LIMIT doesn't affect ORDER BY simplicity)
+/// - `ORDER BY UPPER(col)` -> false (function call)
+/// - `ORDER BY col + 1` -> false (arithmetic expression)
+fn is_simple_order_by(order_by: &[vibesql_ast::OrderByItem]) -> bool {
+    for item in order_by {
+        // ORDER BY expression must be a simple column reference
+        if !matches!(item.expr, Expression::ColumnRef { .. }) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check if ORDER BY uses any SELECT list aliases
+///
+/// Returns true if any ORDER BY column matches a SELECT list alias.
+/// This is used to exclude such queries from the fast path, since
+/// the fast path sorts before projection and can't resolve aliases.
+fn uses_select_alias(order_by: &[vibesql_ast::OrderByItem], select_list: &[SelectItem]) -> bool {
+    // Collect all aliases from the SELECT list
+    let aliases: Vec<&str> = select_list.iter()
+        .filter_map(|item| {
+            if let SelectItem::Expression { alias: Some(alias), .. } = item {
+                Some(alias.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // If no aliases, no conflict possible
+    if aliases.is_empty() {
+        return false;
+    }
+
+    // Check if any ORDER BY column matches an alias
+    for item in order_by {
+        if let Expression::ColumnRef { table: None, column } = &item.expr {
+            // Case-insensitive comparison for SQL identifiers
+            if aliases.iter().any(|alias| alias.eq_ignore_ascii_case(column)) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if we need to apply explicit sorting (index didn't provide the order)
+///
+/// Returns true if ORDER BY columns don't match the sorted_by metadata from index scan.
+fn needs_sorting(
+    order_by: &[vibesql_ast::OrderByItem],
+    sorted_by: &Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+) -> bool {
+    let Some(sorted_cols) = sorted_by else {
+        return true; // No sorting metadata, need to sort
+    };
+
+    // Check if ORDER BY is a prefix of sorted_by with matching directions
+    if order_by.len() > sorted_cols.len() {
+        return true; // ORDER BY has more columns than sorted
+    }
+
+    for (order_item, (col_name, col_dir)) in order_by.iter().zip(sorted_cols.iter()) {
+        // Extract column name from ORDER BY expression
+        let order_col = match &order_item.expr {
+            Expression::ColumnRef { column, .. } => column,
+            _ => return true, // Non-column expression, need to sort
+        };
+
+        // Check column name matches (case-insensitive)
+        if !order_col.eq_ignore_ascii_case(col_name) {
+            return true;
+        }
+
+        // Check direction matches
+        if &order_item.direction != col_dir {
+            return true;
+        }
+    }
+
+    false // Sorting is already satisfied
 }
 
 /// Check if a SELECT list contains only simple columns or *
@@ -223,6 +334,7 @@ impl SelectExecutor<'_> {
 
         let schema = from_result.schema.clone();
         let where_filtered = from_result.where_filtered;
+        let sorted_by = from_result.sorted_by.clone();
         let rows = from_result.into_rows();
 
         // Apply remaining WHERE clause if not already filtered
@@ -232,8 +344,19 @@ impl SelectExecutor<'_> {
             self.apply_where_filter_fast(stmt.where_clause.as_ref().unwrap(), rows, &schema)?
         };
 
+        // Apply ORDER BY sorting if needed (index didn't provide the order)
+        let sorted_rows = if let Some(order_by) = &stmt.order_by {
+            if needs_sorting(order_by, &sorted_by) {
+                self.apply_order_by_fast(order_by, filtered_rows, &schema)?
+            } else {
+                filtered_rows
+            }
+        } else {
+            filtered_rows
+        };
+
         // Apply projection
-        let projected_rows = self.apply_projection_fast(&stmt.select_list, filtered_rows, &schema)?;
+        let projected_rows = self.apply_projection_fast(&stmt.select_list, sorted_rows, &schema)?;
 
         // Apply LIMIT/OFFSET
         let final_rows = crate::select::helpers::apply_limit_offset(
@@ -460,6 +583,72 @@ impl SelectExecutor<'_> {
         Ok(projected)
     }
 
+    /// Apply ORDER BY sorting in fast path
+    ///
+    /// Uses simple column-based sorting for the fast path.
+    /// ORDER BY expressions must be simple column references (validated by is_simple_order_by).
+    /// ORDER BY with aliases is excluded at detection time by uses_select_alias().
+    fn apply_order_by_fast(
+        &self,
+        order_by: &[vibesql_ast::OrderByItem],
+        mut rows: Vec<Row>,
+        schema: &CombinedSchema,
+    ) -> Result<Vec<Row>, ExecutorError> {
+        use std::cmp::Ordering;
+        use crate::select::grouping::compare_sql_values;
+
+        // Pre-compute column indices for ORDER BY columns
+        let mut sort_indices: Vec<(usize, vibesql_ast::OrderDirection)> = Vec::with_capacity(order_by.len());
+
+        for item in order_by {
+            let col_idx = match &item.expr {
+                Expression::ColumnRef { table, column } => {
+                    schema.get_column_index(table.as_deref(), column)
+                        .ok_or_else(|| ExecutorError::ColumnNotFound {
+                            column_name: column.clone(),
+                            table_name: table.clone().unwrap_or_default(),
+                            searched_tables: schema.table_schemas.keys().cloned().collect(),
+                            available_columns: vec![],
+                        })?
+                }
+                _ => {
+                    return Err(ExecutorError::Other(
+                        "Fast path ORDER BY requires simple column references".to_string()
+                    ));
+                }
+            };
+            sort_indices.push((col_idx, item.direction.clone()));
+        }
+
+        // Sort rows by the specified columns
+        rows.sort_by(|a, b| {
+            for (col_idx, dir) in &sort_indices {
+                let val_a = &a.values[*col_idx];
+                let val_b = &b.values[*col_idx];
+
+                // Handle NULLs: always sort last regardless of ASC/DESC
+                let cmp = match (val_a.is_null(), val_b.is_null()) {
+                    (true, true) => Ordering::Equal,
+                    (true, false) => return Ordering::Greater, // NULL always sorts last
+                    (false, true) => return Ordering::Less,    // non-NULL always sorts first
+                    (false, false) => {
+                        // Compare non-NULL values, respecting direction
+                        match dir {
+                            vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
+                            vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                        }
+                    }
+                };
+
+                if cmp != Ordering::Equal {
+                    return cmp;
+                }
+            }
+            Ordering::Equal
+        });
+
+        Ok(rows)
+    }
 }
 
 #[cfg(test)]
@@ -503,5 +692,91 @@ mod tests {
     fn test_or_not_simple() {
         // OR predicates are not simple (could be optimized later)
         assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 OR y = 2")));
+    }
+
+    #[test]
+    fn test_order_by_simple_queries() {
+        // Simple ORDER BY with column references should be detected as simple
+        assert!(is_simple_point_query(&parse_select("SELECT no_o_id FROM new_order WHERE no_w_id = 1 ORDER BY no_o_id")));
+        assert!(is_simple_point_query(&parse_select("SELECT * FROM t WHERE id = 1 ORDER BY col ASC")));
+        assert!(is_simple_point_query(&parse_select("SELECT a, b FROM t WHERE x = 1 ORDER BY a DESC")));
+        assert!(is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a, b")));
+        assert!(is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a DESC, b ASC")));
+        // ORDER BY with LIMIT
+        assert!(is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a LIMIT 1")));
+    }
+
+    #[test]
+    fn test_order_by_complex_not_simple() {
+        // Complex ORDER BY expressions should not be detected as simple
+        assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY UPPER(a)")));
+        assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a + 1")));
+        assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY COALESCE(a, b)")));
+    }
+
+    #[test]
+    fn test_needs_sorting() {
+        // No sorted_by means we need to sort
+        assert!(needs_sorting(
+            &[vibesql_ast::OrderByItem {
+                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                direction: vibesql_ast::OrderDirection::Asc,
+            }],
+            &None
+        ));
+
+        // Matching sorted_by means no sorting needed
+        assert!(!needs_sorting(
+            &[vibesql_ast::OrderByItem {
+                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                direction: vibesql_ast::OrderDirection::Asc,
+            }],
+            &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
+        ));
+
+        // Different column means sorting needed
+        assert!(needs_sorting(
+            &[vibesql_ast::OrderByItem {
+                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
+                direction: vibesql_ast::OrderDirection::Asc,
+            }],
+            &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
+        ));
+
+        // Different direction means sorting needed
+        assert!(needs_sorting(
+            &[vibesql_ast::OrderByItem {
+                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                direction: vibesql_ast::OrderDirection::Desc,
+            }],
+            &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
+        ));
+
+        // ORDER BY prefix of sorted_by is OK
+        assert!(!needs_sorting(
+            &[vibesql_ast::OrderByItem {
+                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                direction: vibesql_ast::OrderDirection::Asc,
+            }],
+            &Some(vec![
+                ("a".to_string(), vibesql_ast::OrderDirection::Asc),
+                ("b".to_string(), vibesql_ast::OrderDirection::Asc),
+            ])
+        ));
+
+        // ORDER BY with more columns than sorted_by needs sorting
+        assert!(needs_sorting(
+            &[
+                vibesql_ast::OrderByItem {
+                    expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                    direction: vibesql_ast::OrderDirection::Asc,
+                },
+                vibesql_ast::OrderByItem {
+                    expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
+                    direction: vibesql_ast::OrderDirection::Asc,
+                },
+            ],
+            &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
+        ));
     }
 }
