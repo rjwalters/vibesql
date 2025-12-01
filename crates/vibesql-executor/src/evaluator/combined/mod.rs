@@ -12,5 +12,8 @@ mod predicates;
 mod special;
 mod subqueries;
 
+// Re-export cache clearing function for benchmarks
+pub use subqueries::clear_in_subquery_cache;
+
 // Note: The CombinedExpressionEvaluator struct is defined in core.rs
 // This module only contains the implementation methods

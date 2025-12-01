@@ -60,6 +60,7 @@ pub use drop_table::DropTableExecutor;
 pub use truncate_table::TruncateTableExecutor;
 pub use errors::ExecutorError;
 pub use evaluator::ExpressionEvaluator;
+pub use evaluator::clear_in_subquery_cache;
 pub use grant::GrantExecutor;
 pub use index_ddl::{
     AnalyzeExecutor, CreateIndexExecutor, DropIndexExecutor, IndexExecutor, ReindexExecutor,
