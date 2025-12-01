@@ -320,61 +320,19 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         Self { db }
     }
 
-    /// Direct index lookup for single-column primary key
-    /// Returns the row if found, None otherwise
-    #[inline]
-    fn lookup_by_pk(&self, table_name: &str, index_name: &str, key: i64) -> Option<vibesql_storage::Row> {
-        use vibesql_types::SqlValue;
-
-        let index_data = self.db.get_index_data(index_name)?;
-        let table = self.db.get_table(table_name)?;
-
-        let key_values = vec![SqlValue::Integer(key)];
-        let row_indices = index_data.get(&key_values)?;
-
-        let all_rows = table.scan();
-        row_indices.first().and_then(|idx| all_rows.get(*idx).cloned())
-    }
-
-    /// Direct index lookup for two-column composite primary key
-    /// Returns the row if found, None otherwise
-    #[inline]
-    fn lookup_by_pk2(&self, table_name: &str, index_name: &str, key1: i64, key2: i64) -> Option<vibesql_storage::Row> {
-        use vibesql_types::SqlValue;
-
-        let index_data = self.db.get_index_data(index_name)?;
-        let table = self.db.get_table(table_name)?;
-
-        let key_values = vec![SqlValue::Integer(key1), SqlValue::Integer(key2)];
-        let row_indices = index_data.get(&key_values)?;
-
-        let all_rows = table.scan();
-        row_indices.first().and_then(|idx| all_rows.get(*idx).cloned())
-    }
-
-    /// Direct index lookup for three-column composite primary key
-    /// Returns the row if found, None otherwise
-    #[inline]
-    fn lookup_by_pk3(&self, table_name: &str, index_name: &str, key1: i64, key2: i64, key3: i64) -> Option<vibesql_storage::Row> {
-        use vibesql_types::SqlValue;
-
-        let index_data = self.db.get_index_data(index_name)?;
-        let table = self.db.get_table(table_name)?;
-
-        let key_values = vec![SqlValue::Integer(key1), SqlValue::Integer(key2), SqlValue::Integer(key3)];
-        let row_indices = index_data.get(&key_values)?;
-
-        let all_rows = table.scan();
-        row_indices.first().and_then(|idx| all_rows.get(*idx).cloned())
-    }
-
-    /// Execute New-Order transaction using optimized direct lookups
+    /// Execute New-Order transaction using the public lookup_by_index API
+    ///
+    /// This method uses Database::lookup_one_by_index() for direct B+ tree lookups,
+    /// bypassing SQL parsing entirely for maximum performance.
     pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
         // Get warehouse (single-column PK lookup)
         // Index: idx_warehouse_pk on warehouse(W_ID)
-        if self.lookup_by_pk("warehouse", "idx_warehouse_pk", input.w_id as i64).is_none() {
+        if self.db.lookup_one_by_index("idx_warehouse_pk", &[SqlValue::Integer(input.w_id as i64)])
+            .ok().flatten().is_none()
+        {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -384,7 +342,11 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Get district (two-column composite PK lookup)
         // Index: idx_district_pk on district(D_W_ID, D_ID)
-        if self.lookup_by_pk2("district", "idx_district_pk", input.w_id as i64, input.d_id as i64).is_none() {
+        if self.db.lookup_one_by_index("idx_district_pk", &[
+            SqlValue::Integer(input.w_id as i64),
+            SqlValue::Integer(input.d_id as i64),
+        ]).ok().flatten().is_none()
+        {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -394,7 +356,12 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Get customer (three-column composite PK lookup)
         // Index: idx_customer_pk on customer(C_W_ID, C_D_ID, C_ID)
-        if self.lookup_by_pk3("customer", "idx_customer_pk", input.w_id as i64, input.d_id as i64, input.c_id as i64).is_none() {
+        if self.db.lookup_one_by_index("idx_customer_pk", &[
+            SqlValue::Integer(input.w_id as i64),
+            SqlValue::Integer(input.d_id as i64),
+            SqlValue::Integer(input.c_id as i64),
+        ]).ok().flatten().is_none()
+        {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -406,7 +373,9 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         for item in &input.items {
             // Get item (single-column PK lookup)
             // Index: idx_item_pk on item(I_ID)
-            if self.lookup_by_pk("item", "idx_item_pk", item.ol_i_id as i64).is_none() {
+            if self.db.lookup_one_by_index("idx_item_pk", &[SqlValue::Integer(item.ol_i_id as i64)])
+                .ok().flatten().is_none()
+            {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -416,7 +385,11 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
             // Get stock (two-column composite PK lookup)
             // Index: idx_stock_pk on stock(S_I_ID, S_W_ID)
-            if self.lookup_by_pk2("stock", "idx_stock_pk", item.ol_i_id as i64, item.ol_supply_w_id as i64).is_none() {
+            if self.db.lookup_one_by_index("idx_stock_pk", &[
+                SqlValue::Integer(item.ol_i_id as i64),
+                SqlValue::Integer(item.ol_supply_w_id as i64),
+            ]).ok().flatten().is_none()
+            {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -432,12 +405,15 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Payment transaction using optimized direct lookups
+    /// Execute Payment transaction using the public lookup_by_index API
     pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
         // Get warehouse
-        if self.lookup_by_pk("warehouse", "idx_warehouse_pk", input.w_id as i64).is_none() {
+        if self.db.lookup_one_by_index("idx_warehouse_pk", &[SqlValue::Integer(input.w_id as i64)])
+            .ok().flatten().is_none()
+        {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -446,7 +422,11 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
 
         // Get district
-        if self.lookup_by_pk2("district", "idx_district_pk", input.w_id as i64, input.d_id as i64).is_none() {
+        if self.db.lookup_one_by_index("idx_district_pk", &[
+            SqlValue::Integer(input.w_id as i64),
+            SqlValue::Integer(input.d_id as i64),
+        ]).ok().flatten().is_none()
+        {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -456,8 +436,13 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Get customer (by ID or last name)
         if let Some(c_id) = input.c_id {
-            // Direct PK lookup
-            if self.lookup_by_pk3("customer", "idx_customer_pk", input.c_w_id as i64, input.c_d_id as i64, c_id as i64).is_none() {
+            // Direct PK lookup using public API
+            if self.db.lookup_one_by_index("idx_customer_pk", &[
+                SqlValue::Integer(input.c_w_id as i64),
+                SqlValue::Integer(input.c_d_id as i64),
+                SqlValue::Integer(c_id as i64),
+            ]).ok().flatten().is_none()
+            {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -486,13 +471,20 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Order-Status transaction
+    /// Execute Order-Status transaction using the public lookup_by_index API
     pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
         // Get customer (by ID or last name)
         if let Some(c_id) = input.c_id {
-            if self.lookup_by_pk3("customer", "idx_customer_pk", input.w_id as i64, input.d_id as i64, c_id as i64).is_none() {
+            // Direct PK lookup using public API
+            if self.db.lookup_one_by_index("idx_customer_pk", &[
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(c_id as i64),
+            ]).ok().flatten().is_none()
+            {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -556,14 +548,18 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Stock-Level transaction
+    /// Execute Stock-Level transaction using the public lookup_by_index API
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
-        // Get district next order ID via direct lookup
-        let district = match self.lookup_by_pk2("district", "idx_district_pk", input.w_id as i64, input.d_id as i64) {
-            Some(row) => row,
-            None => {
+        // Get district next order ID via direct lookup using public API
+        let district = match self.db.lookup_one_by_index("idx_district_pk", &[
+            SqlValue::Integer(input.w_id as i64),
+            SqlValue::Integer(input.d_id as i64),
+        ]) {
+            Ok(Some(row)) => row,
+            _ => {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -574,7 +570,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Extract d_next_o_id from the row (column index 10)
         let d_next_o_id = match district.values.get(10) {
-            Some(vibesql_types::SqlValue::Integer(id)) => *id,
+            Some(SqlValue::Integer(id)) => *id,
             _ => {
                 return TransactionResult {
                     success: false,
