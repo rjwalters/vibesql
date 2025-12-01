@@ -6,6 +6,7 @@ use std::ops::Bound;
 use vibesql_types::SqlValue;
 
 use super::index_metadata::{acquire_btree_lock, IndexData};
+use super::range_bounds::try_increment_sqlvalue;
 use super::value_normalization::normalize_for_comparison;
 
 impl IndexData {
@@ -54,18 +55,26 @@ impl IndexData {
         matching_row_indices
     }
 
-    /// Scan index using multi-column prefix matching
+    /// Lookup rows matching a multi-column prefix in a composite index
     ///
-    /// This method is designed for multi-column indexes where we want to match on
-    /// the first N columns. For example, with index on (a, b, c) and query
-    /// `WHERE a = 1 AND b = 2`, this will find all rows where `a=1` AND `b=2`,
-    /// regardless of the value of `c`.
+    /// For example, with index `[c_w_id, c_d_id, c_id]` and prefix `[1, 2]`,
+    /// this returns all rows where `c_w_id = 1 AND c_d_id = 2`, regardless of `c_id`.
     ///
     /// # Arguments
-    /// * `prefix` - Key prefix to match (e.g., [a_val, b_val] for 2-column prefix)
+    /// * `prefix` - Prefix values for the first N index columns (N < total columns)
     ///
     /// # Returns
-    /// Vector of row indices where the key prefix matches
+    /// Vector of row indices matching the prefix
+    ///
+    /// # Performance
+    /// Uses BTreeMap's efficient range() method with computed bounds for O(log n + k)
+    /// complexity, where n is the number of unique keys and k is matching keys.
+    ///
+    /// # How it works
+    /// BTreeMap orders Vec<SqlValue> lexicographically:
+    ///   [1, 2] < [1, 2, 0] < [1, 2, 99] < [1, 3] < [1, 3, 0]
+    ///
+    /// So prefix_scan([1, 2]) scans from [1, 2] (inclusive) to [1, 3) (exclusive).
     ///
     /// # Example
     /// ```rust,ignore
@@ -73,74 +82,43 @@ impl IndexData {
     /// // Find all rows where w_id=1 AND d_id=5 (2-column prefix)
     /// let rows = index_data.prefix_scan(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
     /// ```
-    ///
-    /// # Implementation Notes
-    /// Uses BTreeMap's lexicographic ordering: [1, 5] < [1, 5, 1] < [1, 5, 2] < [1, 6]
-    /// We start at the prefix key and iterate while all prefix columns match.
     pub fn prefix_scan(&self, prefix: &[SqlValue]) -> Vec<usize> {
         if prefix.is_empty() {
-            return Vec::new();
+            // Empty prefix matches everything - return all rows
+            return self.values().flatten().collect();
         }
 
-        // Normalize all prefix values for consistent comparison
+        // Normalize prefix values for consistent comparison
         let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
             IndexData::InMemory { data } => {
+                // Calculate upper bound by incrementing the last element of the prefix
+                // For prefix [1, 2], upper bound is [1, 3)
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                let start_bound: Bound<&[SqlValue]> = Bound::Included(normalized_prefix.as_slice());
+                let end_bound: Bound<&[SqlValue]> = match end_key.as_ref() {
+                    Some(key) => Bound::Excluded(key.as_slice()),
+                    None => Bound::Unbounded, // Couldn't increment, use unbounded
+                };
+
                 let mut matching_row_indices = Vec::new();
 
-                // Start iteration at the prefix key using BTreeMap's efficient range()
-                // Lexicographic ordering means [1, 5] < [1, 5, x] < [1, 6] for any x
-                let start_bound: Bound<&[SqlValue]> = Bound::Included(normalized_prefix.as_slice());
-
-                for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, Bound::Unbounded)) {
-                    // Check if the key starts with our prefix
-                    if key_values.len() < normalized_prefix.len() {
-                        // Key has fewer columns than prefix - can't match
-                        break;
+                for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                    // Double-check prefix match (needed for Unbounded end bound case)
+                    if key_values.len() >= normalized_prefix.len()
+                        && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                    {
+                        matching_row_indices.extend(row_indices);
                     }
-
-                    // Compare prefix columns
-                    let matches = key_values[..normalized_prefix.len()]
-                        .iter()
-                        .zip(normalized_prefix.iter())
-                        .all(|(k, p)| k == p);
-
-                    if !matches {
-                        // Prefix no longer matches - we've passed all matching keys
-                        break;
-                    }
-
-                    matching_row_indices.extend(row_indices);
                 }
 
                 matching_row_indices
             }
             IndexData::DiskBacked { btree, .. } => {
-                // For disk-backed indexes, we need to use range_scan with calculated bounds
-                // Strategy: Calculate the next prefix to use as exclusive upper bound
-                //
-                // For example, to find all rows where (a, b) = (1, 5) in index (a, b, c):
-                //   Range: [1, 5] (inclusive) to [1, 6] (exclusive)
-                //   This captures all keys like [1, 5, 1], [1, 5, 2], ..., [1, 5, 999]
-                //   But excludes [1, 6, x] for any x
-
-                // Calculate end bound by incrementing the last prefix element
-                let end_key = {
-                    let mut end = normalized_prefix.clone();
-                    if let Some(last) = end.last_mut() {
-                        // Try to increment the last value
-                        if let Some(incremented) = super::range_bounds::try_increment_sqlvalue(last) {
-                            *last = incremented;
-                            Some(end)
-                        } else {
-                            // Can't increment (e.g., max integer) - use unbounded
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
+                // Calculate upper bound for disk-backed index
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
 
                 match acquire_btree_lock(btree) {
                     Ok(guard) => guard
@@ -191,6 +169,30 @@ impl IndexData {
         }
 
         results
+    }
+}
+
+/// Compute the exclusive upper bound for a prefix scan
+///
+/// For prefix [1, 2], returns [1, 3] (incrementing the last element).
+/// This allows BTreeMap range scan to efficiently find all keys starting with [1, 2].
+///
+/// Returns None if the last element cannot be incremented (e.g., max value overflow).
+fn compute_prefix_upper_bound(prefix: &[SqlValue]) -> Option<Vec<SqlValue>> {
+    if prefix.is_empty() {
+        return None;
+    }
+
+    // Clone prefix and try to increment the last element
+    let mut upper_bound = prefix.to_vec();
+    let last_idx = upper_bound.len() - 1;
+
+    match try_increment_sqlvalue(&upper_bound[last_idx]) {
+        Some(incremented) => {
+            upper_bound[last_idx] = incremented;
+            Some(upper_bound)
+        }
+        None => None, // Couldn't increment (overflow), caller should use unbounded
     }
 }
 
@@ -351,9 +353,11 @@ mod tests {
             (vec![SqlValue::Integer(2), SqlValue::Integer(20)], vec![1]),
         ]);
 
-        // Empty prefix returns nothing (by design)
+        // Empty prefix matches everything - returns all rows
         let results = index.prefix_scan(&[]);
-        assert!(results.is_empty());
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&0));
+        assert!(results.contains(&1));
     }
 
     #[test]

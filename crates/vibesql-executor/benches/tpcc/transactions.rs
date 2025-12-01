@@ -475,7 +475,12 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Order-Status transaction using the public lookup_by_index API
+    /// Execute Order-Status transaction using direct index API
+    ///
+    /// This optimization replaces the SQL query for order lookup with direct index API:
+    /// 1. Customer by ID: Uses direct index lookup via `idx_customer_pk` (60% of cases)
+    /// 2. Customer by last name: Falls back to SQL (40% of cases)
+    /// 3. Order lookup: Uses `idx_orders_customer` index with direct API to find max o_id
     pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
         use vibesql_types::SqlValue;
         let start = Instant::now();
@@ -504,18 +509,41 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
             }
         }
 
-        // Get last order for customer - requires ORDER BY, use SQL
+        // Get last order for customer using direct index API
+        // Index: idx_orders_customer on orders(O_W_ID, O_D_ID, O_C_ID)
         let c_id = input.c_id.unwrap_or(1);
-        let o_query = format!(
-            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = {} AND o_d_id = {} AND o_c_id = {} ORDER BY o_id DESC LIMIT 1",
-            input.w_id, input.d_id, c_id
-        );
-        if let Err(e) = execute_query(self.db, &o_query) {
-            return TransactionResult {
-                success: false,
-                duration_us: start.elapsed().as_micros() as u64,
-                error: Some(format!("Order query failed: {}", e)),
-            };
+        let order_key = [
+            SqlValue::Integer(input.w_id as i64),
+            SqlValue::Integer(input.d_id as i64),
+            SqlValue::Integer(c_id as i64),
+        ];
+
+        // Lookup all orders for this customer and find the one with max o_id
+        match self.db.lookup_by_index("idx_orders_customer", &order_key) {
+            Ok(Some(orders)) => {
+                // Find the order with maximum o_id (column 0)
+                let _max_order = orders.iter().max_by_key(|row| {
+                    match row.values.first() {
+                        Some(SqlValue::Integer(o_id)) => *o_id,
+                        _ => i64::MIN,
+                    }
+                });
+                // Order found - we just needed to verify it exists
+            }
+            Ok(None) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some("No orders found for customer".to_string()),
+                };
+            }
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Order lookup failed: {}", e)),
+                };
+            }
         }
 
         TransactionResult {
@@ -649,12 +677,10 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Collect unique item IDs from order_lines (column 4 = ol_i_id)
         let mut unique_item_ids: HashSet<i64> = HashSet::new();
-        for order_lines_opt in &order_line_results {
-            if let Some(order_lines) = order_lines_opt {
-                for row in order_lines {
-                    if let Some(SqlValue::Integer(ol_i_id)) = row.values.get(4) {
-                        unique_item_ids.insert(*ol_i_id);
-                    }
+        for order_lines in order_line_results.iter().flatten() {
+            for row in order_lines {
+                if let Some(SqlValue::Integer(ol_i_id)) = row.values.get(4) {
+                    unique_item_ids.insert(*ol_i_id);
                 }
             }
         }
@@ -683,12 +709,10 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Count items with quantity below threshold (column 2 = s_quantity)
         let mut _low_stock_count = 0i64;
-        for stock_row_opt in &stock_results {
-            if let Some(row) = stock_row_opt {
-                if let Some(SqlValue::Integer(s_quantity)) = row.values.get(2) {
-                    if *s_quantity < input.threshold as i64 {
-                        _low_stock_count += 1;
-                    }
+        for row in stock_results.iter().flatten() {
+            if let Some(SqlValue::Integer(s_quantity)) = row.values.get(2) {
+                if *s_quantity < input.threshold as i64 {
+                    _low_stock_count += 1;
                 }
             }
         }

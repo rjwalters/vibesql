@@ -97,7 +97,7 @@ impl PackedMask {
         if len == 0 {
             return Self { words: vec![], len: 0 };
         }
-        let num_words = (len + 63) / 64;
+        let num_words = len.div_ceil(64);
         let mut words = vec![u64::MAX; num_words];
 
         // Clear unused bits in the last word
@@ -115,7 +115,7 @@ impl PackedMask {
         if len == 0 {
             return Self { words: vec![], len: 0 };
         }
-        let num_words = (len + 63) / 64;
+        let num_words = len.div_ceil(64);
         Self { words: vec![0; num_words], len }
     }
 
@@ -211,7 +211,7 @@ impl PackedMask {
             return Self { words: vec![], len: 0 };
         }
 
-        let num_words = (len + 63) / 64;
+        let num_words = len.div_ceil(64);
         let mut words = vec![0u64; num_words];
 
         // Process 64 bits at a time

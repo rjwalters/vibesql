@@ -227,7 +227,7 @@ async fn test_transaction_rollback() {
     // With proper rollback implementation, only the initial row should exist
     // Note: If rollback is not fully implemented, this test documents expected behavior
     assert!(
-        data_rows.len() >= 1,
+        !data_rows.is_empty(),
         "Should have at least the initial row"
     );
 }
@@ -368,7 +368,7 @@ async fn test_error_in_transaction() {
     // For now, verify at least one row exists (the first insert)
     // This confirms the test infrastructure works and documents current behavior
     assert!(
-        data_rows.len() >= 1,
+        !data_rows.is_empty(),
         "At least the first insert should have succeeded"
     );
 }

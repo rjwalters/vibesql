@@ -538,7 +538,7 @@ impl SelectExecutor<'_> {
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
             let rows = match rows_result {
-                Some(refs) => refs.into_iter().map(|r| r.clone()).collect::<Vec<_>>(),
+                Some(refs) => refs.into_iter().cloned().collect::<Vec<_>>(),
                 None => vec![],
             };
 
@@ -596,26 +596,23 @@ impl SelectExecutor<'_> {
         pk_columns: &[&str],
         values: &mut HashMap<String, vibesql_types::SqlValue>,
     ) {
-        match expr {
-            Expression::BinaryOp { left, op, right } => {
-                match op {
-                    vibesql_ast::BinaryOperator::And => {
-                        // Recurse into both sides of AND
-                        self.collect_pk_equality_values(left, pk_columns, values);
-                        self.collect_pk_equality_values(right, pk_columns, values);
-                    }
-                    vibesql_ast::BinaryOperator::Equal => {
-                        // Check for column = literal pattern
-                        if let Some((col_name, value)) = self.extract_column_literal_pair(left, right) {
-                            if pk_columns.contains(&col_name.as_str()) {
-                                values.insert(col_name, value);
-                            }
+        if let Expression::BinaryOp { left, op, right } = expr {
+            match op {
+                vibesql_ast::BinaryOperator::And => {
+                    // Recurse into both sides of AND
+                    self.collect_pk_equality_values(left, pk_columns, values);
+                    self.collect_pk_equality_values(right, pk_columns, values);
+                }
+                vibesql_ast::BinaryOperator::Equal => {
+                    // Check for column = literal pattern
+                    if let Some((col_name, value)) = self.extract_column_literal_pair(left, right) {
+                        if pk_columns.contains(&col_name.as_str()) {
+                            values.insert(col_name, value);
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
 
@@ -723,7 +720,7 @@ impl SelectExecutor<'_> {
     ) -> Result<(), ExecutorError> {
         for item in select_list {
             if let SelectItem::Expression { expr, .. } = item {
-                self.validate_expression_columns(expr, schema)?;
+                Self::validate_expression_columns(expr, schema)?;
             }
         }
         Ok(())
@@ -731,7 +728,6 @@ impl SelectExecutor<'_> {
 
     /// Recursively validate column references in an expression
     fn validate_expression_columns(
-        &self,
         expr: &Expression,
         schema: &CombinedSchema,
     ) -> Result<(), ExecutorError> {
@@ -753,14 +749,14 @@ impl SelectExecutor<'_> {
                 }
             }
             Expression::BinaryOp { left, right, .. } => {
-                self.validate_expression_columns(left, schema)?;
-                self.validate_expression_columns(right, schema)?;
+                Self::validate_expression_columns(left, schema)?;
+                Self::validate_expression_columns(right, schema)?;
             }
             Expression::UnaryOp { expr, .. } => {
-                self.validate_expression_columns(expr, schema)?;
+                Self::validate_expression_columns(expr, schema)?;
             }
             Expression::Cast { expr, .. } => {
-                self.validate_expression_columns(expr, schema)?;
+                Self::validate_expression_columns(expr, schema)?;
             }
             // Literals and other expressions don't need column validation
             _ => {}

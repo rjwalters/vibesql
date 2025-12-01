@@ -143,7 +143,6 @@ async fn test_multiple_concurrent_connections() {
     // Connect 5 clients concurrently
     let handles: Vec<_> = (0..5)
         .map(|i| {
-            let addr = addr;
             tokio::spawn(async move {
                 let mut client = TestClient::connect(addr).await.expect("Failed to connect");
                 client
@@ -201,22 +200,22 @@ async fn test_rapid_connect_disconnect_cycles() {
     for i in 0..10 {
         let mut client = TestClient::connect(server.addr())
             .await
-            .expect(&format!("Failed to connect on cycle {}", i));
+            .unwrap_or_else(|_| panic!("Failed to connect on cycle {}", i));
 
         client
             .send_startup("testuser", "testdb")
             .await
-            .expect(&format!("Failed to send startup on cycle {}", i));
+            .unwrap_or_else(|_| panic!("Failed to send startup on cycle {}", i));
 
         let _ = client
             .read_until_message_type(b'Z')
             .await
-            .expect(&format!("Failed to read response on cycle {}", i));
+            .unwrap_or_else(|_| panic!("Failed to read response on cycle {}", i));
 
         client
             .send_terminate()
             .await
-            .expect(&format!("Failed to send terminate on cycle {}", i));
+            .unwrap_or_else(|_| panic!("Failed to send terminate on cycle {}", i));
 
         // Small delay between cycles
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -258,7 +257,7 @@ async fn test_many_sequential_connections() {
     for i in 0..20 {
         let mut client = TestClient::connect(server.addr())
             .await
-            .expect(&format!("Failed to connect on iteration {}", i));
+            .unwrap_or_else(|_| panic!("Failed to connect on iteration {}", i));
 
         client
             .send_startup(&format!("user{}", i), "testdb")
@@ -292,7 +291,6 @@ async fn test_connection_after_heavy_load() {
     // Create heavy load with concurrent connections
     let handles: Vec<_> = (0..10)
         .map(|i| {
-            let addr = addr;
             tokio::spawn(async move {
                 let mut client = TestClient::connect(addr).await.expect("Failed to connect");
                 client.send_startup(&format!("user{}", i), "testdb").await.expect("Failed to send startup");

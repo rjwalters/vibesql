@@ -519,35 +519,32 @@ impl UpdateExecutor {
         expr: &Expression,
         schema: &vibesql_catalog::TableSchema,
     ) -> Option<Vec<vibesql_types::SqlValue>> {
-        match expr {
-            Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
-                // Check: column = literal
-                if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
-                    (left.as_ref(), right.as_ref())
-                {
-                    if let Some(pk_indices) = schema.get_primary_key_indices() {
-                        if let Some(col_index) = schema.get_column_index(column) {
-                            if pk_indices.len() == 1 && pk_indices[0] == col_index {
-                                return Some(vec![value.clone()]);
-                            }
-                        }
-                    }
-                }
-
-                // Check: literal = column
-                if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
-                    (left.as_ref(), right.as_ref())
-                {
-                    if let Some(pk_indices) = schema.get_primary_key_indices() {
-                        if let Some(col_index) = schema.get_column_index(column) {
-                            if pk_indices.len() == 1 && pk_indices[0] == col_index {
-                                return Some(vec![value.clone()]);
-                            }
+        if let Expression::BinaryOp { left, op: BinaryOperator::Equal, right } = expr {
+            // Check: column = literal
+            if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                (left.as_ref(), right.as_ref())
+            {
+                if let Some(pk_indices) = schema.get_primary_key_indices() {
+                    if let Some(col_index) = schema.get_column_index(column) {
+                        if pk_indices.len() == 1 && pk_indices[0] == col_index {
+                            return Some(vec![value.clone()]);
                         }
                     }
                 }
             }
-            _ => {}
+
+            // Check: literal = column
+            if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                (left.as_ref(), right.as_ref())
+            {
+                if let Some(pk_indices) = schema.get_primary_key_indices() {
+                    if let Some(col_index) = schema.get_column_index(column) {
+                        if pk_indices.len() == 1 && pk_indices[0] == col_index {
+                            return Some(vec![value.clone()]);
+                        }
+                    }
+                }
+            }
         }
         None
     }

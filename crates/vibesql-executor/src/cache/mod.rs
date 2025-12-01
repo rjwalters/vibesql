@@ -14,8 +14,8 @@ pub mod table_extractor;
 pub use integration::{CacheManager, CachedQueryContext};
 pub use parameterized::{LiteralExtractor, LiteralValue, ParameterPosition, ParameterizedPlan};
 pub use prepared_statement::{
-    PreparedStatement, PreparedStatementCache, PreparedStatementCacheStats,
-    PreparedStatementError,
+    CachedPlan, ColumnProjection, PkPointLookupPlan, PreparedStatement, PreparedStatementCache,
+    PreparedStatementCacheStats, PreparedStatementError, ProjectionPlan,
 };
 pub use query_plan_cache::{CacheStats, QueryPlanCache};
 pub use query_result_cache::QueryResultCache;

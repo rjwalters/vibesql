@@ -218,13 +218,13 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
 
         // Recursively bind in compound expressions
         Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
-            op: op.clone(),
+            op: *op,
             left: Box::new(bind_expression(left, params)),
             right: Box::new(bind_expression(right, params)),
         },
 
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
-            op: op.clone(),
+            op: *op,
             expr: Box::new(bind_expression(inner, params)),
         },
 
@@ -317,7 +317,7 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
         Expression::QuantifiedComparison { expr: inner, op, quantifier, subquery } => {
             Expression::QuantifiedComparison {
                 expr: Box::new(bind_expression(inner, params)),
-                op: op.clone(),
+                op: *op,
                 quantifier: quantifier.clone(),
                 subquery: Box::new(bind_select(subquery, params)),
             }
