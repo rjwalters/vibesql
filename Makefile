@@ -183,7 +183,7 @@ benchmark-tpcc:
 	@echo ""
 	@echo "Running TPC-C benchmark (60s duration, 10s warmup)..."
 	TPCC_DURATION_SECS=60 TPCC_WARMUP_SECS=10 TPCC_SCALE_FACTOR=1 \
-		$$(find ./target/release/deps -maxdepth 1 -name "tpcc_benchmark-*" -type f ! -name "*.d" | head -1) \
+		$$(find ./target/release/deps -maxdepth 1 -name "tpcc_benchmark-*" -type f ! -name "*.d" ! -name "*.o" -perm +111 | head -1) \
 		2>&1 | tee /tmp/tpcc_results.txt
 	@echo ""
 	@echo "Processing TPC-C results into database..."
