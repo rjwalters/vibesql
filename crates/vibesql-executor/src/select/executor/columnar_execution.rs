@@ -609,15 +609,26 @@ impl SelectExecutor<'_> {
     ///
     /// # Supported Query Patterns
     ///
-    /// - Multi-table INNER JOINs (explicit JOIN or comma-separated tables)
-    /// - Equi-join conditions (col1 = col2)
+    /// - Multi-table INNER JOINs (explicit `JOIN ... ON` syntax)
+    /// - Implicit joins via comma-separated tables (`FROM a, b WHERE a.x = b.y`)
+    /// - Equi-join conditions (col1 = col2) in ON clause or WHERE clause
     /// - Simple WHERE predicates
     /// - GROUP BY with aggregates (SUM, COUNT, AVG, MIN, MAX)
+    ///
+    /// # Implicit Join Syntax (Issue #3132)
+    ///
+    /// Comma-separated tables are parsed as CROSS JOINs. When combined with
+    /// equijoin conditions in the WHERE clause, they are semantically equivalent
+    /// to INNER JOINs. This enables columnar optimization for queries like:
+    ///
+    /// ```sql
+    /// SELECT * FROM lineitem, part WHERE p_partkey = l_partkey
+    /// ```
     ///
     /// # Performance
     ///
     /// - 3-5x improvement for JOIN-heavy queries
-    /// - Targets TPC-H Q3, Q5, Q7-Q10 style queries
+    /// - Targets TPC-H Q3, Q5, Q7-Q10, Q19 style queries
     pub(in crate::select::executor) fn try_columnar_join_execution(
         &self,
         stmt: &vibesql_ast::SelectStmt,
@@ -641,7 +652,9 @@ impl SelectExecutor<'_> {
             None => return Ok(None),
         };
 
-        // Must be a JOIN clause (explicit or implicit via comma-separated tables)
+        // Must be a JOIN clause - this includes:
+        // - Explicit JOINs: FROM a JOIN b ON a.x = b.y
+        // - Implicit joins (comma syntax): FROM a, b (parsed as CROSS JOIN)
         if !matches!(from_clause, FromClause::Join { .. }) {
             return Ok(None);
         }
@@ -656,9 +669,17 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // Only handle INNER joins for now - CROSS, LEFT, RIGHT, FULL need special handling
-        if !is_inner_join_only(from_clause) {
-            log::debug!("Columnar join: only INNER joins are supported, falling back");
+        // Only handle INNER and CROSS joins - LEFT, RIGHT, FULL need special handling
+        // CROSS joins are included because comma-separated tables (FROM a, b) parse as CROSS JOIN
+        if !is_inner_or_cross_join_only(from_clause) {
+            log::debug!("Columnar join: only INNER/CROSS joins are supported, falling back");
+            return Ok(None);
+        }
+
+        // CROSS JOIN with ON condition is semantically invalid SQL
+        // Fall back to regular execution to produce proper error message
+        if has_cross_join_with_on_condition(from_clause) {
+            log::debug!("Columnar join: CROSS JOIN with ON condition detected, falling back");
             return Ok(None);
         }
 
@@ -947,14 +968,37 @@ impl SelectExecutor<'_> {
     }
 }
 
-/// Check if a FROM clause only contains INNER joins (no CROSS, LEFT, RIGHT, FULL)
-fn is_inner_join_only(from: &FromClause) -> bool {
+/// Check if a FROM clause only contains INNER or CROSS joins
+///
+/// CROSS joins are included because:
+/// - Comma-separated tables (`FROM a, b`) are parsed as CROSS joins
+/// - CROSS JOIN with equijoin conditions in WHERE is semantically equivalent to INNER JOIN
+/// - This enables columnar execution for implicit join syntax (e.g., TPC-H Q19)
+fn is_inner_or_cross_join_only(from: &FromClause) -> bool {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } => true,
         FromClause::Join { left, right, join_type, .. } => {
-            matches!(join_type, JoinType::Inner)
-                && is_inner_join_only(left)
-                && is_inner_join_only(right)
+            matches!(join_type, JoinType::Inner | JoinType::Cross)
+                && is_inner_or_cross_join_only(left)
+                && is_inner_or_cross_join_only(right)
+        }
+    }
+}
+
+/// Check if a FROM clause contains a CROSS JOIN with an ON condition
+///
+/// This is semantically invalid SQL (CROSS JOIN should not have ON clause).
+/// We detect this case to fall back to regular execution which produces a proper error.
+fn has_cross_join_with_on_condition(from: &FromClause) -> bool {
+    match from {
+        FromClause::Table { .. } | FromClause::Subquery { .. } => false,
+        FromClause::Join { left, right, join_type, condition, .. } => {
+            // CROSS JOIN with ON condition is invalid
+            if matches!(join_type, JoinType::Cross) && condition.is_some() {
+                return true;
+            }
+            // Recursively check children
+            has_cross_join_with_on_condition(left) || has_cross_join_with_on_condition(right)
         }
     }
 }
@@ -992,12 +1036,14 @@ fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<EquiJoinCondi
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } => {}
         FromClause::Join { left, right, condition, join_type, .. } => {
-            // Only handle INNER joins in columnar path
-            // CROSS joins should not have ON conditions, and OUTER joins need special handling
-            if !matches!(join_type, JoinType::Inner) {
+            // Only handle INNER and CROSS joins in columnar path
+            // OUTER joins need special handling and are not supported
+            if !matches!(join_type, JoinType::Inner | JoinType::Cross) {
                 return;
             }
 
+            // Extract ON conditions (CROSS joins typically don't have ON conditions -
+            // their join predicates are in the WHERE clause which is handled separately)
             if let Some(cond) = condition {
                 extract_equijoin_conditions(cond, conditions);
             }
