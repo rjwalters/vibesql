@@ -35,6 +35,29 @@ thread_local! {
         RefCell::new(lru::LruCache::new(std::num::NonZeroUsize::new(1000).unwrap()));
 }
 
+/// Clear the thread-local IN subquery HashSet cache.
+///
+/// This is useful for benchmarks and long-running processes to prevent memory
+/// accumulation. The cache is automatically bounded by LRU eviction, but for
+/// memory-sensitive scenarios (like TPC-DS benchmarks), explicit clearing can
+/// help reduce memory pressure between query batches.
+///
+/// # Example
+///
+/// ```ignore
+/// use vibesql_executor::clear_in_subquery_cache;
+///
+/// // Run a batch of queries...
+///
+/// // Clear the cache to release memory
+/// clear_in_subquery_cache();
+/// ```
+pub fn clear_in_subquery_cache() {
+    IN_SUBQUERY_HASHSET_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
+}
+
 /// Build a HashSet from subquery result rows for O(1) membership checks
 fn build_hashset_from_rows(rows: &[vibesql_storage::Row]) -> InSubqueryHashSetEntry {
     let mut has_null = false;

@@ -24,9 +24,10 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use memory_monitor::{format_bytes, MemoryMonitor, MemoryPressure};
 use std::hint::black_box;
 use std::sync::{Mutex, OnceLock};
-use vibesql_executor::SelectExecutor;
+use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
+use tpcds::memory::hint_memory_release;
 
 // =============================================================================
 // Query Result Tracking
@@ -375,6 +376,10 @@ fn bench_sanity_queries(c: &mut Criterion) {
     }
 
     group.finish();
+
+    // Release memory between benchmark groups to prevent OOM
+    clear_in_subquery_cache();
+    hint_memory_release();
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -441,6 +446,10 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
     }
 
     group.finish();
+
+    // Release memory between benchmark groups to prevent OOM
+    clear_in_subquery_cache();
+    hint_memory_release();
 }
 
 // =============================================================================
@@ -491,6 +500,10 @@ fn bench_tpcds_queries(c: &mut Criterion) {
     }
 
     group.finish();
+
+    // Release memory before printing summary
+    clear_in_subquery_cache();
+    hint_memory_release();
 
     // Print summary at the end
     print_query_summary();

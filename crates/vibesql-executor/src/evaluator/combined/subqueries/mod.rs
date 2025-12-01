@@ -19,3 +19,6 @@ mod scalar;
 mod exists;
 mod quantified;
 mod in_subquery;
+
+// Re-export cache clearing function for benchmarks
+pub use in_subquery::clear_in_subquery_cache;
