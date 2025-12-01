@@ -7,6 +7,18 @@ use vibesql_types::SqlValue;
 
 use super::selection::is_column_reference;
 
+/// Composite predicate types for multi-column index optimization
+///
+/// This represents the type of predicate on each column in a composite index,
+/// supporting both equality (col = val) and IN (col IN (val1, val2, ...)) predicates.
+#[derive(Debug, Clone)]
+pub(crate) enum CompositePredicateType {
+    /// Equality predicate: col = value
+    Equality(SqlValue),
+    /// IN predicate: col IN (value1, value2, ...)
+    In(Vec<SqlValue>),
+}
+
 /// Range predicate information extracted from WHERE clause
 #[derive(Debug)]
 pub(crate) struct RangePredicate {
@@ -226,6 +238,10 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
 /// # Returns
 /// `Some(Vec<SqlValue>)` - Composite key values in index column order
 /// `None` - Cannot extract composite key (fall back to single-column predicate)
+///
+/// Note: This function is superseded by `extract_composite_predicates_with_in` which
+/// also handles IN predicates. Kept for backward compatibility with tests.
+#[allow(dead_code)]
 pub(crate) fn extract_composite_equality_predicates(
     expr: &Expression,
     column_names: &[&str],
@@ -259,6 +275,10 @@ pub(crate) fn extract_composite_equality_predicates(
 ///
 /// Recursively walks the expression tree to find all `column = literal` predicates.
 /// Handles AND-connected predicates.
+///
+/// Note: This helper is used by `extract_composite_equality_predicates` which is
+/// superseded by `extract_composite_predicates_with_in`. Kept for backward compatibility.
+#[allow(dead_code)]
 fn collect_equality_predicates(
     expr: &Expression,
     predicates: &mut std::collections::HashMap<String, SqlValue>,
@@ -297,6 +317,279 @@ fn collect_equality_predicates(
             collect_equality_predicates(right, predicates);
         }
         _ => {}
+    }
+}
+
+/// Extract composite predicates (equality or IN) for ALL columns in a composite index
+///
+/// For a query like: `WHERE c_w_id IN (1, 2) AND c_d_id = 5`
+/// with index columns `[c_w_id, c_d_id]`, this returns `Some([In([1, 2]), Equality(5)])`.
+///
+/// Returns None if:
+/// - Any index column doesn't have an equality or IN predicate
+/// - The predicates use non-literal values
+/// - The WHERE clause structure doesn't support extraction
+///
+/// # Arguments
+/// * `expr` - The WHERE clause expression
+/// * `column_names` - The index column names in order
+///
+/// # Returns
+/// `Some(Vec<CompositePredicateType>)` - Predicate types in index column order
+/// `None` - Cannot extract composite predicates
+pub(crate) fn extract_composite_predicates_with_in(
+    expr: &Expression,
+    column_names: &[&str],
+) -> Option<Vec<CompositePredicateType>> {
+    if column_names.is_empty() {
+        return None;
+    }
+
+    // Collect all predicates (equality and IN) from the WHERE clause
+    let mut equality_predicates: std::collections::HashMap<String, SqlValue> =
+        std::collections::HashMap::new();
+    let mut in_predicates: std::collections::HashMap<String, Vec<SqlValue>> =
+        std::collections::HashMap::new();
+    collect_predicates_with_in(expr, &mut equality_predicates, &mut in_predicates);
+
+    // Build composite predicate types in index column order
+    let mut result = Vec::with_capacity(column_names.len());
+    for col_name in column_names {
+        let col_upper = col_name.to_uppercase();
+
+        // Check for equality predicate first
+        if let Some(value) = equality_predicates.get(&col_upper) {
+            result.push(CompositePredicateType::Equality(value.clone()));
+        }
+        // Then check for IN predicate
+        else if let Some(values) = in_predicates.get(&col_upper) {
+            if values.is_empty() {
+                return None; // Empty IN list
+            }
+            result.push(CompositePredicateType::In(values.clone()));
+        } else {
+            // Missing predicate for this column - can't use composite key
+            return None;
+        }
+    }
+
+    Some(result)
+}
+
+/// Collect both equality and IN predicates from WHERE clause
+///
+/// Recursively walks the expression tree to find:
+/// - `column = literal` predicates
+/// - `column IN (literal, ...)` predicates
+///
+/// Handles AND-connected predicates.
+fn collect_predicates_with_in(
+    expr: &Expression,
+    equality_predicates: &mut std::collections::HashMap<String, SqlValue>,
+    in_predicates: &mut std::collections::HashMap<String, Vec<SqlValue>>,
+) {
+    match expr {
+        // Handle equality: col = value or value = col
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::Equal,
+            right,
+        } => {
+            // Check col = literal
+            if let Expression::ColumnRef { column, .. } = left.as_ref() {
+                if let Expression::Literal(value) = right.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        equality_predicates.insert(column.to_uppercase(), value.clone());
+                    }
+                }
+            }
+            // Check literal = col (reversed)
+            if let Expression::ColumnRef { column, .. } = right.as_ref() {
+                if let Expression::Literal(value) = left.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        equality_predicates.insert(column.to_uppercase(), value.clone());
+                    }
+                }
+            }
+        }
+        // Handle IN list: col IN (val1, val2, ...)
+        Expression::InList { expr: col_expr, values, negated } => {
+            if !negated {
+                if let Expression::ColumnRef { column, .. } = col_expr.as_ref() {
+                    // Extract literal values from the IN list
+                    let mut in_values = Vec::new();
+                    let mut all_literals = true;
+                    let mut has_null = false;
+
+                    for item in values {
+                        if let Expression::Literal(value) = item {
+                            if matches!(value, SqlValue::Null) {
+                                has_null = true;
+                            }
+                            in_values.push(value.clone());
+                        } else {
+                            all_literals = false;
+                            break;
+                        }
+                    }
+
+                    // Only use if all are literals and no NULL values
+                    // (NULL in IN list has special three-valued logic)
+                    if all_literals && !has_null && !in_values.is_empty() {
+                        in_predicates.insert(column.to_uppercase(), in_values);
+                    }
+                }
+            }
+        }
+        // Recursively process AND predicates
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            collect_predicates_with_in(left, equality_predicates, in_predicates);
+            collect_predicates_with_in(right, equality_predicates, in_predicates);
+        }
+        _ => {}
+    }
+}
+
+/// Generate all composite keys from a list of predicate types
+///
+/// For predicates like `[In([1, 2]), Equality(5)]`, generates keys:
+/// - `[1, 5]`
+/// - `[2, 5]`
+///
+/// This is effectively a cartesian product of all IN values combined with equalities.
+pub(crate) fn generate_composite_keys(predicates: &[CompositePredicateType]) -> Vec<Vec<SqlValue>> {
+    if predicates.is_empty() {
+        return vec![];
+    }
+
+    // Start with a single empty key
+    let mut result: Vec<Vec<SqlValue>> = vec![vec![]];
+
+    for pred in predicates {
+        match pred {
+            CompositePredicateType::Equality(value) => {
+                // Append this value to all existing keys
+                for key in &mut result {
+                    key.push(value.clone());
+                }
+            }
+            CompositePredicateType::In(values) => {
+                // For each existing key, create N new keys (one per IN value)
+                let mut new_result = Vec::with_capacity(result.len() * values.len());
+                for key in &result {
+                    for value in values {
+                        let mut new_key = key.clone();
+                        new_key.push(value.clone());
+                        new_result.push(new_key);
+                    }
+                }
+                result = new_result;
+            }
+        }
+    }
+
+    result
+}
+
+/// Check if WHERE clause is fully satisfied by composite index predicates
+///
+/// Returns true if the WHERE clause contains ONLY:
+/// - Equality predicates on index columns (col = val)
+/// - IN predicates on index columns (col IN (val1, val2, ...))
+/// - AND connectors between these predicates
+///
+/// This allows skipping redundant WHERE clause re-evaluation when using
+/// composite index lookup.
+pub(crate) fn where_clause_fully_satisfied_by_composite_key(
+    where_expr: &Expression,
+    index_column_names: &[&str],
+) -> bool {
+    // Count predicates to verify WHERE contains exactly the right predicates
+    let mut predicate_count = 0;
+    let satisfied = check_composite_satisfaction(where_expr, index_column_names, &mut predicate_count);
+
+    // WHERE is fully satisfied only if all parts were handled
+    // and we found the expected number of predicates (one per column)
+    satisfied && predicate_count == index_column_names.len()
+}
+
+/// Helper to check if an expression is fully satisfied by composite index
+fn check_composite_satisfaction(
+    expr: &Expression,
+    index_column_names: &[&str],
+    predicate_count: &mut usize,
+) -> bool {
+    match expr {
+        // Equality predicate: col = val or val = col
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::Equal,
+            right,
+        } => {
+            let col_name = extract_column_name(left).or_else(|| extract_column_name(right));
+            let has_literal = matches!(left.as_ref(), Expression::Literal(_))
+                || matches!(right.as_ref(), Expression::Literal(_));
+
+            if let Some(name) = col_name {
+                let name_upper = name.to_uppercase();
+                let is_index_col = index_column_names
+                    .iter()
+                    .any(|c| c.to_uppercase() == name_upper);
+
+                if is_index_col && has_literal {
+                    *predicate_count += 1;
+                    return true;
+                }
+            }
+            false
+        }
+        // IN predicate: col IN (val1, val2, ...)
+        Expression::InList { expr: col_expr, values, negated } => {
+            if *negated {
+                return false;
+            }
+
+            if let Some(col_name) = extract_column_name(col_expr) {
+                let name_upper = col_name.to_uppercase();
+                let is_index_col = index_column_names
+                    .iter()
+                    .any(|c| c.to_uppercase() == name_upper);
+
+                // All values must be literals (no NULL for optimization)
+                let all_literals = values.iter().all(|v| {
+                    matches!(v, Expression::Literal(val) if !matches!(val, SqlValue::Null))
+                });
+
+                if is_index_col && all_literals && !values.is_empty() {
+                    *predicate_count += 1;
+                    return true;
+                }
+            }
+            false
+        }
+        // AND connector
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            let left_ok = check_composite_satisfaction(left, index_column_names, predicate_count);
+            let right_ok = check_composite_satisfaction(right, index_column_names, predicate_count);
+            left_ok && right_ok
+        }
+        _ => false,
+    }
+}
+
+/// Extract column name from a ColumnRef expression
+fn extract_column_name(expr: &Expression) -> Option<&str> {
+    match expr {
+        Expression::ColumnRef { column, .. } => Some(column.as_str()),
+        _ => None,
     }
 }
 
