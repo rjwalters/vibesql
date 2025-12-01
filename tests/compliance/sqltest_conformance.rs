@@ -380,7 +380,10 @@ impl SqltestRunner {
             | vibesql_ast::Statement::ShowIndex(_)
             | vibesql_ast::Statement::ShowCreateTable(_)
             | vibesql_ast::Statement::Describe(_)
-            | vibesql_ast::Statement::Analyze(_) => {
+            | vibesql_ast::Statement::Analyze(_)
+            | vibesql_ast::Statement::Prepare(_)
+            | vibesql_ast::Statement::Execute(_)
+            | vibesql_ast::Statement::Deallocate(_) => {
                 // Transactions, cursors, triggers, assertions, procedures, functions, and advanced SQL objects are no-ops
                 // for validation
                 Ok(true)

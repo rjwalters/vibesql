@@ -342,7 +342,10 @@ impl VibeSqlDB {
             | vibesql_ast::Statement::DeclareCursor(_)
             | vibesql_ast::Statement::OpenCursor(_)
             | vibesql_ast::Statement::Fetch(_)
-            | vibesql_ast::Statement::CloseCursor(_) => Ok(DBOutput::StatementComplete(0)),
+            | vibesql_ast::Statement::CloseCursor(_)
+            | vibesql_ast::Statement::Prepare(_)
+            | vibesql_ast::Statement::Execute(_)
+            | vibesql_ast::Statement::Deallocate(_) => Ok(DBOutput::StatementComplete(0)),
         }
     }
 
