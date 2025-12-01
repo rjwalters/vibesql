@@ -5,6 +5,7 @@
 //! reports transaction status in the wire protocol.
 
 use std::net::TcpListener;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener as TokioTcpListener;
@@ -81,6 +82,8 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
         ObservabilityProvider::init(&config.observability).expect("Failed to init observability"),
     );
 
+    let active_connections = Arc::new(AtomicUsize::new(0));
+
     loop {
         tokio::select! {
             _ = &mut shutdown_rx => {
@@ -91,6 +94,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                     Ok((stream, peer_addr)) => {
                         let config = Arc::clone(&config);
                         let observability = Arc::clone(&observability);
+                        let active_connections = Arc::clone(&active_connections);
 
                         tokio::spawn(async move {
                             let mut handler = ConnectionHandler::new(
@@ -99,6 +103,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                                 config,
                                 observability,
                                 None,
+                                active_connections,
                             );
                             let _ = handler.handle().await;
                         });
