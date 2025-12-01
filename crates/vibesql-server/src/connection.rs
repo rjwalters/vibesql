@@ -378,6 +378,10 @@ impl ConnectionHandler {
                 self.send_command_complete("DROP TABLE").await?;
             }
 
+            ExecutionResult::Analyze { tables_analyzed } => {
+                self.send_command_complete(&format!("ANALYZE {}", tables_analyzed)).await?;
+            }
+
             ExecutionResult::Other { message } => {
                 self.send_command_complete(&message).await?;
             }
