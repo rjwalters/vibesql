@@ -444,6 +444,8 @@ fn validate_expression_column_refs(
         Expression::DuplicateKeyValue { .. } => Ok(()),
 
         // Placeholders - no column references to validate
-        Expression::Placeholder(_) => Ok(()),
+        Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_) => Ok(()),
     }
 }

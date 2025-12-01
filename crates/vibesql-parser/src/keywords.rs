@@ -237,6 +237,9 @@ pub enum Keyword {
     Declare,
     Cursor,
     Insensitive,
+    // Prepared statement keywords
+    Prepare,
+    Deallocate,
     Scroll,
     Hold,
     Without,
@@ -531,6 +534,8 @@ impl fmt::Display for Keyword {
             Keyword::Declare => "DECLARE",
             Keyword::Cursor => "CURSOR",
             Keyword::Insensitive => "INSENSITIVE",
+            Keyword::Prepare => "PREPARE",
+            Keyword::Deallocate => "DEALLOCATE",
             Keyword::Scroll => "SCROLL",
             Keyword::Hold => "HOLD",
             Keyword::Without => "WITHOUT",

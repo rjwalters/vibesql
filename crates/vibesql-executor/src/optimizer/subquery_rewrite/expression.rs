@@ -265,7 +265,9 @@ pub(super) fn rewrite_expression_with_context(
         | Expression::MatchAgainst { .. }
         | Expression::PseudoVariable { .. }
         | Expression::SessionVariable { .. }
-        | Expression::Placeholder(_) => expr.clone(),
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_) => expr.clone(),
     }
 }
 

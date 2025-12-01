@@ -126,7 +126,9 @@ fn collect_window_functions_from_expression(
         }
 
         // Placeholders don't contain window functions
-        Expression::Placeholder(_) => {}
+        Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_) => {}
     }
 }
 

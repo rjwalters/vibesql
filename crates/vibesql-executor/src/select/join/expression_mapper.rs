@@ -277,7 +277,9 @@ impl ExpressionMapper {
                 // Recursively handle the search term
                 self.walk_expression(search_modifier, tables, columns, resolvable);
             }
-            Expression::Placeholder(_) => {
+            Expression::Placeholder(_)
+            | Expression::NumberedPlaceholder(_)
+            | Expression::NamedPlaceholder(_) => {
                 // Placeholders don't reference columns
             }
         }

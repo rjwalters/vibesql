@@ -276,7 +276,10 @@ impl QuerySignature {
         match expr {
             // Key difference: All literals and placeholders hash to the same value
             // This allows parameterized queries to match with literal values
-            Expression::Literal(_) | Expression::Placeholder(_) => {
+            Expression::Literal(_)
+            | Expression::Placeholder(_)
+            | Expression::NumberedPlaceholder(_)
+            | Expression::NamedPlaceholder(_) => {
                 "LITERAL_PLACEHOLDER".hash(hasher)
             }
 

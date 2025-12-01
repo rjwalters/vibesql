@@ -195,7 +195,11 @@ fn is_expression_correlated(
     subquery_tables: &[String],
 ) -> bool {
     match expr {
-        Expression::Literal(_) | Expression::Placeholder(_) | Expression::Wildcard => false,
+        Expression::Literal(_)
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_)
+        | Expression::Wildcard => false,
 
         Expression::ColumnRef { table, column } => {
             // Check if this column reference belongs to the outer schema

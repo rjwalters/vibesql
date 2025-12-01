@@ -166,6 +166,8 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
         // Leaf expressions - no tables to extract
         vibesql_ast::Expression::Literal(_)
         | vibesql_ast::Expression::Placeholder(_)
+        | vibesql_ast::Expression::NumberedPlaceholder(_)
+        | vibesql_ast::Expression::NamedPlaceholder(_)
         | vibesql_ast::Expression::ColumnRef { .. }
         | vibesql_ast::Expression::Wildcard
         | vibesql_ast::Expression::CurrentDate
