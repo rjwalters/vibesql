@@ -47,11 +47,12 @@ use std::collections::HashMap;
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
     optimizer::adaptive::{choose_execution_model, ExecutionModel},
-    select::{columnar, cte::CteResult, join::hash_join::columnar as columnar_join},
+    select::{columnar, cte::CteResult, join::hash_join::columnar as columnar_join, projection::project_row_combined},
     schema::CombinedSchema,
 };
-use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType};
+use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem};
 
 impl SelectExecutor<'_> {
     /// Try to execute using columnar (auto-vectorized) execution
@@ -659,16 +660,6 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // For now, only handle SELECT * (all columns) - projection not yet implemented
-        // TODO: Implement column projection for partial selects
-        let is_select_star = stmt.select_list.iter().any(|item| {
-            matches!(item, vibesql_ast::SelectItem::Wildcard { .. } | vibesql_ast::SelectItem::QualifiedWildcard { .. })
-        });
-        if !is_select_star {
-            log::debug!("Columnar join: only SELECT * is supported, falling back");
-            return Ok(None);
-        }
-
         // Only handle INNER and CROSS joins - LEFT, RIGHT, FULL need special handling
         // CROSS joins are included because comma-separated tables (FROM a, b) parse as CROSS JOIN
         if !is_inner_or_cross_join_only(from_clause) {
@@ -791,9 +782,52 @@ impl SelectExecutor<'_> {
             // Execute GROUP BY aggregation
             self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema)
         } else {
-            // No GROUP BY - convert to rows
+            // No GROUP BY - convert to rows and apply projection
             let rows = filtered_batch.to_rows()?;
-            Ok(Some(rows))
+
+            // Check if we need projection (i.e., not just SELECT *)
+            let is_select_star = stmt.select_list.iter().all(|item| {
+                matches!(item, SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. })
+            });
+
+            if is_select_star {
+                // SELECT * - return rows directly without projection
+                Ok(Some(rows))
+            } else {
+                // Check if SELECT list contains aggregate functions
+                // Aggregates without GROUP BY need special handling (fall back to row-oriented)
+                let has_aggregates = crate::optimizer::aggregate_analysis::AggregateAnalysis::analyze(stmt).has_aggregates;
+                if has_aggregates {
+                    log::debug!("Columnar join: aggregates without GROUP BY not supported, falling back");
+                    return Ok(None);
+                }
+
+                // Apply column projection to each row
+                log::debug!("Columnar join: applying projection to {} rows", rows.len());
+
+                // Create evaluator for projection
+                // SAFETY: combined_schema lives for the duration of this function call
+                let schema_ref: &'static CombinedSchema = unsafe {
+                    std::mem::transmute(&combined_schema)
+                };
+                let evaluator = CombinedExpressionEvaluator::with_database(schema_ref, self.database);
+                let buffer_pool = self.database.query_buffer_pool();
+
+                let mut projected_rows = Vec::with_capacity(rows.len());
+                for row in &rows {
+                    let projected = project_row_combined(
+                        row,
+                        &stmt.select_list,
+                        &evaluator,
+                        &combined_schema,
+                        &None, // No window functions in columnar join path
+                        buffer_pool,
+                    )?;
+                    projected_rows.push(projected);
+                }
+
+                Ok(Some(projected_rows))
+            }
         }
     }
 
