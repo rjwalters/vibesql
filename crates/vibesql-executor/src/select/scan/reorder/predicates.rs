@@ -4,6 +4,16 @@ use std::collections::{HashMap, HashSet};
 use vibesql_ast::{BinaryOperator, Expression};
 use super::utils::resolve_column_with_fallback;
 
+/// Check if an expression contains any column reference (for CTE fallback)
+fn expr_has_column(expr: &Expression) -> bool {
+    match expr {
+        Expression::ColumnRef { .. } => true,
+        Expression::BinaryOp { left, right, .. } => expr_has_column(left) || expr_has_column(right),
+        Expression::UnaryOp { expr: inner, .. } => expr_has_column(inner),
+        _ => false,
+    }
+}
+
 /// Extract table-local predicates using schema-based column resolution
 ///
 /// This version accepts a column_to_table map for resolving unqualified column names.
@@ -247,6 +257,16 @@ pub(super) fn extract_where_equijoins_with_schema(
                         }
                     } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                         eprintln!("[JOIN_REORDER]   ✗ Skipped: lt==rt or table not found");
+                    }
+                } else if column_to_table.is_empty() {
+                    // CTE fallback: if schema is unavailable, check if both sides reference columns
+                    let left_has_column = expr_has_column(left);
+                    let right_has_column = expr_has_column(right);
+                    if left_has_column && right_has_column {
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[JOIN_REORDER] CTE fallback: adding arithmetic equijoin {:?}", expr);
+                        }
+                        equijoins.push(expr.clone());
                     }
                 }
             }

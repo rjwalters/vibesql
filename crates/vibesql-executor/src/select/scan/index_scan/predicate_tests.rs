@@ -761,3 +761,497 @@ fn test_build_residual_where_clause_multiple_uncovered() {
         _ => panic!("Expected AND expression"),
     }
 }
+// Tests for composite IN predicates
+
+#[test]
+fn test_extract_composite_predicates_with_in_basic() {
+    // WHERE c_w_id IN (1, 2, 3) AND c_d_id = 5
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::InList {
+            expr: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            values: vec![
+                Expression::Literal(SqlValue::Integer(1)),
+                Expression::Literal(SqlValue::Integer(2)),
+                Expression::Literal(SqlValue::Integer(3)),
+            ],
+            negated: false,
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    let result = extract_composite_predicates_with_in(&expr, &columns);
+
+    assert!(result.is_some());
+    let predicates = result.unwrap();
+    assert_eq!(predicates.len(), 2);
+
+    // First predicate should be IN
+    match &predicates[0] {
+        CompositePredicateType::In(values) => {
+            assert_eq!(values.len(), 3);
+            assert_eq!(values[0], SqlValue::Integer(1));
+            assert_eq!(values[1], SqlValue::Integer(2));
+            assert_eq!(values[2], SqlValue::Integer(3));
+        }
+        _ => panic!("Expected IN predicate"),
+    }
+
+    // Second predicate should be Equality
+    match &predicates[1] {
+        CompositePredicateType::Equality(value) => {
+            assert_eq!(*value, SqlValue::Integer(5));
+        }
+        _ => panic!("Expected Equality predicate"),
+    }
+}
+
+#[test]
+fn test_extract_composite_predicates_with_in_reversed() {
+    // WHERE c_d_id = 5 AND c_w_id IN (1, 2)
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+        }),
+        right: Box::new(Expression::InList {
+            expr: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            values: vec![
+                Expression::Literal(SqlValue::Integer(1)),
+                Expression::Literal(SqlValue::Integer(2)),
+            ],
+            negated: false,
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    let result = extract_composite_predicates_with_in(&expr, &columns);
+
+    assert!(result.is_some());
+    let predicates = result.unwrap();
+    assert_eq!(predicates.len(), 2);
+
+    // First column (c_w_id) should have IN predicate
+    match &predicates[0] {
+        CompositePredicateType::In(values) => {
+            assert_eq!(values.len(), 2);
+        }
+        _ => panic!("Expected IN predicate for c_w_id"),
+    }
+
+    // Second column (c_d_id) should have Equality
+    match &predicates[1] {
+        CompositePredicateType::Equality(value) => {
+            assert_eq!(*value, SqlValue::Integer(5));
+        }
+        _ => panic!("Expected Equality predicate for c_d_id"),
+    }
+}
+
+#[test]
+fn test_generate_composite_keys_all_equality() {
+    // All equality predicates: [Eq(1), Eq(2), Eq(3)]
+    let predicates = vec![
+        CompositePredicateType::Equality(SqlValue::Integer(1)),
+        CompositePredicateType::Equality(SqlValue::Integer(2)),
+        CompositePredicateType::Equality(SqlValue::Integer(3)),
+    ];
+
+    let keys = generate_composite_keys(&predicates);
+
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0], vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(3)]);
+}
+
+#[test]
+fn test_generate_composite_keys_single_in() {
+    // IN on first column: [In([1, 2, 3]), Eq(5)]
+    let predicates = vec![
+        CompositePredicateType::In(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+            SqlValue::Integer(3),
+        ]),
+        CompositePredicateType::Equality(SqlValue::Integer(5)),
+    ];
+
+    let keys = generate_composite_keys(&predicates);
+
+    assert_eq!(keys.len(), 3);
+    assert_eq!(keys[0], vec![SqlValue::Integer(1), SqlValue::Integer(5)]);
+    assert_eq!(keys[1], vec![SqlValue::Integer(2), SqlValue::Integer(5)]);
+    assert_eq!(keys[2], vec![SqlValue::Integer(3), SqlValue::Integer(5)]);
+}
+
+#[test]
+fn test_generate_composite_keys_in_on_second_column() {
+    // IN on second column: [Eq(1), In([2, 3])]
+    let predicates = vec![
+        CompositePredicateType::Equality(SqlValue::Integer(1)),
+        CompositePredicateType::In(vec![
+            SqlValue::Integer(2),
+            SqlValue::Integer(3),
+        ]),
+    ];
+
+    let keys = generate_composite_keys(&predicates);
+
+    assert_eq!(keys.len(), 2);
+    assert_eq!(keys[0], vec![SqlValue::Integer(1), SqlValue::Integer(2)]);
+    assert_eq!(keys[1], vec![SqlValue::Integer(1), SqlValue::Integer(3)]);
+}
+
+#[test]
+fn test_generate_composite_keys_multiple_in() {
+    // Multiple IN predicates: [In([1, 2]), In([3, 4])]
+    let predicates = vec![
+        CompositePredicateType::In(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+        ]),
+        CompositePredicateType::In(vec![
+            SqlValue::Integer(3),
+            SqlValue::Integer(4),
+        ]),
+    ];
+
+    let keys = generate_composite_keys(&predicates);
+
+    // Should produce cartesian product: 2 * 2 = 4 keys
+    assert_eq!(keys.len(), 4);
+    assert_eq!(keys[0], vec![SqlValue::Integer(1), SqlValue::Integer(3)]);
+    assert_eq!(keys[1], vec![SqlValue::Integer(1), SqlValue::Integer(4)]);
+    assert_eq!(keys[2], vec![SqlValue::Integer(2), SqlValue::Integer(3)]);
+    assert_eq!(keys[3], vec![SqlValue::Integer(2), SqlValue::Integer(4)]);
+}
+
+#[test]
+fn test_where_clause_satisfied_by_composite_key_equality_only() {
+    // WHERE c_w_id = 1 AND c_d_id = 2
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    assert!(where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_where_clause_satisfied_by_composite_key_with_in() {
+    // WHERE c_w_id IN (1, 2, 3) AND c_d_id = 5
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::InList {
+            expr: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            values: vec![
+                Expression::Literal(SqlValue::Integer(1)),
+                Expression::Literal(SqlValue::Integer(2)),
+                Expression::Literal(SqlValue::Integer(3)),
+            ],
+            negated: false,
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    assert!(where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_where_clause_not_satisfied_extra_predicate() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 AND extra_col = 3
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_w_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_d_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            }),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "extra_col".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(3))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    // Should return false because extra_col is not in the index
+    assert!(!where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_where_clause_not_satisfied_negated_in() {
+    // WHERE c_w_id NOT IN (1, 2, 3) AND c_d_id = 5
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::InList {
+            expr: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            values: vec![
+                Expression::Literal(SqlValue::Integer(1)),
+                Expression::Literal(SqlValue::Integer(2)),
+                Expression::Literal(SqlValue::Integer(3)),
+            ],
+            negated: true, // NOT IN
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    // Should return false because NOT IN cannot be optimized
+    assert!(!where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+// Additional tests from main branch for composite key satisfaction
+
+#[test]
+fn test_composite_key_satisfaction_full_match() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 AND c_id = 3 with index [c_w_id, c_d_id, c_id]
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_w_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_d_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            }),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(3))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    assert!(where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_composite_key_satisfaction_missing_predicate() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 with index [c_w_id, c_d_id, c_id]
+    // Should NOT be satisfied because c_id predicate is missing
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    assert!(!where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_composite_key_satisfaction_range_predicate() {
+    // WHERE c_w_id = 1 AND c_d_id > 2 with index [c_w_id, c_d_id]
+    // Should NOT be satisfied because c_d_id uses a range predicate, not equality
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThan,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    assert!(!where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_composite_key_satisfaction_or_predicate() {
+    // WHERE c_w_id = 1 OR c_d_id = 2 with index [c_w_id, c_d_id]
+    // Should NOT be satisfied because OR is not supported
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::Or,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    assert!(!where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_composite_key_satisfaction_single_column() {
+    // WHERE c_id = 42 with index [c_id]
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(Expression::ColumnRef {
+            table: None,
+            column: "c_id".to_string(),
+        }),
+        right: Box::new(Expression::Literal(SqlValue::Integer(42))),
+    };
+
+    let columns = vec!["c_id"];
+    assert!(where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_composite_key_satisfaction_case_insensitive() {
+    // WHERE C_W_ID = 1 AND C_D_ID = 2 with index [c_w_id, c_d_id]
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "C_W_ID".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "C_D_ID".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id"];
+    assert!(where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}
+
+#[test]
+fn test_composite_key_satisfaction_null_value() {
+    // WHERE c_id = NULL should NOT be satisfied (NULL comparisons need special handling)
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(Expression::ColumnRef {
+            table: None,
+            column: "c_id".to_string(),
+        }),
+        right: Box::new(Expression::Literal(SqlValue::Null)),
+    };
+
+    let columns = vec!["c_id"];
+    assert!(!where_clause_fully_satisfied_by_composite_key(&expr, &columns));
+}

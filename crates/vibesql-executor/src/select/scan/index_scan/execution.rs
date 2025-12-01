@@ -8,8 +8,10 @@ use vibesql_storage::{Database, Row};
 use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema};
 
 use super::predicate::{
-    build_residual_where_clause, extract_composite_equality_predicates, extract_index_predicate,
-    extract_prefix_equality_predicates, IndexPredicate, PrefixPredicateResult,
+    build_residual_where_clause, extract_composite_predicates_with_in, extract_index_predicate,
+    extract_prefix_equality_predicates, generate_composite_keys,
+    where_clause_fully_satisfied_by_composite_key, CompositePredicateType, IndexPredicate,
+    PrefixPredicateResult,
 };
 
 /// Execute an index scan
@@ -59,16 +61,29 @@ pub(crate) fn execute_index_scan(
     // Get the first indexed column (for single-column predicate extraction fallback)
     let first_indexed_column = index_column_names.first().copied().unwrap_or("");
 
-    // Try composite key lookup first (for multi-column indexes with full equality predicates)
-    // This handles queries like: WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 42
-    let composite_key = if is_multi_column_index {
-        where_clause.and_then(|expr| extract_composite_equality_predicates(expr, &index_column_names))
+    // Try composite key lookup first (for multi-column indexes with full predicates)
+    // This handles queries like:
+    //   WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 42 (all equality)
+    //   WHERE c_w_id IN (1, 2) AND c_d_id = 5 (mixed equality + IN)
+    let composite_predicates = if is_multi_column_index {
+        where_clause.and_then(|expr| extract_composite_predicates_with_in(expr, &index_column_names))
     } else {
         None
     };
 
+    // Generate composite keys (handles both single key and multiple keys for IN predicates)
+    let composite_keys: Option<Vec<Vec<vibesql_types::SqlValue>>> = composite_predicates
+        .as_ref()
+        .map(|preds| generate_composite_keys(preds));
+
+    // Check if we have any IN predicates (affects lookup strategy)
+    let has_in_predicate = composite_predicates
+        .as_ref()
+        .map(|preds| preds.iter().any(|p| matches!(p, CompositePredicateType::In(_))))
+        .unwrap_or(false);
+
     // Determine if we can use composite key point lookup
-    let use_composite_lookup = composite_key.is_some();
+    let use_composite_lookup = composite_keys.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
 
     // Try prefix lookup if full composite key not available (for partial prefix matches)
     // This handles queries like: WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100
@@ -104,24 +119,17 @@ pub(crate) fn execute_index_scan(
     // Performance optimization: Determine if WHERE filtering can be skipped
     // Check if the index predicate fully satisfies the WHERE clause
     let (need_where_filter, effective_where) = if use_composite_lookup {
-        // Composite key lookup is an exact match
-        // Check if WHERE clause is fully satisfied by checking if all predicates are
-        // equality predicates on index columns
-        let all_predicates_covered = if let Some(where_expr) = where_clause {
-            // Try to build a residual - if it's None, all predicates are covered
-            let mut covered_columns = std::collections::HashSet::new();
-            for col in &index_column_names {
-                covered_columns.insert(col.to_uppercase());
+        // Composite key lookup (with or without IN) - check if WHERE is fully satisfied
+        match where_clause {
+            Some(where_expr) => {
+                let satisfied = where_clause_fully_satisfied_by_composite_key(where_expr, &index_column_names);
+                if satisfied {
+                    (false, None)
+                } else {
+                    (true, Some((*where_expr).clone()))
+                }
             }
-            build_residual_where_clause(where_expr, &covered_columns).is_none()
-        } else {
-            true
-        };
-
-        if all_predicates_covered {
-            (false, None) // Skip WHERE filter entirely
-        } else {
-            (true, where_clause.cloned()) // Need to apply full WHERE
+            None => (false, None),
         }
     } else if use_prefix_lookup {
         // Prefix lookup - apply only residual WHERE clause
@@ -142,10 +150,25 @@ pub(crate) fn execute_index_scan(
     };
 
     // Get row indices using the appropriate index operation
-    let matching_row_indices: Vec<usize> = if let Some(ref key) = composite_key {
-        // Composite key point lookup - O(log n) exact match
-        // This is the fast path for multi-column equality predicates
-        index_data.get(key).unwrap_or_default()
+    let matching_row_indices: Vec<usize> = if let Some(ref keys) = composite_keys {
+        if keys.is_empty() {
+            vec![]
+        } else if keys.len() == 1 && !has_in_predicate {
+            // Single composite key - O(log n) exact match
+            // This is the fast path for multi-column equality predicates
+            index_data.get(&keys[0]).unwrap_or_default()
+        } else {
+            // Multiple composite keys (from IN predicates) - do multiple lookups
+            let mut all_indices = Vec::new();
+            for key in keys {
+                let indices = index_data.get(key).unwrap_or_default();
+                all_indices.extend(indices);
+            }
+            // Deduplicate (in case the same row matches multiple keys)
+            all_indices.sort_unstable();
+            all_indices.dedup();
+            all_indices
+        }
     } else if let Some(ref prefix) = prefix_result {
         // Prefix key lookup - O(log n + k) where k is matching rows
         // This handles partial composite key matches

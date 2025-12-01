@@ -127,7 +127,7 @@ jobs:
       - name: Download test artifacts
         if: inputs.artifact-name != ''
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ inputs.artifact-name }}
           path: artifacts/
@@ -135,7 +135,7 @@ jobs:
       - name: Download benchmark artifacts
         if: inputs.benchmark-artifact-name != ''
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ inputs.benchmark-artifact-name }}
           path: artifacts/
@@ -370,7 +370,7 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: './deploy'
 
