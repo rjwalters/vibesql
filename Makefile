@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -100,6 +100,7 @@ help:
 	@echo ""
 	@echo "Utility targets:"
 	@echo "  make clean              - Clean build artifacts"
+	@echo "  make website            - Regenerate web dashboard data from benchmark database"
 	@echo "  make all                - Build, test, benchmark (runs in BACKGROUND by default)"
 	@echo "  make all-fg             - Run 'make all' in foreground (blocking)"
 	@echo "  make logs               - Tail the background make output"
@@ -273,6 +274,14 @@ clean:
 	rm -f target/sqllogictest_*.json
 	rm -f /tmp/tpch_results.txt
 	rm -f flamegraph*.svg
+
+# Regenerate web dashboard data from benchmark database
+website:
+	@echo "Regenerating web dashboard data..."
+	@./scripts/generate_web_dashboard.py 2>/dev/null || echo "Note: Run 'make benchmark' first to populate the database"
+	@echo ""
+	@echo "Output: web-demo/public/data/dashboard.json"
+	@echo "Run 'cd web-demo && pnpm run build' to rebuild the site"
 
 #
 # Profiling Targets
