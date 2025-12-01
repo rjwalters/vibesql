@@ -255,6 +255,155 @@ pub(crate) fn extract_composite_equality_predicates(
     Some(composite_key)
 }
 
+/// Result of prefix equality predicate extraction
+#[derive(Debug)]
+pub(crate) struct PrefixPredicateResult {
+    /// Prefix key values in index column order (may be shorter than index columns)
+    pub prefix_key: Vec<SqlValue>,
+    /// Column names that are covered by the prefix (case-insensitive, uppercase)
+    pub covered_columns: std::collections::HashSet<String>,
+}
+
+/// Extract equality predicates for a PREFIX of columns in a composite index
+///
+/// Unlike `extract_composite_equality_predicates` which requires ALL columns,
+/// this function extracts a prefix of matching columns starting from the first.
+///
+/// For example, with index `[c_w_id, c_d_id, c_id]`:
+/// - `WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100` returns prefix `[1, 2]`
+///   with covered columns `{c_w_id, c_d_id}`
+/// - `WHERE c_w_id = 1 AND c_id = 3` returns prefix `[1]` (c_id skipped, not contiguous)
+///
+/// # Arguments
+/// * `expr` - The WHERE clause expression
+/// * `column_names` - The index column names in order
+///
+/// # Returns
+/// `Some(PrefixPredicateResult)` - Prefix key and covered columns
+/// `None` - No prefix could be extracted (first column has no equality predicate)
+pub(crate) fn extract_prefix_equality_predicates(
+    expr: &Expression,
+    column_names: &[&str],
+) -> Option<PrefixPredicateResult> {
+    if column_names.is_empty() {
+        return None;
+    }
+
+    // Collect all equality predicates from the WHERE clause
+    let mut predicates: std::collections::HashMap<String, SqlValue> =
+        std::collections::HashMap::new();
+    collect_equality_predicates(expr, &mut predicates);
+
+    // Build prefix key in index column order, stopping at first missing column
+    let mut prefix_key = Vec::new();
+    let mut covered_columns = std::collections::HashSet::new();
+
+    for col_name in column_names {
+        let col_upper = col_name.to_uppercase();
+        if let Some(value) = predicates.get(&col_upper) {
+            prefix_key.push(value.clone());
+            covered_columns.insert(col_upper);
+        } else {
+            // Gap in prefix - stop here
+            break;
+        }
+    }
+
+    if prefix_key.is_empty() {
+        // First column has no equality predicate - can't use prefix lookup
+        return None;
+    }
+
+    Some(PrefixPredicateResult {
+        prefix_key,
+        covered_columns,
+    })
+}
+
+/// Build a residual WHERE clause by removing predicates covered by index lookup
+///
+/// Given a WHERE clause and a set of covered column names, this removes the
+/// equality predicates for those columns and returns only the uncovered predicates.
+///
+/// # Arguments
+/// * `expr` - The original WHERE clause expression
+/// * `covered_columns` - Set of column names (uppercase) covered by the index lookup
+///
+/// # Returns
+/// `Some(Expression)` - The residual WHERE clause with uncovered predicates
+/// `None` - All predicates are covered by the index (no filtering needed)
+///
+/// # Example
+/// ```text
+/// WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100
+/// covered_columns = {C_W_ID, C_D_ID}
+/// → Returns: c_balance > 100
+/// ```
+pub(crate) fn build_residual_where_clause(
+    expr: &Expression,
+    covered_columns: &std::collections::HashSet<String>,
+) -> Option<Expression> {
+    filter_expression(expr, covered_columns)
+}
+
+/// Recursively filter an expression, removing covered equality predicates
+fn filter_expression(
+    expr: &Expression,
+    covered_columns: &std::collections::HashSet<String>,
+) -> Option<Expression> {
+    match expr {
+        // Check if this is a covered equality predicate: col = literal or literal = col
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::Equal,
+            right,
+        } => {
+            // Check col = literal
+            if let Expression::ColumnRef { column, .. } = left.as_ref() {
+                if covered_columns.contains(&column.to_uppercase()) {
+                    if matches!(right.as_ref(), Expression::Literal(_)) {
+                        // This predicate is covered - remove it
+                        return None;
+                    }
+                }
+            }
+            // Check literal = col
+            if let Expression::ColumnRef { column, .. } = right.as_ref() {
+                if covered_columns.contains(&column.to_uppercase()) {
+                    if matches!(left.as_ref(), Expression::Literal(_)) {
+                        // This predicate is covered - remove it
+                        return None;
+                    }
+                }
+            }
+            // Not a covered predicate - keep it
+            Some(expr.clone())
+        }
+        // Handle AND: filter both sides and recombine
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            let left_filtered = filter_expression(left, covered_columns);
+            let right_filtered = filter_expression(right, covered_columns);
+
+            match (left_filtered, right_filtered) {
+                (Some(l), Some(r)) => Some(Expression::BinaryOp {
+                    left: Box::new(l),
+                    op: BinaryOperator::And,
+                    right: Box::new(r),
+                }),
+                (Some(l), None) => Some(l),
+                (None, Some(r)) => Some(r),
+                (None, None) => None, // Both sides were covered
+            }
+        }
+        // All other expressions are not covered equality predicates - keep them
+        _ => Some(expr.clone()),
+    }
+}
+
 /// Collect equality predicates from WHERE clause into a map
 ///
 /// Recursively walks the expression tree to find all `column = literal` predicates.

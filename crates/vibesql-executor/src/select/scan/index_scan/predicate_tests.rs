@@ -395,3 +395,369 @@ fn test_extract_composite_predicates_empty_columns() {
     // Should return None for empty column list
     assert!(result.is_none());
 }
+
+// ============================================================================
+// Tests for prefix equality predicate extraction (Issue #3175)
+// ============================================================================
+
+#[test]
+fn test_extract_prefix_predicates_partial_match() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100
+    // Index: [c_w_id, c_d_id, c_id]
+    // Expected prefix: [1, 2] covering {c_w_id, c_d_id}
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_w_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_d_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            }),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThan,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_balance".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(100))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    let result = extract_prefix_equality_predicates(&expr, &columns);
+
+    assert!(result.is_some());
+    let prefix = result.unwrap();
+    assert_eq!(prefix.prefix_key.len(), 2);
+    assert_eq!(prefix.prefix_key[0], SqlValue::Integer(1));
+    assert_eq!(prefix.prefix_key[1], SqlValue::Integer(2));
+    assert!(prefix.covered_columns.contains("C_W_ID"));
+    assert!(prefix.covered_columns.contains("C_D_ID"));
+    assert!(!prefix.covered_columns.contains("C_ID"));
+}
+
+#[test]
+fn test_extract_prefix_predicates_single_column() {
+    // WHERE c_w_id = 1 AND c_balance > 100
+    // Index: [c_w_id, c_d_id, c_id]
+    // Expected prefix: [1] covering {c_w_id}
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThan,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_balance".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(100))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    let result = extract_prefix_equality_predicates(&expr, &columns);
+
+    assert!(result.is_some());
+    let prefix = result.unwrap();
+    assert_eq!(prefix.prefix_key.len(), 1);
+    assert_eq!(prefix.prefix_key[0], SqlValue::Integer(1));
+    assert!(prefix.covered_columns.contains("C_W_ID"));
+}
+
+#[test]
+fn test_extract_prefix_predicates_gap_in_columns() {
+    // WHERE c_w_id = 1 AND c_id = 3 (missing c_d_id - gap in prefix)
+    // Index: [c_w_id, c_d_id, c_id]
+    // Expected prefix: [1] (stops at c_d_id gap)
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(3))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    let result = extract_prefix_equality_predicates(&expr, &columns);
+
+    assert!(result.is_some());
+    let prefix = result.unwrap();
+    assert_eq!(prefix.prefix_key.len(), 1); // Only c_w_id, stopped at gap
+    assert_eq!(prefix.prefix_key[0], SqlValue::Integer(1));
+}
+
+#[test]
+fn test_extract_prefix_predicates_no_first_column() {
+    // WHERE c_d_id = 2 (missing first column c_w_id)
+    // Index: [c_w_id, c_d_id, c_id]
+    // Expected: None (can't use prefix without first column)
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(Expression::ColumnRef {
+            table: None,
+            column: "c_d_id".to_string(),
+        }),
+        right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    let result = extract_prefix_equality_predicates(&expr, &columns);
+
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_extract_prefix_predicates_full_match() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 AND c_id = 3 (all columns)
+    // Index: [c_w_id, c_d_id, c_id]
+    // Expected prefix: [1, 2, 3] covering all
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_w_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_d_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            }),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(3))),
+        }),
+    };
+
+    let columns = vec!["c_w_id", "c_d_id", "c_id"];
+    let result = extract_prefix_equality_predicates(&expr, &columns);
+
+    assert!(result.is_some());
+    let prefix = result.unwrap();
+    assert_eq!(prefix.prefix_key.len(), 3);
+}
+
+// ============================================================================
+// Tests for residual WHERE clause building (Issue #3175)
+// ============================================================================
+
+#[test]
+fn test_build_residual_where_clause_partial_covered() {
+    // WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100
+    // Covered: {c_w_id, c_d_id}
+    // Expected residual: c_balance > 100
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_w_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_d_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+            }),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThan,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_balance".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(100))),
+        }),
+    };
+
+    let mut covered = std::collections::HashSet::new();
+    covered.insert("C_W_ID".to_string());
+    covered.insert("C_D_ID".to_string());
+
+    let residual = build_residual_where_clause(&expr, &covered);
+
+    assert!(residual.is_some());
+    // Verify the residual is just c_balance > 100
+    match residual.unwrap() {
+        Expression::BinaryOp { left, op: BinaryOperator::GreaterThan, right } => {
+            match left.as_ref() {
+                Expression::ColumnRef { column, .. } => {
+                    assert_eq!(column, "c_balance");
+                }
+                _ => panic!("Expected column reference"),
+            }
+            match right.as_ref() {
+                Expression::Literal(SqlValue::Integer(100)) => {}
+                _ => panic!("Expected literal 100"),
+            }
+        }
+        _ => panic!("Expected binary op"),
+    }
+}
+
+#[test]
+fn test_build_residual_where_clause_all_covered() {
+    // WHERE c_w_id = 1 AND c_d_id = 2
+    // Covered: {c_w_id, c_d_id}
+    // Expected residual: None (all covered)
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_w_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_d_id".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }),
+    };
+
+    let mut covered = std::collections::HashSet::new();
+    covered.insert("C_W_ID".to_string());
+    covered.insert("C_D_ID".to_string());
+
+    let residual = build_residual_where_clause(&expr, &covered);
+
+    assert!(residual.is_none()); // All predicates covered
+}
+
+#[test]
+fn test_build_residual_where_clause_none_covered() {
+    // WHERE c_balance > 100 AND c_credit = 'BC'
+    // Covered: {} (empty)
+    // Expected residual: original expression
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThan,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_balance".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(100))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_credit".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Varchar("BC".to_string()))),
+        }),
+    };
+
+    let covered = std::collections::HashSet::new(); // Empty
+
+    let residual = build_residual_where_clause(&expr, &covered);
+
+    assert!(residual.is_some()); // Nothing covered, full expression returned
+}
+
+#[test]
+fn test_build_residual_where_clause_multiple_uncovered() {
+    // WHERE c_w_id = 1 AND c_balance > 100 AND c_credit = 'BC'
+    // Covered: {c_w_id}
+    // Expected residual: c_balance > 100 AND c_credit = 'BC'
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_w_id".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            }),
+            right: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::GreaterThan,
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "c_balance".to_string(),
+                }),
+                right: Box::new(Expression::Literal(SqlValue::Integer(100))),
+            }),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef {
+                table: None,
+                column: "c_credit".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Varchar("BC".to_string()))),
+        }),
+    };
+
+    let mut covered = std::collections::HashSet::new();
+    covered.insert("C_W_ID".to_string());
+
+    let residual = build_residual_where_clause(&expr, &covered);
+
+    assert!(residual.is_some());
+    // Verify it's an AND of the two uncovered predicates
+    match residual.unwrap() {
+        Expression::BinaryOp { op: BinaryOperator::And, .. } => {}
+        _ => panic!("Expected AND expression"),
+    }
+}
