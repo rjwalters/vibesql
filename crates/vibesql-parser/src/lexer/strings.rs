@@ -1,7 +1,7 @@
 use super::{Lexer, LexerError};
 use crate::token::Token;
 
-impl Lexer {
+impl<'a> Lexer<'a> {
     /// Tokenize a string literal enclosed in single quotes.
     /// Supports SQL-standard escaped quotes (e.g., 'O''Reilly' becomes "O'Reilly")
     pub(super) fn tokenize_string(&mut self) -> Result<Token, LexerError> {
@@ -30,7 +30,7 @@ impl Lexer {
 
         Err(LexerError {
             message: "Unterminated string literal".to_string(),
-            position: self.position,
+            position: self.position(),
         })
     }
 }
