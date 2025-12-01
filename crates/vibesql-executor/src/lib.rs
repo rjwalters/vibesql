@@ -33,6 +33,7 @@ mod role_ddl;
 pub mod schema;
 mod schema_ddl;
 pub mod select;
+pub mod session;
 mod select_into;
 pub mod timeout;
 mod transaction;
@@ -86,6 +87,7 @@ pub use type_ddl::TypeExecutor;
 pub use update::UpdateExecutor;
 pub use view_ddl::ViewExecutor;
 pub use timeout::TimeoutContext;
+pub use session::{PreparedExecutionResult, Session, SessionError, SessionMut};
 
 #[cfg(test)]
 mod tests;
