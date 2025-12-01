@@ -229,7 +229,7 @@ async fn test_rapid_connect_disconnect_cycles() {
 #[tokio::test]
 async fn test_partial_startup_timeout() {
     let server = start_test_server().await;
-    let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
+    let client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Don't send startup message, just connect
     // Server should eventually timeout or we should be able to connect others
@@ -245,8 +245,8 @@ async fn test_partial_startup_timeout() {
 
     assert!(result.is_ok(), "Second client should be able to connect while first is idle");
 
-    // Clean up first client
-    drop(client);
+    // Clean up first client - suppress unused warning since we only need it kept alive until here
+    let _ = client;
     server.shutdown();
 }
 

@@ -143,6 +143,7 @@ pub fn test_config() -> Config {
 }
 
 /// Create a test configuration with password authentication
+#[allow(dead_code)]
 pub fn test_config_with_password(password_file: std::path::PathBuf) -> Config {
     let mut config = test_config();
     config.auth.method = "password".to_string();
@@ -200,6 +201,7 @@ impl TestClient {
     }
 
     /// Send SSL request
+    #[allow(dead_code)]
     pub async fn send_ssl_request(&mut self) -> std::io::Result<()> {
         self.write_buf.clear();
 
@@ -213,6 +215,7 @@ impl TestClient {
     }
 
     /// Send a password message
+    #[allow(dead_code)]
     pub async fn send_password(&mut self, password: &str) -> std::io::Result<()> {
         self.write_buf.clear();
 
@@ -259,6 +262,7 @@ impl TestClient {
     }
 
     /// Read bytes from the server and return the data
+    #[allow(dead_code)]
     pub async fn read_response(&mut self) -> std::io::Result<Vec<u8>> {
         self.read_buf.clear();
         let n = self.stream.read_buf(&mut self.read_buf).await?;
@@ -294,6 +298,7 @@ impl TestClient {
     }
 
     /// Read a single byte (for SSL response)
+    #[allow(dead_code)]
     pub async fn read_byte(&mut self) -> std::io::Result<u8> {
         let mut buf = [0u8; 1];
         self.stream.read_exact(&mut buf).await?;
@@ -301,11 +306,13 @@ impl TestClient {
     }
 
     /// Get raw access to the read buffer
+    #[allow(dead_code)]
     pub fn read_buffer(&self) -> &BytesMut {
         &self.read_buf
     }
 
     /// Check if connection is still open by attempting a zero-byte read
+    #[allow(dead_code)]
     pub async fn is_connected(&mut self) -> bool {
         let mut buf = [0u8; 1];
         match self.stream.try_read(&mut buf) {
@@ -377,6 +384,7 @@ pub struct ParsedMessage {
     pub payload: Vec<u8>,
 }
 
+#[allow(dead_code)]
 impl ParsedMessage {
     /// Check if this is an AuthenticationOk message
     pub fn is_auth_ok(&self) -> bool {

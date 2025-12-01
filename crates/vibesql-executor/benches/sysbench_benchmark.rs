@@ -113,6 +113,7 @@ impl WorkloadType {
 struct WorkloadResults {
     workload_name: String,
     operations: u64,
+    #[allow(dead_code)]
     total_time_us: u64,
     avg_latency_us: f64,
     ops_per_second: f64,
@@ -163,6 +164,7 @@ trait SysbenchExecutor {
     fn sum_range(&mut self, start: i64, end: i64) -> usize;
     fn order_range(&mut self, start: i64, end: i64) -> usize;
     fn distinct_range(&mut self, start: i64, end: i64) -> usize;
+    #[allow(dead_code)]
     fn name(&self) -> &'static str;
 }
 

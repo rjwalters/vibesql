@@ -467,7 +467,8 @@ mod tests {
         // Verify cache was used (should have 1 miss, then hits)
         let stats = session.cache().stats();
         assert_eq!(stats.misses, 1);
-        assert!(stats.hits >= 0); // May vary based on implementation
+        // hits is always >= 0 since it's a u64, just ensure it exists
+        let _hits = stats.hits;
     }
 
     #[test]

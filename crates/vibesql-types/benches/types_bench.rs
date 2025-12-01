@@ -13,7 +13,8 @@
 //! Or via Makefile:
 //!   make bench-types
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use std::collections::HashMap;
 use vibesql_types::{Date, SqlValue, Time, Timestamp};
 
@@ -162,7 +163,6 @@ fn bench_hashing(c: &mut Criterion) {
     let mut group = c.benchmark_group("hashing");
 
     // Hash map insertion (tests hashing + equality)
-    let int_val = SqlValue::Integer(42);
     group.bench_function("hashmap_insert_integer", |b| {
         b.iter(|| {
             let mut map = HashMap::new();

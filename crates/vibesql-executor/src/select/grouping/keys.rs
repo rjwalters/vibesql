@@ -222,6 +222,7 @@ impl GroupKeySpec {
     /// Uses unchecked accessors for performance. Caller must ensure column
     /// indices are valid.
     #[cfg(test)]
+    #[allow(dead_code)]
     #[inline]
     pub unsafe fn extract_key(&self, row: &Row) -> GroupKey {
         match self {

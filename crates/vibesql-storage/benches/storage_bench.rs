@@ -11,7 +11,8 @@
 //! Or via Makefile:
 //!   make bench-storage
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::{Row, Table};
 use vibesql_types::{DataType, SqlValue};
