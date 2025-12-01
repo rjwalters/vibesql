@@ -441,15 +441,25 @@ fn main() {
     let vibesql_db = load_vibesql(scale_factor);
     eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
 
-    // Run VibeSQL benchmark
-    eprintln!("\n--- VibeSQL Benchmark ---");
-    tpcc::transactions::reset_profile_counters();
+    // Check if optimized mode is enabled via environment variable
+    let use_optimized = env::var("TPCC_OPTIMIZED").map(|v| v == "1" || v.to_lowercase() == "true").unwrap_or(false);
 
-    let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
-    let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
-    print_results(&vibesql_results, transaction_type);
-
-    tpcc::transactions::print_profile_summary();
+    // Run VibeSQL benchmark - optimized or standard based on env var
+    let vibesql_results = if use_optimized {
+        eprintln!("\n--- VibeSQL (Optimized Direct Lookup) Benchmark ---");
+        let optimized_executor = OptimizedVibesqlExecutor::new(&vibesql_db);
+        let results = run_benchmark(&optimized_executor, transaction_type, num_warehouses, duration, warmup, true);
+        print_results(&results, transaction_type);
+        results
+    } else {
+        eprintln!("\n--- VibeSQL (Standard SQL) Benchmark ---");
+        tpcc::transactions::reset_profile_counters();
+        let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
+        let results = run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
+        print_results(&results, transaction_type);
+        tpcc::transactions::print_profile_summary();
+        results
+    };
 
     // Comparison benchmarks (if feature enabled)
     #[cfg(feature = "benchmark-comparison")]
