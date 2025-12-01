@@ -527,38 +527,44 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
     /// Execute Delivery transaction using direct index API (no SQL)
     ///
-    /// This optimization replaces the 10 SQL queries with a single batched index lookup:
-    /// 1. Build 10 keys for each district: (w_id, d_id)
-    /// 2. Batch lookup using idx_new_order_pk on new_order(no_w_id, no_d_id, no_o_id)
+    /// This optimization replaces the 10 SQL queries with a single batched index prefix lookup:
+    /// 1. Build 10 prefix keys for each district: (w_id, d_id)
+    /// 2. Batch prefix lookup using idx_new_order_pk on new_order(no_w_id, no_d_id, no_o_id)
     /// 3. Since the index is sorted by no_o_id, the first row returned is the minimum
+    ///
+    /// Note: We use prefix matching because the index has 3 columns (w_id, d_id, o_id) but
+    /// we're only providing 2 columns (w_id, d_id). Exact matching would fail to find any rows.
     pub fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
         use vibesql_types::SqlValue;
         let start = Instant::now();
 
-        // Build keys for all 10 districts: (no_w_id, no_d_id)
+        // Build prefix keys for all 10 districts: (no_w_id, no_d_id)
         // Using idx_new_order_pk index which is sorted by (no_w_id, no_d_id, no_o_id)
-        let district_keys: Vec<Vec<SqlValue>> = (1..=10)
+        // We use prefix matching to find all rows where (no_w_id, no_d_id) match
+        let district_prefixes: Vec<Vec<SqlValue>> = (1..=10)
             .map(|d_id| vec![
                 SqlValue::Integer(input.w_id as i64),
                 SqlValue::Integer(d_id),
             ])
             .collect();
 
-        // Batch lookup all new_orders for all 10 districts
+        // Batch prefix lookup all new_orders for all 10 districts
         // The index returns rows in ascending no_o_id order, so first row is minimum
-        let _results = match self.db.lookup_by_index_batch("idx_new_order_pk", &district_keys) {
+        let _results = match self.db.lookup_by_index_prefix_batch("idx_new_order_pk", &district_prefixes) {
             Ok(results) => {
+                // DEBUG: Check if any data was found
+                let found_count = results.iter().filter(|r| !r.is_empty()).count();
+                if std::env::var("DELIVERY_DEBUG").is_ok() {
+                    eprintln!("DEBUG: lookup_by_index_prefix_batch found data in {} districts", found_count);
+                }
+
                 // For each district, extract the minimum no_o_id (first row if any)
                 let mut _min_order_ids: Vec<Option<i64>> = Vec::with_capacity(10);
-                for district_rows_opt in &results {
-                    if let Some(rows) = district_rows_opt {
-                        if let Some(first_row) = rows.first() {
-                            // Column 0 = no_o_id (based on new_order table schema)
-                            if let Some(SqlValue::Integer(no_o_id)) = first_row.values.first() {
-                                _min_order_ids.push(Some(*no_o_id));
-                            } else {
-                                _min_order_ids.push(None);
-                            }
+                for district_rows in &results {
+                    if let Some(first_row) = district_rows.first() {
+                        // Column 0 = no_o_id (based on new_order table schema)
+                        if let Some(SqlValue::Integer(no_o_id)) = first_row.values.first() {
+                            _min_order_ids.push(Some(*no_o_id));
                         } else {
                             _min_order_ids.push(None);
                         }
