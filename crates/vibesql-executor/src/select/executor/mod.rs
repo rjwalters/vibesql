@@ -14,6 +14,7 @@ mod builder;
 mod columns;
 mod columnar_execution;
 mod execute;
+mod fast_path;
 mod index_optimization;
 mod nonagg;
 mod utils;

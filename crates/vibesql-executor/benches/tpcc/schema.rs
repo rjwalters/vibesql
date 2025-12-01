@@ -423,6 +423,18 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         false,
         vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id")],
     ).ok();
+
+    // Stock-Level low-quantity index: enables efficient filtering of low-stock items
+    // for the IN subquery in Stock-Level transaction. The query pattern is:
+    //   SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?
+    // This index allows range scan by (s_w_id, s_quantity) and provides s_i_id
+    // as a covering column to avoid table lookups.
+    db.create_index(
+        "idx_stock_low_quantity".to_string(),
+        "stock".to_string(),
+        false,
+        vec![col("s_w_id"), col("s_quantity"), col("s_i_id")],
+    ).ok();
 }
 
 fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCCData) {
