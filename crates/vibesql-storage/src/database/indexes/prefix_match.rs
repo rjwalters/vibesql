@@ -4,7 +4,9 @@
 
 use vibesql_types::SqlValue;
 
-use super::index_metadata::IndexData;
+use super::index_metadata::{acquire_btree_lock, IndexData};
+use super::range_bounds::try_increment_sqlvalue;
+use super::value_normalization::normalize_for_comparison;
 
 impl IndexData {
     /// Lookup multiple values using prefix matching for multi-column indexes
@@ -50,5 +52,107 @@ impl IndexData {
         }
 
         matching_row_indices
+    }
+
+    /// Lookup rows matching a multi-column prefix in a composite index
+    ///
+    /// For example, with index `[c_w_id, c_d_id, c_id]` and prefix `[1, 2]`,
+    /// this returns all rows where `c_w_id = 1 AND c_d_id = 2`, regardless of `c_id`.
+    ///
+    /// # Arguments
+    /// * `prefix` - Prefix values for the first N index columns (N < total columns)
+    ///
+    /// # Returns
+    /// Vector of row indices matching the prefix
+    ///
+    /// # Performance
+    /// Uses BTreeMap's efficient range() method with computed bounds for O(log n + k)
+    /// complexity, where n is the number of unique keys and k is matching keys.
+    ///
+    /// # How it works
+    /// BTreeMap orders Vec<SqlValue> lexicographically:
+    ///   [1, 2] < [1, 2, 0] < [1, 2, 99] < [1, 3] < [1, 3, 0]
+    ///
+    /// So prefix_scan([1, 2]) scans from [1, 2] (inclusive) to [1, 3) (exclusive).
+    pub fn prefix_scan(&self, prefix: &[SqlValue]) -> Vec<usize> {
+        if prefix.is_empty() {
+            // Empty prefix matches everything - return all rows
+            return self.values().flatten().collect();
+        }
+
+        // Normalize prefix values for consistent comparison
+        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+
+        match self {
+            IndexData::InMemory { data } => {
+                use std::ops::Bound;
+
+                // Calculate upper bound by incrementing the last element of the prefix
+                // For prefix [1, 2], upper bound is [1, 3)
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                let start_bound: Bound<&[SqlValue]> = Bound::Included(normalized_prefix.as_slice());
+                let end_bound: Bound<&[SqlValue]> = match end_key.as_ref() {
+                    Some(key) => Bound::Excluded(key.as_slice()),
+                    None => Bound::Unbounded, // Couldn't increment, use unbounded
+                };
+
+                let mut matching_row_indices = Vec::new();
+
+                for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                    // Double-check prefix match (needed for Unbounded end bound case)
+                    if key_values.len() >= normalized_prefix.len()
+                        && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                    {
+                        matching_row_indices.extend(row_indices);
+                    }
+                }
+
+                matching_row_indices
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // Calculate upper bound for disk-backed index
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => guard
+                        .range_scan(
+                            Some(&normalized_prefix),
+                            end_key.as_ref(),
+                            true,  // Inclusive start
+                            false, // Exclusive end
+                        )
+                        .unwrap_or_else(|_| vec![]),
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in prefix_scan: {}", e);
+                        vec![]
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Compute the exclusive upper bound for a prefix scan
+///
+/// For prefix [1, 2], returns [1, 3] (incrementing the last element).
+/// This allows BTreeMap range scan to efficiently find all keys starting with [1, 2].
+///
+/// Returns None if the last element cannot be incremented (e.g., max value overflow).
+fn compute_prefix_upper_bound(prefix: &[SqlValue]) -> Option<Vec<SqlValue>> {
+    if prefix.is_empty() {
+        return None;
+    }
+
+    // Clone prefix and try to increment the last element
+    let mut upper_bound = prefix.to_vec();
+    let last_idx = upper_bound.len() - 1;
+
+    match try_increment_sqlvalue(&upper_bound[last_idx]) {
+        Some(incremented) => {
+            upper_bound[last_idx] = incremented;
+            Some(upper_bound)
+        }
+        None => None, // Couldn't increment (overflow), caller should use unbounded
     }
 }
