@@ -1,13 +1,18 @@
 use anyhow::Result;
+use bytes::BytesMut;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use vibesql_server::auth::PasswordStore;
 use vibesql_server::config::Config;
 use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::observability::ObservabilityProvider;
+use vibesql_server::protocol::BackendMessage;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -82,30 +87,92 @@ async fn main() -> Result<()> {
     let config = Arc::new(config);
     let observability = Arc::new(observability);
 
+    // Track active connections
+    let active_connections = Arc::new(AtomicUsize::new(0));
+
     loop {
         // Accept new connections
         match listener.accept().await {
-            Ok((stream, peer_addr)) => {
+            Ok((mut stream, peer_addr)) => {
                 info!("New connection from {}", peer_addr);
 
-                let config = Arc::clone(&config);
-                let observability = Arc::clone(&observability);
-                let password_store = password_store.clone();
+                // Check if we've reached the connection limit using compare_exchange
+                let max_conns = config.server.max_connections;
+                let mut current = active_connections.load(Ordering::Acquire);
 
-                // Record connection metric
-                if let Some(metrics) = observability.metrics() {
-                    metrics.record_connection();
-                }
+                loop {
+                    if current >= max_conns {
+                        // At limit - reject connection
+                        warn!(
+                            "Connection limit reached ({}/{}), rejecting connection from {}",
+                            current, max_conns, peer_addr
+                        );
 
-                // Spawn a new task for each connection
-                tokio::spawn(async move {
-                    let mut handler =
-                        ConnectionHandler::new(stream, peer_addr, config, observability, password_store);
-                    if let Err(e) = handler.handle().await {
-                        error!("Connection error from {}: {}", peer_addr, e);
+                        // Send PostgreSQL error response (53300 = too_many_connections)
+                        let mut buf = BytesMut::new();
+                        let mut fields = HashMap::new();
+                        fields.insert(b'S', "FATAL".to_string());
+                        fields.insert(b'V', "FATAL".to_string());
+                        fields.insert(b'C', "53300".to_string());
+                        fields.insert(
+                            b'M',
+                            format!(
+                                "sorry, too many clients already (max_connections={})",
+                                max_conns
+                            ),
+                        );
+                        BackendMessage::ErrorResponse { fields }.encode(&mut buf);
+
+                        // Try to send error and close connection
+                        if let Err(e) = stream.write_all(&buf).await {
+                            error!("Failed to send rejection error to {}: {}", peer_addr, e);
+                        }
+                        let _ = stream.shutdown().await;
+                        break;
                     }
-                    info!("Connection closed: {}", peer_addr);
-                });
+
+                    // Try to atomically increment the counter
+                    match active_connections.compare_exchange_weak(
+                        current,
+                        current + 1,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            // Successfully incremented - proceed with connection
+                            let config = Arc::clone(&config);
+                            let observability = Arc::clone(&observability);
+                            let password_store = password_store.clone();
+                            let active_connections = Arc::clone(&active_connections);
+
+                            // Record connection metric
+                            if let Some(metrics) = observability.metrics() {
+                                metrics.record_connection();
+                            }
+
+                            // Spawn a new task for each connection
+                            tokio::spawn(async move {
+                                let mut handler = ConnectionHandler::new(
+                                    stream,
+                                    peer_addr,
+                                    config,
+                                    observability,
+                                    password_store,
+                                    active_connections,
+                                );
+                                if let Err(e) = handler.handle().await {
+                                    error!("Connection error from {}: {}", peer_addr, e);
+                                }
+                                info!("Connection closed: {}", peer_addr);
+                            });
+                            break;
+                        }
+                        Err(new_current) => {
+                            // Another thread changed the value, retry
+                            current = new_current;
+                        }
+                    }
+                }
             }
             Err(e) => {
                 error!("Failed to accept connection: {}", e);

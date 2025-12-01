@@ -2,6 +2,7 @@
 
 use bytes::{BufMut, BytesMut};
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -75,6 +76,9 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
         None
     };
 
+    // Track active connections
+    let active_connections = Arc::new(AtomicUsize::new(0));
+
     // Spawn server task
     tokio::spawn(async move {
         loop {
@@ -85,6 +89,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                             let config = Arc::clone(&config);
                             let observability = Arc::clone(&observability);
                             let password_store = password_store.clone();
+                            let active_connections = Arc::clone(&active_connections);
 
                             tokio::spawn(async move {
                                 let mut handler = ConnectionHandler::new(
@@ -93,6 +98,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                                     config,
                                     observability,
                                     password_store,
+                                    active_connections,
                                 );
                                 let _ = handler.handle().await;
                             });

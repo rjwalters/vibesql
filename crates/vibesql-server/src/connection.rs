@@ -7,6 +7,7 @@ use anyhow::Result;
 use bytes::BytesMut;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -24,6 +25,7 @@ pub struct ConnectionHandler {
     write_buf: BytesMut,
     session: Option<Session>,
     connection_start: Instant,
+    active_connections: Arc<AtomicUsize>,
 }
 
 impl ConnectionHandler {
@@ -34,6 +36,7 @@ impl ConnectionHandler {
         config: Arc<Config>,
         observability: Arc<ObservabilityProvider>,
         password_store: Option<Arc<PasswordStore>>,
+        active_connections: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             stream,
@@ -45,6 +48,7 @@ impl ConnectionHandler {
             write_buf: BytesMut::with_capacity(8192),
             session: None,
             connection_start: Instant::now(),
+            active_connections,
         }
     }
 
@@ -472,6 +476,9 @@ impl ConnectionHandler {
 
 impl Drop for ConnectionHandler {
     fn drop(&mut self) {
+        // Decrement active connection count
+        self.active_connections.fetch_sub(1, Ordering::AcqRel);
+
         // Record connection duration when connection closes
         if let Some(metrics) = self.observability.metrics() {
             metrics.record_connection_duration(self.connection_start.elapsed());
