@@ -218,3 +218,93 @@ pub(in crate::select::join) fn hash_join_inner_multi(
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
+
+/// Hash join INNER JOIN with arithmetic offset transformation
+///
+/// This implementation optimizes joins with arithmetic conditions like:
+/// `left_col = right_col - offset` (e.g., TPC-DS Q2: `d_week_seq1 = d_week_seq2 - 53`)
+///
+/// The transformation applies the offset during hash table building:
+/// - Build phase: hash(right_col + offset) → for `left = right - 53`, offset = -53
+/// - Probe phase: lookup hash(left_col)
+///
+/// This converts arithmetic equijoins to regular hash joins with O(n+m) complexity.
+pub(in crate::select::join) fn hash_join_inner_arithmetic(
+    left: FromResult,
+    right: FromResult,
+    left_col_idx: usize,
+    right_col_idx: usize,
+    offset: i64,
+) -> Result<FromResult, ExecutorError> {
+    use ahash::AHashMap;
+    use vibesql_types::SqlValue;
+
+    // Extract right table name and schema for combining
+    let right_table_name = right
+        .schema
+        .table_schemas
+        .keys()
+        .next()
+        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
+        .clone();
+
+    let right_schema = right
+        .schema
+        .table_schemas
+        .get(&right_table_name)
+        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
+        .1
+        .clone();
+
+    // Combine schemas
+    let combined_schema =
+        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
+    // Build hash table on right side with offset applied
+    // Key: right_col_value + offset
+    // Value: vector of row indices
+    let mut hash_table: AHashMap<i64, Vec<usize>> = AHashMap::with_capacity(right_slice.len());
+
+    for (idx, row) in right_slice.iter().enumerate() {
+        let value = &row.values[right_col_idx];
+
+        // Only handle integer values - skip NULLs
+        if let SqlValue::Integer(n) = value {
+            // Apply offset during build: for condition `left = right - 53`,
+            // we store hash(right + (-53)) = hash(right - 53)
+            let key = n + offset;
+            hash_table.entry(key).or_default().push(idx);
+        }
+        // Skip NULL values - they never match in equi-joins
+    }
+
+    // Probe phase: For each left row, lookup by left_col value
+    let estimated_capacity = left_slice.len().saturating_mul(2).min(100_000);
+    let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(estimated_capacity);
+
+    for (left_idx, left_row) in left_slice.iter().enumerate() {
+        let value = &left_row.values[left_col_idx];
+
+        // Only handle integer values
+        if let SqlValue::Integer(n) = value {
+            // Probe with the raw left column value
+            if let Some(right_indices) = hash_table.get(n) {
+                for &right_idx in right_indices {
+                    pairs.push((left_idx, right_idx));
+                }
+            }
+        }
+    }
+
+    // Materialization phase: Create combined rows from index pairs
+    let mut result_rows = Vec::with_capacity(pairs.len());
+    for (left_idx, right_idx) in pairs {
+        let combined_row = combine_rows(&left_slice[left_idx], &right_slice[right_idx]);
+        result_rows.push(combined_row);
+    }
+
+    Ok(FromResult::from_rows(combined_schema, result_rows))
+}

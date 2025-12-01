@@ -21,7 +21,7 @@ mod tests;
 
 // Re-export join reorder analyzer for public tests
 // Re-export hash_join functions for internal use
-use hash_join::{hash_join_inner, hash_join_inner_multi, hash_join_left_outer};
+use hash_join::{hash_join_inner, hash_join_inner_arithmetic, hash_join_inner_multi, hash_join_left_outer};
 use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 use hash_anti_join::{hash_anti_join, hash_anti_join_with_filter};
 // Re-export hash join iterator for public use
@@ -477,7 +477,54 @@ pub(super) fn nested_loop_join(
             }
         }
 
-        // Phase 3.1: If no ON condition hash join, try WHERE clause equijoins
+        // Phase 3.3: Try arithmetic equi-join (TPC-DS Q2 optimization)
+        // For expressions like `col1 = col2 - 53`, extract the arithmetic offset for hash join
+        if let Some(cond) = condition {
+            if let Some(arith_info) =
+                join_analyzer::analyze_arithmetic_equi_join(cond, &temp_schema, left_col_count)
+            {
+                // Save schemas for NATURAL JOIN processing before moving left/right
+                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                    (Some(left.schema.clone()), Some(right.schema.clone()))
+                } else {
+                    (None, None)
+                };
+
+                let mut result = hash_join_inner_arithmetic(
+                    left,
+                    right,
+                    arith_info.left_col_idx,
+                    arith_info.right_col_idx,
+                    arith_info.offset,
+                )?;
+
+                // For NATURAL JOIN, remove duplicate columns from the result
+                if natural {
+                    if let (Some(left_schema), Some(right_schema_orig)) =
+                        (left_schema_for_natural, right_schema_for_natural)
+                    {
+                        let right_schema_for_removal = CombinedSchema {
+                            table_schemas: vec![(
+                                right_table_name_for_natural.clone(),
+                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                            )]
+                            .into_iter()
+                            .collect(),
+                            total_columns: right_schema_orig.total_columns,
+                        };
+                        result = remove_duplicate_columns_for_natural_join(
+                            result,
+                            &left_schema,
+                            &right_schema_for_removal,
+                        )?;
+                    }
+                }
+
+                return Ok(result);
+            }
+        }
+
+        // Phase 3.4: If no ON condition hash join, try WHERE clause equijoins
         // Iterate through all additional equijoins to find one suitable for hash join
         for (idx, equijoin) in additional_equijoins.iter().enumerate() {
             if let Some(equi_join_info) =
@@ -749,6 +796,39 @@ pub(super) fn nested_loop_join(
                         right,
                         equi_join_info.left_col_idx,
                         equi_join_info.right_col_idx,
+                    )?;
+
+                    // Apply remaining equijoins as post-join filters
+                    let remaining_conditions: Vec<_> = additional_equijoins
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i != idx)
+                        .map(|(_, e)| e.clone())
+                        .collect();
+
+                    if !remaining_conditions.is_empty() {
+                        if let Some(filter_expr) = combine_with_and(remaining_conditions) {
+                            result = apply_post_join_filter(result, &filter_expr, database)?;
+                        }
+                    }
+
+                    return Ok(result);
+                }
+            }
+
+            // Try arithmetic equijoins for hash join (TPC-DS Q2 optimization)
+            // For expressions like `col1 = col2 - 53` in WHERE clause
+            for (idx, equijoin) in additional_equijoins.iter().enumerate() {
+                if let Some(arith_info) =
+                    join_analyzer::analyze_arithmetic_equi_join(equijoin, &temp_schema, left_col_count)
+                {
+                    // Found an arithmetic equijoin suitable for hash join!
+                    let mut result = hash_join_inner_arithmetic(
+                        left,
+                        right,
+                        arith_info.left_col_idx,
+                        arith_info.right_col_idx,
+                        arith_info.offset,
                     )?;
 
                     // Apply remaining equijoins as post-join filters

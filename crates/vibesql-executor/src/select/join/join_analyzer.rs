@@ -25,6 +25,27 @@ pub struct EquiJoinInfo {
     pub right_col_idx: usize,
 }
 
+/// Information about an arithmetic equi-join condition
+///
+/// Used for conditions like `col1 = col2 + constant` or `col1 = col2 - constant`
+/// which can be optimized using hash join with offset transformation.
+///
+/// The transformation works by applying the offset to the build side key:
+/// - For `left_col = right_col - offset`: hash(right_col - offset), probe(left_col)
+/// - For `left_col = right_col + offset`: hash(right_col + offset), probe(left_col)
+#[derive(Debug, Clone)]
+pub struct ArithmeticEquiJoinInfo {
+    /// Column index in the left table (probe side)
+    pub left_col_idx: usize,
+    /// Column index in the right table (build side, before offset)
+    pub right_col_idx: usize,
+    /// Offset to apply to the right column value during build
+    /// Positive means add, negative means subtract
+    /// For `left = right - 53`, this is -53 (subtract 53 from right)
+    /// For `left = right + 53`, this is +53 (add 53 to right)
+    pub offset: i64,
+}
+
 /// Information about a multi-column equi-join (composite key)
 ///
 /// Used when there are multiple equality conditions between the same table pair,
@@ -366,4 +387,100 @@ pub fn analyze_or_equi_join(
 
     // No common equi-join found
     None
+}
+
+/// Analyze a join condition to detect if it's an arithmetic equi-join
+///
+/// Detects patterns like:
+/// - `col1 = col2 - constant` → ArithmeticEquiJoinInfo with negative offset
+/// - `col1 = col2 + constant` → ArithmeticEquiJoinInfo with positive offset
+/// - `col2 - constant = col1` → same, just reordered
+/// - `col2 + constant = col1` → same, just reordered
+///
+/// This enables hash join optimization for TPC-DS Q2 which has:
+/// `d_week_seq1 = d_week_seq2 - 53`
+///
+/// Returns None if the condition is not a simple arithmetic equi-join.
+pub fn analyze_arithmetic_equi_join(
+    condition: &Expression,
+    schema: &CombinedSchema,
+    left_column_count: usize,
+) -> Option<ArithmeticEquiJoinInfo> {
+    match condition {
+        Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
+            // Pattern 1: col1 = col2 +/- constant
+            if let Some(info) = try_extract_arithmetic_join(left, right, schema, left_column_count) {
+                return Some(info);
+            }
+            // Pattern 2: col2 +/- constant = col1 (swapped)
+            if let Some(info) = try_extract_arithmetic_join(right, left, schema, left_column_count) {
+                return Some(info);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Try to extract arithmetic equi-join from pattern: simple_col = col +/- constant
+fn try_extract_arithmetic_join(
+    simple_side: &Expression,
+    arithmetic_side: &Expression,
+    schema: &CombinedSchema,
+    left_column_count: usize,
+) -> Option<ArithmeticEquiJoinInfo> {
+    // simple_side must be a column reference
+    let simple_col_idx = extract_column_index(simple_side, schema)?;
+
+    // arithmetic_side must be (column +/- integer_literal)
+    match arithmetic_side {
+        Expression::BinaryOp { op, left: arith_left, right: arith_right } => {
+            // Check for Plus or Minus
+            let is_plus = matches!(op, BinaryOperator::Plus);
+            let is_minus = matches!(op, BinaryOperator::Minus);
+
+            if !is_plus && !is_minus {
+                return None;
+            }
+
+            // Left side of arithmetic should be a column
+            let arith_col_idx = extract_column_index(arith_left, schema)?;
+
+            // Right side should be an integer literal
+            let offset_value = match arith_right.as_ref() {
+                Expression::Literal(vibesql_types::SqlValue::Integer(n)) => *n,
+                _ => return None,
+            };
+
+            // Compute the offset to apply during build phase
+            // For `simple_col = arith_col - 53`: offset = -53 (subtract from arith_col)
+            // For `simple_col = arith_col + 53`: offset = +53 (add to arith_col)
+            let offset = if is_plus { offset_value } else { -offset_value };
+
+            // Determine which is left (probe) and right (build) table
+            // simple_col is the probe side (lookup key)
+            // arith_col is the build side (key needs offset applied)
+            if simple_col_idx < left_column_count && arith_col_idx >= left_column_count {
+                // simple_col from left table (probe), arith_col from right table (build)
+                Some(ArithmeticEquiJoinInfo {
+                    left_col_idx: simple_col_idx,
+                    right_col_idx: arith_col_idx - left_column_count,
+                    offset,
+                })
+            } else if arith_col_idx < left_column_count && simple_col_idx >= left_column_count {
+                // arith_col from left table (build), simple_col from right table (probe)
+                // Need to swap roles: left becomes build, right becomes probe
+                // But our hash join assumes right is build, so we negate the offset
+                Some(ArithmeticEquiJoinInfo {
+                    left_col_idx: arith_col_idx,
+                    right_col_idx: simple_col_idx - left_column_count,
+                    offset: -offset, // Negate because tables are swapped
+                })
+            } else {
+                // Both columns from same table - not a valid join
+                None
+            }
+        }
+        _ => None,
+    }
 }

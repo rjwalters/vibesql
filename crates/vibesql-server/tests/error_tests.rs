@@ -80,9 +80,15 @@ async fn test_invalid_column_error() {
     client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
-    // Create table
+    // Create table and verify it succeeded
     client.send_query("CREATE TABLE col_test (id INT, name VARCHAR(50))").await.expect("Failed to CREATE");
-    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+    let create_data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+    let create_messages = parse_backend_messages(&create_data);
+    assert!(
+        create_messages.iter().any(|m| m.is_command_complete()),
+        "CREATE TABLE should succeed, got messages: {:?}",
+        create_messages.iter().map(|m| m.msg_type as char).collect::<Vec<_>>()
+    );
 
     // Query non-existent column
     client.send_query("SELECT nonexistent_column FROM col_test").await.expect("Failed to send query");
@@ -92,7 +98,8 @@ async fn test_invalid_column_error() {
 
     assert!(
         messages.iter().any(|m| m.is_error()),
-        "Should receive ErrorResponse for invalid column"
+        "Should receive ErrorResponse for invalid column, got messages: {:?}",
+        messages.iter().map(|m| m.msg_type as char).collect::<Vec<_>>()
     );
 
     client.send_terminate().await.expect("Failed to terminate");

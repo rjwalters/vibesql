@@ -357,6 +357,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
     /// Execute New-Order transaction using optimized direct lookups
     pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
         // Get warehouse (single-column PK lookup)
@@ -419,8 +420,9 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Payment transaction using optimized direct lookups
+    /// Execute Payment transaction using the public lookup_by_index API
     pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
         // Get warehouse
@@ -473,8 +475,9 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Order-Status transaction
+    /// Execute Order-Status transaction using the public lookup_by_index API
     pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
         // Get customer (by ID or last name)
@@ -543,8 +546,9 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Stock-Level transaction
+    /// Execute Stock-Level transaction using the public lookup_by_index API
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
         let start = Instant::now();
 
         // Get district next order ID via direct lookup - need the row data here
@@ -561,7 +565,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Extract d_next_o_id from the row (column index 10)
         let d_next_o_id = match district.values.get(10) {
-            Some(vibesql_types::SqlValue::Integer(id)) => *id,
+            Some(SqlValue::Integer(id)) => *id,
             _ => {
                 return TransactionResult {
                     success: false,
