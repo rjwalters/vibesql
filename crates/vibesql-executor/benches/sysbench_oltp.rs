@@ -671,6 +671,7 @@ fn benchmark_point_select_duckdb(c: &mut Criterion) {
 fn benchmark_insert_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_insert");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     // We need a fresh database for each benchmark run to avoid duplicate key errors
     // So we use iter_custom to set up a new database for each measurement batch
@@ -699,6 +700,7 @@ fn benchmark_insert_vibesql(c: &mut Criterion) {
 fn benchmark_insert_sqlite(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_insert");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
@@ -725,6 +727,7 @@ fn benchmark_insert_sqlite(c: &mut Criterion) {
 fn benchmark_insert_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_insert");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
@@ -982,6 +985,7 @@ fn benchmark_update_non_index_duckdb(c: &mut Criterion) {
 fn benchmark_write_only_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_write_only");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
@@ -1024,6 +1028,7 @@ fn benchmark_write_only_vibesql(c: &mut Criterion) {
 fn benchmark_write_only_sqlite(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_write_only");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
@@ -1066,6 +1071,7 @@ fn benchmark_write_only_sqlite(c: &mut Criterion) {
 fn benchmark_write_only_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_write_only");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
@@ -1118,6 +1124,7 @@ fn benchmark_write_only_duckdb(c: &mut Criterion) {
 fn benchmark_read_write_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_read_write");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
@@ -1148,6 +1155,7 @@ fn benchmark_read_write_vibesql(c: &mut Criterion) {
 fn benchmark_read_write_sqlite(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_read_write");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
@@ -1178,6 +1186,7 @@ fn benchmark_read_write_sqlite(c: &mut Criterion) {
 fn benchmark_read_write_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_read_write");
     group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
