@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -98,6 +98,11 @@ help:
 	@echo "  make analyze-tests      - Show SQLLogicTest analysis from database"
 	@echo "  make analyze-benchmarks - Show TPC-H benchmark analysis from database"
 	@echo ""
+	@echo "MySQL Docker targets:"
+	@echo "  make mysql-start        - Start MySQL Docker container for benchmarks"
+	@echo "  make mysql-stop         - Stop and remove MySQL Docker container"
+	@echo "  make mysql-status       - Check MySQL Docker container status"
+	@echo ""
 	@echo "Utility targets:"
 	@echo "  make clean              - Clean build artifacts"
 	@echo "  make website            - Regenerate web dashboard data from benchmark database"
@@ -177,13 +182,21 @@ benchmark-tpch:
 	@echo "  ./scripts/query_benchmark_results.py --trend"
 
 # Run TPC-C benchmarks (OLTP workload) with database tracking
+# Automatically starts MySQL Docker container if Docker is available
 benchmark-tpcc:
 	@echo "Running TPC-C benchmarks..."
 	@echo "Building TPC-C benchmark..."
 	cargo bench --package vibesql-executor --bench tpcc_benchmark --features benchmark-comparison --no-run
 	@echo ""
-	@echo "Running TPC-C benchmark (60s duration, 10s warmup)..."
-	TPCC_DURATION_SECS=60 TPCC_WARMUP_SECS=10 TPCC_SCALE_FACTOR=1 \
+	@# Try to start MySQL Docker, but continue if it fails (Docker not installed, etc.)
+	@MYSQL_URL=$$(./scripts/ensure-mysql-docker.sh 2>/dev/null) || MYSQL_URL=""; \
+	echo "Running TPC-C benchmark (60s duration, 10s warmup)..."; \
+	if [ -n "$$MYSQL_URL" ]; then \
+		echo "MySQL enabled: $$MYSQL_URL"; \
+	else \
+		echo "MySQL disabled (Docker not available or failed to start)"; \
+	fi; \
+	MYSQL_URL="$$MYSQL_URL" TPCC_DURATION_SECS=60 TPCC_WARMUP_SECS=10 TPCC_SCALE_FACTOR=1 \
 		$$(find ./target/release/deps -maxdepth 1 -name "tpcc_benchmark-*" -type f ! -name "*.d" ! -name "*.o" -perm +111 | head -1) \
 		2>&1 | tee /tmp/tpcc_results.txt
 	@echo ""
@@ -211,9 +224,17 @@ benchmark-tpcds-all:
 		./scripts/process_tpcds_results.py --criterion-dir target/criterion
 
 # Run Sysbench OLTP benchmarks with database tracking
+# Automatically starts MySQL Docker container if Docker is available
 benchmark-sysbench:
 	@echo "Running Sysbench OLTP benchmarks..."
-	cargo bench --package vibesql-executor --bench sysbench_oltp --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/sysbench_results.txt
+	@# Try to start MySQL Docker, but continue if it fails (Docker not installed, etc.)
+	@MYSQL_URL=$$(./scripts/ensure-mysql-docker.sh 2>/dev/null) || MYSQL_URL=""; \
+	if [ -n "$$MYSQL_URL" ]; then \
+		echo "MySQL enabled: $$MYSQL_URL"; \
+	else \
+		echo "MySQL disabled (Docker not available or failed to start)"; \
+	fi; \
+	MYSQL_URL="$$MYSQL_URL" cargo bench --package vibesql-executor --bench sysbench_oltp --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/sysbench_results.txt
 	@echo ""
 	@echo "Processing Sysbench results into database..."
 	./scripts/process_sysbench_results.py --criterion-dir target/criterion || \
@@ -340,3 +361,40 @@ bench-types:
 	@echo "Running type system benchmarks..."
 	cargo bench --package vibesql-types --bench types_bench 2>&1 | tee /tmp/types_bench_results.txt || \
 		echo "Note: Types benchmarks not yet implemented. Create benches/types_bench.rs"
+
+#
+# MySQL Docker Targets
+#
+
+# Start MySQL Docker container for benchmarks
+mysql-start:
+	@echo "Starting MySQL Docker container..."
+	@./scripts/ensure-mysql-docker.sh || exit 1
+	@echo ""
+	@echo "MySQL is ready for benchmarks!"
+	@echo "Run benchmarks with: make benchmark-tpcc  or  make benchmark-sysbench"
+
+# Stop and remove MySQL Docker container
+mysql-stop:
+	@echo "Stopping MySQL Docker container..."
+	@if docker ps -q -f name=vibesql-mysql-tpch 2>/dev/null | grep -q .; then \
+		docker stop vibesql-mysql-tpch && echo "Container stopped"; \
+	else \
+		echo "Container not running"; \
+	fi
+	@if docker ps -aq -f name=vibesql-mysql-tpch 2>/dev/null | grep -q .; then \
+		docker rm vibesql-mysql-tpch && echo "Container removed"; \
+	fi
+
+# Check MySQL Docker container status
+mysql-status:
+	@if docker ps -q -f name=vibesql-mysql-tpch 2>/dev/null | grep -q .; then \
+		echo "MySQL container: RUNNING"; \
+		echo "  Container: vibesql-mysql-tpch"; \
+		echo "  Port: 3306"; \
+		echo "  MYSQL_URL: mysql://root@127.0.0.1:3306/sysbench"; \
+	elif docker ps -aq -f name=vibesql-mysql-tpch 2>/dev/null | grep -q .; then \
+		echo "MySQL container: STOPPED (use 'make mysql-start' to start)"; \
+	else \
+		echo "MySQL container: NOT CREATED (use 'make mysql-start' to create)"; \
+	fi
