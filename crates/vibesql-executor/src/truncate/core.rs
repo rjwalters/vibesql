@@ -57,6 +57,10 @@ pub fn execute_truncate(database: &mut Database, table_name: &str) -> Result<usi
     // Clear all data at once (O(1) operation)
     table.clear();
 
+    // Rebuild user-defined B-tree indexes (clears them since table is now empty)
+    // This ensures auto-created indexes for PK/UNIQUE constraints are also cleared
+    database.rebuild_indexes(table_name);
+
     // Reset AUTO_INCREMENT sequences
     reset_auto_increment_sequences(database, table_name)?;
 

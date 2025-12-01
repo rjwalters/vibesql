@@ -481,8 +481,25 @@ impl Operations {
         tables: &HashMap<String, Table>,
         table_name: &str,
     ) {
-        let table_rows: Vec<Row> = if let Some(table) = tables.get(table_name) {
+        // Normalize table name for lookup (matches catalog normalization)
+        let normalized_name = if catalog.is_case_sensitive_identifiers() {
+            table_name.to_string()
+        } else {
+            table_name.to_uppercase()
+        };
+
+        // First try direct lookup, then try with schema prefix if needed
+        let table_rows: Vec<Row> = if let Some(table) = tables.get(&normalized_name) {
             table.scan().to_vec()
+        } else if !table_name.contains('.') {
+            // Try with schema prefix
+            let current_schema = catalog.get_current_schema();
+            let qualified_name = format!("{}.{}", current_schema, normalized_name);
+            if let Some(table) = tables.get(&qualified_name) {
+                table.scan().to_vec()
+            } else {
+                return;
+            }
         } else {
             return;
         };
