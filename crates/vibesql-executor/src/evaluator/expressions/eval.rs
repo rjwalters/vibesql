@@ -331,6 +331,20 @@ impl ExpressionEvaluator<'_> {
                     format!("Unbound placeholder ?{} - placeholders must be bound to values before execution", idx)
                 ))
             }
+
+            // Numbered placeholder ($1, $2, etc.) - must be bound before evaluation
+            vibesql_ast::Expression::NumberedPlaceholder(idx) => {
+                Err(ExecutorError::UnsupportedExpression(
+                    format!("Unbound numbered placeholder ${} - placeholders must be bound to values before execution", idx)
+                ))
+            }
+
+            // Named placeholder (:name) - must be bound before evaluation
+            vibesql_ast::Expression::NamedPlaceholder(name) => {
+                Err(ExecutorError::UnsupportedExpression(
+                    format!("Unbound named placeholder :{} - placeholders must be bound to values before execution", name)
+                ))
+            }
         }
     }
 

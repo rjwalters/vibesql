@@ -442,7 +442,10 @@ pub fn execute_sql(
         | vibesql_ast::Statement::ShowIndex(_)
         | vibesql_ast::Statement::ShowCreateTable(_)
         | vibesql_ast::Statement::Describe(_)
-        | vibesql_ast::Statement::AlterTrigger(_) => Ok(DBOutput::StatementComplete(0)),
+        | vibesql_ast::Statement::AlterTrigger(_)
+        | vibesql_ast::Statement::Prepare(_)
+        | vibesql_ast::Statement::Execute(_)
+        | vibesql_ast::Statement::Deallocate(_) => Ok(DBOutput::StatementComplete(0)),
     }
 }
 

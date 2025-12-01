@@ -379,6 +379,20 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 "Placeholder expressions must be bound to values before serialization".to_string(),
             ));
         }
+        Expression::NumberedPlaceholder(_) => {
+            // Numbered placeholders should be bound to values before storage serialization
+            return Err(StorageError::NotImplemented(
+                "NumberedPlaceholder expressions must be bound to values before serialization"
+                    .to_string(),
+            ));
+        }
+        Expression::NamedPlaceholder(_) => {
+            // Named placeholders should be bound to values before storage serialization
+            return Err(StorageError::NotImplemented(
+                "NamedPlaceholder expressions must be bound to values before serialization"
+                    .to_string(),
+            ));
+        }
     }
     Ok(())
 }

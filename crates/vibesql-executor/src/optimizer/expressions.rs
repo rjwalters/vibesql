@@ -327,7 +327,9 @@ pub fn optimize_expression(
         Expression::MatchAgainst { .. } => Ok(expr.clone()),
 
         // Placeholders - cannot optimize (they need to be bound first)
-        Expression::Placeholder(_) => Ok(expr.clone()),
+        Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_) => Ok(expr.clone()),
     }
 }
 

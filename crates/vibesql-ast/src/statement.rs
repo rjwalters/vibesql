@@ -7,15 +7,16 @@ use crate::{
     CloseCursorStmt, CommitStmt, CreateAssertionStmt, CreateCharacterSetStmt,
     CreateCollationStmt, CreateDomainStmt, CreateFunctionStmt, CreateIndexStmt,
     CreateProcedureStmt, CreateRoleStmt, CreateSchemaStmt, CreateSequenceStmt, CreateTableStmt,
-    CreateTranslationStmt, CreateTriggerStmt, CreateTypeStmt, CreateViewStmt, DeclareCursorStmt,
-    DeleteStmt, DescribeStmt, DropAssertionStmt, DropCharacterSetStmt, DropCollationStmt,
-    DropDomainStmt, DropFunctionStmt, DropIndexStmt, DropProcedureStmt, DropRoleStmt,
-    DropSchemaStmt, DropSequenceStmt, DropTableStmt, DropTranslationStmt, DropTriggerStmt,
-    DropTypeStmt, DropViewStmt, FetchStmt, GrantStmt, InsertStmt, OpenCursorStmt, ReindexStmt,
-    ReleaseSavepointStmt, RevokeStmt, RollbackStmt, RollbackToSavepointStmt, SavepointStmt,
-    SelectStmt, SetCatalogStmt, SetNamesStmt, SetSchemaStmt, SetTimeZoneStmt,
-    SetTransactionStmt, SetVariableStmt, ShowColumnsStmt, ShowCreateTableStmt, ShowDatabasesStmt,
-    ShowIndexStmt, ShowTablesStmt, TruncateTableStmt, UpdateStmt,
+    CreateTranslationStmt, CreateTriggerStmt, CreateTypeStmt, CreateViewStmt, DeallocateStmt,
+    DeclareCursorStmt, DeleteStmt, DescribeStmt, DropAssertionStmt, DropCharacterSetStmt,
+    DropCollationStmt, DropDomainStmt, DropFunctionStmt, DropIndexStmt, DropProcedureStmt,
+    DropRoleStmt, DropSchemaStmt, DropSequenceStmt, DropTableStmt, DropTranslationStmt,
+    DropTriggerStmt, DropTypeStmt, DropViewStmt, ExecuteStmt, FetchStmt, GrantStmt, InsertStmt,
+    OpenCursorStmt, PrepareStmt, ReindexStmt, ReleaseSavepointStmt, RevokeStmt, RollbackStmt,
+    RollbackToSavepointStmt, SavepointStmt, SelectStmt, SetCatalogStmt, SetNamesStmt,
+    SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, ShowColumnsStmt,
+    ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt, TruncateTableStmt,
+    UpdateStmt,
 };
 
 // ============================================================================
@@ -81,6 +82,10 @@ pub enum Statement {
     OpenCursor(OpenCursorStmt),
     Fetch(FetchStmt),
     CloseCursor(CloseCursorStmt),
+    // Prepared statements (SQL:1999 Feature E141)
+    Prepare(PrepareStmt),
+    Execute(ExecuteStmt),
+    Deallocate(DeallocateStmt),
     // Stored procedures and functions (SQL:1999 Feature P001)
     CreateProcedure(CreateProcedureStmt),
     DropProcedure(DropProcedureStmt),

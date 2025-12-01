@@ -24,6 +24,20 @@ impl Parser {
             return Ok(vibesql_ast::Expression::Placeholder(index));
         }
 
+        // Try to parse as a numbered placeholder ($1, $2, etc.)
+        if let Token::NumberedPlaceholder(n) = self.peek() {
+            let index = *n;
+            self.advance();
+            return Ok(vibesql_ast::Expression::NumberedPlaceholder(index));
+        }
+
+        // Try to parse as a named placeholder (:name)
+        if let Token::NamedPlaceholder(name) = self.peek() {
+            let param_name = name.clone();
+            self.advance();
+            return Ok(vibesql_ast::Expression::NamedPlaceholder(param_name));
+        }
+
         // Try to parse as a literal
         if let Some(expr) = self.parse_literal()? {
             return Ok(expr);

@@ -120,6 +120,27 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::Placeholder)
             }
+            '$' => {
+                // Check if followed by digits for numbered placeholder ($1, $2, etc.)
+                if self.peek(1).map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                    self.tokenize_numbered_placeholder()
+                } else {
+                    Err(LexerError {
+                        message: "Expected digit after '$' for numbered placeholder".to_string(),
+                        position: self.position,
+                    })
+                }
+            }
+            ':' => {
+                // Check if followed by alphabetic character or underscore for named placeholder
+                if self.peek(1).map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false) {
+                    self.tokenize_named_placeholder()
+                } else {
+                    // Just a colon symbol (could be used in other contexts)
+                    self.advance();
+                    Ok(Token::Symbol(':'))
+                }
+            }
             _ => Err(LexerError {
                 message: format!("Unexpected character: '{}'", ch),
                 position: self.byte_pos,
@@ -283,5 +304,74 @@ impl<'a> Lexer<'a> {
 
         let var_name = self.slice_from(start).to_string();
         Ok(Token::UserVariable(var_name))
+    }
+
+    /// Tokenize a numbered placeholder ($1, $2, etc.).
+    /// PostgreSQL-style: 1-indexed ($1 = first parameter).
+    fn tokenize_numbered_placeholder(&mut self) -> Result<Token, LexerError> {
+        self.advance(); // consume '$'
+
+        let start_pos = self.position;
+        let mut num_str = String::new();
+
+        // Read all digits
+        while !self.is_eof() {
+            let ch = self.current_char();
+            if ch.is_ascii_digit() {
+                num_str.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if num_str.is_empty() {
+            return Err(LexerError {
+                message: "Expected digit after '$' for numbered placeholder".to_string(),
+                position: start_pos,
+            });
+        }
+
+        let index: usize = num_str.parse().map_err(|_| LexerError {
+            message: format!("Invalid numbered placeholder: ${}", num_str),
+            position: start_pos,
+        })?;
+
+        // PostgreSQL requires $1 or higher (no $0)
+        if index == 0 {
+            return Err(LexerError {
+                message: "Numbered placeholder must be $1 or higher (no $0)".to_string(),
+                position: start_pos,
+            });
+        }
+
+        Ok(Token::NumberedPlaceholder(index))
+    }
+
+    /// Tokenize a named placeholder (:name, :user_id, etc.).
+    fn tokenize_named_placeholder(&mut self) -> Result<Token, LexerError> {
+        self.advance(); // consume ':'
+
+        let mut name = String::new();
+
+        // Read the identifier (alphanumeric or underscore)
+        while !self.is_eof() {
+            let ch = self.current_char();
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                name.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if name.is_empty() {
+            return Err(LexerError {
+                message: "Expected identifier after ':' for named placeholder".to_string(),
+                position: self.position,
+            });
+        }
+
+        Ok(Token::NamedPlaceholder(name))
     }
 }

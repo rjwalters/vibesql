@@ -15,6 +15,17 @@ pub enum Expression {
     /// Example: WHERE id = ? AND name = ? -> Placeholder(0), Placeholder(1)
     Placeholder(usize),
 
+    /// Numbered parameter placeholder ($1, $2, etc.) for prepared statements
+    /// PostgreSQL-style: 1-indexed as written in SQL
+    /// Example: WHERE id = $1 AND name = $2
+    /// The number is the explicit position (1-indexed) of the parameter
+    NumberedPlaceholder(usize),
+
+    /// Named parameter placeholder (:name) for prepared statements
+    /// Used by many ORMs and applications for readability
+    /// Example: WHERE id = :user_id AND name = :name
+    NamedPlaceholder(String),
+
     /// Column reference (id, users.id)
     ColumnRef {
         table: Option<String>,

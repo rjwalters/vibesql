@@ -460,6 +460,8 @@ impl LiteralExtractor {
             // These expressions don't contain literals
             Expression::ColumnRef { .. }
             | Expression::Placeholder(_)
+            | Expression::NumberedPlaceholder(_)
+            | Expression::NamedPlaceholder(_)
             | Expression::PseudoVariable { .. }
             | Expression::Wildcard
             | Expression::CurrentDate
