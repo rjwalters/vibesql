@@ -34,8 +34,11 @@ use vibesql_types::SqlValue;
 use super::{extract_tables_from_statement, QuerySignature};
 
 mod bind;
+pub mod plan;
 
-/// A prepared statement with cached AST
+pub use plan::{CachedPlan, PkPointLookupPlan, ProjectionPlan, ColumnProjection};
+
+/// A prepared statement with cached AST and optional execution plan
 #[derive(Debug, Clone)]
 pub struct PreparedStatement {
     /// Original SQL with `?` placeholders
@@ -48,6 +51,8 @@ pub struct PreparedStatement {
     param_count: usize,
     /// Tables referenced by this statement (for invalidation)
     tables: std::collections::HashSet<String>,
+    /// Cached execution plan (for fast-path execution)
+    cached_plan: CachedPlan,
 }
 
 impl PreparedStatement {
@@ -57,6 +62,8 @@ impl PreparedStatement {
         // Count placeholders from the AST (more accurate than counting ? in SQL string)
         let param_count = bind::count_placeholders(&statement);
         let tables = extract_tables_from_statement(&statement);
+        // Analyze for fast-path execution plan
+        let cached_plan = plan::analyze_for_plan(&statement);
 
         Self {
             sql,
@@ -64,6 +71,7 @@ impl PreparedStatement {
             signature,
             param_count,
             tables,
+            cached_plan,
         }
     }
 
@@ -90,6 +98,11 @@ impl PreparedStatement {
     /// Get the tables referenced by this statement
     pub fn tables(&self) -> &std::collections::HashSet<String> {
         &self.tables
+    }
+
+    /// Get the cached execution plan
+    pub fn cached_plan(&self) -> &CachedPlan {
+        &self.cached_plan
     }
 
     /// Bind parameters to create an executable statement
