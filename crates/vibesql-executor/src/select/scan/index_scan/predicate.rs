@@ -427,6 +427,97 @@ pub(crate) fn where_clause_fully_satisfied_by_index(
     }
 }
 
+/// Check if WHERE clause is fully satisfied by composite key lookup
+///
+/// Returns true if:
+/// 1. All predicates in WHERE clause are simple equality predicates (col = literal)
+/// 2. All predicates are on columns that are part of the composite index
+/// 3. The number of predicates equals the number of index columns
+///
+/// When true, the composite key index lookup already guarantees all rows match
+/// the WHERE clause, so redundant WHERE filtering can be skipped.
+///
+/// # Examples
+/// - `WHERE c_w_id = 1 AND c_d_id = 2 AND c_id = 42` with index `[c_w_id, c_d_id, c_id]` -> true
+/// - `WHERE c_w_id = 1 AND c_d_id = 2` with index `[c_w_id, c_d_id, c_id]` -> false (missing c_id)
+/// - `WHERE c_w_id = 1 AND c_d_id = 2 AND status = 'active'` with index `[c_w_id, c_d_id]` -> false (extra predicate)
+/// - `WHERE c_w_id = 1 AND c_d_id > 2` with index `[c_w_id, c_d_id]` -> false (range predicate)
+pub(crate) fn where_clause_fully_satisfied_by_composite_key(
+    where_expr: &Expression,
+    index_column_names: &[&str],
+) -> bool {
+    // Count total atomic predicates in WHERE clause
+    let total_predicates = count_atomic_predicates(where_expr);
+
+    // If the number of predicates doesn't match the number of index columns,
+    // there are either extra predicates or missing predicates
+    if total_predicates != index_column_names.len() {
+        return false;
+    }
+
+    // Verify all predicates are equality predicates on index columns
+    all_predicates_are_index_equalities(where_expr, index_column_names)
+}
+
+/// Count the total number of atomic predicates in a WHERE clause
+///
+/// An atomic predicate is a leaf-level comparison that isn't composed of AND/OR.
+/// Examples:
+/// - `col = 5` -> 1 predicate
+/// - `col > 10` -> 1 predicate
+/// - `col = 1 AND col2 = 2` -> 2 predicates
+/// - `col BETWEEN 1 AND 10` -> 1 predicate
+fn count_atomic_predicates(expr: &Expression) -> usize {
+    match expr {
+        // AND chains: count both sides
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+            count_atomic_predicates(left) + count_atomic_predicates(right)
+        }
+        // OR chains: count both sides
+        Expression::BinaryOp { left, op: BinaryOperator::Or, right } => {
+            count_atomic_predicates(left) + count_atomic_predicates(right)
+        }
+        // Any other expression is an atomic predicate
+        _ => 1,
+    }
+}
+
+/// Check if all predicates in the expression are equality predicates on index columns
+fn all_predicates_are_index_equalities(expr: &Expression, index_column_names: &[&str]) -> bool {
+    match expr {
+        // AND chain: both sides must be satisfied
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+            all_predicates_are_index_equalities(left, index_column_names)
+                && all_predicates_are_index_equalities(right, index_column_names)
+        }
+        // Equality predicate: verify it's on an index column
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
+            // Check col = literal
+            if let Expression::ColumnRef { column, .. } = left.as_ref() {
+                if matches!(right.as_ref(), Expression::Literal(v) if !matches!(v, SqlValue::Null)) {
+                    return is_index_column(column, index_column_names);
+                }
+            }
+            // Check literal = col
+            if let Expression::ColumnRef { column, .. } = right.as_ref() {
+                if matches!(left.as_ref(), Expression::Literal(v) if !matches!(v, SqlValue::Null)) {
+                    return is_index_column(column, index_column_names);
+                }
+            }
+            // Not a simple equality predicate on index column
+            false
+        }
+        // Any other predicate type (range, IN, etc.) is not a simple equality
+        _ => false,
+    }
+}
+
+/// Check if a column name matches any column in the index (case-insensitive)
+fn is_index_column(column: &str, index_column_names: &[&str]) -> bool {
+    let col_upper = column.to_uppercase();
+    index_column_names.iter().any(|name| name.to_uppercase() == col_upper)
+}
+
 #[cfg(test)]
 #[path = "predicate_tests.rs"]
 mod predicate_tests;

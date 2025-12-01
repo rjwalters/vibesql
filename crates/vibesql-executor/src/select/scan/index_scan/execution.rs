@@ -7,7 +7,10 @@ use vibesql_storage::{Database, Row};
 
 use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema};
 
-use super::predicate::{extract_composite_equality_predicates, extract_index_predicate, IndexPredicate};
+use super::predicate::{
+    extract_composite_equality_predicates, extract_index_predicate,
+    where_clause_fully_satisfied_by_composite_key, IndexPredicate,
+};
 
 /// Execute an index scan
 ///
@@ -77,11 +80,14 @@ pub(crate) fn execute_index_scan(
     // Performance optimization: Determine if WHERE filtering can be skipped
     // Check if the index predicate fully satisfies the WHERE clause
     let need_where_filter = if use_composite_lookup {
-        // Composite key lookup is an exact match - only skip WHERE filter if
-        // the WHERE clause contains ONLY the equality predicates for index columns
-        // For now, be conservative and still apply WHERE filter to handle edge cases
-        // TODO: Optimize by detecting when WHERE is fully satisfied by composite key
-        where_clause.is_some()
+        // Composite key lookup is an exact match - skip WHERE filter if
+        // the WHERE clause contains ONLY equality predicates for ALL index columns
+        match where_clause {
+            Some(where_expr) => {
+                !where_clause_fully_satisfied_by_composite_key(where_expr, &index_column_names)
+            }
+            None => false, // No WHERE clause to filter
+        }
     } else {
         match (&where_clause, &index_predicate) {
             (Some(where_expr), Some(_)) => {
