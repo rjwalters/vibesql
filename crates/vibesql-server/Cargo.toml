@@ -9,6 +9,10 @@ description = "Network server with PostgreSQL wire protocol for VibeSQL"
 keywords = ["sql", "database", "server", "postgresql", "network"]
 categories = ["database", "network-programming"]
 
+[lib]
+name = "vibesql_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "vibesql-server"
 path = "src/main.rs"
