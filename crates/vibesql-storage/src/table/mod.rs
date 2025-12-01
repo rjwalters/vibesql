@@ -433,6 +433,22 @@ impl Table {
         &self.rows
     }
 
+    /// Get a single row by index position (O(1) access)
+    ///
+    /// This is more efficient than `scan().get(idx)` when you only need one row,
+    /// as it avoids returning a reference to the entire row slice.
+    ///
+    /// # Arguments
+    /// * `idx` - The row index position
+    ///
+    /// # Returns
+    /// * `Some(&Row)` - The row at the given index
+    /// * `None` - If the index is out of bounds
+    #[inline]
+    pub fn get_row(&self, idx: usize) -> Option<&Row> {
+        self.rows.get(idx)
+    }
+
     /// Scan table data in columnar format for SIMD-accelerated processing
     ///
     /// This method returns columnar data suitable for high-performance analytical queries.

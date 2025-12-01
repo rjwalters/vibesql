@@ -274,17 +274,12 @@ impl Database {
             None => return Ok(None),
         };
 
-        // Get the table and return the row
+        // Get the table and return the row using O(1) direct access
         let table = self.get_table(&table_name).ok_or_else(|| {
             StorageError::TableNotFound(table_name.clone())
         })?;
 
-        let rows = table.scan();
-        if first_idx < rows.len() {
-            Ok(Some(&rows[first_idx]))
-        } else {
-            Ok(None)
-        }
+        Ok(table.get_row(first_idx))
     }
 
     /// Batch lookup by index - look up multiple keys in a single call
@@ -332,24 +327,21 @@ impl Database {
             StorageError::IndexNotFound(index_name.to_string())
         })?;
 
-        // Get the table once
+        // Get the table once for O(1) row access
         let table = self.get_table(&table_name).ok_or_else(|| {
             StorageError::TableNotFound(table_name.clone())
         })?;
-        let rows = table.scan();
 
-        // Look up each key
+        // Look up each key using direct row access
         let mut results = Vec::with_capacity(keys.len());
         for key in keys {
             let row_indices = index_data.get(key);
             match row_indices {
                 Some(indices) if !indices.is_empty() => {
-                    let mut matched_rows = Vec::with_capacity(indices.len());
-                    for &idx in &indices {
-                        if idx < rows.len() {
-                            matched_rows.push(&rows[idx]);
-                        }
-                    }
+                    let matched_rows: Vec<_> = indices
+                        .iter()
+                        .filter_map(|&idx| table.get_row(idx))
+                        .collect();
                     if matched_rows.is_empty() {
                         results.push(None);
                     } else {
@@ -390,24 +382,18 @@ impl Database {
             StorageError::IndexNotFound(index_name.to_string())
         })?;
 
-        // Get the table once
+        // Get the table once for O(1) row access
         let table = self.get_table(&table_name).ok_or_else(|| {
             StorageError::TableNotFound(table_name.clone())
         })?;
-        let rows = table.scan();
 
-        // Look up each key
+        // Look up each key using direct row access
         let mut results = Vec::with_capacity(keys.len());
         for key in keys {
             let row_indices = index_data.get(key);
             match row_indices {
                 Some(indices) if !indices.is_empty() => {
-                    let first_idx = indices[0];
-                    if first_idx < rows.len() {
-                        results.push(Some(&rows[first_idx]));
-                    } else {
-                        results.push(None);
-                    }
+                    results.push(table.get_row(indices[0]));
                 }
                 _ => results.push(None),
             }
