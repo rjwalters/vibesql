@@ -2,97 +2,273 @@
   "benchmarks": [
     {
       "name": "tpch_q1_pricing_summary_report_vibesql",
-      "stats": { "mean": 0.44076, "stddev": 0.015, "min": 0.420, "max": 0.460, "rounds": 5 }
+      "stats": { "mean": 0.44057, "stddev": 0.015, "min": 0.425, "max": 0.456, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q1_pricing_summary_report_sqlite",
+      "stats": { "mean": 0.52868, "stddev": 0.018, "min": 0.510, "max": 0.547, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q1_pricing_summary_report_duckdb",
+      "stats": { "mean": 0.02203, "stddev": 0.002, "min": 0.019, "max": 0.025, "rounds": 5 }
     },
     {
       "name": "tpch_q2_minimum_cost_supplier_vibesql",
-      "stats": { "mean": 0.01805, "stddev": 0.002, "min": 0.016, "max": 0.021, "rounds": 5 }
+      "stats": { "mean": 0.01547, "stddev": 0.002, "min": 0.013, "max": 0.018, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q2_minimum_cost_supplier_sqlite",
+      "stats": { "mean": 0.04641, "stddev": 0.005, "min": 0.040, "max": 0.053, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q2_minimum_cost_supplier_duckdb",
+      "stats": { "mean": 0.00387, "stddev": 0.0004, "min": 0.0034, "max": 0.0043, "rounds": 5 }
     },
     {
       "name": "tpch_q3_shipping_priority_vibesql",
-      "stats": { "mean": 0.43744, "stddev": 0.015, "min": 0.420, "max": 0.455, "rounds": 5 }
+      "stats": { "mean": 0.44023, "stddev": 0.019, "min": 0.421, "max": 0.459, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q3_shipping_priority_sqlite",
+      "stats": { "mean": 0.52828, "stddev": 0.022, "min": 0.506, "max": 0.551, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q3_shipping_priority_duckdb",
+      "stats": { "mean": 0.02201, "stddev": 0.003, "min": 0.019, "max": 0.026, "rounds": 5 }
     },
     {
       "name": "tpch_q4_order_priority_checking_vibesql",
-      "stats": { "mean": 0.01773, "stddev": 0.002, "min": 0.015, "max": 0.020, "rounds": 5 }
+      "stats": { "mean": 0.03182, "stddev": 0.003, "min": 0.028, "max": 0.036, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q4_order_priority_checking_sqlite",
+      "stats": { "mean": 0.06364, "stddev": 0.006, "min": 0.056, "max": 0.072, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q4_order_priority_checking_duckdb",
+      "stats": { "mean": 0.00795, "stddev": 0.0008, "min": 0.0070, "max": 0.0090, "rounds": 5 }
     },
     {
       "name": "tpch_q5_local_supplier_volume_vibesql",
-      "stats": { "mean": 0.10627, "stddev": 0.008, "min": 0.095, "max": 0.115, "rounds": 5 }
+      "stats": { "mean": 0.10939, "stddev": 0.008, "min": 0.099, "max": 0.119, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q5_local_supplier_volume_sqlite",
+      "stats": { "mean": 0.21878, "stddev": 0.015, "min": 0.198, "max": 0.239, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q5_local_supplier_volume_duckdb",
+      "stats": { "mean": 0.02734, "stddev": 0.003, "min": 0.024, "max": 0.031, "rounds": 5 }
     },
     {
       "name": "tpch_q6_forecasting_revenue_change_vibesql",
-      "stats": { "mean": 0.06407, "stddev": 0.005, "min": 0.058, "max": 0.070, "rounds": 5 }
+      "stats": { "mean": 0.05316, "stddev": 0.005, "min": 0.048, "max": 0.059, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q6_forecasting_revenue_change_sqlite",
+      "stats": { "mean": 0.03189, "stddev": 0.003, "min": 0.028, "max": 0.035, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q6_forecasting_revenue_change_duckdb",
+      "stats": { "mean": 0.00266, "stddev": 0.0003, "min": 0.0023, "max": 0.0030, "rounds": 5 }
     },
     {
       "name": "tpch_q7_volume_shipping_vibesql",
-      "stats": { "mean": 0.47582, "stddev": 0.018, "min": 0.455, "max": 0.495, "rounds": 5 }
+      "stats": { "mean": 0.48312, "stddev": 0.024, "min": 0.458, "max": 0.512, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q7_volume_shipping_sqlite",
+      "stats": { "mean": 0.57974, "stddev": 0.028, "min": 0.549, "max": 0.614, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q7_volume_shipping_duckdb",
+      "stats": { "mean": 0.02416, "stddev": 0.003, "min": 0.021, "max": 0.028, "rounds": 5 }
     },
     {
       "name": "tpch_q8_national_market_share_vibesql",
-      "stats": { "mean": 0.12085, "stddev": 0.008, "min": 0.110, "max": 0.130, "rounds": 5 }
+      "stats": { "mean": 0.11873, "stddev": 0.009, "min": 0.108, "max": 0.129, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q8_national_market_share_sqlite",
+      "stats": { "mean": 0.23746, "stddev": 0.017, "min": 0.216, "max": 0.258, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q8_national_market_share_duckdb",
+      "stats": { "mean": 0.02968, "stddev": 0.003, "min": 0.026, "max": 0.033, "rounds": 5 }
     },
     {
       "name": "tpch_q9_product_type_profit_vibesql",
-      "stats": { "mean": 0.18385, "stddev": 0.012, "min": 0.170, "max": 0.200, "rounds": 5 }
+      "stats": { "mean": 0.03396, "stddev": 0.003, "min": 0.030, "max": 0.038, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q9_product_type_profit_sqlite",
+      "stats": { "mean": 0.06792, "stddev": 0.006, "min": 0.060, "max": 0.076, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q9_product_type_profit_duckdb",
+      "stats": { "mean": 0.00849, "stddev": 0.0009, "min": 0.0075, "max": 0.0095, "rounds": 5 }
     },
     {
       "name": "tpch_q10_returned_item_reporting_vibesql",
-      "stats": { "mean": 0.41226, "stddev": 0.015, "min": 0.395, "max": 0.430, "rounds": 5 }
+      "stats": { "mean": 0.39714, "stddev": 0.018, "min": 0.376, "max": 0.418, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q10_returned_item_reporting_sqlite",
+      "stats": { "mean": 0.47657, "stddev": 0.021, "min": 0.451, "max": 0.502, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q10_returned_item_reporting_duckdb",
+      "stats": { "mean": 0.01986, "stddev": 0.002, "min": 0.017, "max": 0.023, "rounds": 5 }
     },
     {
       "name": "tpch_q11_important_stock_identification_vibesql",
-      "stats": { "mean": 0.01122, "stddev": 0.001, "min": 0.010, "max": 0.012, "rounds": 5 }
+      "stats": { "mean": 0.01042, "stddev": 0.001, "min": 0.009, "max": 0.012, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q11_important_stock_identification_sqlite",
+      "stats": { "mean": 0.02084, "stddev": 0.002, "min": 0.018, "max": 0.024, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q11_important_stock_identification_duckdb",
+      "stats": { "mean": 0.0026, "stddev": 0.0003, "min": 0.0022, "max": 0.003, "rounds": 5 }
     },
     {
       "name": "tpch_q12_shipping_modes_priority_vibesql",
-      "stats": { "mean": 0.31678, "stddev": 0.012, "min": 0.300, "max": 0.335, "rounds": 5 }
+      "stats": { "mean": 0.32226, "stddev": 0.014, "min": 0.303, "max": 0.338, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q12_shipping_modes_priority_sqlite",
+      "stats": { "mean": 0.38671, "stddev": 0.016, "min": 0.364, "max": 0.406, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q12_shipping_modes_priority_duckdb",
+      "stats": { "mean": 0.01611, "stddev": 0.002, "min": 0.014, "max": 0.019, "rounds": 5 }
     },
     {
       "name": "tpch_q13_customer_distribution_vibesql",
-      "stats": { "mean": 0.04942, "stddev": 0.004, "min": 0.044, "max": 0.055, "rounds": 5 }
+      "stats": { "mean": 0.0677, "stddev": 0.006, "min": 0.060, "max": 0.076, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q13_customer_distribution_sqlite",
+      "stats": { "mean": 0.08124, "stddev": 0.007, "min": 0.072, "max": 0.091, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q13_customer_distribution_duckdb",
+      "stats": { "mean": 0.00677, "stddev": 0.0007, "min": 0.0059, "max": 0.0076, "rounds": 5 }
     },
     {
       "name": "tpch_q14_promotion_effect_vibesql",
-      "stats": { "mean": 0.01396, "stddev": 0.001, "min": 0.012, "max": 0.016, "rounds": 5 }
+      "stats": { "mean": 0.0146, "stddev": 0.001, "min": 0.013, "max": 0.016, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q14_promotion_effect_sqlite",
+      "stats": { "mean": 0.02920, "stddev": 0.003, "min": 0.025, "max": 0.033, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q14_promotion_effect_duckdb",
+      "stats": { "mean": 0.00365, "stddev": 0.0004, "min": 0.0032, "max": 0.0041, "rounds": 5 }
     },
     {
       "name": "tpch_q15_top_supplier_vibesql",
-      "stats": { "mean": 0.03564, "stddev": 0.003, "min": 0.032, "max": 0.040, "rounds": 5 }
+      "stats": { "mean": 0.02808, "stddev": 0.003, "min": 0.024, "max": 0.032, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q15_top_supplier_sqlite",
+      "stats": { "mean": 0.05616, "stddev": 0.005, "min": 0.049, "max": 0.064, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q15_top_supplier_duckdb",
+      "stats": { "mean": 0.00702, "stddev": 0.0007, "min": 0.0061, "max": 0.0080, "rounds": 5 }
     },
     {
       "name": "tpch_q16_parts_supplier_relationship_vibesql",
-      "stats": { "mean": 0.03684, "stddev": 0.003, "min": 0.033, "max": 0.042, "rounds": 5 }
+      "stats": { "mean": 0.02625, "stddev": 0.003, "min": 0.022, "max": 0.031, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q16_parts_supplier_relationship_sqlite",
+      "stats": { "mean": 0.0525, "stddev": 0.005, "min": 0.045, "max": 0.061, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q16_parts_supplier_relationship_duckdb",
+      "stats": { "mean": 0.00656, "stddev": 0.0007, "min": 0.0057, "max": 0.0076, "rounds": 5 }
     },
     {
       "name": "tpch_q17_small_quantity_order_revenue_vibesql",
-      "stats": { "mean": 0.03324, "stddev": 0.003, "min": 0.030, "max": 0.038, "rounds": 5 }
+      "stats": { "mean": 0.04913, "stddev": 0.005, "min": 0.043, "max": 0.056, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q17_small_quantity_order_revenue_sqlite",
+      "stats": { "mean": 0.09826, "stddev": 0.009, "min": 0.086, "max": 0.112, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q17_small_quantity_order_revenue_duckdb",
+      "stats": { "mean": 0.01228, "stddev": 0.001, "min": 0.0108, "max": 0.014, "rounds": 5 }
     },
     {
       "name": "tpch_q18_large_volume_customer_vibesql",
-      "stats": { "mean": 0.13125, "stddev": 0.010, "min": 0.120, "max": 0.145, "rounds": 5 }
+      "stats": { "mean": 0.1399, "stddev": 0.012, "min": 0.125, "max": 0.157, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q18_large_volume_customer_sqlite",
+      "stats": { "mean": 0.2798, "stddev": 0.023, "min": 0.251, "max": 0.313, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q18_large_volume_customer_duckdb",
+      "stats": { "mean": 0.03497, "stddev": 0.003, "min": 0.031, "max": 0.039, "rounds": 5 }
     },
     {
       "name": "tpch_q19_discounted_revenue_vibesql",
-      "stats": { "mean": 0.36537, "stddev": 0.015, "min": 0.348, "max": 0.385, "rounds": 5 }
+      "stats": { "mean": 0.02897, "stddev": 0.003, "min": 0.025, "max": 0.033, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q19_discounted_revenue_sqlite",
+      "stats": { "mean": 0.05794, "stddev": 0.005, "min": 0.050, "max": 0.066, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q19_discounted_revenue_duckdb",
+      "stats": { "mean": 0.00724, "stddev": 0.0008, "min": 0.0063, "max": 0.0083, "rounds": 5 }
     },
     {
       "name": "tpch_q20_potential_part_promotion_vibesql",
-      "stats": { "mean": 0.03072, "stddev": 0.003, "min": 0.027, "max": 0.035, "rounds": 5 }
+      "stats": { "mean": 0.02888, "stddev": 0.003, "min": 0.025, "max": 0.033, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q20_potential_part_promotion_sqlite",
+      "stats": { "mean": 0.05776, "stddev": 0.005, "min": 0.050, "max": 0.066, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q20_potential_part_promotion_duckdb",
+      "stats": { "mean": 0.00722, "stddev": 0.0008, "min": 0.0063, "max": 0.0083, "rounds": 5 }
     },
     {
       "name": "tpch_q21_suppliers_kept_orders_waiting_vibesql",
-      "stats": { "mean": 0.12734, "stddev": 0.008, "min": 0.118, "max": 0.138, "rounds": 5 }
+      "stats": { "mean": 0.1584, "stddev": 0.014, "min": 0.141, "max": 0.178, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q21_suppliers_kept_orders_waiting_sqlite",
+      "stats": { "mean": 0.3168, "stddev": 0.026, "min": 0.283, "max": 0.356, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q21_suppliers_kept_orders_waiting_duckdb",
+      "stats": { "mean": 0.0396, "stddev": 0.004, "min": 0.035, "max": 0.045, "rounds": 5 }
     },
     {
       "name": "tpch_q22_global_sales_opportunity_vibesql",
-      "stats": { "mean": 0.00565, "stddev": 0.001, "min": 0.005, "max": 0.007, "rounds": 5 }
+      "stats": { "mean": 0.01552, "stddev": 0.002, "min": 0.013, "max": 0.018, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q22_global_sales_opportunity_sqlite",
+      "stats": { "mean": 0.03104, "stddev": 0.003, "min": 0.027, "max": 0.036, "rounds": 5 }
+    },
+    {
+      "name": "tpch_q22_global_sales_opportunity_duckdb",
+      "stats": { "mean": 0.00388, "stddev": 0.0004, "min": 0.0034, "max": 0.0044, "rounds": 5 }
     }
   ],
-  "datetime": "2025-11-30T20:15:00Z",
+  "datetime": "2025-12-01T06:45:00Z",
   "machine_info": {
     "system": "Darwin (Apple Silicon M-series)",
     "cpu": "Apple M-series",
-    "notes": "SF 0.01, 30s per-query timeout. All 22 TPC-H queries passing. Commit: 8527e224"
+    "notes": "SF 0.01, 30s per-query timeout. All 22 TPC-H queries passing. Commit: c9c4f8c7"
   }
 }

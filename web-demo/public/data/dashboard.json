@@ -1395,108 +1395,164 @@
     "tpcc": {
       "description": "TPC-C OLTP - Mixed read/write transactions",
       "scale_factor": 1,
+      "queries_passing": 5,
+      "queries_total": 5,
+      "latest_run": {
+        "timestamp": "2025-11-30T20:15:00Z",
+        "commit": "8527e224"
+      },
       "latest": {
-        "timestamp": "2025-11-27T11:33:29.939404",
-        "commit": "86ed554c",
-        "vibesql_tps": null,
-        "transactions": {
-          "mixed": {
-            "duckdb": {
-              "tps": 631.43,
-              "latency_us": 1680.49
-            }
+        "timestamp": "2025-11-30T20:15:00Z",
+        "commit": "8527e224",
+        "vibesql_tps": 67.89,
+        "sqlite_tps": 2523.07,
+        "duckdb_tps": 363.58,
+        "mixed_latency_us": 13550
+      },
+      "queries": {
+        "new_order": {
+          "name": "New Order",
+          "description": "Complex transaction with inventory checks and order creation",
+          "latest": {
+            "vibesql_ms": 13.55,
+            "sqlite_ms": 0.056,
+            "duckdb_ms": 4.636,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:15:00Z"
+          }
+        },
+        "payment": {
+          "name": "Payment",
+          "description": "Update customer balance and warehouse/district totals",
+          "latest": {
+            "vibesql_ms": 12.34,
+            "sqlite_ms": 0.011,
+            "duckdb_ms": 0.824,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:15:00Z"
+          }
+        },
+        "order_status": {
+          "name": "Order Status",
+          "description": "Read-only query for customer order history",
+          "latest": {
+            "vibesql_ms": 14.69,
+            "sqlite_ms": 0.161,
+            "duckdb_ms": 1.134,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:15:00Z"
+          }
+        },
+        "delivery": {
+          "name": "Delivery",
+          "description": "Batch processing of pending orders",
+          "latest": {
+            "vibesql_ms": 2.66,
+            "sqlite_ms": 0.026,
+            "duckdb_ms": 5.420,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:15:00Z"
+          }
+        },
+        "stock_level": {
+          "name": "Stock Level",
+          "description": "Count items below threshold in recent orders",
+          "latest": {
+            "vibesql_ms": 65.76,
+            "sqlite_ms": 9.157,
+            "duckdb_ms": 1.433,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:15:00Z"
           }
         }
       },
       "history": []
     },
     "sysbench": {
-      "description": "Sysbench OLTP - Point operations",
-      "latest": {
-        "timestamp": "2025-11-27T11:57:18.613416",
-        "commit": "86ed554c"
+      "description": "Sysbench OLTP - Point operations (10K rows)",
+      "scale_factor": 10000,
+      "queries_passing": 6,
+      "queries_total": 6,
+      "latest_run": {
+        "timestamp": "2025-11-30T20:35:29.933875Z",
+        "commit": "c9c4f8c7"
       },
       "tests": {
-        "point_select_10000": {
-          "test_name": "point_select",
-          "table_size": 10000,
-          "engines": {
-            "sqlite": {
-              "mean_us": 0.36,
-              "std_dev_us": null
-            }
+        "point_select": {
+          "name": "Point Select",
+          "description": "Single row lookup by primary key",
+          "latest": {
+            "vibesql_ms": 0.001,
+            "sqlite_ms": 0.00036,
+            "duckdb_ms": null,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:35:29.933875Z"
           }
         },
-        "delete_10000": {
-          "test_name": "delete",
-          "table_size": 10000,
-          "engines": {
-            "vibesql": {
-              "mean_us": 2414.8,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 1186.2,
-              "std_dev_us": null
-            }
+        "insert": {
+          "name": "Insert",
+          "description": "Insert new rows into table",
+          "latest": {
+            "vibesql_ms": 0.00154,
+            "sqlite_ms": null,
+            "duckdb_ms": null,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:35:29.933875Z"
           }
         },
-        "update_index_10000": {
-          "test_name": "update_index",
-          "table_size": 10000,
-          "engines": {
-            "vibesql": {
-              "mean_us": 1424.4,
-              "std_dev_us": null
-            }
+        "update_index": {
+          "name": "Update Index",
+          "description": "Update indexed column (k = k + 1)",
+          "latest": {
+            "vibesql_ms": 1.424,
+            "sqlite_ms": null,
+            "duckdb_ms": null,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:35:29.933875Z"
           }
         },
-        "update_non_index_10000": {
-          "test_name": "update_non_index",
-          "table_size": 10000,
-          "engines": {
-            "vibesql": {
-              "mean_us": 1426.8,
-              "std_dev_us": null
-            }
+        "update_non_index": {
+          "name": "Update Non-Index",
+          "description": "Update non-indexed column",
+          "latest": {
+            "vibesql_ms": 1.427,
+            "sqlite_ms": null,
+            "duckdb_ms": null,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:35:29.933875Z"
           }
         },
-        "write_only_10000": {
-          "test_name": "write_only",
-          "table_size": 10000,
-          "engines": {
-            "vibesql": {
-              "mean_us": 4361.6,
-              "std_dev_us": null
-            }
+        "delete": {
+          "name": "Delete",
+          "description": "Remove rows by primary key",
+          "latest": {
+            "vibesql_ms": 2.415,
+            "sqlite_ms": null,
+            "duckdb_ms": 1.186,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:35:29.933875Z"
           }
         },
-        "read_write_10000": {
-          "test_name": "read_write",
-          "table_size": 10000,
-          "engines": {
-            "vibesql": {
-              "mean_us": 2345.8,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 1303.0,
-              "std_dev_us": null
-            }
+        "read_write": {
+          "name": "Read/Write Mix",
+          "description": "Mixed read and write operations",
+          "latest": {
+            "vibesql_ms": 2.346,
+            "sqlite_ms": null,
+            "duckdb_ms": 1.303,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:35:29.933875Z"
           }
         },
-        "oltp_read_only_10000": {
-          "test_name": "oltp_read_only",
-          "table_size": 10000,
-          "engines": {
-            "vibesql": {
-              "mean_us": 3909.4,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 1867.7,
-              "std_dev_us": null
-            }
+        "oltp_read_only": {
+          "name": "OLTP Read-Only",
+          "description": "Read-only transaction workload",
+          "latest": {
+            "vibesql_ms": 3.909,
+            "sqlite_ms": null,
+            "duckdb_ms": 1.868,
+            "status": "passed",
+            "timestamp": "2025-11-30T20:35:29.933875Z"
           }
         }
       }
