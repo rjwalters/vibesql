@@ -475,7 +475,12 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
         }
     }
 
-    /// Execute Order-Status transaction using the public lookup_by_index API
+    /// Execute Order-Status transaction using direct index API
+    ///
+    /// This optimization replaces the SQL query for order lookup with direct index API:
+    /// 1. Customer by ID: Uses direct index lookup via `idx_customer_pk` (60% of cases)
+    /// 2. Customer by last name: Falls back to SQL (40% of cases)
+    /// 3. Order lookup: Uses `idx_orders_customer` index with direct API to find max o_id
     pub fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
         use vibesql_types::SqlValue;
         let start = Instant::now();
@@ -504,18 +509,41 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
             }
         }
 
-        // Get last order for customer - requires ORDER BY, use SQL
+        // Get last order for customer using direct index API
+        // Index: idx_orders_customer on orders(O_W_ID, O_D_ID, O_C_ID)
         let c_id = input.c_id.unwrap_or(1);
-        let o_query = format!(
-            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = {} AND o_d_id = {} AND o_c_id = {} ORDER BY o_id DESC LIMIT 1",
-            input.w_id, input.d_id, c_id
-        );
-        if let Err(e) = execute_query(self.db, &o_query) {
-            return TransactionResult {
-                success: false,
-                duration_us: start.elapsed().as_micros() as u64,
-                error: Some(format!("Order query failed: {}", e)),
-            };
+        let order_key = [
+            SqlValue::Integer(input.w_id as i64),
+            SqlValue::Integer(input.d_id as i64),
+            SqlValue::Integer(c_id as i64),
+        ];
+
+        // Lookup all orders for this customer and find the one with max o_id
+        match self.db.lookup_by_index("idx_orders_customer", &order_key) {
+            Ok(Some(orders)) => {
+                // Find the order with maximum o_id (column 0)
+                let _max_order = orders.iter().max_by_key(|row| {
+                    match row.values.get(0) {
+                        Some(SqlValue::Integer(o_id)) => *o_id,
+                        _ => i64::MIN,
+                    }
+                });
+                // Order found - we just needed to verify it exists
+            }
+            Ok(None) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some("No orders found for customer".to_string()),
+                };
+            }
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Order lookup failed: {}", e)),
+                };
+            }
         }
 
         TransactionResult {
