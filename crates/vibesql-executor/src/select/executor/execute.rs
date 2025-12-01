@@ -62,6 +62,17 @@ impl SelectExecutor<'_> {
             });
         }
 
+        // Fast path for simple point-lookup queries (TPC-C optimization)
+        // This bypasses expensive optimizer passes for queries like:
+        // SELECT col FROM table WHERE pk = value
+        if self.subquery_depth == 0
+            && self.outer_row.is_none()
+            && self.cte_context.is_none()
+            && super::fast_path::is_simple_point_query(stmt)
+        {
+            return self.execute_fast_path(stmt);
+        }
+
         #[cfg(feature = "profile-q6")]
         let setup_time = execute_start.elapsed();
 
