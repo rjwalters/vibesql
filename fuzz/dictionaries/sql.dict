@@ -1,0 +1,448 @@
+# SQL Keywords dictionary for libfuzzer
+# Generated from vibesql_parser keywords
+
+# Core SQL keywords
+"SELECT"
+"DISTINCT"
+"FROM"
+"WHERE"
+"INSERT"
+"INTO"
+"REPLACE"
+"IGNORE"
+"UPDATE"
+"DELETE"
+"DUPLICATE"
+"CREATE"
+"TABLE"
+"TRUNCATE"
+"DROP"
+"ALTER"
+
+# Boolean operators
+"AND"
+"OR"
+"NOT"
+
+# Literals
+"NULL"
+"TRUE"
+"FALSE"
+
+# Aliases
+"AS"
+
+# JOIN keywords
+"JOIN"
+"LEFT"
+"RIGHT"
+"INNER"
+"OUTER"
+"CROSS"
+"FULL"
+"NATURAL"
+"ON"
+
+# GROUP BY / ORDER BY
+"GROUP"
+"BY"
+"ROLLUP"
+"CUBE"
+"SETS"
+"GROUPING"
+"GROUPING_ID"
+"HAVING"
+"ORDER"
+"ASC"
+"DESC"
+"LIMIT"
+"OFFSET"
+
+# Set operations
+"SET"
+"VALUES"
+"IN"
+"BETWEEN"
+"ASYMMETRIC"
+"SYMMETRIC"
+"LIKE"
+"EXISTS"
+"IF"
+"ALL"
+"ANY"
+"SOME"
+"UNION"
+"INTERSECT"
+"EXCEPT"
+
+# CTEs
+"WITH"
+"RECURSIVE"
+
+# Temporal types
+"DATE"
+"TIME"
+"TIMESTAMP"
+"INTERVAL"
+
+# Type casting
+"CAST"
+
+# CASE expression
+"CASE"
+"WHEN"
+"THEN"
+"ELSE"
+"END"
+
+# Window functions
+"OVER"
+"PARTITION"
+"ROWS"
+"RANGE"
+"PRECEDING"
+"FOLLOWING"
+"UNBOUNDED"
+"CURRENT"
+
+# Constraints
+"PRIMARY"
+"FOREIGN"
+"KEY"
+"UNIQUE"
+"CHECK"
+"REFERENCES"
+"IS"
+
+# Transactions
+"BEGIN"
+"COMMIT"
+"ROLLBACK"
+"CASCADE"
+"RESTRICT"
+"SCHEMA"
+"START"
+"TRANSACTION"
+
+# ALTER TABLE
+"ADD"
+"COLUMN"
+"CONSTRAINT"
+"DEFAULT"
+"RENAME"
+"MODIFY"
+"CHANGE"
+
+# Savepoints
+"SAVEPOINT"
+"RELEASE"
+"TO"
+
+# Roles
+"ROLE"
+
+# TRIM function
+"BOTH"
+"LEADING"
+"TRAILING"
+
+# MySQL operators
+"DIV"
+
+# Data types
+"VARYING"
+"CHARACTERS"
+"OCTETS"
+"USING"
+
+# SUBSTRING
+"FOR"
+
+# Current date/time
+"CURRENT_DATE"
+"CURRENT_TIME"
+"CURRENT_TIMESTAMP"
+
+# Privileges
+"GRANT"
+"PRIVILEGES"
+"USAGE"
+"OPTION"
+"REVOKE"
+"GRANTED"
+"EXECUTE"
+"TRIGGER"
+"UNDER"
+
+# Advanced objects
+"DOMAIN"
+"SEQUENCE"
+"TYPE"
+"COLLATION"
+"CHARACTER"
+"TRANSLATION"
+"VIEW"
+"INDEX"
+"ANALYZE"
+"REINDEX"
+"ASSERTION"
+"SPECIFIC"
+
+# Trigger keywords
+"BEFORE"
+"AFTER"
+"INSTEAD"
+"OF"
+"EACH"
+"ROW"
+"STATEMENT"
+"ENABLE"
+"DISABLE"
+
+# Sequence keywords
+"INCREMENT"
+"MINVALUE"
+"MAXVALUE"
+"CYCLE"
+"NO"
+"RESTART"
+"NEXT"
+
+# Referential actions
+"ACTION"
+
+# Session config
+"CATALOG"
+"NAMES"
+"ZONE"
+"LOCAL"
+"SESSION"
+"GLOBAL"
+
+# Interval units
+"YEAR"
+"QUARTER"
+"MONTH"
+"WEEK"
+"DAY"
+"HOUR"
+"MINUTE"
+"SECOND"
+"MICROSECOND"
+
+# Callable objects
+"FUNCTION"
+"PROCEDURE"
+"CALL"
+"ROUTINE"
+"METHOD"
+"CONSTRUCTOR"
+"STATIC"
+"INSTANCE"
+
+# Parameter modes
+"OUT"
+"INOUT"
+
+# Procedure keywords
+"RETURNS"
+"WHILE"
+"DO"
+"LOOP"
+"REPEAT"
+"UNTIL"
+"RETURN"
+"LEAVE"
+"ITERATE"
+
+# Procedure characteristics
+"DETERMINISTIC"
+"LANGUAGE"
+"SQL"
+"SECURITY"
+"DEFINER"
+"INVOKER"
+
+# Internationalization
+"GET"
+"PAD"
+"SPACE"
+"COLLATE"
+
+# Cursor keywords
+"DECLARE"
+"CURSOR"
+"INSENSITIVE"
+"SCROLL"
+"HOLD"
+"WITHOUT"
+"READ"
+"ONLY"
+"OIDS"
+"OPEN"
+"FETCH"
+"CLOSE"
+"PRIOR"
+"FIRST"
+"LAST"
+"ABSOLUTE"
+"RELATIVE"
+"SERIALIZABLE"
+"ISOLATION"
+"LEVEL"
+"WRITE"
+"COMMENT"
+
+# MySQL table options
+"KEY_BLOCK_SIZE"
+"CONNECTION"
+"INSERT_METHOD"
+"ROW_FORMAT"
+"DELAY_KEY_WRITE"
+"TABLE_CHECKSUM"
+"CHECKSUM"
+"STATS_SAMPLE_PAGES"
+"PASSWORD"
+"AVG_ROW_LENGTH"
+"MIN_ROWS"
+"MAX_ROWS"
+"SECONDARY_ENGINE"
+
+# Row format values
+"DYNAMIC"
+"FIXED"
+"COMPRESSED"
+"REDUNDANT"
+"COMPACT"
+
+# Full-text search
+"FULLTEXT"
+"MATCH"
+"AGAINST"
+"BOOLEAN"
+"EXPANSION"
+"MODE"
+"QUERY"
+
+# Spatial
+"SPATIAL"
+
+# Introspection
+"SHOW"
+"DESCRIBE"
+"DATABASES"
+"TABLES"
+"COLUMNS"
+"FIELDS"
+"INDEXES"
+"KEYS"
+
+# Auto increment
+"AUTO_INCREMENT"
+"AUTOINCREMENT"
+
+# Temporary
+"TEMP"
+"TEMPORARY"
+
+# VibeSQL storage
+"STORAGE"
+"COLUMNAR"
+
+# Data types
+"INTEGER"
+"INT"
+"SMALLINT"
+"BIGINT"
+"TINYINT"
+"FLOAT"
+"REAL"
+"DOUBLE"
+"DECIMAL"
+"NUMERIC"
+"VARCHAR"
+"CHAR"
+"TEXT"
+"BLOB"
+"BOOLEAN"
+"BOOL"
+"BINARY"
+"VARBINARY"
+
+# Common operators and punctuation
+"="
+"!="
+"<>"
+"<"
+">"
+"<="
+">="
+"+"
+"-"
+"*"
+"/"
+"%"
+"||"
+"("
+")"
+","
+";"
+"."
+"'"
+"\""
+"`"
+
+# Common functions
+"COUNT"
+"SUM"
+"AVG"
+"MIN"
+"MAX"
+"COALESCE"
+"NULLIF"
+"ABS"
+"ROUND"
+"FLOOR"
+"CEIL"
+"CEILING"
+"LENGTH"
+"UPPER"
+"LOWER"
+"TRIM"
+"LTRIM"
+"RTRIM"
+"SUBSTRING"
+"CONCAT"
+"REPLACE"
+"NOW"
+"EXTRACT"
+"DATE_ADD"
+"DATE_SUB"
+"DATEDIFF"
+"ROW_NUMBER"
+"RANK"
+"DENSE_RANK"
+"NTILE"
+"LAG"
+"LEAD"
+"FIRST_VALUE"
+"LAST_VALUE"
+"NTH_VALUE"
+
+# Numeric literals
+"0"
+"1"
+"-1"
+"123"
+"0.5"
+"3.14159"
+"-99.99"
+"1e10"
+"1E-5"
+
+# String literals
+"''"
+"'test'"
+"'hello world'"
+"'\\''"
+"\"test\""

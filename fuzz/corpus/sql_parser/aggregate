@@ -1,0 +1,1 @@
+SELECT COUNT(*), SUM(a) FROM t GROUP BY b
