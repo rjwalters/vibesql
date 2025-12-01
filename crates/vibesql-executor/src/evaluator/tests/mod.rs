@@ -1,6 +1,9 @@
 // CSE tests
 mod cse_tests;
 
+// Compiled CASE expression tests
+mod compiled_case_tests;
+
 // Evaluator tests
 mod evaluator_tests {
     use vibesql_catalog::{ColumnSchema, TableSchema};
