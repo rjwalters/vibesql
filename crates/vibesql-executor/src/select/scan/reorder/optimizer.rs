@@ -241,6 +241,16 @@ where
                 if references_new_table && references_joined_table {
                     applicable_conditions.push(condition.clone());
                     applied_conditions.insert(idx);
+                } else if column_to_table.is_empty() && joined_tables.len() == 1 && referenced_tables.is_empty() {
+                    // CTE fallback: When column_to_table is empty (CTE results), we can't resolve
+                    // table references, but if the condition was already extracted as a WHERE equijoin
+                    // for exactly these two tables, it must be applicable.
+                    // This enables hash join for patterns like `d_week_seq1 = d_week_seq2 - 53` in TPC-DS Q2.
+                    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!("[JOIN_REORDER] CTE fallback: including condition for 2-table join: {:?}", condition);
+                    }
+                    applicable_conditions.push(condition.clone());
+                    applied_conditions.insert(idx);
                 }
             }
 

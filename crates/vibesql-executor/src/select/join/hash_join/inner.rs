@@ -4,6 +4,7 @@ use super::{combine_rows, FromResult};
 use super::build::{CompositeKey, build_hash_table_composite_parallel, build_hash_table_parallel};
 use super::columnar::{hash_join_indices_columnar, hash_join_indices_columnar_multi};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
+use crate::select::join::join_analyzer::KeyAdjustment;
 
 // Note: Memory limit checking removed from hash join.
 // Hash join uses O(smaller_table) memory for the hash table, not O(result_size).
@@ -120,6 +121,139 @@ pub(in crate::select::join) fn hash_join_inner(
     }
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
+}
+
+/// Adjusted hash join for expressions like `col1 = col2 +/- constant`
+///
+/// This enables hash join for queries like TPC-DS Q2 where the join condition is:
+///   `d_week_seq1 = d_week_seq2 - 53`
+///
+/// Instead of doing a full Cartesian product and filtering, we:
+/// 1. Build: Compute `col2 +/- constant` and insert into hash table
+/// 2. Probe: Lookup `col1` directly
+///
+/// This reduces O(n*m) to O(n+m) for such joins.
+pub(in crate::select::join) fn hash_join_inner_adjusted(
+    left: FromResult,
+    right: FromResult,
+    left_col_idx: usize,
+    right_col_idx: usize,
+    right_adjustment: &KeyAdjustment,
+) -> Result<FromResult, ExecutorError> {
+    // Extract right table name and schema for combining
+    let right_table_name = right
+        .schema
+        .table_schemas
+        .keys()
+        .next()
+        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
+        .clone();
+
+    let right_schema = right
+        .schema
+        .table_schemas
+        .get(&right_table_name)
+        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
+        .1
+        .clone();
+
+    // Combine schemas
+    let combined_schema =
+        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+
+    // Use as_slice() for zero-cost access
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
+    // For adjusted joins, we always build on the right side (the one with adjustment)
+    // and probe with the left side (simple column reference)
+    let build_rows = right_slice;
+    let probe_rows = left_slice;
+    let build_col_idx = right_col_idx;
+    let probe_col_idx = left_col_idx;
+
+    // Build hash table with adjusted keys
+    use std::collections::HashMap;
+    let mut hash_table: HashMap<vibesql_types::SqlValue, Vec<usize>> =
+        HashMap::with_capacity(build_rows.len());
+
+    for (idx, row) in build_rows.iter().enumerate() {
+        let original_key = &row.values[build_col_idx];
+
+        // Apply adjustment to get the hash key
+        let adjusted_key = apply_key_adjustment(original_key, right_adjustment);
+
+        // Skip NULL values
+        if adjusted_key == vibesql_types::SqlValue::Null {
+            continue;
+        }
+
+        hash_table.entry(adjusted_key).or_default().push(idx);
+    }
+
+    // Probe phase: Lookup with left column values directly
+    let estimated_capacity = probe_rows.len().saturating_mul(2).min(100_000);
+    let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(estimated_capacity);
+
+    for (probe_idx, probe_row) in probe_rows.iter().enumerate() {
+        let key = &probe_row.values[probe_col_idx];
+
+        // Skip NULL values
+        if key == &vibesql_types::SqlValue::Null {
+            continue;
+        }
+
+        if let Some(build_indices) = hash_table.get(key) {
+            for &build_idx in build_indices {
+                pairs.push((build_idx, probe_idx));
+            }
+        }
+    }
+
+    // Materialization phase: Create combined rows
+    // For adjusted join, left is always probe, right is always build
+    let mut result_rows = Vec::with_capacity(pairs.len());
+    for (build_idx, probe_idx) in pairs {
+        // Left (probe) first, then right (build)
+        let combined_row = combine_rows(&probe_rows[probe_idx], &build_rows[build_idx]);
+        result_rows.push(combined_row);
+    }
+
+    Ok(FromResult::from_rows(combined_schema, result_rows))
+}
+
+/// Apply key adjustment for adjusted hash join
+fn apply_key_adjustment(
+    value: &vibesql_types::SqlValue,
+    adjustment: &KeyAdjustment,
+) -> vibesql_types::SqlValue {
+    match adjustment {
+        KeyAdjustment::None => value.clone(),
+        KeyAdjustment::AddInteger(n) => {
+            match value {
+                vibesql_types::SqlValue::Integer(v) => {
+                    vibesql_types::SqlValue::Integer(v.saturating_add(*n))
+                }
+                vibesql_types::SqlValue::Bigint(v) => {
+                    vibesql_types::SqlValue::Bigint(v.saturating_add(*n))
+                }
+                // For non-integer types, return NULL to skip
+                _ => vibesql_types::SqlValue::Null,
+            }
+        }
+        KeyAdjustment::SubtractInteger(n) => {
+            match value {
+                vibesql_types::SqlValue::Integer(v) => {
+                    vibesql_types::SqlValue::Integer(v.saturating_sub(*n))
+                }
+                vibesql_types::SqlValue::Bigint(v) => {
+                    vibesql_types::SqlValue::Bigint(v.saturating_sub(*n))
+                }
+                // For non-integer types, return NULL to skip
+                _ => vibesql_types::SqlValue::Null,
+            }
+        }
+    }
 }
 
 /// Multi-column hash join INNER JOIN implementation

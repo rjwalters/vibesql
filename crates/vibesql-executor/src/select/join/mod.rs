@@ -21,7 +21,7 @@ mod tests;
 
 // Re-export join reorder analyzer for public tests
 // Re-export hash_join functions for internal use
-use hash_join::{hash_join_inner, hash_join_inner_multi, hash_join_left_outer};
+use hash_join::{hash_join_inner, hash_join_inner_multi, hash_join_inner_adjusted, hash_join_left_outer};
 use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 use hash_anti_join::{hash_anti_join, hash_anti_join_with_filter};
 // Re-export hash join iterator for public use
@@ -290,8 +290,15 @@ pub(super) fn nested_loop_join(
     additional_equijoins: &[vibesql_ast::Expression],
     timeout_ctx: &TimeoutContext,
 ) -> Result<FromResult, ExecutorError> {
-    // Try to use hash join for INNER JOINs with simple equi-join conditions
-    if let vibesql_ast::JoinType::Inner = join_type {
+    // Try to use hash join for INNER JOINs with simple equi-join conditions,
+    // or CROSS JOINs (comma joins) with equi-join predicates in WHERE clause.
+    // This optimization is critical for queries like TPC-DS Q2 which use:
+    //   FROM wscs, date_dim WHERE d_date_sk = sold_date_sk
+    // Without this, such queries use O(n*m) nested loop instead of O(n+m) hash join.
+    let use_hash_join = matches!(join_type, vibesql_ast::JoinType::Inner)
+        || (matches!(join_type, vibesql_ast::JoinType::Cross) && !additional_equijoins.is_empty());
+
+    if use_hash_join {
         // Get column count and right table info once for analysis
         // IMPORTANT: Sum up columns from ALL tables in the left schema,
         // not just the first table, to handle accumulated multi-table joins
@@ -535,6 +542,71 @@ pub(super) fn nested_loop_join(
                 }
 
                 return Ok(result);
+            }
+        }
+
+        // Phase 3.2: Try adjusted equi-joins (col = col +/- constant patterns)
+        // This enables hash join for TPC-DS Q2 style queries with temporal offsets
+        for (idx, equijoin) in additional_equijoins.iter().enumerate() {
+            if let Some(adj_info) =
+                join_analyzer::analyze_adjusted_equi_join(equijoin, &temp_schema, left_col_count)
+            {
+                // Only use adjusted hash join if there's actually an adjustment
+                if !matches!(adj_info.right_adjustment, join_analyzer::KeyAdjustment::None) {
+                    // Save schemas for NATURAL JOIN processing before moving left/right
+                    let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
+
+                    // Found an adjusted equijoin suitable for hash join!
+                    let mut result = hash_join_inner_adjusted(
+                        left,
+                        right,
+                        adj_info.left_col_idx,
+                        adj_info.right_col_idx,
+                        &adj_info.right_adjustment,
+                    )?;
+
+                    // Apply remaining equijoins and conditions as post-join filters
+                    let remaining_conditions: Vec<_> = additional_equijoins
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i != idx)
+                        .map(|(_, e)| e.clone())
+                        .collect();
+
+                    if !remaining_conditions.is_empty() {
+                        if let Some(filter_expr) = combine_with_and(remaining_conditions) {
+                            result = apply_post_join_filter(result, &filter_expr, database)?;
+                        }
+                    }
+
+                    // For NATURAL JOIN, remove duplicate columns from the result
+                    if natural {
+                        if let (Some(left_schema), Some(right_schema_orig)) =
+                            (left_schema_for_natural, right_schema_for_natural)
+                        {
+                            let right_schema_for_removal = CombinedSchema {
+                                table_schemas: vec![(
+                                    right_table_name_for_natural.clone(),
+                                    (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                )]
+                                .into_iter()
+                                .collect(),
+                                total_columns: right_schema_orig.total_columns,
+                            };
+                            result = remove_duplicate_columns_for_natural_join(
+                                result,
+                                &left_schema,
+                                &right_schema_for_removal,
+                            )?;
+                        }
+                    }
+
+                    return Ok(result);
+                }
             }
         }
     }

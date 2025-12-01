@@ -58,9 +58,10 @@ pub(crate) fn execute_table_scan(
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
-            // Must clone rows for filtering (copy-on-write semantics)
-            let rows = apply_table_local_predicates(
-                cte_rows.as_ref().clone(),
+            // Use zero-copy filtering: only clone rows that pass the filter
+            // This avoids O(n) deep cloning when most rows are filtered out
+            let rows = apply_table_local_predicates_ref(
+                cte_rows.as_ref(),
                 schema.clone(),
                 &predicate_plan,
                 table_name,

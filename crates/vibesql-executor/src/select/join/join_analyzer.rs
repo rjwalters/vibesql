@@ -37,6 +37,34 @@ pub struct MultiColumnEquiJoinInfo {
     pub right_col_indices: Vec<usize>,
 }
 
+/// Adjustment to apply during hash join for expressions like `col = col +/- constant`
+#[derive(Debug, Clone)]
+pub enum KeyAdjustment {
+    /// No adjustment needed (simple `col = col`)
+    None,
+    /// Add a constant to the key (for `col = other_col - N`, we add N to other_col)
+    AddInteger(i64),
+    /// Subtract a constant from the key (for `col = other_col + N`, we subtract N from other_col)
+    SubtractInteger(i64),
+}
+
+/// Information about an adjusted equi-join condition
+///
+/// Extends EquiJoinInfo to support expressions like:
+/// - `col1 = col2 + 53` (adjust by subtracting 53 from col2)
+/// - `col1 = col2 - 53` (adjust by adding 53 to col2)
+///
+/// This enables hash join for TPC-DS Q2 and similar queries.
+#[derive(Debug, Clone)]
+pub struct AdjustedEquiJoinInfo {
+    /// Column index in the left table
+    pub left_col_idx: usize,
+    /// Column index in the right table
+    pub right_col_idx: usize,
+    /// Adjustment to apply to the right column value during hash table build
+    pub right_adjustment: KeyAdjustment,
+}
+
 /// Analyze a join condition to detect if it's a simple equi-join
 ///
 /// Returns Some(EquiJoinInfo) if the condition is a simple equi-join like:
@@ -83,6 +111,184 @@ fn analyze_single_equi_join(
                 }
             }
             None
+        }
+        _ => None,
+    }
+}
+
+/// Analyze an equality expression for adjusted equi-join (col = col +/- constant)
+///
+/// Handles patterns like:
+/// - `col1 = col2 + 53` → adjust by subtracting 53 from col2
+/// - `col1 = col2 - 53` → adjust by adding 53 to col2
+///
+/// This enables hash join for TPC-DS Q2 and similar queries with temporal offsets.
+pub fn analyze_adjusted_equi_join(
+    condition: &Expression,
+    schema: &CombinedSchema,
+    left_column_count: usize,
+) -> Option<AdjustedEquiJoinInfo> {
+    let debug = std::env::var("ADJ_JOIN_DEBUG").is_ok();
+    if debug {
+        eprintln!("[ADJ_JOIN_DEBUG] Analyzing condition: {:?}", condition);
+        eprintln!("[ADJ_JOIN_DEBUG] Schema tables: {:?}", schema.table_schemas.keys().collect::<Vec<_>>());
+        eprintln!("[ADJ_JOIN_DEBUG] Left column count: {}", left_column_count);
+    }
+
+    // First try simple equi-join (no adjustment)
+    if let Some(simple) = analyze_single_equi_join(condition, schema, left_column_count) {
+        if debug {
+            eprintln!("[ADJ_JOIN_DEBUG] Found simple equi-join: left={}, right={}", simple.left_col_idx, simple.right_col_idx);
+        }
+        return Some(AdjustedEquiJoinInfo {
+            left_col_idx: simple.left_col_idx,
+            right_col_idx: simple.right_col_idx,
+            right_adjustment: KeyAdjustment::None,
+        });
+    }
+
+    // Try to match patterns like `col = col +/- constant`
+    match condition {
+        Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
+            if debug {
+                eprintln!("[ADJ_JOIN_DEBUG] Trying adjusted equi-join: left={:?}, right={:?}", left, right);
+            }
+            // Try both orderings: col = expr and expr = col
+            if let Some(result) = try_adjusted_equi_join(left, right, schema, left_column_count) {
+                if debug {
+                    eprintln!("[ADJ_JOIN_DEBUG] SUCCESS with left-right ordering: {:?}", result);
+                }
+                return Some(result);
+            }
+            if let Some(result) = try_adjusted_equi_join(right, left, schema, left_column_count) {
+                if debug {
+                    eprintln!("[ADJ_JOIN_DEBUG] SUCCESS with right-left ordering: {:?}", result);
+                }
+                return Some(result);
+            }
+            if debug {
+                eprintln!("[ADJ_JOIN_DEBUG] No adjusted equi-join found");
+            }
+            None
+        }
+        _ => {
+            if debug {
+                eprintln!("[ADJ_JOIN_DEBUG] Not a BinaryOp::Equal expression");
+            }
+            None
+        }
+    }
+}
+
+/// Helper to try matching `simple_col = col +/- constant`
+fn try_adjusted_equi_join(
+    simple_side: &Expression,
+    adjusted_side: &Expression,
+    schema: &CombinedSchema,
+    left_column_count: usize,
+) -> Option<AdjustedEquiJoinInfo> {
+    let debug = std::env::var("ADJ_JOIN_DEBUG").is_ok();
+
+    // Check if simple_side is a plain column reference
+    let simple_col_idx = extract_column_index(simple_side, schema);
+    if debug {
+        eprintln!("[ADJ_JOIN_DEBUG] try_adjusted: simple_side={:?}, simple_col_idx={:?}", simple_side, simple_col_idx);
+        eprintln!("[ADJ_JOIN_DEBUG]   Schema columns: {:?}",
+            schema.table_schemas.iter()
+                .flat_map(|(t, (_, s))| s.columns.iter().map(move |c| format!("{}.{}", t, c.name)))
+                .collect::<Vec<_>>());
+    }
+    let simple_col_idx = simple_col_idx?;
+
+    // Check if adjusted_side is `col +/- constant`
+    let (adj_col_idx, adjustment) = extract_column_with_constant_adjustment(adjusted_side, schema)?;
+
+    // Check if one is from left table and one is from right table
+    if simple_col_idx < left_column_count && adj_col_idx >= left_column_count {
+        // Simple column from left, adjusted column from right
+        Some(AdjustedEquiJoinInfo {
+            left_col_idx: simple_col_idx,
+            right_col_idx: adj_col_idx - left_column_count,
+            right_adjustment: adjustment,
+        })
+    } else if adj_col_idx < left_column_count && simple_col_idx >= left_column_count {
+        // Adjusted column from left, simple column from right
+        // We need to swap and invert the adjustment
+        // If left = right + N, then we build on (right + N) and probe with left
+        // But our structure assumes adjustment on right, so we need to handle differently
+        // For simplicity, we only support adjustment on the right side for now
+        None
+    } else {
+        None
+    }
+}
+
+/// Extract a column reference with an integer constant adjustment
+///
+/// Matches patterns like:
+/// - `col + 53` → returns (col_idx, SubtractInteger(53))
+/// - `col - 53` → returns (col_idx, AddInteger(53))
+///
+/// The adjustment is inverted because to make `left_col = right_col - 53` work with hash join,
+/// we need to compute `right_col - 53` during build (which equals adding 53 in the opposite direction).
+fn extract_column_with_constant_adjustment(
+    expr: &Expression,
+    schema: &CombinedSchema,
+) -> Option<(usize, KeyAdjustment)> {
+    match expr {
+        Expression::BinaryOp { op, left, right } => {
+            // Try col +/- constant
+            if let (Some(col_idx), Some(constant)) = (
+                extract_column_index(left, schema),
+                extract_integer_literal(right),
+            ) {
+                match op {
+                    BinaryOperator::Plus => {
+                        // col + N: to match, we subtract N from col
+                        Some((col_idx, KeyAdjustment::SubtractInteger(constant)))
+                    }
+                    BinaryOperator::Minus => {
+                        // col - N: to match, we add N to col
+                        Some((col_idx, KeyAdjustment::AddInteger(constant)))
+                    }
+                    _ => None,
+                }
+            } else if let (Some(constant), Some(col_idx)) = (
+                extract_integer_literal(left),
+                extract_column_index(right, schema),
+            ) {
+                // constant +/- col (less common but supported)
+                match op {
+                    BinaryOperator::Plus => {
+                        // N + col: same as col + N
+                        Some((col_idx, KeyAdjustment::SubtractInteger(constant)))
+                    }
+                    BinaryOperator::Minus => {
+                        // N - col: this would require negation, skip for now
+                        None
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Extract an integer literal from an expression
+fn extract_integer_literal(expr: &Expression) -> Option<i64> {
+    use vibesql_types::SqlValue;
+    match expr {
+        Expression::Literal(SqlValue::Integer(n)) => Some(*n),
+        Expression::Literal(SqlValue::Bigint(n)) => Some(*n),
+        Expression::UnaryOp { op: vibesql_ast::UnaryOperator::Minus, expr } => {
+            match expr.as_ref() {
+                Expression::Literal(SqlValue::Integer(n)) => Some(-n),
+                Expression::Literal(SqlValue::Bigint(n)) => Some(-n),
+                _ => None,
+            }
         }
         _ => None,
     }

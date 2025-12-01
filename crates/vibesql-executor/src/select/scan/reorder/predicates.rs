@@ -112,9 +112,66 @@ pub(super) fn extract_in_predicates_from_or(
     result
 }
 
+/// Check if an expression contains a column reference (possibly nested in arithmetic)
+///
+/// Used for fallback CTE join handling when schema lookup isn't available.
+fn expr_has_column(expr: &Expression) -> bool {
+    match expr {
+        Expression::ColumnRef { .. } => true,
+        Expression::BinaryOp { left, right, .. } => {
+            expr_has_column(left) || expr_has_column(right)
+        }
+        Expression::UnaryOp { expr: inner, .. } => expr_has_column(inner),
+        _ => false,
+    }
+}
+
+/// Extract the table name from an expression
+///
+/// Handles:
+/// - Simple column references: `table.col` or `col`
+/// - Adjusted expressions: `col +/- constant` (for adjusted equi-joins like `d_week_seq1 = d_week_seq2 - 53`)
+fn extract_table_from_expr(
+    expr: &Expression,
+    column_to_table: &HashMap<String, String>,
+) -> Option<String> {
+    match expr {
+        // Simple column reference with explicit table
+        Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
+        // Unqualified column - use schema-based lookup
+        Expression::ColumnRef { table: None, column } => {
+            resolve_column_with_fallback(column, column_to_table)
+        }
+        // Adjusted expression: col +/- constant
+        // This enables hash joins for conditions like `d_week_seq1 = d_week_seq2 - 53`
+        Expression::BinaryOp { op, left, right } => {
+            match op {
+                BinaryOperator::Plus | BinaryOperator::Minus => {
+                    // Check if one side is a column and the other is a literal
+                    let left_is_literal = matches!(left.as_ref(), Expression::Literal(_));
+                    let right_is_literal = matches!(right.as_ref(), Expression::Literal(_));
+
+                    if right_is_literal && !left_is_literal {
+                        // Pattern: col +/- constant
+                        extract_table_from_expr(left, column_to_table)
+                    } else if left_is_literal && !right_is_literal {
+                        // Pattern: constant +/- col (less common but valid)
+                        extract_table_from_expr(right, column_to_table)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Extract equijoin conditions from a WHERE clause expression using schema-based column resolution
 ///
 /// This is the preferred method that uses actual database schema to resolve unqualified columns.
+/// It handles both simple equijoins (col1 = col2) and adjusted equijoins (col1 = col2 +/- constant).
 pub(super) fn extract_where_equijoins_with_schema(
     expr: &Expression,
     tables: &HashSet<String>,
@@ -212,25 +269,14 @@ pub(super) fn extract_where_equijoins_with_schema(
                     equijoins.extend(common_eqs);
                 }
             }
-            // Binary EQUAL: check if it's an equijoin
+            // Binary EQUAL: check if it's an equijoin (simple or adjusted)
             Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
-                // Check if both sides are column references
+                // Check if both sides are column references (simple equijoin)
+                // or if one side is a column and the other is col +/- constant (adjusted equijoin)
                 // Use schema-based lookup
 
-                let left_table = match left.as_ref() {
-                    Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => {
-                        resolve_column_with_fallback(column, column_to_table)
-                    }
-                    _ => None,
-                };
-                let right_table = match right.as_ref() {
-                    Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => {
-                        resolve_column_with_fallback(column, column_to_table)
-                    }
-                    _ => None,
-                };
+                let left_table = extract_table_from_expr(left, column_to_table);
+                let right_table = extract_table_from_expr(right, column_to_table);
 
                 // If both sides reference columns from different tables, it's an equijoin
                 if let (Some(lt), Some(rt)) = (left_table.clone(), right_table.clone()) {
@@ -247,6 +293,19 @@ pub(super) fn extract_where_equijoins_with_schema(
                         }
                     } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                         eprintln!("[JOIN_REORDER]   ✗ Skipped: lt==rt or table not found");
+                    }
+                } else if column_to_table.is_empty() {
+                    // Fallback for CTE joins: if schema is unavailable, check if both sides
+                    // reference columns (possibly with arithmetic). Include the condition and
+                    // let the join executor figure out how to use it.
+                    let left_has_column = expr_has_column(left);
+                    let right_has_column = expr_has_column(right);
+
+                    if left_has_column && right_has_column {
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[JOIN_REORDER] CTE fallback: including unresolved equijoin: {:?}", expr);
+                        }
+                        equijoins.push(expr.clone());
                     }
                 }
             }
