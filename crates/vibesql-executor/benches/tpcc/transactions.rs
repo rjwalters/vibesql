@@ -523,7 +523,7 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
             Ok(Some(orders)) => {
                 // Find the order with maximum o_id (column 0)
                 let _max_order = orders.iter().max_by_key(|row| {
-                    match row.values.get(0) {
+                    match row.values.first() {
                         Some(SqlValue::Integer(o_id)) => *o_id,
                         _ => i64::MIN,
                     }
@@ -677,12 +677,10 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Collect unique item IDs from order_lines (column 4 = ol_i_id)
         let mut unique_item_ids: HashSet<i64> = HashSet::new();
-        for order_lines_opt in &order_line_results {
-            if let Some(order_lines) = order_lines_opt {
-                for row in order_lines {
-                    if let Some(SqlValue::Integer(ol_i_id)) = row.values.get(4) {
-                        unique_item_ids.insert(*ol_i_id);
-                    }
+        for order_lines in order_line_results.iter().flatten() {
+            for row in order_lines {
+                if let Some(SqlValue::Integer(ol_i_id)) = row.values.get(4) {
+                    unique_item_ids.insert(*ol_i_id);
                 }
             }
         }
@@ -711,12 +709,10 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
 
         // Count items with quantity below threshold (column 2 = s_quantity)
         let mut _low_stock_count = 0i64;
-        for stock_row_opt in &stock_results {
-            if let Some(row) = stock_row_opt {
-                if let Some(SqlValue::Integer(s_quantity)) = row.values.get(2) {
-                    if *s_quantity < input.threshold as i64 {
-                        _low_stock_count += 1;
-                    }
+        for row in stock_results.iter().flatten() {
+            if let Some(SqlValue::Integer(s_quantity)) = row.values.get(2) {
+                if *s_quantity < input.threshold as i64 {
+                    _low_stock_count += 1;
                 }
             }
         }

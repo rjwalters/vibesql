@@ -923,7 +923,7 @@ impl TPCEData {
             s_name: format!("{} Common Stock", s_symb),
             s_ex_id: self.rng.pick(&exchanges).to_string(),
             s_co_id: co_id,
-            s_num_out: self.rng.random_int(1_000_000, 1_000_000_000) as i64,
+            s_num_out: self.rng.random_int(1_000_000, 1_000_000_000),
             s_start_date: self.rng.random_date(1980, 2020),
             s_exch_date: self.rng.random_date(1980, 2020),
             s_pe: self.rng.random_decimal(5.0, 50.0, 2),
@@ -944,7 +944,7 @@ impl TPCEData {
             lt_dts: TPCERng::current_timestamp(),
             lt_price: price,
             lt_open_price: price * self.rng.random_float(0.95, 1.05),
-            lt_vol: self.rng.random_int(1000, 10_000_000) as i64,
+            lt_vol: self.rng.random_int(1000, 10_000_000),
         }
     }
 
@@ -953,7 +953,7 @@ impl TPCEData {
         let revenue = self.rng.random_decimal(1_000_000.0, 1_000_000_000.0, 2);
         let margin = self.rng.random_decimal(0.05, 0.30, 4);
         let net_earn = revenue * margin;
-        let shares = self.rng.random_int(10_000_000, 1_000_000_000) as i64;
+        let shares = self.rng.random_int(10_000_000, 1_000_000_000);
 
         Financial {
             fi_co_id: co_id,
