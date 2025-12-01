@@ -531,8 +531,9 @@ fn check_composite_satisfaction(
             right,
         } => {
             let col_name = extract_column_name(left).or_else(|| extract_column_name(right));
-            let has_literal = matches!(left.as_ref(), Expression::Literal(_))
-                || matches!(right.as_ref(), Expression::Literal(_));
+            // Check for non-NULL literals (col = NULL requires special IS NULL handling)
+            let has_non_null_literal = matches!(left.as_ref(), Expression::Literal(val) if !matches!(val, SqlValue::Null))
+                || matches!(right.as_ref(), Expression::Literal(val) if !matches!(val, SqlValue::Null));
 
             if let Some(name) = col_name {
                 let name_upper = name.to_uppercase();
@@ -540,7 +541,7 @@ fn check_composite_satisfaction(
                     .iter()
                     .any(|c| c.to_uppercase() == name_upper);
 
-                if is_index_col && has_literal {
+                if is_index_col && has_non_null_literal {
                     *predicate_count += 1;
                     return true;
                 }
