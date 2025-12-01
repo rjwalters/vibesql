@@ -1061,3 +1061,351 @@ fn test_lookup_by_index_error_cases() {
     let result = db.lookup_by_index_batch("nonexistent_index", &[vec![SqlValue::Integer(1)]]);
     assert!(result.is_err());
 }
+
+// ============================================================================
+// Prefix Index Lookup API Tests (Issue #3195)
+// ============================================================================
+
+#[test]
+fn test_lookup_by_index_prefix_basic() {
+    // Test basic prefix lookup on a multi-column index
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table with 3-column composite key (like TPC-C NEW_ORDER)
+    let columns = vec![
+        ColumnSchema::new("w_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("d_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("o_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("carrier_id".to_string(), DataType::Integer, true),
+    ];
+    let table_schema = TableSchema::new("new_order".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows: warehouse 1, districts 1-3, varying orders
+    let table = db.get_table_mut("new_order").unwrap();
+    // District 1: orders 101, 102
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(101), SqlValue::Null] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(102), SqlValue::Null] }).unwrap();
+    // District 2: orders 201, 202, 203
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(201), SqlValue::Null] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(202), SqlValue::Null] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(203), SqlValue::Null] }).unwrap();
+    // District 3: order 301
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(3), SqlValue::Integer(301), SqlValue::Null] }).unwrap();
+
+    // Create composite index on (w_id, d_id, o_id)
+    db.create_index(
+        "idx_no_pk".to_string(),
+        "new_order".to_string(),
+        true,
+        vec![
+            IndexColumn { column_name: "w_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "d_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "o_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+        ],
+    ).unwrap();
+
+    // Test prefix lookup: find all orders for warehouse 1, district 2
+    let rows = db.lookup_by_index_prefix("idx_no_pk", &[
+        SqlValue::Integer(1),
+        SqlValue::Integer(2),
+    ]).unwrap();
+
+    // Should find 3 rows (orders 201, 202, 203)
+    assert_eq!(rows.len(), 3, "Should find 3 orders for district 2");
+
+    // Verify the order IDs
+    let order_ids: Vec<i64> = rows.iter()
+        .map(|r| match &r.values[2] { SqlValue::Integer(v) => *v, _ => 0 })
+        .collect();
+    assert!(order_ids.contains(&201));
+    assert!(order_ids.contains(&202));
+    assert!(order_ids.contains(&203));
+}
+
+#[test]
+fn test_lookup_by_index_prefix_single_column() {
+    // Test prefix lookup with single-column prefix
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table
+    let columns = vec![
+        ColumnSchema::new("warehouse".to_string(), DataType::Integer, false),
+        ColumnSchema::new("district".to_string(), DataType::Integer, false),
+        ColumnSchema::new("value".to_string(), DataType::Integer, false),
+    ];
+    let table_schema = TableSchema::new("test_data".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("test_data").unwrap();
+    // Warehouse 1: 3 rows
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(200)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(3), SqlValue::Integer(300)] }).unwrap();
+    // Warehouse 2: 2 rows
+    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Integer(400)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(2), SqlValue::Integer(500)] }).unwrap();
+
+    // Create index on (warehouse, district)
+    db.create_index(
+        "idx_wd".to_string(),
+        "test_data".to_string(),
+        false,
+        vec![
+            IndexColumn { column_name: "warehouse".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "district".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+        ],
+    ).unwrap();
+
+    // Test single-column prefix: find all rows for warehouse 1
+    let rows = db.lookup_by_index_prefix("idx_wd", &[SqlValue::Integer(1)]).unwrap();
+    assert_eq!(rows.len(), 3, "Should find 3 rows for warehouse 1");
+
+    // Test single-column prefix: find all rows for warehouse 2
+    let rows = db.lookup_by_index_prefix("idx_wd", &[SqlValue::Integer(2)]).unwrap();
+    assert_eq!(rows.len(), 2, "Should find 2 rows for warehouse 2");
+}
+
+#[test]
+fn test_lookup_by_index_prefix_no_match() {
+    // Test prefix lookup when no rows match
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table
+    let columns = vec![
+        ColumnSchema::new("a".to_string(), DataType::Integer, false),
+        ColumnSchema::new("b".to_string(), DataType::Integer, false),
+    ];
+    let table_schema = TableSchema::new("test_table".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("test_table").unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(10)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(20)] }).unwrap();
+
+    // Create index
+    db.create_index(
+        "idx_ab".to_string(),
+        "test_table".to_string(),
+        false,
+        vec![
+            IndexColumn { column_name: "a".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "b".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+        ],
+    ).unwrap();
+
+    // Test prefix that doesn't match any rows
+    let rows = db.lookup_by_index_prefix("idx_ab", &[SqlValue::Integer(999)]).unwrap();
+    assert!(rows.is_empty(), "Should find no rows for non-existent prefix");
+}
+
+#[test]
+fn test_lookup_by_index_prefix_batch_basic() {
+    // Test batch prefix lookup on a multi-column index
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table (like TPC-C NEW_ORDER)
+    let columns = vec![
+        ColumnSchema::new("w_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("d_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("o_id".to_string(), DataType::Integer, false),
+    ];
+    let table_schema = TableSchema::new("new_order".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows for warehouse 1, all 10 districts
+    let table = db.get_table_mut("new_order").unwrap();
+    for d_id in 1..=10 {
+        // Each district has d_id orders (district 1 has 1 order, district 2 has 2, etc.)
+        for o_id in 1..=d_id {
+            table.insert(Row {
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(d_id as i64),
+                    SqlValue::Integer(o_id as i64 * 100),
+                ],
+            }).unwrap();
+        }
+    }
+
+    // Create composite index
+    db.create_index(
+        "idx_no_pk".to_string(),
+        "new_order".to_string(),
+        true,
+        vec![
+            IndexColumn { column_name: "w_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "d_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "o_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+        ],
+    ).unwrap();
+
+    // Batch prefix lookup: find all orders for districts 1, 5, and 10
+    let prefixes = vec![
+        vec![SqlValue::Integer(1), SqlValue::Integer(1)],  // district 1
+        vec![SqlValue::Integer(1), SqlValue::Integer(5)],  // district 5
+        vec![SqlValue::Integer(1), SqlValue::Integer(10)], // district 10
+    ];
+    let results = db.lookup_by_index_prefix_batch("idx_no_pk", &prefixes).unwrap();
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0].len(), 1, "District 1 should have 1 order");
+    assert_eq!(results[1].len(), 5, "District 5 should have 5 orders");
+    assert_eq!(results[2].len(), 10, "District 10 should have 10 orders");
+}
+
+#[test]
+fn test_lookup_by_index_prefix_batch_tpcc_delivery() {
+    // Test the exact TPC-C Delivery transaction pattern:
+    // Look up all new orders for all 10 districts in a single batch
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create NEW_ORDER table
+    let columns = vec![
+        ColumnSchema::new("no_w_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("no_d_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("no_o_id".to_string(), DataType::Integer, false),
+    ];
+    let table_schema = TableSchema::new("new_order".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert new orders for warehouse 1
+    let table = db.get_table_mut("new_order").unwrap();
+    let w_id = 1;
+    // Each district has some new orders (simulating pending orders)
+    // District 1 has 1 order, district 2 has 2, ..., district 10 has 10
+    for d_id in 1..=10 {
+        for o_id in 2100..(2100 + d_id) {
+            table.insert(Row {
+                values: vec![
+                    SqlValue::Integer(w_id),
+                    SqlValue::Integer(d_id as i64),
+                    SqlValue::Integer(o_id as i64),
+                ],
+            }).unwrap();
+        }
+    }
+
+    // Create composite index (primary key)
+    db.create_index(
+        "idx_new_order_pk".to_string(),
+        "new_order".to_string(),
+        true,
+        vec![
+            IndexColumn { column_name: "no_w_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "no_d_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "no_o_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+        ],
+    ).unwrap();
+
+    // TPC-C Delivery transaction: batch prefix lookup for all 10 districts
+    let prefixes: Vec<Vec<SqlValue>> = (1..=10)
+        .map(|d| vec![SqlValue::Integer(w_id), SqlValue::Integer(d)])
+        .collect();
+
+    let results = db.lookup_by_index_prefix_batch("idx_new_order_pk", &prefixes).unwrap();
+
+    // Verify we got results for all 10 districts
+    assert_eq!(results.len(), 10);
+
+    // Verify each district has the expected number of orders
+    // District 1 has 1 order (2100..2101), district 2 has 2, ..., district 10 has 10
+    for (d_idx, rows) in results.iter().enumerate() {
+        let d_id = d_idx + 1;
+        let expected_orders = d_id;  // District N has N orders
+        assert_eq!(
+            rows.len(),
+            expected_orders,
+            "District {} should have {} new orders",
+            d_id,
+            expected_orders
+        );
+    }
+}
+
+#[test]
+fn test_lookup_by_index_prefix_error_cases() {
+    // Test error handling for prefix lookup
+    use crate::Database;
+
+    let db = Database::new();
+
+    // Test prefix lookup on non-existent index
+    let result = db.lookup_by_index_prefix("nonexistent_index", &[SqlValue::Integer(1)]);
+    assert!(result.is_err());
+
+    // Test batch prefix lookup on non-existent index
+    let result = db.lookup_by_index_prefix_batch("nonexistent_index", &[vec![SqlValue::Integer(1)]]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_lookup_by_index_prefix_empty_prefix() {
+    // Test prefix lookup with empty prefix
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table
+    let columns = vec![
+        ColumnSchema::new("a".to_string(), DataType::Integer, false),
+        ColumnSchema::new("b".to_string(), DataType::Integer, false),
+    ];
+    let table_schema = TableSchema::new("test_table".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("test_table").unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(10)] }).unwrap();
+
+    // Create index
+    db.create_index(
+        "idx_ab".to_string(),
+        "test_table".to_string(),
+        false,
+        vec![
+            IndexColumn { column_name: "a".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "b".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+        ],
+    ).unwrap();
+
+    // Empty prefix should return empty results (by design)
+    let rows = db.lookup_by_index_prefix("idx_ab", &[]).unwrap();
+    assert!(rows.is_empty(), "Empty prefix should return no rows");
+}

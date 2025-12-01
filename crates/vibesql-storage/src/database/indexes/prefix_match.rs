@@ -193,3 +193,478 @@ impl IndexData {
         results
     }
 }
+
+// ============================================================================
+// Unit Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// Helper to create an InMemory IndexData with test data
+    /// Note: Keys are normalized to match how real indexes store data
+    fn create_test_index_data(entries: Vec<(Vec<SqlValue>, Vec<usize>)>) -> IndexData {
+        let mut data = BTreeMap::new();
+        for (key, row_indices) in entries {
+            // Normalize keys like real index insertion does
+            let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
+            data.insert(normalized_key, row_indices);
+        }
+        IndexData::InMemory { data }
+    }
+
+    // ========================================================================
+    // prefix_scan() Tests - InMemory
+    // ========================================================================
+
+    #[test]
+    fn test_prefix_scan_single_column_match() {
+        // Index on (a, b) - look for rows where a=1
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(30)], vec![2]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(10)], vec![3]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(20)], vec![4]),
+        ]);
+
+        // Prefix [1] should match rows 0, 1, 2
+        let results = index.prefix_scan(&[SqlValue::Integer(1)]);
+        assert_eq!(results, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_prefix_scan_two_column_prefix() {
+        // Index on (a, b, c) - look for rows where a=1 AND b=5
+        let index = create_test_index_data(vec![
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(5),
+                    SqlValue::Integer(100),
+                ],
+                vec![0],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(5),
+                    SqlValue::Integer(200),
+                ],
+                vec![1],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(5),
+                    SqlValue::Integer(300),
+                ],
+                vec![2],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(6),
+                    SqlValue::Integer(100),
+                ],
+                vec![3],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Integer(5),
+                    SqlValue::Integer(100),
+                ],
+                vec![4],
+            ),
+        ]);
+
+        // Prefix [1, 5] should match rows 0, 1, 2
+        let results = index.prefix_scan(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
+        assert_eq!(results, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_prefix_scan_exact_match() {
+        // When prefix length equals key length, it's an exact match
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![1]),
+        ]);
+
+        // Exact match [1, 10]
+        let results = index.prefix_scan(&[SqlValue::Integer(1), SqlValue::Integer(10)]);
+        assert_eq!(results, vec![0]);
+    }
+
+    #[test]
+    fn test_prefix_scan_no_match() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(20)], vec![1]),
+        ]);
+
+        // No rows where a=3
+        let results = index.prefix_scan(&[SqlValue::Integer(3)]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_scan_single_row() {
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(10)],
+            vec![0],
+        )]);
+
+        let results = index.prefix_scan(&[SqlValue::Integer(1)]);
+        assert_eq!(results, vec![0]);
+    }
+
+    #[test]
+    fn test_prefix_scan_multiple_rows_per_key() {
+        // Non-unique index: multiple row indices per key
+        let index = create_test_index_data(vec![
+            (
+                vec![SqlValue::Integer(1), SqlValue::Integer(10)],
+                vec![0, 5, 10],
+            ),
+            (
+                vec![SqlValue::Integer(1), SqlValue::Integer(20)],
+                vec![1, 6],
+            ),
+        ]);
+
+        let results = index.prefix_scan(&[SqlValue::Integer(1)]);
+        assert_eq!(results, vec![0, 5, 10, 1, 6]);
+    }
+
+    // ========================================================================
+    // Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_prefix_scan_empty_prefix() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(20)], vec![1]),
+        ]);
+
+        // Empty prefix returns nothing (by design)
+        let results = index.prefix_scan(&[]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_scan_prefix_longer_than_key() {
+        // Index has 2-column keys, but we search with 3-column prefix
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+        ]);
+
+        // Prefix longer than key cannot match
+        let results = index.prefix_scan(&[
+            SqlValue::Integer(1),
+            SqlValue::Integer(10),
+            SqlValue::Integer(100),
+        ]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_scan_empty_index() {
+        let index = create_test_index_data(vec![]);
+
+        let results = index.prefix_scan(&[SqlValue::Integer(1)]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_scan_with_string_keys() {
+        let index = create_test_index_data(vec![
+            (
+                vec![
+                    SqlValue::Varchar("a".to_string()),
+                    SqlValue::Integer(1),
+                ],
+                vec![0],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar("a".to_string()),
+                    SqlValue::Integer(2),
+                ],
+                vec![1],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar("b".to_string()),
+                    SqlValue::Integer(1),
+                ],
+                vec![2],
+            ),
+        ]);
+
+        let results = index.prefix_scan(&[SqlValue::Varchar("a".to_string())]);
+        assert_eq!(results, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_prefix_scan_with_mixed_types() {
+        // Multi-column index with different types
+        let index = create_test_index_data(vec![
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar("x".to_string()),
+                    SqlValue::Boolean(true),
+                ],
+                vec![0],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar("x".to_string()),
+                    SqlValue::Boolean(false),
+                ],
+                vec![1],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar("y".to_string()),
+                    SqlValue::Boolean(true),
+                ],
+                vec![2],
+            ),
+        ]);
+
+        // Match on [1, "x"] - order depends on BTreeMap key ordering (false < true)
+        let results = index.prefix_scan(&[
+            SqlValue::Integer(1),
+            SqlValue::Varchar("x".to_string()),
+        ]);
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&0));
+        assert!(results.contains(&1));
+    }
+
+    #[test]
+    fn test_prefix_scan_numeric_type_normalization() {
+        // Test that different numeric types are normalized correctly
+        // Index uses Integer, but we search with a different numeric type
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Double(1.0), SqlValue::Double(10.0)], vec![0]),
+            (vec![SqlValue::Double(1.0), SqlValue::Double(20.0)], vec![1]),
+            (vec![SqlValue::Double(2.0), SqlValue::Double(10.0)], vec![2]),
+        ]);
+
+        // Search with Integer(1) should match Double(1.0) after normalization
+        let results = index.prefix_scan(&[SqlValue::Integer(1)]);
+        assert_eq!(results, vec![0, 1]);
+    }
+
+    // ========================================================================
+    // prefix_scan_batch() Tests
+    // ========================================================================
+
+    #[test]
+    fn test_prefix_scan_batch_basic() {
+        // Index on (w_id, d_id, o_id) - like TPC-C NEW_ORDER table
+        let index = create_test_index_data(vec![
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(100),
+                ],
+                vec![0],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(101),
+                ],
+                vec![1],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(2),
+                    SqlValue::Integer(100),
+                ],
+                vec![2],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(2),
+                    SqlValue::Integer(101),
+                ],
+                vec![3],
+            ),
+            (
+                vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(3),
+                    SqlValue::Integer(100),
+                ],
+                vec![4],
+            ),
+        ]);
+
+        // Batch lookup for districts 1 and 2
+        let prefixes = vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(1)],
+            vec![SqlValue::Integer(1), SqlValue::Integer(2)],
+        ];
+
+        let results = index.prefix_scan_batch(&prefixes);
+
+        // Should have 2 results (one for each prefix that has matches)
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], (0, vec![0, 1])); // prefix 0 matches rows 0, 1
+        assert_eq!(results[1], (1, vec![2, 3])); // prefix 1 matches rows 2, 3
+    }
+
+    #[test]
+    fn test_prefix_scan_batch_some_empty() {
+        let index = create_test_index_data(vec![
+            (
+                vec![SqlValue::Integer(1), SqlValue::Integer(1)],
+                vec![0],
+            ),
+            (
+                vec![SqlValue::Integer(1), SqlValue::Integer(3)],
+                vec![2],
+            ),
+        ]);
+
+        // Batch lookup - prefix at index 1 has no matches
+        let prefixes = vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(1)],
+            vec![SqlValue::Integer(1), SqlValue::Integer(2)], // No match
+            vec![SqlValue::Integer(1), SqlValue::Integer(3)],
+        ];
+
+        let results = index.prefix_scan_batch(&prefixes);
+
+        // Only prefixes 0 and 2 have matches
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], (0, vec![0]));
+        assert_eq!(results[1], (2, vec![2]));
+    }
+
+    #[test]
+    fn test_prefix_scan_batch_all_empty() {
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(1)],
+            vec![0],
+        )]);
+
+        let prefixes = vec![
+            vec![SqlValue::Integer(2), SqlValue::Integer(1)],
+            vec![SqlValue::Integer(3), SqlValue::Integer(1)],
+        ];
+
+        let results = index.prefix_scan_batch(&prefixes);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_scan_batch_empty_input() {
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(1)],
+            vec![0],
+        )]);
+
+        let results = index.prefix_scan_batch(&[]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_scan_batch_tpcc_like() {
+        // Simulate TPC-C Delivery transaction: lookup all districts for a warehouse
+        // Index: (NO_W_ID, NO_D_ID, NO_O_ID)
+        let mut entries = Vec::new();
+        let w_id = 1;
+
+        // Create data for 10 districts, each with varying number of new orders
+        for d_id in 1..=10 {
+            for o_id in 1..=(d_id * 2) {
+                // District 1 has 2 orders, district 2 has 4, etc.
+                let key = vec![
+                    SqlValue::Integer(w_id),
+                    SqlValue::Integer(d_id),
+                    SqlValue::Integer(o_id),
+                ];
+                entries.push((key, vec![((d_id - 1) * 10 + o_id - 1) as usize]));
+            }
+        }
+
+        let index = create_test_index_data(entries);
+
+        // Batch prefix lookup for all 10 districts
+        let prefixes: Vec<Vec<SqlValue>> = (1..=10)
+            .map(|d| vec![SqlValue::Integer(w_id), SqlValue::Integer(d)])
+            .collect();
+
+        let results = index.prefix_scan_batch(&prefixes);
+
+        // All 10 districts should have matches
+        assert_eq!(results.len(), 10);
+
+        // Verify each district has the expected number of rows
+        for (idx, rows) in &results {
+            let d_id = *idx as i64 + 1;
+            let expected_count = (d_id * 2) as usize;
+            assert_eq!(rows.len(), expected_count, "District {} should have {} orders", d_id, expected_count);
+        }
+    }
+
+    // ========================================================================
+    // prefix_multi_lookup() Tests
+    // ========================================================================
+
+    #[test]
+    fn test_prefix_multi_lookup_basic() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![1]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(10)], vec![2]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(20)], vec![3]),
+            (vec![SqlValue::Integer(3), SqlValue::Integer(10)], vec![4]),
+        ]);
+
+        // Look up a=1 OR a=2
+        let results = index.prefix_multi_lookup(&[SqlValue::Integer(1), SqlValue::Integer(2)]);
+
+        // Should find rows 0, 1 (a=1) and 2, 3 (a=2)
+        assert_eq!(results.len(), 4);
+        assert!(results.contains(&0));
+        assert!(results.contains(&1));
+        assert!(results.contains(&2));
+        assert!(results.contains(&3));
+    }
+
+    #[test]
+    fn test_prefix_multi_lookup_with_duplicates() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(20)], vec![1]),
+        ]);
+
+        // Duplicates in input should be deduplicated
+        let results = index.prefix_multi_lookup(&[
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+        ]);
+
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&0));
+        assert!(results.contains(&1));
+    }
+}
