@@ -8,8 +8,10 @@ use vibesql_storage::{Database, Row};
 use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema};
 
 use super::predicate::{
-    extract_composite_predicates_with_in, extract_index_predicate, generate_composite_keys,
+    build_residual_where_clause, extract_composite_predicates_with_in, extract_index_predicate,
+    extract_prefix_equality_predicates, generate_composite_keys,
     where_clause_fully_satisfied_by_composite_key, CompositePredicateType, IndexPredicate,
+    PrefixPredicateResult,
 };
 
 /// Execute an index scan
@@ -83,31 +85,67 @@ pub(crate) fn execute_index_scan(
     // Determine if we can use composite key point lookup
     let use_composite_lookup = composite_keys.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
 
-    // Fall back to single-column predicate extraction if composite key not available
-    let index_predicate = if use_composite_lookup {
-        None // Don't need single-column predicate - using composite key
+    // Try prefix lookup if full composite key not available (for partial prefix matches)
+    // This handles queries like: WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100
+    // where only c_w_id and c_d_id are in the index
+    let prefix_result: Option<PrefixPredicateResult> = if !use_composite_lookup && is_multi_column_index {
+        where_clause.and_then(|expr| extract_prefix_equality_predicates(expr, &index_column_names))
+    } else {
+        None
+    };
+
+    // Check if we're using prefix lookup (partial composite key match)
+    let use_prefix_lookup = prefix_result.is_some() && !use_composite_lookup;
+
+    // Fall back to single-column predicate extraction if neither composite nor prefix available
+    let index_predicate = if use_composite_lookup || use_prefix_lookup {
+        None // Don't need single-column predicate - using composite/prefix key
     } else {
         where_clause.and_then(|expr| extract_index_predicate(expr, first_indexed_column))
     };
 
+    // Build residual WHERE clause for prefix lookups
+    // This contains only the predicates NOT covered by the index prefix
+    let residual_where = if let Some(ref prefix) = prefix_result {
+        if let Some(where_expr) = where_clause {
+            build_residual_where_clause(where_expr, &prefix.covered_columns)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Performance optimization: Determine if WHERE filtering can be skipped
     // Check if the index predicate fully satisfies the WHERE clause
-    let need_where_filter = if use_composite_lookup {
+    let (need_where_filter, effective_where) = if use_composite_lookup {
         // Composite key lookup (with or without IN) - check if WHERE is fully satisfied
         match where_clause {
             Some(where_expr) => {
-                !where_clause_fully_satisfied_by_composite_key(where_expr, &index_column_names)
+                let satisfied = where_clause_fully_satisfied_by_composite_key(where_expr, &index_column_names);
+                if satisfied {
+                    (false, None)
+                } else {
+                    (true, Some((*where_expr).clone()))
+                }
             }
-            None => false,
+            None => (false, None),
+        }
+    } else if use_prefix_lookup {
+        // Prefix lookup - apply only residual WHERE clause
+        match &residual_where {
+            Some(residual) => (true, Some(residual.clone())), // Apply residual only
+            None => (false, None), // All predicates covered by prefix - skip filtering
         }
     } else {
         match (&where_clause, &index_predicate) {
             (Some(where_expr), Some(_)) => {
                 // Only skip WHERE filtering if we're certain the index handles everything
-                !where_clause_fully_satisfied_by_index(where_expr, first_indexed_column, &index_predicate)
+                let need_filter = !where_clause_fully_satisfied_by_index(where_expr, first_indexed_column, &index_predicate);
+                (need_filter, if need_filter { Some((*where_expr).clone()) } else { None })
             }
-            (Some(_), None) => true,  // WHERE present but no index predicate extracted
-            (None, _) => false,         // No WHERE clause
+            (Some(where_expr), None) => (true, Some((*where_expr).clone())),  // WHERE present but no index predicate extracted
+            (None, _) => (false, None),  // No WHERE clause
         }
     };
 
@@ -131,6 +169,10 @@ pub(crate) fn execute_index_scan(
             all_indices.dedup();
             all_indices
         }
+    } else if let Some(ref prefix) = prefix_result {
+        // Prefix key lookup - O(log n + k) where k is matching rows
+        // This handles partial composite key matches
+        index_data.prefix_scan(&prefix.prefix_key)
     } else {
         match index_predicate {
             Some(IndexPredicate::Range(range)) => {
@@ -195,14 +237,16 @@ pub(crate) fn execute_index_scan(
     // guarantees all rows satisfy the predicate (e.g., simple predicates like
     // `WHERE col = 5` or `WHERE col BETWEEN 10 AND 20`).
     //
+    // For prefix lookups, we only apply the residual WHERE clause (uncovered predicates).
+    //
     // We still need to filter when:
     // - Predicates involve non-indexed columns
     // - Complex predicates that couldn't be fully pushed to index
     // - OR predicates (not yet optimized for index pushdown)
     // - Multi-column predicates where only first column was indexed
-    let filtered_row_refs: Vec<&Row> = if need_where_filter && where_clause.is_some() {
-        // Build predicate plan once
-        let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
+    let filtered_row_refs: Vec<&Row> = if need_where_filter && effective_where.is_some() {
+        // Build predicate plan from effective WHERE (original or residual)
+        let predicate_plan = PredicatePlan::from_where_clause(effective_where.as_ref(), &schema)
             .map_err(ExecutorError::InvalidWhereClause)?;
 
         // Filter with zero-copy references
