@@ -504,18 +504,39 @@ impl<'a> OptimizedVibesqlExecutor<'a> {
             }
         }
 
-        // Get last order for customer - requires ORDER BY, use SQL
+        // Get last order for customer using direct index API
+        // Index: idx_orders_customer on orders(o_w_id, o_d_id, o_c_id)
+        // Orders table columns: o_id(0), o_d_id(1), o_w_id(2), o_c_id(3), o_entry_d(4), o_carrier_id(5), ...
         let c_id = input.c_id.unwrap_or(1);
-        let o_query = format!(
-            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = {} AND o_d_id = {} AND o_c_id = {} ORDER BY o_id DESC LIMIT 1",
-            input.w_id, input.d_id, c_id
-        );
-        if let Err(e) = execute_query(self.db, &o_query) {
-            return TransactionResult {
-                success: false,
-                duration_us: start.elapsed().as_micros() as u64,
-                error: Some(format!("Order query failed: {}", e)),
-            };
+        let order_key = vec![
+            SqlValue::Integer(input.w_id as i64),
+            SqlValue::Integer(input.d_id as i64),
+            SqlValue::Integer(c_id as i64),
+        ];
+
+        match self.db.lookup_by_index("idx_orders_customer", &order_key) {
+            Ok(Some(rows)) if !rows.is_empty() => {
+                // Find the row with maximum o_id (column 0)
+                let _last_order = rows.iter()
+                    .max_by_key(|row| {
+                        if let Some(SqlValue::Integer(o_id)) = row.values.first() {
+                            *o_id
+                        } else {
+                            i64::MIN
+                        }
+                    });
+                // Order found - continue (fields would be extracted in real implementation)
+            }
+            Ok(_) => {
+                // No orders for customer - this is valid, transaction succeeds
+            }
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Order lookup failed: {}", e)),
+                };
+            }
         }
 
         TransactionResult {
