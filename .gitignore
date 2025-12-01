@@ -67,3 +67,8 @@ benchmarks/suite/results/
 
 # Test results database backups
 # test_results/ - now tracked to preserve 100% conformance milestone
+
+# Fuzzing
+fuzz/target/
+fuzz/artifacts/
+fuzz/Cargo.lock

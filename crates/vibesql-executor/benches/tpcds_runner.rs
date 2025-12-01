@@ -11,12 +11,18 @@
 //! - Configurable memory warning thresholds
 //! - Optional jemalloc allocator for better memory release
 //!
+//! Validation Mode:
+//! When VALIDATE=1 is set (requires --features benchmark-comparison), the runner
+//! compares VibeSQL results against DuckDB as ground truth. This validates that
+//! queries return the correct number of rows.
+//!
 //! Usage:
 //!   cargo run --release --bench tpcds_runner
 //!   SCALE_FACTOR=0.001 cargo run --release --bench tpcds_runner  # Smaller dataset
 //!   SKIP_SLOW=1 cargo run --release --bench tpcds_runner  # Skip known slow queries
 //!   BATCH_SIZE=5 cargo run --release --bench tpcds_runner  # Run 5 queries per batch
 //!   MEMORY_WARN_MB=4000 cargo run --release --bench tpcds_runner  # Warn at 4GB RSS
+//!   VALIDATE=1 cargo run --release --bench tpcds_runner --features benchmark-comparison  # Validation mode
 //!
 //! For better memory release, use jemalloc:
 //!   cargo run --release --bench tpcds_runner --features jemalloc
@@ -28,13 +34,18 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod tpcds;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tpcds::memory::{get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled, MemoryTracker};
 use tpcds::queries::TPCDS_QUERIES;
 use tpcds::schema::load_vibesql;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
+
+#[cfg(feature = "benchmark-comparison")]
+use duckdb::Connection as DuckDBConn;
+#[cfg(feature = "benchmark-comparison")]
+use tpcds::schema::load_duckdb;
 
 /// Queries known to be extremely slow due to complex joins/subqueries
 /// These can be skipped with SKIP_SLOW=1 environment variable
@@ -51,6 +62,36 @@ const DEFAULT_BATCH_SIZE: usize = 10;
 
 /// Default memory warning threshold in MB
 const DEFAULT_MEMORY_WARN_MB: f64 = 6000.0;
+
+/// Get expected row counts from DuckDB for validation
+#[cfg(feature = "benchmark-comparison")]
+fn get_expected_row_counts(duckdb: &DuckDBConn, queries: &[(&str, &str)]) -> HashMap<String, usize> {
+    let mut expected = HashMap::new();
+
+    for (name, sql) in queries {
+        match duckdb.prepare(sql) {
+            Ok(mut stmt) => {
+                match stmt.query([]) {
+                    Ok(mut rows) => {
+                        let mut count = 0;
+                        while rows.next().map(|r| r.is_some()).unwrap_or(false) {
+                            count += 1;
+                        }
+                        expected.insert(name.to_string(), count);
+                    }
+                    Err(e) => {
+                        eprintln!("DuckDB query error for {}: {:?}", name, e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("DuckDB prepare error for {}: {:?}", name, e);
+            }
+        }
+    }
+
+    expected
+}
 
 fn main() {
     println!("=== TPC-DS Benchmark Runner ===\n");
@@ -78,6 +119,16 @@ fn main() {
         HashSet::new()
     };
 
+    // Check for validation mode
+    let validate_mode = std::env::var("VALIDATE").is_ok();
+
+    #[cfg(not(feature = "benchmark-comparison"))]
+    if validate_mode {
+        eprintln!("ERROR: VALIDATE=1 requires --features benchmark-comparison");
+        eprintln!("Usage: VALIDATE=1 cargo run --release --bench tpcds_runner --features benchmark-comparison");
+        std::process::exit(1);
+    }
+
     // Print configuration
     println!("Configuration:");
     println!("  Scale factor:    {}", scale_factor);
@@ -86,6 +137,9 @@ fn main() {
     println!("  Allocator:       {}", if is_jemalloc_enabled() { "jemalloc" } else { "system" });
     if skip_slow {
         println!("  Skipping:        {} known slow queries", SLOW_QUERIES.len());
+    }
+    if validate_mode {
+        println!("  Mode:            VALIDATION (comparing with DuckDB)");
     }
 
     // Initialize memory tracker
@@ -101,7 +155,27 @@ fn main() {
     let load_start = Instant::now();
     let db = load_vibesql(scale_factor);
     let load_time = load_start.elapsed();
-    println!("Data loaded in {:?}", load_time);
+    println!("VibeSQL data loaded in {:?}", load_time);
+
+    // Load DuckDB and get expected row counts in validation mode
+    #[cfg(feature = "benchmark-comparison")]
+    let expected_rows: HashMap<String, usize> = if validate_mode {
+        println!("Loading DuckDB for validation...");
+        let duckdb_start = Instant::now();
+        let duckdb = load_duckdb(scale_factor);
+        println!("DuckDB loaded in {:?}", duckdb_start.elapsed());
+
+        println!("Computing expected row counts from DuckDB...");
+        let expect_start = Instant::now();
+        let expected = get_expected_row_counts(&duckdb, TPCDS_QUERIES);
+        println!("Expected row counts computed in {:?} ({} queries)", expect_start.elapsed(), expected.len());
+        expected
+    } else {
+        HashMap::new()
+    };
+
+    #[cfg(not(feature = "benchmark-comparison"))]
+    let expected_rows: HashMap<String, usize> = HashMap::new();
 
     // Report post-load memory
     if let Some(stats) = memory_tracker.record() {
@@ -109,11 +183,19 @@ fn main() {
     }
 
     println!("\nRunning {} TPC-DS queries in batches of {}...\n", TPCDS_QUERIES.len(), batch_size);
-    println!(
-        "{:<8} {:>12} {:>10} {:>12} {:>10}",
-        "Query", "Time (ms)", "Rows", "RSS (MB)", "Status"
-    );
-    println!("{}", "-".repeat(60));
+    if validate_mode {
+        println!(
+            "{:<8} {:>12} {:>10} {:>10} {:>12} {:>10}",
+            "Query", "Time (ms)", "Rows", "Expected", "RSS (MB)", "Status"
+        );
+        println!("{}", "-".repeat(75));
+    } else {
+        println!(
+            "{:<8} {:>12} {:>10} {:>12} {:>10}",
+            "Query", "Time (ms)", "Rows", "RSS (MB)", "Status"
+        );
+        println!("{}", "-".repeat(60));
+    }
 
     let mut results: Vec<(String, Option<Duration>, usize, String)> = Vec::new();
     let mut total_time = Duration::ZERO;
@@ -121,6 +203,8 @@ fn main() {
     let mut error_count = 0;
     let mut skipped_count = 0;
     let mut queries_in_batch = 0;
+    let mut pass_count = 0;
+    let mut fail_count = 0;
 
     for (idx, (name, sql)) in TPCDS_QUERIES.iter().enumerate() {
         // Check if query should be skipped
@@ -168,14 +252,43 @@ fn main() {
                         .map(|s| format!("{:.1}", s.rss_mb()))
                         .unwrap_or_else(|| "-".to_string());
 
-                    results.push((name.to_string(), Some(elapsed), row_count, "OK".to_string()));
-                    println!(
-                        "{:<8} {:>12.2} {:>10} {:>12} OK",
-                        name,
-                        elapsed.as_secs_f64() * 1000.0,
-                        row_count,
-                        rss_mb
-                    );
+                    // Validation mode: compare with expected row count
+                    if validate_mode {
+                        let expected = expected_rows.get(*name);
+                        let (status, status_str) = match expected {
+                            Some(&exp) if row_count == exp => {
+                                pass_count += 1;
+                                ("PASS", "PASS".to_string())
+                            }
+                            Some(&exp) => {
+                                fail_count += 1;
+                                ("FAIL", format!("FAIL (exp {})", exp))
+                            }
+                            None => {
+                                ("NO_EXP", "NO_EXP".to_string())
+                            }
+                        };
+                        let expected_str = expected.map(|e| e.to_string()).unwrap_or_else(|| "-".to_string());
+                        results.push((name.to_string(), Some(elapsed), row_count, status.to_string()));
+                        println!(
+                            "{:<8} {:>12.2} {:>10} {:>10} {:>12} {}",
+                            name,
+                            elapsed.as_secs_f64() * 1000.0,
+                            row_count,
+                            expected_str,
+                            rss_mb,
+                            status_str
+                        );
+                    } else {
+                        results.push((name.to_string(), Some(elapsed), row_count, "OK".to_string()));
+                        println!(
+                            "{:<8} {:>12.2} {:>10} {:>12} OK",
+                            name,
+                            elapsed.as_secs_f64() * 1000.0,
+                            row_count,
+                            rss_mb
+                        );
+                    }
                 }
                 Err(e) => {
                     let elapsed = start.elapsed();
@@ -264,6 +377,18 @@ fn main() {
     println!("Total exec time: {:?}", total_time);
     if success_count > 0 {
         println!("Average time:    {:?}", total_time / success_count as u32);
+    }
+
+    // Print validation summary
+    if validate_mode {
+        println!("\n=== Validation Results ===");
+        println!("Passed:          {} ({:.1}%)", pass_count, 100.0 * pass_count as f64 / success_count.max(1) as f64);
+        println!("Failed:          {}", fail_count);
+        if fail_count > 0 {
+            println!("\nVALIDATION FAILED: {} queries returned incorrect row counts", fail_count);
+        } else if pass_count > 0 {
+            println!("\nVALIDATION PASSED: All {} queries returned correct row counts", pass_count);
+        }
     }
 
     // Print memory summary
