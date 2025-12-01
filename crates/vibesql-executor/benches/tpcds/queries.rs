@@ -2246,7 +2246,7 @@ WHERE ss_items.item_id = cs_items.item_id
     AND ss_item_rev BETWEEN 0.9 * cs_item_rev AND 1.1 * cs_item_rev
     AND ss_item_rev BETWEEN 0.9 * ws_item_rev AND 1.1 * ws_item_rev
     AND cs_item_rev BETWEEN 0.9 * ws_item_rev AND 1.1 * ws_item_rev
-ORDER BY item_id, ss_item_rev
+ORDER BY ss_items.item_id, ss_item_rev
 LIMIT 100
 "#;
 
@@ -2270,7 +2270,7 @@ WITH wss AS (
 )
 SELECT
     s_store_name,
-    d_week_seq,
+    wss.d_week_seq,
     sun_sales,
     mon_sales,
     tue_sales,
@@ -2282,7 +2282,7 @@ FROM wss, store, date_dim d
 WHERE d.d_week_seq = wss.d_week_seq
     AND ss_store_sk = s_store_sk
     AND d_month_seq BETWEEN 1200 AND 1211
-ORDER BY s_store_name, d_week_seq
+ORDER BY s_store_name, wss.d_week_seq
 LIMIT 100
 "#;
 
@@ -2969,6 +2969,8 @@ LIMIT 100
 
 // TPC-DS Q90: Web time-based analysis
 // Tests: CASE within aggregation
+// Note: Changed subquery alias from 'at' to 'am_data' for DuckDB compatibility
+// ('at' is a reserved keyword in DuckDB)
 pub const TPCDS_Q90: &str = r#"
 SELECT
     CAST(amc AS DECIMAL(15, 4)) / CAST(pmc AS DECIMAL(15, 4)) am_pm_ratio
@@ -2978,14 +2980,14 @@ FROM (
     WHERE ws_sold_time_sk = time_dim.t_time_sk
         AND ws_web_page_sk = web_page.wp_web_page_sk
         AND t_hour BETWEEN 8 AND 9
-) at,
+) am_data,
 (
     SELECT COUNT(*) pmc
     FROM web_sales, time_dim, web_page
     WHERE ws_sold_time_sk = time_dim.t_time_sk
         AND ws_web_page_sk = web_page.wp_web_page_sk
         AND t_hour BETWEEN 19 AND 20
-) pt
+) pm_data
 WHERE pmc > 0
 "#;
 

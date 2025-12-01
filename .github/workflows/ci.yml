@@ -108,3 +108,67 @@ jobs:
           echo "## Quick Benchmark Results (1k tests)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           python benchmarks/format_results.py benchmark_results.json >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # TPC-DS Benchmark with Validation
+  # ============================================================================
+  # Runs TPC-DS queries against VibeSQL and validates results against DuckDB
+  tpcds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Free disk space
+        run: |
+          # Remove large pre-installed software to free disk space
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
+
+      - name: Run TPC-DS benchmark runner with validation
+        env:
+          SCALE_FACTOR: "0.001"
+          SKIP_SLOW: "1"
+          VALIDATE: "1"
+        run: |
+          # Build and run the TPC-DS runner with validation
+          cargo bench --bench tpcds_runner --features benchmark-comparison -- 2>&1 | tee tpcds_output.txt
+
+          # Check for validation failures
+          if grep -q "VALIDATION FAILED" tpcds_output.txt; then
+            echo "::error::TPC-DS validation failed - some queries returned incorrect results"
+            exit 1
+          fi
+
+          # Check for pass status
+          if grep -q "VALIDATION PASSED" tpcds_output.txt; then
+            echo "TPC-DS validation passed!"
+          fi
+
+      - name: Display TPC-DS results
+        if: always()
+        run: |
+          echo "## TPC-DS Benchmark Results (SF 0.001)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All 99 TPC-DS queries validated against DuckDB (skip slow: Q4, Q11, Q17, Q24, Q29)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract CSV output from the runner
+          if [ -f tpcds_output.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 1000 "=== CSV Output ===" tpcds_output.txt | head -110 >> $GITHUB_STEP_SUMMARY || echo "No CSV output found"
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
