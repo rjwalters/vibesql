@@ -1,7 +1,7 @@
 use super::{Lexer, LexerError};
 use crate::token::Token;
 
-impl Lexer {
+impl<'a> Lexer<'a> {
     /// Tokenize comparison and logical operators.
     /// Handles multi-character operators like <=, >=, !=, <>, ||
     pub(super) fn tokenize_operator(&mut self, ch: char) -> Result<Token, LexerError> {
@@ -41,7 +41,7 @@ impl Lexer {
                 } else {
                     Err(LexerError {
                         message: "Unexpected character: '|' (did you mean '||'?)".to_string(),
-                        position: self.position - 1,
+                        position: self.position() - 1,
                     })
                 }
             }
