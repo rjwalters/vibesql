@@ -982,3 +982,130 @@ fn test_rollup_null_handling() {
         }
     }
 }
+
+// ============================================================================
+// Pivot Aggregate Optimization Tests (Issue #3136)
+// ============================================================================
+
+/// Test the TPC-DS Q2-style pivot pattern with multiple SUM(CASE...) aggregates
+/// This is the specific pattern optimized by PivotAggregateGroup
+#[test]
+fn test_pivot_aggregate_pattern_tpcds_q2() {
+    let mut db = Database::new();
+
+    // Create a simplified weekly_sales table similar to TPC-DS
+    execute_ddl(
+        &mut db,
+        r#"CREATE TABLE weekly_sales (
+            week_seq INTEGER,
+            d_day_name TEXT,
+            sales_price FLOAT
+        )"#,
+    );
+
+    // Insert test data across different days and weeks
+    let inserts = [
+        // Week 1
+        "INSERT INTO weekly_sales VALUES (1, 'Sunday', 100.0)",
+        "INSERT INTO weekly_sales VALUES (1, 'Monday', 150.0)",
+        "INSERT INTO weekly_sales VALUES (1, 'Tuesday', 120.0)",
+        "INSERT INTO weekly_sales VALUES (1, 'Wednesday', 130.0)",
+        "INSERT INTO weekly_sales VALUES (1, 'Thursday', 140.0)",
+        "INSERT INTO weekly_sales VALUES (1, 'Friday', 200.0)",
+        "INSERT INTO weekly_sales VALUES (1, 'Saturday', 250.0)",
+        // Week 2
+        "INSERT INTO weekly_sales VALUES (2, 'Sunday', 110.0)",
+        "INSERT INTO weekly_sales VALUES (2, 'Monday', 160.0)",
+        "INSERT INTO weekly_sales VALUES (2, 'Tuesday', 125.0)",
+        "INSERT INTO weekly_sales VALUES (2, 'Wednesday', 135.0)",
+        "INSERT INTO weekly_sales VALUES (2, 'Thursday', 145.0)",
+        "INSERT INTO weekly_sales VALUES (2, 'Friday', 210.0)",
+        "INSERT INTO weekly_sales VALUES (2, 'Saturday', 260.0)",
+    ];
+
+    for sql in inserts {
+        execute_insert(&mut db, sql);
+    }
+
+    // TPC-DS Q2 style query with 7 pivot aggregates
+    let query = r#"
+        SELECT
+            week_seq,
+            SUM(CASE WHEN d_day_name = 'Sunday' THEN sales_price ELSE NULL END) as sun_sales,
+            SUM(CASE WHEN d_day_name = 'Monday' THEN sales_price ELSE NULL END) as mon_sales,
+            SUM(CASE WHEN d_day_name = 'Tuesday' THEN sales_price ELSE NULL END) as tue_sales,
+            SUM(CASE WHEN d_day_name = 'Wednesday' THEN sales_price ELSE NULL END) as wed_sales,
+            SUM(CASE WHEN d_day_name = 'Thursday' THEN sales_price ELSE NULL END) as thu_sales,
+            SUM(CASE WHEN d_day_name = 'Friday' THEN sales_price ELSE NULL END) as fri_sales,
+            SUM(CASE WHEN d_day_name = 'Saturday' THEN sales_price ELSE NULL END) as sat_sales
+        FROM weekly_sales
+        GROUP BY week_seq
+        ORDER BY week_seq
+    "#;
+
+    let rows = execute_query(&db, query);
+
+    // Verify results
+    assert_eq!(rows.len(), 2, "Should have 2 weeks of results");
+
+    // Week 1 results
+    assert_eq!(get_i64(&rows[0].values[0]), 1, "First row should be week 1");
+    assert_eq!(get_f64(&rows[0].values[1]), 100.0, "Sunday sales week 1");
+    assert_eq!(get_f64(&rows[0].values[2]), 150.0, "Monday sales week 1");
+    assert_eq!(get_f64(&rows[0].values[3]), 120.0, "Tuesday sales week 1");
+    assert_eq!(get_f64(&rows[0].values[4]), 130.0, "Wednesday sales week 1");
+    assert_eq!(get_f64(&rows[0].values[5]), 140.0, "Thursday sales week 1");
+    assert_eq!(get_f64(&rows[0].values[6]), 200.0, "Friday sales week 1");
+    assert_eq!(get_f64(&rows[0].values[7]), 250.0, "Saturday sales week 1");
+
+    // Week 2 results
+    assert_eq!(get_i64(&rows[1].values[0]), 2, "Second row should be week 2");
+    assert_eq!(get_f64(&rows[1].values[1]), 110.0, "Sunday sales week 2");
+    assert_eq!(get_f64(&rows[1].values[2]), 160.0, "Monday sales week 2");
+    assert_eq!(get_f64(&rows[1].values[3]), 125.0, "Tuesday sales week 2");
+    assert_eq!(get_f64(&rows[1].values[4]), 135.0, "Wednesday sales week 2");
+    assert_eq!(get_f64(&rows[1].values[5]), 145.0, "Thursday sales week 2");
+    assert_eq!(get_f64(&rows[1].values[6]), 210.0, "Friday sales week 2");
+    assert_eq!(get_f64(&rows[1].values[7]), 260.0, "Saturday sales week 2");
+}
+
+/// Test pivot aggregates without GROUP BY (single group)
+#[test]
+fn test_pivot_aggregate_no_group_by() {
+    let mut db = Database::new();
+
+    execute_ddl(
+        &mut db,
+        r#"CREATE TABLE day_sales (
+            day_name TEXT,
+            amount FLOAT
+        )"#,
+    );
+
+    let inserts = [
+        "INSERT INTO day_sales VALUES ('Monday', 100.0)",
+        "INSERT INTO day_sales VALUES ('Monday', 50.0)",
+        "INSERT INTO day_sales VALUES ('Tuesday', 200.0)",
+        "INSERT INTO day_sales VALUES ('Wednesday', 150.0)",
+    ];
+
+    for sql in inserts {
+        execute_insert(&mut db, sql);
+    }
+
+    // Pivot query without GROUP BY
+    let query = r#"
+        SELECT
+            SUM(CASE WHEN day_name = 'Monday' THEN amount ELSE NULL END) as mon_total,
+            SUM(CASE WHEN day_name = 'Tuesday' THEN amount ELSE NULL END) as tue_total,
+            SUM(CASE WHEN day_name = 'Wednesday' THEN amount ELSE NULL END) as wed_total
+        FROM day_sales
+    "#;
+
+    let rows = execute_query(&db, query);
+
+    assert_eq!(rows.len(), 1, "Should have exactly one result row");
+    assert_eq!(get_f64(&rows[0].values[0]), 150.0, "Monday total (100 + 50)");
+    assert_eq!(get_f64(&rows[0].values[1]), 200.0, "Tuesday total");
+    assert_eq!(get_f64(&rows[0].values[2]), 150.0, "Wednesday total");
+}

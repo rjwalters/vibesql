@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
+    evaluator::compiled_pivot::PivotAggregateGroup,
     optimizer::optimize_where_clause,
     pipeline::ExecutionContext,
     select::{
@@ -131,6 +132,13 @@ impl SelectExecutor<'_> {
         // This allows SELECT * and SELECT table.* to work with GROUP BY/aggregates
         let expanded_select_list = self.expand_wildcards_for_aggregation(&stmt.select_list, &schema)?;
 
+        // Detect and set up pivot aggregate optimization (#3136)
+        // This detects patterns like: SUM(CASE WHEN col='A' THEN val END), SUM(CASE WHEN col='B' THEN val END)...
+        // and batches them into a single pass over the data
+        if let Some(pivot_group) = PivotAggregateGroup::try_detect(&expanded_select_list, &schema) {
+            self.set_pivot_group(pivot_group);
+        }
+
         // Process GROUP BY clause (handles ROLLUP, CUBE, GROUPING SETS)
         let mut result_rows = Vec::new();
 
@@ -166,6 +174,12 @@ impl SelectExecutor<'_> {
                 for (group_key, group_rows) in groups {
                     // Clear aggregate cache for new group
                     self.clear_aggregate_cache();
+
+                    // Execute pivot aggregates in a single pass (if detected)
+                    // This pre-populates the cache with all pivot aggregate results
+                    if self.has_pivot_group() {
+                        self.execute_pivot_aggregates(&group_rows)?;
+                    }
 
                     // Clear CSE cache for new group to prevent cross-group contamination
                     evaluator.clear_cse_cache();
@@ -231,6 +245,12 @@ impl SelectExecutor<'_> {
             for (group_key, group_rows) in groups {
                 // Clear aggregate cache for new group
                 self.clear_aggregate_cache();
+
+                // Execute pivot aggregates in a single pass (if detected)
+                // This pre-populates the cache with all pivot aggregate results
+                if self.has_pivot_group() {
+                    self.execute_pivot_aggregates(&group_rows)?;
+                }
 
                 // Clear CSE cache for new group to prevent cross-group contamination
                 evaluator.clear_cse_cache();
