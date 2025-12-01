@@ -7,7 +7,7 @@
 
 use crate::errors::ExecutorError;
 use vibesql_storage::Row;
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, Date, SqlValue, Time, Timestamp};
 
 use super::types::{ColumnArray, ColumnarBatch};
 
@@ -175,10 +175,65 @@ impl ColumnArray {
                 .cloned()
                 .ok_or(ExecutorError::ColumnIndexOutOfBounds { index }),
 
-            _ => Err(ExecutorError::UnsupportedArrayType {
-                operation: "get_value".to_string(),
-                array_type: format!("{:?}", std::mem::discriminant(self)),
-            }),
+            Self::Int32(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    if null_mask.get(index).copied().unwrap_or(false) {
+                        return Ok(SqlValue::Null);
+                    }
+                }
+                values
+                    .get(index)
+                    .map(|v| SqlValue::Integer(*v as i64))
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
+            }
+
+            Self::Float32(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    if null_mask.get(index).copied().unwrap_or(false) {
+                        return Ok(SqlValue::Null);
+                    }
+                }
+                values
+                    .get(index)
+                    .map(|v| SqlValue::Real(*v))
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
+            }
+
+            Self::FixedString(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    if null_mask.get(index).copied().unwrap_or(false) {
+                        return Ok(SqlValue::Null);
+                    }
+                }
+                values
+                    .get(index)
+                    .map(|v| SqlValue::Character(v.clone()))
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
+            }
+
+            Self::Date(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    if null_mask.get(index).copied().unwrap_or(false) {
+                        return Ok(SqlValue::Null);
+                    }
+                }
+                values
+                    .get(index)
+                    .map(|v| SqlValue::Date(days_since_epoch_to_date(*v)))
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
+            }
+
+            Self::Timestamp(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    if null_mask.get(index).copied().unwrap_or(false) {
+                        return Ok(SqlValue::Null);
+                    }
+                }
+                values
+                    .get(index)
+                    .map(|v| SqlValue::Timestamp(microseconds_to_timestamp(*v)))
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
+            }
         }
     }
 
@@ -217,6 +272,68 @@ impl ColumnArray {
             _ => None,
         }
     }
+}
+
+/// Convert days since Unix epoch to Date
+fn days_since_epoch_to_date(days: i32) -> Date {
+    // Simplified conversion: start from 1970-01-01 and count forward
+    let mut year = 1970;
+    let mut remaining_days = days;
+
+    // Handle years
+    loop {
+        let year_days = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if remaining_days < year_days {
+            break;
+        }
+        remaining_days -= year_days;
+        year += 1;
+    }
+
+    // Handle months
+    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_lengths = if is_leap {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+
+    let mut month = 1;
+    for &days_in_month in &month_lengths {
+        if remaining_days < days_in_month {
+            break;
+        }
+        remaining_days -= days_in_month;
+        month += 1;
+    }
+
+    let day = remaining_days + 1;
+
+    Date::new(year, month as u8, day as u8).unwrap_or_else(|_| Date::new(1970, 1, 1).unwrap())
+}
+
+/// Convert microseconds since Unix epoch to Timestamp
+fn microseconds_to_timestamp(micros: i64) -> Timestamp {
+    let days = (micros / 86_400_000_000) as i32;
+    let remaining_micros = micros % 86_400_000_000;
+
+    let date = days_since_epoch_to_date(days);
+
+    let hours = (remaining_micros / 3_600_000_000) as u8;
+    let remaining_micros = remaining_micros % 3_600_000_000;
+    let minutes = (remaining_micros / 60_000_000) as u8;
+    let remaining_micros = remaining_micros % 60_000_000;
+    let seconds = (remaining_micros / 1_000_000) as u8;
+    let nanoseconds = ((remaining_micros % 1_000_000) * 1_000) as u32;
+
+    let time =
+        Time::new(hours, minutes, seconds, nanoseconds).unwrap_or_else(|_| Time::new(0, 0, 0, 0).unwrap());
+
+    Timestamp::new(date, time)
 }
 
 #[cfg(test)]
