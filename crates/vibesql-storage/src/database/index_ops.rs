@@ -401,4 +401,127 @@ impl Database {
 
         Ok(results)
     }
+
+    // ============================================================================
+    // Prefix Index Lookup API (Multi-column indexes)
+    // ============================================================================
+
+    /// Look up rows by index using prefix matching - for multi-column indexes
+    ///
+    /// This method performs prefix matching on multi-column indexes. For example,
+    /// with an index on (a, b, c), you can look up all rows where (a, b) match
+    /// a specific value, regardless of c.
+    ///
+    /// # Arguments
+    /// * `index_name` - Name of the index (as created with CREATE INDEX)
+    /// * `prefix` - Prefix key values to match (must be a prefix of index columns)
+    ///
+    /// # Returns
+    /// * `Ok(Vec<&Row>)` - The rows matching the prefix (empty if none found)
+    /// * `Err(StorageError)` - Index not found or other error
+    ///
+    /// # Performance
+    /// Uses efficient B+ tree range scan: O(log n + k) where n is total keys, k is matches.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Index on (warehouse_id, district_id, order_id) - 3 columns
+    /// // Find all orders for warehouse 1, district 5 (2-column prefix)
+    /// let rows = db.lookup_by_index_prefix("idx_orders_pk", &[
+    ///     SqlValue::Integer(1),  // warehouse_id
+    ///     SqlValue::Integer(5),  // district_id
+    /// ])?;
+    /// ```
+    pub fn lookup_by_index_prefix(
+        &self,
+        index_name: &str,
+        prefix: &[vibesql_types::SqlValue],
+    ) -> Result<Vec<&Row>, StorageError> {
+        // Get index metadata to find the table
+        let metadata = self.get_index(index_name).ok_or_else(|| {
+            StorageError::IndexNotFound(index_name.to_string())
+        })?;
+        let table_name = metadata.table_name.clone();
+
+        // Get the index data
+        let index_data = self.get_index_data(index_name).ok_or_else(|| {
+            StorageError::IndexNotFound(index_name.to_string())
+        })?;
+
+        // Perform the prefix scan
+        let row_indices = index_data.prefix_scan(prefix);
+        if row_indices.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Get the table
+        let table = self.get_table(&table_name).ok_or_else(|| {
+            StorageError::TableNotFound(table_name.clone())
+        })?;
+
+        // Collect the rows using O(1) direct access
+        let rows: Vec<_> = row_indices
+            .iter()
+            .filter_map(|&idx| table.get_row(idx))
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Batch prefix lookup - look up multiple prefixes in a single call
+    ///
+    /// This method is optimized for batch prefix lookups on multi-column indexes.
+    /// For each prefix, returns all rows where the key prefix matches.
+    ///
+    /// # Arguments
+    /// * `index_name` - Name of the index
+    /// * `prefixes` - List of prefix key tuples to look up
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Vec<&Row>>)` - For each prefix, the matching rows (empty vec if none)
+    /// * `Err(StorageError)` - Index not found or other error
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Index on (w_id, d_id, o_id) - find new orders for all 10 districts
+    /// let prefixes: Vec<Vec<SqlValue>> = (1..=10)
+    ///     .map(|d| vec![SqlValue::Integer(w_id), SqlValue::Integer(d)])
+    ///     .collect();
+    /// let results = db.lookup_by_index_prefix_batch("idx_new_order_pk", &prefixes)?;
+    /// // results[0] = rows for district 1, results[1] = rows for district 2, etc.
+    /// ```
+    pub fn lookup_by_index_prefix_batch<'a>(
+        &'a self,
+        index_name: &str,
+        prefixes: &[Vec<vibesql_types::SqlValue>],
+    ) -> Result<Vec<Vec<&'a Row>>, StorageError> {
+        // Get index metadata to find the table
+        let metadata = self.get_index(index_name).ok_or_else(|| {
+            StorageError::IndexNotFound(index_name.to_string())
+        })?;
+        let table_name = metadata.table_name.clone();
+
+        // Get the index data
+        let index_data = self.get_index_data(index_name).ok_or_else(|| {
+            StorageError::IndexNotFound(index_name.to_string())
+        })?;
+
+        // Get the table once for O(1) row access
+        let table = self.get_table(&table_name).ok_or_else(|| {
+            StorageError::TableNotFound(table_name.clone())
+        })?;
+
+        // Look up each prefix and collect results
+        let mut results = Vec::with_capacity(prefixes.len());
+        for prefix in prefixes {
+            let row_indices = index_data.prefix_scan(prefix);
+            let matched_rows: Vec<_> = row_indices
+                .iter()
+                .filter_map(|&idx| table.get_row(idx))
+                .collect();
+            results.push(matched_rows);
+        }
+
+        Ok(results)
+    }
 }

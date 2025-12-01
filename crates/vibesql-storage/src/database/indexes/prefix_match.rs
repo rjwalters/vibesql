@@ -2,6 +2,7 @@
 // Prefix Match - Multi-column index prefix matching
 // ============================================================================
 
+use std::ops::Bound;
 use vibesql_types::SqlValue;
 
 use super::index_metadata::{acquire_btree_lock, IndexData};
@@ -74,6 +75,13 @@ impl IndexData {
     ///   [1, 2] < [1, 2, 0] < [1, 2, 99] < [1, 3] < [1, 3, 0]
     ///
     /// So prefix_scan([1, 2]) scans from [1, 2] (inclusive) to [1, 3) (exclusive).
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Index on (w_id, d_id, o_id) - 3 columns
+    /// // Find all rows where w_id=1 AND d_id=5 (2-column prefix)
+    /// let rows = index_data.prefix_scan(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
+    /// ```
     pub fn prefix_scan(&self, prefix: &[SqlValue]) -> Vec<usize> {
         if prefix.is_empty() {
             // Empty prefix matches everything - return all rows
@@ -85,8 +93,6 @@ impl IndexData {
 
         match self {
             IndexData::InMemory { data } => {
-                use std::ops::Bound;
-
                 // Calculate upper bound by incrementing the last element of the prefix
                 // For prefix [1, 2], upper bound is [1, 3)
                 let end_key = compute_prefix_upper_bound(&normalized_prefix);
@@ -130,6 +136,39 @@ impl IndexData {
                 }
             }
         }
+    }
+
+    /// Batch prefix scan - look up multiple prefixes in a single call
+    ///
+    /// This method is optimized for batch prefix lookups where you need to retrieve
+    /// rows matching multiple key prefixes. It's more efficient than calling
+    /// `prefix_scan` in a loop.
+    ///
+    /// # Arguments
+    /// * `prefixes` - List of key prefixes to look up
+    ///
+    /// # Returns
+    /// Vector of (prefix_index, row_indices) pairs for each prefix that has matches
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Index on (w_id, d_id, o_id) - look up all orders for districts 1-10
+    /// let prefixes: Vec<Vec<SqlValue>> = (1..=10)
+    ///     .map(|d| vec![SqlValue::Integer(1), SqlValue::Integer(d)])
+    ///     .collect();
+    /// let results = index_data.prefix_scan_batch(&prefixes);
+    /// ```
+    pub fn prefix_scan_batch(&self, prefixes: &[Vec<SqlValue>]) -> Vec<(usize, Vec<usize>)> {
+        let mut results = Vec::new();
+
+        for (idx, prefix) in prefixes.iter().enumerate() {
+            let row_indices = self.prefix_scan(prefix);
+            if !row_indices.is_empty() {
+                results.push((idx, row_indices));
+            }
+        }
+
+        results
     }
 }
 
