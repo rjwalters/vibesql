@@ -14,6 +14,7 @@
 
 use std::hash::{Hash, Hasher};
 
+#[cfg(test)]
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
@@ -114,6 +115,7 @@ pub enum GroupKeySpec {
 
 impl GroupKeySpec {
     /// Analyze GROUP BY columns and determine the best key strategy
+    #[cfg(test)]
     pub fn from_columns(columns: &[(usize, DataType)]) -> Self {
         match columns.len() {
             1 => {
@@ -219,6 +221,7 @@ impl GroupKeySpec {
     ///
     /// Uses unchecked accessors for performance. Caller must ensure column
     /// indices are valid.
+    #[cfg(test)]
     #[inline]
     pub unsafe fn extract_key(&self, row: &Row) -> GroupKey {
         match self {
