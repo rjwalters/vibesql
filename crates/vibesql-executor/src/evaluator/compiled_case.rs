@@ -16,7 +16,6 @@ use vibesql_types::SqlValue;
 
 /// Compiled representation of simple CASE expressions for fast evaluation
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum CompiledCaseExpression {
     /// CASE WHEN col = literal THEN result_col ELSE NULL END
     WhenEqualsThenColumn {
@@ -30,14 +29,6 @@ pub enum CompiledCaseExpression {
         condition_value: SqlValue,
         result_value: SqlValue,
     },
-    /// CASE WHEN col IN (lit1, lit2, ...) THEN result_col ELSE NULL END
-    WhenEqualsAnyThenColumn {
-        condition_col_idx: usize,
-        condition_values: Vec<SqlValue>,
-        result_col_idx: usize,
-    },
-    /// Expression too complex for fast-path compilation
-    Complex,
 }
 
 impl CompiledCaseExpression {
@@ -180,22 +171,6 @@ impl CompiledCaseExpression {
                 } else {
                     SqlValue::Null
                 }
-            }
-            CompiledCaseExpression::WhenEqualsAnyThenColumn {
-                condition_col_idx,
-                condition_values,
-                result_col_idx,
-            } => {
-                let val = &row.values[*condition_col_idx];
-                if condition_values.contains(val) {
-                    row.values[*result_col_idx].clone()
-                } else {
-                    SqlValue::Null
-                }
-            }
-            CompiledCaseExpression::Complex => {
-                // Should never be called - Complex is a fallback marker
-                SqlValue::Null
             }
         }
     }
