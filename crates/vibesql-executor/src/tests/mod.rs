@@ -44,7 +44,6 @@
 //! - `order_by_index_optimization_tests`: ORDER BY index optimization tests (Phase 5b of issue #1429)
 //! - `alter_table_constraints`: ALTER TABLE ADD/DROP PRIMARY KEY and FOREIGN KEY tests (Phase 6 of issue #1388)
 //! - `non_unique_disk_index_tests`: Non-unique disk-backed index integration tests (issue #1575, PR #1571)
-//! - `monomorphic_integration_tests`: Generic monomorphic pattern integration tests (issue #2244)
 //! - `sql_mode_tests`: SET SQL_MODE tests for runtime dialect switching (issue #2658)
 
 mod common;
@@ -75,7 +74,6 @@ mod issue_938_integer_type_preservation;
 mod join_aggregation;
 mod lazy_evaluation_tests;
 mod limit_offset;
-mod monomorphic_integration_tests;
 mod natural_join;
 mod non_unique_disk_index_tests;
 mod not_operator_tests;
