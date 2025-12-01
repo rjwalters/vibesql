@@ -766,3 +766,298 @@ fn test_thread_local_pool_pattern() {
     run_cycle(2);
     run_cycle(3);
 }
+
+// ============================================================================
+// Direct Index Lookup API Tests (Issue #3140)
+// ============================================================================
+
+#[test]
+fn test_lookup_by_index_single_column() {
+    // Test direct index lookup with single-column index
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table
+    let columns = vec![
+        ColumnSchema::new("id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+    ];
+    let mut table_schema = TableSchema::new("users".to_string(), columns);
+    table_schema.primary_key = Some(vec!["id".to_string()]);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("users").unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".into())] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".into())] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".into())] }).unwrap();
+
+    // Create index on id column
+    db.create_index(
+        "idx_users_id".to_string(),
+        "users".to_string(),
+        true, // unique
+        vec![IndexColumn {
+            column_name: "id".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    ).unwrap();
+
+    // Test lookup_by_index - existing key
+    let result = db.lookup_by_index("idx_users_id", &[SqlValue::Integer(2)]).unwrap();
+    assert!(result.is_some());
+    let rows = result.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[1], SqlValue::Varchar("Bob".into()));
+
+    // Test lookup_by_index - non-existing key
+    let result = db.lookup_by_index("idx_users_id", &[SqlValue::Integer(999)]).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_lookup_one_by_index() {
+    // Test lookup_one_by_index which returns just the first row
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table
+    let columns = vec![
+        ColumnSchema::new("id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("value".to_string(), DataType::Integer, false),
+    ];
+    let mut table_schema = TableSchema::new("items".to_string(), columns);
+    table_schema.primary_key = Some(vec!["id".to_string()]);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("items").unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(100)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(200)] }).unwrap();
+
+    // Create index
+    db.create_index(
+        "idx_items_pk".to_string(),
+        "items".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "id".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    ).unwrap();
+
+    // Test lookup_one_by_index
+    let row = db.lookup_one_by_index("idx_items_pk", &[SqlValue::Integer(1)]).unwrap();
+    assert!(row.is_some());
+    assert_eq!(row.unwrap().values[1], SqlValue::Integer(100));
+
+    // Test non-existing key
+    let row = db.lookup_one_by_index("idx_items_pk", &[SqlValue::Integer(999)]).unwrap();
+    assert!(row.is_none());
+}
+
+#[test]
+fn test_lookup_by_index_composite_key() {
+    // Test direct index lookup with composite (multi-column) key
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table with composite key (warehouse_id, district_id, order_id)
+    let columns = vec![
+        ColumnSchema::new("w_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("d_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("o_id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("amount".to_string(), DataType::DoublePrecision, false),
+    ];
+    let table_schema = TableSchema::new("orders".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("orders").unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Double(100.0)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Double(200.0)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Double(300.0)] }).unwrap();
+    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Double(400.0)] }).unwrap();
+
+    // Create composite index
+    db.create_index(
+        "idx_orders_pk".to_string(),
+        "orders".to_string(),
+        true,
+        vec![
+            IndexColumn { column_name: "w_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "d_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+            IndexColumn { column_name: "o_id".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+        ],
+    ).unwrap();
+
+    // Test lookup with full composite key
+    let result = db.lookup_by_index("idx_orders_pk", &[
+        SqlValue::Integer(1),
+        SqlValue::Integer(2),
+        SqlValue::Integer(1),
+    ]).unwrap();
+    assert!(result.is_some());
+    let rows = result.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[3], SqlValue::Double(300.0));
+
+    // Test non-existing composite key
+    let result = db.lookup_by_index("idx_orders_pk", &[
+        SqlValue::Integer(9),
+        SqlValue::Integer(9),
+        SqlValue::Integer(9),
+    ]).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_lookup_by_index_batch() {
+    // Test batch lookup with multiple keys
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table
+    let columns = vec![
+        ColumnSchema::new("id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+    ];
+    let table_schema = TableSchema::new("products".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("products").unwrap();
+    for i in 1..=10 {
+        table.insert(Row {
+            values: vec![SqlValue::Integer(i), SqlValue::Varchar(format!("Product{}", i))],
+        }).unwrap();
+    }
+
+    // Create index
+    db.create_index(
+        "idx_products_pk".to_string(),
+        "products".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "id".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    ).unwrap();
+
+    // Batch lookup - some exist, some don't
+    let keys = vec![
+        vec![SqlValue::Integer(2)],
+        vec![SqlValue::Integer(5)],
+        vec![SqlValue::Integer(999)], // doesn't exist
+        vec![SqlValue::Integer(8)],
+    ];
+    let results = db.lookup_by_index_batch("idx_products_pk", &keys).unwrap();
+
+    assert_eq!(results.len(), 4);
+    assert!(results[0].is_some()); // id=2
+    assert!(results[1].is_some()); // id=5
+    assert!(results[2].is_none()); // id=999 doesn't exist
+    assert!(results[3].is_some()); // id=8
+
+    // Verify values
+    assert_eq!(results[0].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product2".into()));
+    assert_eq!(results[1].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product5".into()));
+    assert_eq!(results[3].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product8".into()));
+}
+
+#[test]
+fn test_lookup_one_by_index_batch() {
+    // Test batch lookup returning single rows (for unique indexes)
+    use crate::Database;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::{DataType, SqlValue};
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use crate::Row;
+
+    let mut db = Database::new();
+
+    // Create table
+    let columns = vec![
+        ColumnSchema::new("id".to_string(), DataType::Integer, false),
+        ColumnSchema::new("price".to_string(), DataType::DoublePrecision, false),
+    ];
+    let table_schema = TableSchema::new("items".to_string(), columns);
+    db.create_table(table_schema).unwrap();
+
+    // Insert rows
+    let table = db.get_table_mut("items").unwrap();
+    for i in 1..=5 {
+        table.insert(Row {
+            values: vec![SqlValue::Integer(i), SqlValue::Double(i as f64 * 10.0)],
+        }).unwrap();
+    }
+
+    // Create index
+    db.create_index(
+        "idx_items_id".to_string(),
+        "items".to_string(),
+        true,
+        vec![IndexColumn {
+            column_name: "id".to_string(),
+            direction: OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    ).unwrap();
+
+    // Batch lookup single rows
+    let keys = vec![
+        vec![SqlValue::Integer(1)],
+        vec![SqlValue::Integer(3)],
+        vec![SqlValue::Integer(99)], // doesn't exist
+    ];
+    let results = db.lookup_one_by_index_batch("idx_items_id", &keys).unwrap();
+
+    assert_eq!(results.len(), 3);
+    assert!(results[0].is_some());
+    assert!(results[1].is_some());
+    assert!(results[2].is_none());
+
+    assert_eq!(results[0].unwrap().values[1], SqlValue::Double(10.0));
+    assert_eq!(results[1].unwrap().values[1], SqlValue::Double(30.0));
+}
+
+#[test]
+fn test_lookup_by_index_error_cases() {
+    // Test error handling for invalid index names
+    use crate::Database;
+
+    let db = Database::new();
+
+    // Test lookup on non-existent index
+    let result = db.lookup_by_index("nonexistent_index", &[SqlValue::Integer(1)]);
+    assert!(result.is_err());
+
+    let result = db.lookup_one_by_index("nonexistent_index", &[SqlValue::Integer(1)]);
+    assert!(result.is_err());
+
+    let result = db.lookup_by_index_batch("nonexistent_index", &[vec![SqlValue::Integer(1)]]);
+    assert!(result.is_err());
+}
