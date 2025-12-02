@@ -212,7 +212,8 @@ where
             // Use table-local predicates instead of full WHERE clause for early filtering
             // This allows pushing down filters like `l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'`
             // to the table scan, significantly reducing rows before joins
-            execute_table_scan(&table_ref.name, table_ref.alias.as_ref(), cte_results, database, table_filter.as_ref(), None, outer_row, outer_schema)?
+            // Note: LIMIT pushdown is None here because this is for join intermediate results
+            execute_table_scan(&table_ref.name, table_ref.alias.as_ref(), cte_results, database, table_filter.as_ref(), None, None, outer_row, outer_schema)?
         };
         let scan_time = scan_start.elapsed();
         if profile {

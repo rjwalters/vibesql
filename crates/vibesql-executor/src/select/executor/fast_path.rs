@@ -350,12 +350,14 @@ impl SelectExecutor<'_> {
         }
 
         // Fall back to standard fast path with execute_from_clause
+        // Pass LIMIT for early termination optimization (#3253)
         let from_result = crate::select::scan::execute_from_clause(
             stmt.from.as_ref().unwrap(),
             &HashMap::new(), // No CTEs
             self.database,
             stmt.where_clause.as_ref(),
             stmt.order_by.as_deref(),
+            stmt.limit.map(|l| l as usize), // LIMIT pushdown for ORDER BY optimization
             None, // No outer row
             None, // No outer schema
             |_| unreachable!("Fast path doesn't support subqueries"),
@@ -555,9 +557,10 @@ impl SelectExecutor<'_> {
         }
 
         // Verify we have equality values for the first N-1 columns (in order)
+        // Use lowercase for lookup to match how extract_pk_values stores keys
         let mut prefix_key = Vec::with_capacity(prefix_len);
         for col in pk_columns.iter().take(prefix_len) {
-            match equality_values.get(*col) {
+            match equality_values.get(&col.to_ascii_lowercase()) {
                 Some(val) => prefix_key.push(val.clone()),
                 None => return Ok(None), // Missing a prefix column
             }
