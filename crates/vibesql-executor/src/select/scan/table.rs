@@ -60,7 +60,7 @@ pub(crate) fn execute_table_scan(
     if let Some((cte_schema, cte_rows)) = cte_result {
         // Use CTE result
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-        let schema = CombinedSchema::from_table(effective_name, cte_schema.clone());
+        let schema = CombinedSchema::from_table(effective_name.clone(), cte_schema.clone());
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
         // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
@@ -71,11 +71,12 @@ pub(crate) fn execute_table_scan(
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
             // Must clone rows for filtering (copy-on-write semantics)
+            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
             let rows = apply_table_local_predicates(
                 cte_rows.as_ref().clone(),
                 schema.clone(),
                 &predicate_plan,
-                table_name,
+                &effective_name,
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
@@ -142,7 +143,7 @@ pub(crate) fn execute_table_scan(
 
         let view_schema = vibesql_catalog::TableSchema::new(table_name.to_string(), columns);
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-        let schema = CombinedSchema::from_table(effective_name, view_schema);
+        let schema = CombinedSchema::from_table(effective_name.clone(), view_schema);
         let mut rows = select_result.rows;
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
@@ -153,11 +154,12 @@ pub(crate) fn execute_table_scan(
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
+            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
             rows = apply_table_local_predicates(
                 rows,
                 schema.clone(),
                 &predicate_plan,
-                table_name,
+                &effective_name,
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
@@ -199,7 +201,7 @@ pub(crate) fn execute_table_scan(
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-    let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+    let schema = CombinedSchema::from_table(effective_name.clone(), table.schema.clone());
 
     // Get row slice from table (zero-copy reference)
     let row_slice = table.scan();
@@ -224,13 +226,20 @@ pub(crate) fn execute_table_scan(
             .map_err(ExecutorError::InvalidWhereClause)?;
 
         // Check if there are actually table-local predicates for this table
-        // Note: has_table_filters does case-sensitive lookup - try lowercase first
-        let has_filters = predicate_plan.has_table_filters(table_name)
+        // Note: has_table_filters does case-sensitive lookup
+        // Must check BOTH effective_name (alias) AND table_name because:
+        // - IN predicates from OR expressions use the alias (e.g., "n1" from "nation n1")
+        // - Regular predicates may use the actual table name
+        let effective_name_lower = effective_name.to_lowercase();
+        let has_filters = predicate_plan.has_table_filters(&effective_name)
+            || predicate_plan.has_table_filters(&effective_name_lower)
+            || predicate_plan.has_table_filters(table_name)
             || predicate_plan.has_table_filters(&table_name.to_lowercase());
 
         if std::env::var("COLUMNAR_DEBUG").is_ok() {
-            eprintln!("[COLUMNAR_DEBUG] {} table: has_table_filters={}, checking lowercase={}",
-                table_name, predicate_plan.has_table_filters(table_name),
+            eprintln!("[COLUMNAR_DEBUG] {} (alias={}) table: has_filters={} (effective_name={}, table_name={})",
+                table_name, effective_name, has_filters,
+                predicate_plan.has_table_filters(&effective_name_lower),
                 predicate_plan.has_table_filters(&table_name.to_lowercase()));
         }
 
@@ -263,11 +272,12 @@ pub(crate) fn execute_table_scan(
                     table_name);
             }
             // Fall back to generic predicate evaluation for complex expressions
+            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
             let filtered_rows = apply_table_local_predicates_ref(
                 row_slice,
                 schema.clone(),
                 &predicate_plan,
-                table_name,
+                &effective_name,
                 database,
                 None,  // No outer context for predicate pushdown
                 None,
