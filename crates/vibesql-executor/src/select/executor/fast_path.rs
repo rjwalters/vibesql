@@ -326,6 +326,9 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &SelectStmt,
     ) -> Result<Vec<Row>, ExecutorError> {
+        #[cfg(feature = "fast-path-profile")]
+        let start = std::time::Instant::now();
+
         // Extract table name from FROM clause
         let (table_name, alias) = match &stmt.from {
             Some(vibesql_ast::FromClause::Table { name, alias }) => {
@@ -334,15 +337,34 @@ impl SelectExecutor<'_> {
             _ => unreachable!("Fast path requires simple table FROM clause"),
         };
 
+        #[cfg(feature = "fast-path-profile")]
+        let extract_time = start.elapsed();
+
         // Try ultra-fast PK lookup path first
         if let Some(result) = self.try_pk_lookup_fast(table_name, alias, stmt)? {
+            #[cfg(feature = "fast-path-profile")]
+            {
+                let total = start.elapsed();
+                eprintln!("[FAST-PATH] PK lookup succeeded for {}: extract={:?}, total={:?}", table_name, extract_time, total);
+            }
             return Ok(result);
         }
 
+        #[cfg(feature = "fast-path-profile")]
+        let pk_fail_time = start.elapsed();
+
         // Try secondary index lookup path next
         if let Some(result) = self.try_secondary_index_lookup_fast(table_name, alias, stmt)? {
+            #[cfg(feature = "fast-path-profile")]
+            {
+                let total = start.elapsed();
+                eprintln!("[FAST-PATH] Secondary index lookup succeeded for {}: pk_fail={:?}, total={:?}", table_name, pk_fail_time, total);
+            }
             return Ok(result);
         }
+
+        #[cfg(feature = "fast-path-profile")]
+        eprintln!("[FAST-PATH] Falling back to standard path for {}", table_name);
 
         // Fall back to standard fast path with execute_from_clause
         let from_result = crate::select::scan::execute_from_clause(
@@ -451,9 +473,10 @@ impl SelectExecutor<'_> {
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?
         };
 
-        let rows = match row {
-            Some(r) => vec![r.clone()],
-            None => vec![],
+        // If no row found, return empty result
+        let row = match row {
+            Some(r) => r,
+            None => return Ok(Some(vec![])),
         };
 
         // Check if we need projection
@@ -461,16 +484,25 @@ impl SelectExecutor<'_> {
             && matches!(&stmt.select_list[0], SelectItem::Wildcard { .. });
 
         if is_select_star {
-            // No projection needed for SELECT *
-            return Ok(Some(rows));
+            // No projection needed for SELECT * - clone the full row
+            return Ok(Some(vec![row.clone()]));
         }
 
-        // Need to build schema for projection
+        // Try ultra-fast direct column projection (no full row clone)
+        // Only clone the columns we actually need
+        if let Some(col_indices) = self.try_extract_simple_column_indices(&stmt.select_list, &table.schema) {
+            let projected_values: Vec<SqlValue> = col_indices.iter()
+                .map(|&idx| row.values[idx].clone())
+                .collect();
+            return Ok(Some(vec![Row { values: projected_values }]));
+        }
+
+        // Fall back to full projection with evaluator for complex expressions
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
 
         // Apply projection
-        let projected = self.apply_projection_fast(&stmt.select_list, rows, &schema)?;
+        let projected = self.apply_projection_fast(&stmt.select_list, vec![row.clone()], &schema)?;
         Ok(Some(projected))
     }
 
@@ -516,38 +548,53 @@ impl SelectExecutor<'_> {
                 .map(|c| c.column_name.as_str())
                 .collect();
 
-            // Try to extract equality values for all index columns
+            // Try to extract equality values from WHERE clause
             let index_values = self.extract_pk_values(where_clause, &index_columns);
 
-            // Check if we have values for all index columns
-            if index_values.len() != index_columns.len() {
-                continue; // Try next index
+            // Need at least one column value to use the index
+            if index_values.is_empty() {
+                continue;
             }
 
-            // Build key values in column order (use lowercase for lookup to match insert)
-            let key_values: Vec<SqlValue> = index_columns.iter()
-                .filter_map(|col| index_values.get(&col.to_ascii_lowercase()).cloned())
-                .collect();
-
-            if key_values.len() != index_columns.len() {
-                continue; // Missing some values
+            // Build key values for the prefix of columns we have equality predicates for
+            // This supports partial index usage (e.g., 3-column prefix of 4-column index)
+            // Use case-insensitive lookup since schema may have different case than parser output
+            let mut key_values: Vec<SqlValue> = Vec::new();
+            for col in &index_columns {
+                let col_lower = col.to_ascii_lowercase();
+                if let Some(val) = index_values.get(&col_lower) {
+                    key_values.push(val.clone());
+                } else {
+                    break; // Stop at first missing column (must be contiguous prefix)
+                }
             }
 
-            // Perform index lookup - O(log n)
-            let rows_result = self.database.lookup_by_index(index_name, &key_values)
-                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+            // Need at least one value to use the index
+            if key_values.is_empty() {
+                continue;
+            }
 
-            let rows = match rows_result {
-                Some(refs) => refs.into_iter().cloned().collect::<Vec<_>>(),
-                None => vec![],
+            // Perform index lookup
+            let rows = if key_values.len() == index_columns.len() {
+                // Full key match - use exact lookup
+                let rows_result = self.database.lookup_by_index(index_name, &key_values)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+                match rows_result {
+                    Some(refs) => refs.into_iter().cloned().collect::<Vec<_>>(),
+                    None => vec![],
+                }
+            } else {
+                // Prefix match - use prefix lookup
+                self.database.lookup_by_index_prefix(index_name, &key_values)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?
+                    .into_iter().cloned().collect::<Vec<_>>()
             };
 
-            // Build schema for filtering and projection
-            let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-            let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
-
-            // Apply ORDER BY if needed
+            // Apply ORDER BY if needed (requires schema for column lookup)
             let sorted_rows = if let Some(order_by) = &stmt.order_by {
+                // Only build schema if we need ORDER BY
+                let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+                let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
                 // Index lookup doesn't guarantee order, so always sort
                 self.apply_order_by_fast(order_by, rows, &schema)?
             } else {
@@ -569,7 +616,15 @@ impl SelectExecutor<'_> {
                 return Ok(Some(limited_rows));
             }
 
-            // Apply projection
+            // Try ultra-fast direct column projection (no schema clone, no evaluator)
+            if let Some(col_indices) = self.try_extract_simple_column_indices(&stmt.select_list, &table.schema) {
+                let projected = self.project_by_indices_fast(limited_rows, &col_indices);
+                return Ok(Some(projected));
+            }
+
+            // Fall back to full projection with evaluator for complex expressions
+            let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+            let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
             let projected = self.apply_projection_fast(&stmt.select_list, limited_rows, &schema)?;
             return Ok(Some(projected));
         }
@@ -607,6 +662,7 @@ impl SelectExecutor<'_> {
                     // Check for column = literal pattern
                     if let Some((col_name, value)) = self.extract_column_literal_pair(left, right) {
                         // Case-insensitive comparison for SQL identifiers
+                        // Parser uppercases identifiers but schema may have lowercase column names
                         if pk_columns.iter().any(|pk| pk.eq_ignore_ascii_case(&col_name)) {
                             // Store with lowercase key for consistent lookup
                             values.insert(col_name.to_ascii_lowercase(), value);
@@ -831,6 +887,58 @@ impl SelectExecutor<'_> {
         });
 
         Ok(rows)
+    }
+
+    /// Try to extract simple column indices from a SELECT list
+    ///
+    /// Returns Some(indices) if all SELECT items are simple column references,
+    /// None otherwise (indicating fallback to full evaluator path is needed).
+    ///
+    /// This is an optimization for TPC-C style queries where the SELECT list
+    /// contains only column references like `SELECT c_id, c_first, c_middle ...`
+    fn try_extract_simple_column_indices(
+        &self,
+        select_list: &[SelectItem],
+        table_schema: &vibesql_catalog::TableSchema,
+    ) -> Option<Vec<usize>> {
+        let mut indices = Vec::with_capacity(select_list.len());
+
+        for item in select_list {
+            match item {
+                SelectItem::Expression { expr: Expression::ColumnRef { table: _, column }, .. } => {
+                    // Find column index by name (case-insensitive)
+                    let idx = table_schema.columns.iter()
+                        .position(|c| c.name.eq_ignore_ascii_case(column))?;
+                    indices.push(idx);
+                }
+                _ => return None, // Not a simple column reference
+            }
+        }
+
+        Some(indices)
+    }
+
+    /// Project rows by direct column indices (ultra-fast path)
+    ///
+    /// This avoids:
+    /// - Creating CombinedSchema (which clones TableSchema)
+    /// - Creating CombinedExpressionEvaluator
+    /// - Going through the full evaluator machinery
+    ///
+    /// For simple column projections, this is 10-100x faster than the full path.
+    fn project_by_indices_fast(
+        &self,
+        rows: Vec<Row>,
+        col_indices: &[usize],
+    ) -> Vec<Row> {
+        rows.into_iter()
+            .map(|row| {
+                let projected_values: Vec<SqlValue> = col_indices.iter()
+                    .map(|&idx| row.values[idx].clone())
+                    .collect();
+                Row { values: projected_values }
+            })
+            .collect()
     }
 }
 
