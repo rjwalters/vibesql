@@ -26,11 +26,17 @@ impl<'a> Lexer<'a> {
         // Optimization: only allocate/uppercase if needed
         if needs_uppercase {
             let upper_text = text.to_ascii_uppercase();
-            // Use keyword lookup - returns Token directly
-            Ok(keywords::map_keyword(upper_text))
+            // Use perfect hash map for O(1) keyword lookup
+            match keywords::map_keyword(&upper_text) {
+                Some(keyword) => Ok(Token::Keyword(keyword)),
+                None => Ok(Token::Identifier(upper_text)),
+            }
         } else {
-            // Text is already uppercase - convert to owned String for keyword lookup
-            Ok(keywords::map_keyword(text.to_string()))
+            // Text is already uppercase - try keyword lookup on the slice directly
+            match keywords::map_keyword(text) {
+                Some(keyword) => Ok(Token::Keyword(keyword)),
+                None => Ok(Token::Identifier(text.to_string())),
+            }
         }
     }
 
