@@ -149,27 +149,31 @@ pub(crate) fn resolve_order_by_for_aggregates(
 
         // Second, check if column matches an original column name that has an alias
         for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
-                if let vibesql_ast::Expression::ColumnRef { column: select_col, .. } = expr {
-                    if select_col.eq_ignore_ascii_case(column) {
-                        // ORDER BY uses original column name, return ColumnRef to the alias
-                        return vibesql_ast::Expression::ColumnRef {
-                            table: None,
-                            column: alias_name.clone(),
-                        };
-                    }
+            if let vibesql_ast::SelectItem::Expression {
+                expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
+                alias: Some(alias_name),
+            } = item
+            {
+                if select_col.eq_ignore_ascii_case(column) {
+                    // ORDER BY uses original column name, return ColumnRef to the alias
+                    return vibesql_ast::Expression::ColumnRef {
+                        table: None,
+                        column: alias_name.clone(),
+                    };
                 }
             }
         }
 
         // Third, check if column matches a SELECT list column without alias
         for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { expr, alias: None } = item {
-                if let vibesql_ast::Expression::ColumnRef { column: select_col, .. } = expr {
-                    if select_col.eq_ignore_ascii_case(column) {
-                        // Found matching non-aliased column, return as-is
-                        return order_expr.clone();
-                    }
+            if let vibesql_ast::SelectItem::Expression {
+                expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
+                alias: None,
+            } = item
+            {
+                if select_col.eq_ignore_ascii_case(column) {
+                    // Found matching non-aliased column, return as-is
+                    return order_expr.clone();
                 }
             }
         }
@@ -217,17 +221,19 @@ pub(crate) fn resolve_order_by_alias<'a>(
         // This handles: SELECT col AS alias ... ORDER BY col
         // In this case, we need to reference by the alias since that's what the result schema uses
         for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
-                // Check if the SELECT expression is a column reference to the same column
-                if let vibesql_ast::Expression::ColumnRef { table: _, column: select_col } = expr {
-                    if select_col.eq_ignore_ascii_case(column) {
-                        // The ORDER BY column matches the original column, but it's aliased
-                        // Return a new ColumnRef using the alias name
-                        return Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                            table: None,
-                            column: alias_name.clone(),
-                        });
-                    }
+            // Check if the SELECT expression is a column reference to the same column
+            if let vibesql_ast::SelectItem::Expression {
+                expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
+                alias: Some(alias_name),
+            } = item
+            {
+                if select_col.eq_ignore_ascii_case(column) {
+                    // The ORDER BY column matches the original column, but it's aliased
+                    // Return a new ColumnRef using the alias name
+                    return Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                        table: None,
+                        column: alias_name.clone(),
+                    });
                 }
             }
         }

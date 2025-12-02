@@ -221,7 +221,7 @@ pub(super) fn extract_common_or_predicates_with_schema(
             // For each predicate in first branch, check if it appears in all other branches
             for (pred, normalized) in first_preds {
                 let appears_in_all = branch_predicates[1..].iter().all(|branch| {
-                    branch.get(table).map_or(false, |preds| {
+                    branch.get(table).is_some_and(|preds| {
                         preds.iter().any(|(_, n)| n == normalized)
                     })
                 });
