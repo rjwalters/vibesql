@@ -24,15 +24,17 @@
 //! ```
 
 mod ddl;
-mod dml;
+mod delete;
 mod expression;
+mod insert;
 mod select;
+mod update;
 
 use bumpalo::Bump;
-use vibesql_ast::arena::{Expression, SelectStmt, Statement};
+use vibesql_ast::arena::{DeleteStmt, Expression, InsertStmt, SelectStmt, Statement, UpdateStmt};
 
-use crate::{Lexer, ParseError, Token};
 use crate::keywords::Keyword;
+use crate::{Lexer, ParseError, Token};
 
 /// Arena-based SQL parser.
 ///
@@ -105,19 +107,19 @@ impl<'arena> ArenaParser<'arena> {
             }
             Token::Keyword(Keyword::Insert) => {
                 let stmt = self.parse_insert_statement()?;
-                Ok(Statement::Insert(stmt))
+                Ok(Statement::Insert(stmt.clone()))
             }
             Token::Keyword(Keyword::Replace) => {
                 let stmt = self.parse_replace_statement()?;
-                Ok(Statement::Insert(stmt))
+                Ok(Statement::Insert(stmt.clone()))
             }
             Token::Keyword(Keyword::Update) => {
                 let stmt = self.parse_update_statement()?;
-                Ok(Statement::Update(stmt))
+                Ok(Statement::Update(stmt.clone()))
             }
             Token::Keyword(Keyword::Delete) => {
                 let stmt = self.parse_delete_statement()?;
-                Ok(Statement::Delete(stmt))
+                Ok(Statement::Delete(stmt.clone()))
             }
 
             // DDL statements
@@ -250,6 +252,62 @@ impl<'arena> ArenaParser<'arena> {
         let mut parser = ArenaParser::new(tokens, arena);
         let expr = parser.parse_expression()?;
         Ok(arena.alloc(expr))
+    }
+
+    /// Parse an INSERT statement into an arena-allocated InsertStmt.
+    pub fn parse_insert(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<&'arena InsertStmt<'arena>, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        parser.parse_insert_statement()
+    }
+
+    /// Parse an UPDATE statement into an arena-allocated UpdateStmt.
+    pub fn parse_update(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<&'arena UpdateStmt<'arena>, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        parser.parse_update_statement()
+    }
+
+    /// Parse a DELETE statement into an arena-allocated DeleteStmt.
+    pub fn parse_delete(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<&'arena DeleteStmt<'arena>, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        parser.parse_delete_statement()
+    }
+
+    /// Parse a REPLACE statement (alias for INSERT OR REPLACE) into an arena-allocated InsertStmt.
+    pub fn parse_replace(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<&'arena InsertStmt<'arena>, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        parser.parse_replace_statement()
     }
 
     /// Allocate a string in the arena.

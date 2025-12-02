@@ -1,6 +1,7 @@
 use super::*;
 
 mod aggregates;
+mod arena_parser;
 mod alter_table;
 mod assertion;
 mod case_expression;
