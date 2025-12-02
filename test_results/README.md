@@ -4,7 +4,7 @@ This directory contains backup snapshots of the SQLLogicTest results database.
 
 ## Files
 
-- `sqllogictest_results_100percent.sql` - Database backup capturing 100% SQLLogicTest conformance achievement (628/628 tests passing)
+- `sqllogictest_results-20251119-150650.sql` - Database backup capturing 100% SQLLogicTest conformance achievement (628/628 tests passing)
 
 ## Database Schema
 
@@ -19,8 +19,14 @@ To restore the database locally:
 
 ```bash
 # Copy to local test results directory
-cp .vibesql/test_results_backup/sqllogictest_results_100percent.sql \
+cp test_results/sqllogictest_results-20251119-150650.sql \
    ~/.vibesql/test_results/sqllogictest_results.sql
+```
+
+To create a new backup:
+
+```bash
+scripts/backup_test_results.sh
 ```
 
 ## Milestone
