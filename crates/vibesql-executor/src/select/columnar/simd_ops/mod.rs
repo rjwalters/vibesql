@@ -177,6 +177,65 @@ impl PackedMask {
         }
     }
 
+    /// Performs in-place bitwise OR with another mask.
+    ///
+    /// This is used for combining multiple predicates in IN lists.
+    /// Uses native bitwise OR which maps directly to SIMD instructions.
+    #[inline]
+    pub fn or_inplace(&mut self, other: &PackedMask) {
+        debug_assert_eq!(self.len, other.len, "mask lengths must match");
+
+        // Process in chunks of 4 for potential auto-vectorization
+        let chunks = self.words.len() / 4;
+        for i in 0..chunks {
+            let base = i * 4;
+            self.words[base] |= other.words[base];
+            self.words[base + 1] |= other.words[base + 1];
+            self.words[base + 2] |= other.words[base + 2];
+            self.words[base + 3] |= other.words[base + 3];
+        }
+
+        // Handle remainder
+        for i in (chunks * 4)..self.words.len() {
+            self.words[i] |= other.words[i];
+        }
+    }
+
+    /// Returns a new mask with all bits inverted.
+    ///
+    /// This is used for NOT IN operations.
+    #[inline]
+    pub fn not(&self) -> PackedMask {
+        let mut result = PackedMask {
+            words: vec![0; self.words.len()],
+            len: self.len,
+        };
+
+        // Process in chunks of 4 for potential auto-vectorization
+        let chunks = self.words.len() / 4;
+        for i in 0..chunks {
+            let base = i * 4;
+            result.words[base] = !self.words[base];
+            result.words[base + 1] = !self.words[base + 1];
+            result.words[base + 2] = !self.words[base + 2];
+            result.words[base + 3] = !self.words[base + 3];
+        }
+
+        // Handle remainder
+        for i in (chunks * 4)..self.words.len() {
+            result.words[i] = !self.words[i];
+        }
+
+        // Clear unused bits in the last word
+        let remainder = self.len % 64;
+        let num_words = result.words.len();
+        if remainder != 0 && num_words > 0 {
+            result.words[num_words - 1] &= (1u64 << remainder) - 1;
+        }
+
+        result
+    }
+
     /// Counts the number of set bits (rows that pass the filter).
     ///
     /// Uses the `count_ones()` intrinsic which maps to hardware popcount.

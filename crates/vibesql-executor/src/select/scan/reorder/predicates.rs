@@ -122,6 +122,127 @@ pub(super) fn extract_in_predicates_from_or(
     result
 }
 
+/// Extract common single-table predicates from OR expressions.
+///
+/// For queries like TPC-H Q19 where all OR branches share predicates like:
+/// `l_shipmode IN ('AIR', 'AIR REG') AND l_shipinstruct = 'DELIVER IN PERSON'`
+///
+/// This function extracts those common predicates and returns them grouped by table,
+/// allowing them to be pushed down to table scans.
+pub(super) fn extract_common_or_predicates_with_schema(
+    where_expr: &Expression,
+    table_set: &HashSet<String>,
+    column_to_table: &HashMap<String, String>,
+) -> HashMap<String, Vec<Expression>> {
+    let mut result: HashMap<String, Vec<Expression>> = HashMap::new();
+
+    /// Helper to collect all branches of an OR expression
+    fn collect_or_branches(expr: &Expression) -> Vec<Expression> {
+        match expr {
+            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+                let mut branches = collect_or_branches(left);
+                branches.extend(collect_or_branches(right));
+                branches
+            }
+            _ => vec![expr.clone()],
+        }
+    }
+
+    /// Normalize predicate for comparison (handles IN lists with different orderings)
+    fn normalize_predicate(pred: &Expression) -> String {
+        match pred {
+            Expression::InList { expr, values, negated } => {
+                // Sort values for comparison since order doesn't matter for IN lists
+                let mut sorted_vals: Vec<String> = values.iter().map(|v| format!("{:?}", v)).collect();
+                sorted_vals.sort();
+                format!("InList({:?},{:?},{:?})", expr, sorted_vals, negated)
+            }
+            Expression::Between { expr, low, high, negated, symmetric } => {
+                format!("Between({:?},{:?},{:?},{:?},{:?})", expr, low, high, negated, symmetric)
+            }
+            _ => format!("{:?}", pred),
+        }
+    }
+
+    /// Check if a predicate references only a single table
+    fn get_single_table(
+        pred: &Expression,
+        table_set: &HashSet<String>,
+        column_to_table: &HashMap<String, String>,
+    ) -> Option<String> {
+        let mut referenced_tables = HashSet::new();
+        super::graph::extract_referenced_tables_with_schema(pred, &mut referenced_tables, table_set, column_to_table);
+
+        if referenced_tables.len() == 1 {
+            referenced_tables.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    // Process top-level AND predicates looking for OR expressions
+    for pred in flatten_and_chain(where_expr) {
+        // Only process OR expressions
+        if !matches!(&pred, Expression::BinaryOp { op: BinaryOperator::Or, .. }) {
+            continue;
+        }
+
+        // Collect all OR branches
+        let branches = collect_or_branches(&pred);
+        if branches.len() < 2 {
+            continue;
+        }
+
+        // For each branch, extract single-table predicates
+        let mut branch_predicates: Vec<HashMap<String, Vec<(Expression, String)>>> = Vec::new();
+
+        for branch in &branches {
+            let mut branch_preds: HashMap<String, Vec<(Expression, String)>> = HashMap::new();
+
+            for sub_pred in flatten_and_chain(branch) {
+                if let Some(table) = get_single_table(&sub_pred, table_set, column_to_table) {
+                    let normalized = normalize_predicate(&sub_pred);
+                    branch_preds.entry(table).or_default().push((sub_pred, normalized));
+                }
+            }
+
+            branch_predicates.push(branch_preds);
+        }
+
+        // Find predicates that appear in ALL branches for each table
+        if branch_predicates.is_empty() {
+            continue;
+        }
+
+        // Get all tables from first branch
+        let first_branch = &branch_predicates[0];
+
+        for (table, first_preds) in first_branch {
+            // For each predicate in first branch, check if it appears in all other branches
+            for (pred, normalized) in first_preds {
+                let appears_in_all = branch_predicates[1..].iter().all(|branch| {
+                    branch.get(table).map_or(false, |preds| {
+                        preds.iter().any(|(_, n)| n == normalized)
+                    })
+                });
+
+                if appears_in_all {
+                    // Avoid duplicates
+                    let existing = result.entry(table.clone()).or_default();
+                    if !existing.iter().any(|e| normalize_predicate(e) == *normalized) {
+                        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                            eprintln!("[JOIN_REORDER] Extracted common OR predicate for table {}: {:?}", table, pred);
+                        }
+                        existing.push(pred.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
 /// Extract equijoin conditions from a WHERE clause expression using schema-based column resolution
 ///
 /// This is the preferred method that uses actual database schema to resolve unqualified columns.

@@ -63,6 +63,13 @@ pub enum ColumnPredicate {
         pattern: String,
         negated: bool,
     },
+
+    /// column IN (value1, value2, ...)
+    InList {
+        column_idx: usize,
+        values: Vec<SqlValue>,
+        negated: bool,
+    },
 }
 
 /// Extract column predicates as a tree from a WHERE clause expression
@@ -298,6 +305,38 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
             None
         }
 
+        // IN list: column IN (value1, value2, ...)
+        Expression::InList {
+            expr: inner,
+            values,
+            negated,
+        } => {
+            if let Expression::ColumnRef { table, column } = inner.as_ref() {
+                // Extract all literal values from the IN list
+                let mut literal_values = Vec::with_capacity(values.len());
+                for value_expr in values {
+                    if let Expression::Literal(val) = value_expr {
+                        literal_values.push(val.clone());
+                    } else {
+                        // Non-literal value in IN list - can't optimize
+                        return None;
+                    }
+                }
+
+                if literal_values.is_empty() {
+                    return None;
+                }
+
+                let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                return Some(PredicateTree::Leaf(ColumnPredicate::InList {
+                    column_idx,
+                    values: literal_values,
+                    negated: *negated,
+                }));
+            }
+            None
+        }
+
         _ => None,
     }
 }
@@ -463,6 +502,42 @@ fn extract_predicates_recursive(
                 }
             }
             // Skip non-column LIKE expressions
+            Some(())
+        }
+
+        // IN list: column IN (value1, value2, ...)
+        Expression::InList {
+            expr: inner,
+            values,
+            negated,
+        } => {
+            if let Expression::ColumnRef { table, column } = inner.as_ref() {
+                // Extract all literal values from the IN list
+                let mut literal_values = Vec::with_capacity(values.len());
+                for value_expr in values {
+                    if let Expression::Literal(val) = value_expr {
+                        literal_values.push(val.clone());
+                    } else {
+                        // Non-literal value in IN list - can't optimize
+                        return Some(());
+                    }
+                }
+
+                if literal_values.is_empty() {
+                    return Some(());
+                }
+
+                // Skip if column not in schema (cross-table predicate)
+                if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
+                    predicates.push(ColumnPredicate::InList {
+                        column_idx,
+                        values: literal_values,
+                        negated: *negated,
+                    });
+                }
+                return Some(());
+            }
+            // Skip non-column IN expressions
             Some(())
         }
 

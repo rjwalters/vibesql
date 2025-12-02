@@ -15,7 +15,8 @@ impl CombinedSchema {
     pub fn from_table(table_name: String, schema: vibesql_catalog::TableSchema) -> Self {
         let total_columns = schema.columns.len();
         let mut table_schemas = HashMap::new();
-        table_schemas.insert(table_name, (0, schema));
+        // Use lowercase table name for consistent lookups in predicate decomposition
+        table_schemas.insert(table_name.to_lowercase(), (0, schema));
         CombinedSchema { table_schemas, total_columns }
     }
 
@@ -41,7 +42,8 @@ impl CombinedSchema {
 
         let schema = vibesql_catalog::TableSchema::new(alias.clone(), columns);
         let mut table_schemas = HashMap::new();
-        table_schemas.insert(alias, (0, schema));
+        // Use lowercase alias for consistent lookups
+        table_schemas.insert(alias.to_lowercase(), (0, schema));
         CombinedSchema { table_schemas, total_columns }
     }
 
@@ -54,7 +56,8 @@ impl CombinedSchema {
         let mut table_schemas = left.table_schemas;
         let left_total = left.total_columns;
         let right_columns = right_schema.columns.len();
-        table_schemas.insert(right_table, (left_total, right_schema));
+        // Use lowercase table name for consistent lookups
+        table_schemas.insert(right_table.to_lowercase(), (left_total, right_schema));
         CombinedSchema { table_schemas, total_columns: left_total + right_columns }
     }
 

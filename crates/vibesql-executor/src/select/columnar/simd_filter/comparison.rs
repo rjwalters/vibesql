@@ -159,6 +159,26 @@ pub fn evaluate_predicate_i64_simd(
                 right_type: Some("String pattern".to_string()),
             });
         }
+
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // For i64 columns, check if value is in the list
+            let mut result = vec![false; values.len()];
+            for i64_val in list_values {
+                let target = match i64_val {
+                    SqlValue::Integer(n) => *n,
+                    SqlValue::Bigint(n) => *n,
+                    _ => continue,
+                };
+                let matches = simd_ops::eq_i64(values, target);
+                for (i, &m) in matches.iter().enumerate() {
+                    result[i] = result[i] || m;
+                }
+            }
+            if *negated {
+                result.iter_mut().for_each(|v| *v = !*v);
+            }
+            result
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -271,6 +291,23 @@ pub fn evaluate_predicate_i32_simd(
                 right_type: Some("String pattern".to_string()),
             });
         }
+
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // For date (i32) columns, check if value is in the list
+            let mut result = vec![false; values.len()];
+            for date_val in list_values {
+                if let Some(target) = value_to_date_i32(date_val) {
+                    let matches = simd_ops::eq_i32(values, target);
+                    for (i, &m) in matches.iter().enumerate() {
+                        result[i] = result[i] || m;
+                    }
+                }
+            }
+            if *negated {
+                result.iter_mut().for_each(|v| *v = !*v);
+            }
+            result
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -379,6 +416,23 @@ pub fn evaluate_predicate_f64_simd(
                 left_type: "Float64".to_string(),
                 right_type: Some("String pattern".to_string()),
             });
+        }
+
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // For f64 columns, check if value is in the list
+            let mut result = vec![false; values.len()];
+            for f_val in list_values {
+                if let Some(target) = value_to_f64(f_val) {
+                    let matches = simd_ops::eq_f64(values, target);
+                    for (i, &m) in matches.iter().enumerate() {
+                        result[i] = result[i] || m;
+                    }
+                }
+            }
+            if *negated {
+                result.iter_mut().for_each(|v| *v = !*v);
+            }
+            result
         }
     };
 
@@ -542,6 +596,24 @@ pub fn evaluate_predicate_i64_packed(
                 right_type: Some("String pattern".to_string()),
             });
         }
+
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // For i64 columns with packed mask
+            let mut result = PackedMask::new_all_clear(values.len());
+            for i64_val in list_values {
+                let target = match i64_val {
+                    SqlValue::Integer(n) => *n,
+                    SqlValue::Bigint(n) => *n,
+                    _ => continue,
+                };
+                let matches = simd_ops::eq_i64_packed(values, target);
+                result.or_inplace(&matches);
+            }
+            if *negated {
+                result = result.not();
+            }
+            result
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -646,6 +718,21 @@ pub fn evaluate_predicate_i32_packed(
                 right_type: Some("String pattern".to_string()),
             });
         }
+
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // For date (i32) columns with packed mask
+            let mut result = PackedMask::new_all_clear(values.len());
+            for date_val in list_values {
+                if let Some(target) = value_to_date_i32(date_val) {
+                    let matches = simd_ops::eq_i32_packed(values, target);
+                    result.or_inplace(&matches);
+                }
+            }
+            if *negated {
+                result = result.not();
+            }
+            result
+        }
     };
 
     // Apply NULL mask
@@ -749,6 +836,21 @@ pub fn evaluate_predicate_f64_packed(
                 left_type: "Float64".to_string(),
                 right_type: Some("String pattern".to_string()),
             });
+        }
+
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // For f64 columns with packed mask
+            let mut result = PackedMask::new_all_clear(values.len());
+            for f_val in list_values {
+                if let Some(target) = value_to_f64(f_val) {
+                    let matches = simd_ops::eq_f64_packed(values, target);
+                    result.or_inplace(&matches);
+                }
+            }
+            if *negated {
+                result = result.not();
+            }
+            result
         }
     };
 
