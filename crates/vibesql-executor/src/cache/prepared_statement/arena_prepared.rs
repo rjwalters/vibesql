@@ -66,7 +66,7 @@ impl ArenaPreparedStatement {
 
         // Parse into arena
         // We need to get a reference that lives as long as the arena
-        let stmt: &SelectStmt<'_> = ArenaParser::parse_sql(&sql, &arena)
+        let stmt: &SelectStmt<'_> = ArenaParser::parse_select(&sql, &arena)
             .map_err(|e| ArenaParseError::ParseError(e.to_string()))?;
 
         // Count placeholders and extract tables

@@ -22,10 +22,18 @@ use super::predicate::{
 /// If sorted_columns is provided, the function preserves index order and returns results
 /// marked as pre-sorted, allowing the caller to skip ORDER BY sorting.
 ///
+/// If limit is provided AND sorted_columns indicates the index satisfies ORDER BY,
+/// the scan will stop early after fetching enough rows, avoiding the cost of
+/// fetching all matching rows just to apply LIMIT later.
+///
 /// # Performance Optimization
 /// When the WHERE clause can be fully satisfied by the index predicate (e.g., simple
 /// predicates like `WHERE col = 5` or `WHERE col BETWEEN 10 AND 20`), we skip redundant
 /// WHERE clause re-evaluation, significantly improving performance for large result sets.
+///
+/// For ORDER BY with LIMIT queries:
+/// - Without pushdown: Fetch 30 rows, reverse, take 1 = O(30)
+/// - With pushdown: Scan from end, stop after 1 = O(1)
 #[allow(private_interfaces)]
 pub(crate) fn execute_index_scan(
     table_name: &str,
@@ -33,6 +41,7 @@ pub(crate) fn execute_index_scan(
     alias: Option<&String>,
     where_clause: Option<&Expression>,
     sorted_columns: Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+    limit: Option<usize>,
     database: &Database,
 ) -> Result<super::super::FromResult, ExecutorError> {
     // Get table and index
@@ -250,6 +259,42 @@ pub(crate) fn execute_index_scan(
         matching_row_indices.sort_unstable();
     }
 
+    // LIMIT pushdown optimization for ORDER BY queries (#3253)
+    //
+    // When ORDER BY is satisfied by the index AND no post-filtering is needed,
+    // we can apply LIMIT early by:
+    // 1. For DESC: reverse indices and take first N
+    // 2. For ASC: just take first N
+    //
+    // This transforms ORDER BY ... LIMIT N from O(all_matching_rows) to O(N).
+    // Critical for TPC-C Order-Status where a customer may have 30+ orders but
+    // we only need the most recent one.
+    //
+    // Example: SELECT o_id FROM orders WHERE o_w_id=1 AND o_d_id=2 AND o_c_id=3
+    //          ORDER BY o_id DESC LIMIT 1
+    // - Before: Fetch all 30 orders, reverse, take 1
+    // - After: Reverse indices, take 1, fetch just 1 row
+    let limit_already_applied = if sorted_columns.is_some() && !need_where_filter && limit.is_some() {
+        let is_desc = sorted_columns.as_ref()
+            .and_then(|cols| cols.first())
+            .is_some_and(|(_, dir)| *dir == vibesql_ast::OrderDirection::Desc);
+
+        let limit_val = limit.unwrap();
+
+        if is_desc {
+            // For DESC: reverse and take first N
+            matching_row_indices.reverse();
+            matching_row_indices.truncate(limit_val);
+            true // We already handled the reverse
+        } else {
+            // For ASC: just take first N
+            matching_row_indices.truncate(limit_val);
+            false // ASC doesn't need reverse tracking
+        }
+    } else {
+        false
+    };
+
     // Fetch rows from table (zero-copy - returns references)
     let all_rows = table.scan();
 
@@ -296,11 +341,16 @@ pub(crate) fn execute_index_scan(
     // Reverse row refs if needed for DESC ORDER BY
     // BTreeMap iteration is always ascending, but for DESC ORDER BY we need descending order
     // Check if we're using this index for ORDER BY and if the first ORDER BY column is DESC
+    //
+    // NOTE: Skip this if we already applied limit pushdown with DESC order,
+    // because we already reversed the indices earlier to enable early termination.
     let mut filtered_row_refs = filtered_row_refs;
-    if let Some(ref sorted_cols) = sorted_columns {
-        if let Some((_, first_order_direction)) = sorted_cols.first() {
-            if *first_order_direction == vibesql_ast::OrderDirection::Desc {
-                filtered_row_refs.reverse();
+    if !limit_already_applied {
+        if let Some(ref sorted_cols) = sorted_columns {
+            if let Some((_, first_order_direction)) = sorted_cols.first() {
+                if *first_order_direction == vibesql_ast::OrderDirection::Desc {
+                    filtered_row_refs.reverse();
+                }
             }
         }
     }

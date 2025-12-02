@@ -39,6 +39,11 @@ mod table;
 /// - If an index matches the ORDER BY column, results can be returned pre-sorted
 /// - This allows skipping expensive sorting in the SELECT executor
 ///
+/// The LIMIT clause is passed for early termination optimization (#3253):
+/// - When ORDER BY is satisfied by an index and no post-filter needed,
+///   the index scan can stop early after fetching LIMIT rows
+/// - This transforms O(all_matching_rows) to O(LIMIT)
+///
 /// Join reordering optimization (enabled by default):
 /// - For multi-table joins (3-8 tables), analyzes join conditions
 /// - Uses cost-based search to find optimal join order
@@ -50,6 +55,7 @@ pub(super) fn execute_from_clause<F>(
     database: &vibesql_storage::Database,
     where_clause: Option<&vibesql_ast::Expression>,
     order_by: Option<&[vibesql_ast::OrderByItem]>,
+    limit: Option<usize>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&crate::schema::CombinedSchema>,
     execute_subquery: F,
@@ -80,7 +86,7 @@ where
     // Fall back to standard execution (recursive left-deep joins)
     match from {
         vibesql_ast::FromClause::Table { name, alias } => {
-            table::execute_table_scan(name, alias.as_ref(), cte_results, database, where_clause, order_by, outer_row, outer_schema)
+            table::execute_table_scan(name, alias.as_ref(), cte_results, database, where_clause, order_by, limit, outer_row, outer_schema)
         }
         vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => join_scan::execute_join(
             left,
