@@ -233,7 +233,7 @@ impl<'arena> ArenaParser<'arena> {
                     }
                     _ => {
                         return Err(ParseError {
-                            message: format!("Unexpected operator: {}", s),
+                            message: "Unexpected || operator in comparison".to_string(),
                         })
                     }
                 },

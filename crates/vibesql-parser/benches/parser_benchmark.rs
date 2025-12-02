@@ -191,15 +191,17 @@ fn bench_identifiers(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark arena-allocated parser (SELECT statements only for Phase 1)
+/// Benchmark arena-allocated parser (supports full AST as of Phase 2)
 fn bench_arena_parser(c: &mut Criterion) {
     let mut group = c.benchmark_group("arena_parser");
 
-    // Only SELECT queries are supported by the arena parser
+    // Arena parser now supports DML and DDL statements
     let queries = [
         ("simple_select", SIMPLE_SELECT),
         ("point_lookup", POINT_LOOKUP),
         ("multi_column", MULTI_COLUMN),
+        ("insert_single", INSERT_SINGLE),
+        ("insert_multi", INSERT_MULTI),
         ("tpch_q1", TPCH_Q1),
         ("complex_join", COMPLEX_JOIN),
         ("cte_query", CTE_QUERY),
@@ -212,8 +214,8 @@ fn bench_arena_parser(c: &mut Criterion) {
                 let arena = Bump::new();
                 let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
                 // Just verify parsing succeeded - result is tied to arena lifetime
-                let _ = black_box(&result);
-                drop(arena);
+                // Arena is dropped at end of scope, deallocating everything
+                black_box(&result);
             });
         });
     }
@@ -225,11 +227,12 @@ fn bench_arena_parser(c: &mut Criterion) {
 fn bench_parser_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("parser_comparison");
 
-    // Note: Only queries that work with Phase 1 arena parser (no DATE literals, etc.)
+    // Phase 2: Arena parser now supports DML statements
     let queries = [
         ("simple_select", SIMPLE_SELECT),
         ("point_lookup", POINT_LOOKUP),
         ("multi_column", MULTI_COLUMN),
+        ("insert_single", INSERT_SINGLE),
         ("complex_join", COMPLEX_JOIN),
     ];
 
@@ -248,8 +251,8 @@ fn bench_parser_comparison(c: &mut Criterion) {
             b.iter(|| {
                 let arena = Bump::new();
                 let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
-                let _ = black_box(&result);
-                drop(arena);
+                // Arena is dropped at end of scope, deallocating everything
+                black_box(&result);
             });
         });
 
