@@ -316,11 +316,11 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
 
         // Check sort directions
         let directions_match = order_item.direction == index_col.direction;
-        let directions_opposite = match (&order_item.direction, &index_col.direction) {
+        let directions_opposite = matches!(
+            (&order_item.direction, &index_col.direction),
             (vibesql_ast::OrderDirection::Asc, vibesql_ast::OrderDirection::Desc)
-            | (vibesql_ast::OrderDirection::Desc, vibesql_ast::OrderDirection::Asc) => true,
-            _ => false,
-        };
+                | (vibesql_ast::OrderDirection::Desc, vibesql_ast::OrderDirection::Asc)
+        );
 
         if !directions_match {
             all_match = false;
@@ -369,31 +369,28 @@ pub(crate) fn count_pinned_index_columns(
 
 /// Collect all column names that have equality predicates (col = literal)
 fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::HashSet<String>) {
-    match expr {
-        Expression::BinaryOp { left, op, right } => {
-            match op {
-                vibesql_ast::BinaryOperator::Equal => {
-                    // Check for column = literal pattern
-                    if let Expression::ColumnRef { column, .. } = &**left {
-                        if is_literal(right) {
-                            columns.insert(column.to_uppercase());
-                        }
-                    }
-                    if let Expression::ColumnRef { column, .. } = &**right {
-                        if is_literal(left) {
-                            columns.insert(column.to_uppercase());
-                        }
+    if let Expression::BinaryOp { left, op, right } = expr {
+        match op {
+            vibesql_ast::BinaryOperator::Equal => {
+                // Check for column = literal pattern
+                if let Expression::ColumnRef { column, .. } = &**left {
+                    if is_literal(right) {
+                        columns.insert(column.to_uppercase());
                     }
                 }
-                vibesql_ast::BinaryOperator::And => {
-                    // Recurse into both sides of AND
-                    collect_equality_columns(left, columns);
-                    collect_equality_columns(right, columns);
+                if let Expression::ColumnRef { column, .. } = &**right {
+                    if is_literal(left) {
+                        columns.insert(column.to_uppercase());
+                    }
                 }
-                _ => {}
             }
+            vibesql_ast::BinaryOperator::And => {
+                // Recurse into both sides of AND
+                collect_equality_columns(left, columns);
+                collect_equality_columns(right, columns);
+            }
+            _ => {}
         }
-        _ => {}
     }
 }
 

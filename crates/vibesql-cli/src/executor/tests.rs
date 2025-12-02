@@ -58,8 +58,7 @@ fn test_describe_nonexistent_table() {
 fn test_describe_table_with_indexes() {
     let mut executor = SqlExecutor::new(None).unwrap();
     executor.execute("CREATE TABLE test (id INT PRIMARY KEY, email VARCHAR(100))").unwrap();
-    // Note: CREATE INDEX is not yet supported in CLI executor, so skip for now
-    // This test will pass once CREATE INDEX support is added
+    executor.execute("CREATE INDEX idx_test_email ON test (email)").unwrap();
     assert!(executor.describe_table("test").is_ok());
 }
 
@@ -292,4 +291,82 @@ fn test_describe_with_column_pattern() {
     let result = executor.execute("DESCRIBE users 'N%'").unwrap();
     // Should only show NAME column (matching N%)
     assert_eq!(result.row_count, 1);
+}
+
+// ============================================================================
+// Index, ALTER TABLE, and Transaction Tests
+// ============================================================================
+
+#[test]
+fn test_create_index() {
+    // Regression test for issue #3340
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE tab1 (pk INT PRIMARY KEY, col0 INT)").unwrap();
+
+    let result = executor.execute("CREATE INDEX idx_tab1_0 ON tab1 (col0)");
+    assert!(result.is_ok(), "CREATE INDEX should succeed");
+    assert_eq!(result.unwrap().row_count, 0, "CREATE INDEX should return row count of 0 (DDL)");
+}
+
+#[test]
+fn test_drop_index() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE tab1 (pk INT PRIMARY KEY, col0 INT)").unwrap();
+    executor.execute("CREATE INDEX idx_tab1_0 ON tab1 (col0)").unwrap();
+
+    let result = executor.execute("DROP INDEX idx_tab1_0");
+    assert!(result.is_ok(), "DROP INDEX should succeed");
+    assert_eq!(result.unwrap().row_count, 0, "DROP INDEX should return row count of 0 (DDL)");
+}
+
+#[test]
+fn test_alter_table_add_column() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE tab1 (pk INT PRIMARY KEY)").unwrap();
+
+    let result = executor.execute("ALTER TABLE tab1 ADD COLUMN col0 INT");
+    assert!(result.is_ok(), "ALTER TABLE ADD COLUMN should succeed");
+    assert_eq!(result.unwrap().row_count, 0, "ALTER TABLE should return row count of 0 (DDL)");
+}
+
+#[test]
+fn test_transaction_begin_commit() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    let result = executor.execute("BEGIN TRANSACTION");
+    assert!(result.is_ok(), "BEGIN TRANSACTION should succeed");
+
+    let result = executor.execute("COMMIT");
+    assert!(result.is_ok(), "COMMIT should succeed");
+}
+
+#[test]
+fn test_transaction_begin_rollback() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    let result = executor.execute("BEGIN");
+    assert!(result.is_ok(), "BEGIN should succeed");
+
+    let result = executor.execute("ROLLBACK");
+    assert!(result.is_ok(), "ROLLBACK should succeed");
+}
+
+#[test]
+fn test_savepoint() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    executor.execute("BEGIN").unwrap();
+
+    let result = executor.execute("SAVEPOINT sp1");
+    assert!(result.is_ok(), "SAVEPOINT should succeed");
+
+    let result = executor.execute("ROLLBACK TO SAVEPOINT sp1");
+    assert!(result.is_ok(), "ROLLBACK TO SAVEPOINT should succeed");
+
+    let result = executor.execute("RELEASE SAVEPOINT sp1");
+    // Note: After rollback to savepoint, releasing might fail - that's expected behavior
+    // Just checking it doesn't panic
+    let _ = result;
+
+    executor.execute("COMMIT").unwrap();
 }
