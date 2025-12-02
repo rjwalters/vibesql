@@ -441,3 +441,104 @@ pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression,
     let arena_expr = ArenaParser::parse_expression_sql(input, &arena)?;
     Ok(vibesql_ast::Expression::from(arena_expr))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_ast::arena::Expression;
+    use vibesql_types::SqlValue;
+
+    #[test]
+    fn test_date_literal() {
+        let arena = Bump::new();
+        let expr = ArenaParser::parse_expression_sql("DATE '1998-12-01'", &arena).unwrap();
+        match expr {
+            Expression::Literal(SqlValue::Date(d)) => {
+                assert_eq!(d.year, 1998);
+                assert_eq!(d.month, 12);
+                assert_eq!(d.day, 1);
+            }
+            _ => panic!("Expected Date literal, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_time_literal() {
+        let arena = Bump::new();
+        let expr = ArenaParser::parse_expression_sql("TIME '12:30:45'", &arena).unwrap();
+        match expr {
+            Expression::Literal(SqlValue::Time(t)) => {
+                assert_eq!(t.hour, 12);
+                assert_eq!(t.minute, 30);
+                assert_eq!(t.second, 45);
+            }
+            _ => panic!("Expected Time literal, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_timestamp_literal() {
+        let arena = Bump::new();
+        let expr = ArenaParser::parse_expression_sql("TIMESTAMP '2024-01-15 10:30:00'", &arena).unwrap();
+        match expr {
+            Expression::Literal(SqlValue::Timestamp(ts)) => {
+                assert_eq!(ts.date.year, 2024);
+                assert_eq!(ts.date.month, 1);
+                assert_eq!(ts.date.day, 15);
+            }
+            _ => panic!("Expected Timestamp literal, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_interval_literal() {
+        let arena = Bump::new();
+        let expr = ArenaParser::parse_expression_sql("INTERVAL '90' DAY", &arena).unwrap();
+        // Just verify it parses to an Interval type
+        assert!(matches!(expr, Expression::Literal(SqlValue::Interval(_))));
+    }
+
+    #[test]
+    fn test_date_minus_interval_expression() {
+        let arena = Bump::new();
+        let expr = ArenaParser::parse_expression_sql("DATE '1998-12-01' - INTERVAL '90' DAY", &arena).unwrap();
+        match expr {
+            Expression::BinaryOp { op, left, right } => {
+                assert_eq!(*op, vibesql_ast::BinaryOperator::Minus);
+                assert!(matches!(left, Expression::Literal(SqlValue::Date(_))));
+                assert!(matches!(right, Expression::Literal(SqlValue::Interval(_))));
+            }
+            _ => panic!("Expected BinaryOp, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_tpch_q1_parses() {
+        let arena = Bump::new();
+        let sql = r#"SELECT
+            l_returnflag,
+            l_linestatus,
+            SUM(l_quantity) AS sum_qty,
+            SUM(l_extendedprice) AS sum_base_price,
+            SUM(l_extendedprice * (1 - l_discount)) AS sum_disc_price,
+            SUM(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge,
+            AVG(l_quantity) AS avg_qty,
+            AVG(l_extendedprice) AS avg_price,
+            AVG(l_discount) AS avg_disc,
+            COUNT(*) AS count_order
+        FROM
+            lineitem
+        WHERE
+            l_shipdate <= DATE '1998-12-01' - INTERVAL '90' DAY
+        GROUP BY
+            l_returnflag,
+            l_linestatus
+        ORDER BY
+            l_returnflag,
+            l_linestatus"#;
+
+        // This should parse successfully now with typed literal support
+        let result = ArenaParser::parse_sql(sql, &arena);
+        assert!(result.is_ok(), "TPC-H Q1 should parse successfully: {:?}", result.err());
+    }
+}
