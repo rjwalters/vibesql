@@ -165,8 +165,8 @@ fn bench_arena_parsing(c: &mut Criterion) {
             b.iter(|| {
                 let arena = Bump::new();
                 let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
-                let _ = black_box(&result);
-                drop(arena);
+                black_box(&result);
+                // arena drops at end of closure, deallocating result
             });
         });
 
@@ -661,8 +661,8 @@ fn bench_allocation_comparison(c: &mut Criterion) {
                 let arena = Bump::with_capacity(4096);
                 let stmt = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
                 // Access the stmt before arena is dropped
-                let _ = black_box(stmt.select_list.len());
-                drop(arena);
+                black_box(&stmt);
+                // arena drops at end of closure, deallocating result
             });
         });
 
