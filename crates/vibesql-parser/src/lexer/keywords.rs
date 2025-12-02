@@ -2,7 +2,7 @@ use crate::keywords::Keyword;
 use phf::phf_map;
 
 /// Perfect hash map for O(1) keyword lookup.
-/// Keys must be uppercase strings.
+/// Keys must be uppercase ASCII strings.
 static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "SELECT" => Keyword::Select,
     "DISTINCT" => Keyword::Distinct,
@@ -301,7 +301,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "COLUMNAR" => Keyword::Columnar,
 };
 
-/// Map a keyword string (uppercase) to its corresponding Keyword enum.
+/// Map an uppercase string to its corresponding Keyword using perfect hash lookup.
 /// Returns None if the string is not a recognized keyword.
 #[inline]
 pub(super) fn map_keyword(upper_text: &str) -> Option<Keyword> {
