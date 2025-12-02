@@ -78,7 +78,9 @@ impl Parser {
             let op = match self.peek() {
                 Token::Symbol('+') => vibesql_ast::BinaryOperator::Plus,
                 Token::Symbol('-') => vibesql_ast::BinaryOperator::Minus,
-                Token::Operator(ref s) if s == "||" => vibesql_ast::BinaryOperator::Concat,
+                Token::Operator(crate::token::MultiCharOperator::Concat) => {
+                    vibesql_ast::BinaryOperator::Concat
+                }
                 _ => break,
             };
             self.advance();
@@ -275,7 +277,7 @@ impl Parser {
         // Note: Exclude || (concat) operator which should be handled in additive expression
         let is_comparison = match self.peek() {
             Token::Symbol('=') | Token::Symbol('<') | Token::Symbol('>') => true,
-            Token::Operator(ref s) => matches!(s.as_str(), "<=" | ">=" | "!=" | "<>"),
+            Token::Operator(op) => !matches!(op, crate::token::MultiCharOperator::Concat),
             _ => false,
         };
 
@@ -284,13 +286,23 @@ impl Parser {
                 Token::Symbol('=') => vibesql_ast::BinaryOperator::Equal,
                 Token::Symbol('<') => vibesql_ast::BinaryOperator::LessThan,
                 Token::Symbol('>') => vibesql_ast::BinaryOperator::GreaterThan,
-                Token::Operator(ref s) => match s.as_str() {
-                    "<=" => vibesql_ast::BinaryOperator::LessThanOrEqual,
-                    ">=" => vibesql_ast::BinaryOperator::GreaterThanOrEqual,
-                    "!=" => vibesql_ast::BinaryOperator::NotEqual,
-                    "<>" => vibesql_ast::BinaryOperator::NotEqual, // SQL standard
-                    _ => return Err(ParseError { message: format!("Unexpected operator: {}", s) }),
-                },
+                Token::Operator(op) => {
+                    use crate::token::MultiCharOperator;
+                    match op {
+                        MultiCharOperator::LessEqual => vibesql_ast::BinaryOperator::LessThanOrEqual,
+                        MultiCharOperator::GreaterEqual => {
+                            vibesql_ast::BinaryOperator::GreaterThanOrEqual
+                        }
+                        MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
+                            vibesql_ast::BinaryOperator::NotEqual
+                        }
+                        MultiCharOperator::Concat => {
+                            return Err(ParseError {
+                                message: format!("Unexpected operator: {}", op),
+                            })
+                        }
+                    }
+                }
                 _ => unreachable!(),
             };
             self.advance();

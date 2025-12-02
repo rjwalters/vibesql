@@ -2,6 +2,34 @@ use std::fmt;
 
 use crate::keywords::Keyword;
 
+/// Multi-character operators that require heap allocation if stored as String.
+/// Using an enum eliminates allocation and enables fast matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultiCharOperator {
+    /// <= (less than or equal)
+    LessEqual,
+    /// >= (greater than or equal)
+    GreaterEqual,
+    /// != (not equal)
+    NotEqual,
+    /// <> (not equal, SQL standard)
+    NotEqualAlt,
+    /// || (string concatenation)
+    Concat,
+}
+
+impl fmt::Display for MultiCharOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MultiCharOperator::LessEqual => write!(f, "<="),
+            MultiCharOperator::GreaterEqual => write!(f, ">="),
+            MultiCharOperator::NotEqual => write!(f, "!="),
+            MultiCharOperator::NotEqualAlt => write!(f, "<>"),
+            MultiCharOperator::Concat => write!(f, "||"),
+        }
+    }
+}
+
 /// SQL Token produced by the lexer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -18,7 +46,7 @@ pub enum Token {
     /// Single character symbols (+, -, *, /, =, <, >, etc.)
     Symbol(char),
     /// Multi-character operators (<=, >=, !=, <>, ||)
-    Operator(String),
+    Operator(MultiCharOperator),
     /// Session variable (@@variable, @@session.variable, @@global.variable)
     SessionVariable(String),
     /// User variable (@variable)

@@ -1,5 +1,6 @@
 //! Tests for string concatenation operator (||)
 
+use crate::token::MultiCharOperator;
 use crate::*;
 
 #[test]
@@ -79,7 +80,7 @@ fn test_lex_concat_operator() {
 
     assert_eq!(tokens.len(), 4); // 'a', ||, 'b', EOF
     assert_eq!(tokens[0], Token::String("a".to_string()));
-    assert_eq!(tokens[1], Token::Operator("||".to_string()));
+    assert_eq!(tokens[1], Token::Operator(MultiCharOperator::Concat));
     assert_eq!(tokens[2], Token::String("b".to_string()));
     assert_eq!(tokens[3], Token::Eof);
 }

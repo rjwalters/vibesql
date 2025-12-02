@@ -1,6 +1,6 @@
 //! Tests for Display trait implementations.
 
-use crate::{keywords::Keyword, lexer::LexerError, token::Token};
+use crate::{keywords::Keyword, lexer::LexerError, token::MultiCharOperator, token::Token};
 
 #[test]
 fn test_keyword_display_select() {
@@ -214,7 +214,7 @@ fn test_token_display_symbol() {
 
 #[test]
 fn test_token_display_operator() {
-    let token = Token::Operator("<=".to_string());
+    let token = Token::Operator(MultiCharOperator::LessEqual);
     assert_eq!(format!("{}", token), "Operator(<=)");
 }
 
