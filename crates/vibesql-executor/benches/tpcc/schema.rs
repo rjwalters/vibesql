@@ -369,11 +369,14 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         vec![col("c_w_id"), col("c_d_id"), col("c_last"), col("c_first")],
     ).ok();
 
+    // Include o_id in the index to support ORDER BY o_id DESC LIMIT 1 efficiently.
+    // This allows the Order-Status transaction to find a customer's most recent order
+    // via a single index scan rather than fetching all orders and sorting.
     db.create_index(
         "idx_orders_customer".to_string(),
         "orders".to_string(),
         false,
-        vec![col("o_w_id"), col("o_d_id"), col("o_c_id")],
+        vec![col("o_w_id"), col("o_d_id"), col("o_c_id"), col("o_id")],
     ).ok();
 
     // Stock-Level transaction index: enables efficient range scans on order_line
@@ -731,7 +734,7 @@ fn create_tpcc_indexes_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
-        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id);
         CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
@@ -1014,7 +1017,7 @@ fn create_tpcc_indexes_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
-        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id);
         CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
@@ -1354,7 +1357,7 @@ fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
         "CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first)"
     ).unwrap();
     conn.query_drop(
-        "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id)"
+        "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id)"
     ).unwrap();
     conn.query_drop(
         "CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id)"
