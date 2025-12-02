@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use std::pin::Pin;
 
 use bumpalo::Bump;
-use vibesql_ast::arena::{ArenaInterner, Expression, SelectStmt};
+use vibesql_ast::arena::{ArenaInterner, Expression, ExtendedExpr, SelectStmt};
 use vibesql_parser::arena_parser::ArenaParser;
 use vibesql_types::SqlValue;
 
@@ -392,6 +392,7 @@ where
     visitor(expr);
 
     match expr {
+        // Hot-path inline variants
         Expression::BinaryOp { left, right, .. } => {
             visit_arena_expression(left, visitor);
             visit_arena_expression(right, visitor);
@@ -404,128 +405,8 @@ where
         Expression::UnaryOp { expr: inner, .. } => {
             visit_arena_expression(inner, visitor);
         }
-        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
-            for arg in args.iter() {
-                visit_arena_expression(arg, visitor);
-            }
-        }
         Expression::IsNull { expr: inner, .. } => {
             visit_arena_expression(inner, visitor);
-        }
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-        } => {
-            if let Some(op) = operand {
-                visit_arena_expression(op, visitor);
-            }
-            for w in when_clauses.iter() {
-                for c in w.conditions.iter() {
-                    visit_arena_expression(c, visitor);
-                }
-                visit_arena_expression(&w.result, visitor);
-            }
-            if let Some(e) = else_result {
-                visit_arena_expression(e, visitor);
-            }
-        }
-        Expression::ScalarSubquery(select) => visit_arena_statement(select, visitor),
-        Expression::In {
-            expr: inner,
-            subquery,
-            ..
-        } => {
-            visit_arena_expression(inner, visitor);
-            visit_arena_statement(subquery, visitor);
-        }
-        Expression::InList {
-            expr: inner,
-            values,
-            ..
-        } => {
-            visit_arena_expression(inner, visitor);
-            for v in values.iter() {
-                visit_arena_expression(v, visitor);
-            }
-        }
-        Expression::Between {
-            expr: inner,
-            low,
-            high,
-            ..
-        } => {
-            visit_arena_expression(inner, visitor);
-            visit_arena_expression(low, visitor);
-            visit_arena_expression(high, visitor);
-        }
-        Expression::Cast { expr: inner, .. } => {
-            visit_arena_expression(inner, visitor);
-        }
-        Expression::Position {
-            substring, string, ..
-        } => {
-            visit_arena_expression(substring, visitor);
-            visit_arena_expression(string, visitor);
-        }
-        Expression::Trim {
-            removal_char,
-            string,
-            ..
-        } => {
-            if let Some(c) = removal_char {
-                visit_arena_expression(c, visitor);
-            }
-            visit_arena_expression(string, visitor);
-        }
-        Expression::Extract { expr: inner, .. } => {
-            visit_arena_expression(inner, visitor);
-        }
-        Expression::Like {
-            expr: inner,
-            pattern,
-            ..
-        } => {
-            visit_arena_expression(inner, visitor);
-            visit_arena_expression(pattern, visitor);
-        }
-        Expression::Exists { subquery, .. } => {
-            visit_arena_statement(subquery, visitor);
-        }
-        Expression::QuantifiedComparison {
-            expr: inner,
-            subquery,
-            ..
-        } => {
-            visit_arena_expression(inner, visitor);
-            visit_arena_statement(subquery, visitor);
-        }
-        Expression::Interval { value, .. } => {
-            visit_arena_expression(value, visitor);
-        }
-        Expression::WindowFunction { function, over } => {
-            match function {
-                vibesql_ast::arena::WindowFunctionSpec::Aggregate { args, .. }
-                | vibesql_ast::arena::WindowFunctionSpec::Ranking { args, .. }
-                | vibesql_ast::arena::WindowFunctionSpec::Value { args, .. } => {
-                    for arg in args.iter() {
-                        visit_arena_expression(arg, visitor);
-                    }
-                }
-            }
-            if let Some(partition_by) = &over.partition_by {
-                for expr in partition_by.iter() {
-                    visit_arena_expression(expr, visitor);
-                }
-            }
-            if let Some(order_by) = &over.order_by {
-                for item in order_by.iter() {
-                    visit_arena_expression(&item.expr, visitor);
-                }
-            }
-        }
-        Expression::MatchAgainst { search_modifier, .. } => {
-            visit_arena_expression(search_modifier, visitor);
         }
         // Leaf nodes - no recursion needed
         Expression::Literal(_)
@@ -537,11 +418,135 @@ where
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }
         | Expression::CurrentTimestamp { .. }
-        | Expression::Default
-        | Expression::DuplicateKeyValue { .. }
-        | Expression::NextValue { .. }
-        | Expression::PseudoVariable { .. }
-        | Expression::SessionVariable { .. } => {}
+        | Expression::Default => {}
+        // Cold-path extended variants
+        Expression::Extended(ext) => match ext {
+            ExtendedExpr::Function { args, .. } | ExtendedExpr::AggregateFunction { args, .. } => {
+                for arg in args.iter() {
+                    visit_arena_expression(arg, visitor);
+                }
+            }
+            ExtendedExpr::Case {
+                operand,
+                when_clauses,
+                else_result,
+            } => {
+                if let Some(op) = operand {
+                    visit_arena_expression(op, visitor);
+                }
+                for w in when_clauses.iter() {
+                    for c in w.conditions.iter() {
+                        visit_arena_expression(c, visitor);
+                    }
+                    visit_arena_expression(&w.result, visitor);
+                }
+                if let Some(e) = else_result {
+                    visit_arena_expression(e, visitor);
+                }
+            }
+            ExtendedExpr::ScalarSubquery(select) => visit_arena_statement(select, visitor),
+            ExtendedExpr::In {
+                expr: inner,
+                subquery,
+                ..
+            } => {
+                visit_arena_expression(inner, visitor);
+                visit_arena_statement(subquery, visitor);
+            }
+            ExtendedExpr::InList {
+                expr: inner,
+                values,
+                ..
+            } => {
+                visit_arena_expression(inner, visitor);
+                for v in values.iter() {
+                    visit_arena_expression(v, visitor);
+                }
+            }
+            ExtendedExpr::Between {
+                expr: inner,
+                low,
+                high,
+                ..
+            } => {
+                visit_arena_expression(inner, visitor);
+                visit_arena_expression(low, visitor);
+                visit_arena_expression(high, visitor);
+            }
+            ExtendedExpr::Cast { expr: inner, .. } => {
+                visit_arena_expression(inner, visitor);
+            }
+            ExtendedExpr::Position {
+                substring, string, ..
+            } => {
+                visit_arena_expression(substring, visitor);
+                visit_arena_expression(string, visitor);
+            }
+            ExtendedExpr::Trim {
+                removal_char,
+                string,
+                ..
+            } => {
+                if let Some(c) = removal_char {
+                    visit_arena_expression(c, visitor);
+                }
+                visit_arena_expression(string, visitor);
+            }
+            ExtendedExpr::Extract { expr: inner, .. } => {
+                visit_arena_expression(inner, visitor);
+            }
+            ExtendedExpr::Like {
+                expr: inner,
+                pattern,
+                ..
+            } => {
+                visit_arena_expression(inner, visitor);
+                visit_arena_expression(pattern, visitor);
+            }
+            ExtendedExpr::Exists { subquery, .. } => {
+                visit_arena_statement(subquery, visitor);
+            }
+            ExtendedExpr::QuantifiedComparison {
+                expr: inner,
+                subquery,
+                ..
+            } => {
+                visit_arena_expression(inner, visitor);
+                visit_arena_statement(subquery, visitor);
+            }
+            ExtendedExpr::Interval { value, .. } => {
+                visit_arena_expression(value, visitor);
+            }
+            ExtendedExpr::WindowFunction { function, over } => {
+                match function {
+                    vibesql_ast::arena::WindowFunctionSpec::Aggregate { args, .. }
+                    | vibesql_ast::arena::WindowFunctionSpec::Ranking { args, .. }
+                    | vibesql_ast::arena::WindowFunctionSpec::Value { args, .. } => {
+                        for arg in args.iter() {
+                            visit_arena_expression(arg, visitor);
+                        }
+                    }
+                }
+                if let Some(partition_by) = &over.partition_by {
+                    for expr in partition_by.iter() {
+                        visit_arena_expression(expr, visitor);
+                    }
+                }
+                if let Some(order_by) = &over.order_by {
+                    for item in order_by.iter() {
+                        visit_arena_expression(&item.expr, visitor);
+                    }
+                }
+            }
+            ExtendedExpr::MatchAgainst { search_modifier, .. } => {
+                visit_arena_expression(search_modifier, visitor);
+            }
+            // Extended leaf nodes - no recursion needed
+            ExtendedExpr::DuplicateKeyValue { .. }
+            | ExtendedExpr::NextValue { .. }
+            | ExtendedExpr::PseudoVariable { .. }
+            | ExtendedExpr::SessionVariable { .. } => {}
+        },
     }
 }
 

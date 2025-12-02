@@ -28,7 +28,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use vibesql_ast::arena::{ArenaInterner, Expression as ArenaExpression, SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt, Symbol};
+use vibesql_ast::arena::{ArenaInterner, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr, SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -344,15 +344,38 @@ impl SelectExecutor<'_> {
     /// Check if an arena expression contains an aggregate function.
     fn arena_expr_has_aggregate<'arena>(&self, expr: &ArenaExpression<'arena>) -> bool {
         match expr {
-            ArenaExpression::AggregateFunction { .. } => true,
+            // Hot-path inline variants
             ArenaExpression::BinaryOp { left, right, .. } => {
                 self.arena_expr_has_aggregate(left) || self.arena_expr_has_aggregate(right)
             }
             ArenaExpression::UnaryOp { expr, .. } => self.arena_expr_has_aggregate(expr),
-            ArenaExpression::Function { args, .. } => {
+            ArenaExpression::IsNull { expr, .. } => self.arena_expr_has_aggregate(expr),
+            ArenaExpression::Conjunction(children) | ArenaExpression::Disjunction(children) => {
+                children.iter().any(|c| self.arena_expr_has_aggregate(c))
+            }
+            ArenaExpression::Literal(_)
+            | ArenaExpression::Placeholder(_)
+            | ArenaExpression::NumberedPlaceholder(_)
+            | ArenaExpression::NamedPlaceholder(_)
+            | ArenaExpression::ColumnRef { .. }
+            | ArenaExpression::Wildcard
+            | ArenaExpression::CurrentDate
+            | ArenaExpression::CurrentTime { .. }
+            | ArenaExpression::CurrentTimestamp { .. }
+            | ArenaExpression::Default => false,
+            // Cold-path extended variants
+            ArenaExpression::Extended(ext) => self.arena_extended_has_aggregate(ext),
+        }
+    }
+
+    /// Check if an extended expression contains an aggregate function.
+    fn arena_extended_has_aggregate<'arena>(&self, ext: &ArenaExtendedExpr<'arena>) -> bool {
+        match ext {
+            ArenaExtendedExpr::AggregateFunction { .. } => true,
+            ArenaExtendedExpr::Function { args, .. } => {
                 args.iter().any(|a| self.arena_expr_has_aggregate(a))
             }
-            ArenaExpression::Case { operand, when_clauses, else_result, .. } => {
+            ArenaExtendedExpr::Case { operand, when_clauses, else_result, .. } => {
                 operand.as_ref().is_some_and(|o| self.arena_expr_has_aggregate(o))
                     || when_clauses.iter().any(|w| {
                         w.conditions.iter().any(|c| self.arena_expr_has_aggregate(c))
@@ -360,17 +383,19 @@ impl SelectExecutor<'_> {
                     })
                     || else_result.as_ref().is_some_and(|e| self.arena_expr_has_aggregate(e))
             }
-            ArenaExpression::IsNull { expr, .. } => self.arena_expr_has_aggregate(expr),
-            ArenaExpression::Between { expr, low, high, .. } => {
+            ArenaExtendedExpr::Between { expr, low, high, .. } => {
                 self.arena_expr_has_aggregate(expr)
                     || self.arena_expr_has_aggregate(low)
                     || self.arena_expr_has_aggregate(high)
             }
-            ArenaExpression::InList { expr, values, .. } => {
+            ArenaExtendedExpr::InList { expr, values, .. } => {
                 self.arena_expr_has_aggregate(expr)
                     || values.iter().any(|v| self.arena_expr_has_aggregate(v))
             }
-            ArenaExpression::Cast { expr, .. } => self.arena_expr_has_aggregate(expr),
+            ArenaExtendedExpr::Cast { expr, .. } => self.arena_expr_has_aggregate(expr),
+            ArenaExtendedExpr::Like { expr, pattern, .. } => {
+                self.arena_expr_has_aggregate(expr) || self.arena_expr_has_aggregate(pattern)
+            }
             _ => false,
         }
     }
