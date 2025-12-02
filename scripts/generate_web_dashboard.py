@@ -856,7 +856,19 @@ def generate_dashboard(
                 "queries_total": tpch.get("queries_total"),
                 "geo_mean_ms": tpch.get("geo_mean_ms"),
                 "trend_7d_pct": None  # Calculated from timeline
-            }
+            },
+            "tpcds": {
+                "queries_passing": tpcds.get("queries_passing"),
+                "queries_total": tpcds.get("queries_total"),
+                "geo_mean_ms": tpcds.get("geo_mean_ms")
+            } if tpcds else None,
+            "tpcc": {
+                "vibesql_tps": tpcc.get("latest", {}).get("vibesql_tps"),
+                "scale_factor": tpcc.get("scale_factor")
+            } if tpcc else None,
+            "sysbench": {
+                "tests_count": len(sysbench.get("tests", {})) if sysbench else 0
+            } if sysbench else None
         },
         "benchmarks": {
             "tpch": tpch,
@@ -959,9 +971,18 @@ def main():
     # Print summary
     summary = dashboard.get("summary", {})
     tpch = summary.get("tpch", {})
+    tpcds = summary.get("tpcds", {})
+    tpcc = summary.get("tpcc", {})
+    sysbench = summary.get("sysbench", {})
     conformance = summary.get("conformance", {})
 
     print(f"  TPC-H: {tpch.get('queries_passing')}/{tpch.get('queries_total')} queries, geo mean: {tpch.get('geo_mean_ms')}ms")
+    if tpcds:
+        print(f"  TPC-DS: {tpcds.get('queries_passing')}/{tpcds.get('queries_total')} queries, geo mean: {tpcds.get('geo_mean_ms')}ms")
+    if tpcc:
+        print(f"  TPC-C: {tpcc.get('vibesql_tps')} TPS (scale factor {tpcc.get('scale_factor')})")
+    if sysbench:
+        print(f"  Sysbench: {sysbench.get('tests_count')} tests")
     print(f"  Conformance: {conformance.get('pass_rate')}% ({conformance.get('tests_passing')}/{conformance.get('tests_total')} tests)")
     print(f"  Timeline entries: {len(dashboard.get('timeline', []))}")
     print(f"  Recent changes: {len(dashboard.get('changes', []))}")
