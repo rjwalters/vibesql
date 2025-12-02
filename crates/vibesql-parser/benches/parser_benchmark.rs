@@ -227,13 +227,14 @@ fn bench_arena_parser(c: &mut Criterion) {
 fn bench_parser_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("parser_comparison");
 
-    // Phase 2: Arena parser now supports DML statements
+    // Phase 2: Arena parser now supports DML statements + DATE/INTERVAL literals (TPC-H Q1)
     let queries = [
         ("simple_select", SIMPLE_SELECT),
         ("point_lookup", POINT_LOOKUP),
         ("multi_column", MULTI_COLUMN),
         ("insert_single", INSERT_SINGLE),
         ("complex_join", COMPLEX_JOIN),
+        ("tpch_q1", TPCH_Q1),
     ];
 
     for (name, sql) in queries {
