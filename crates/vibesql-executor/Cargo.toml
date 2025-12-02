@@ -208,3 +208,7 @@ harness = false
 [[bench]]
 name = "prepared_statement_benchmark"
 harness = false
+
+[[bench]]
+name = "arena_prepared_statement_benchmark"
+harness = false

@@ -33,6 +33,7 @@ use vibesql_types::SqlValue;
 
 use super::{extract_tables_from_statement, QuerySignature};
 
+pub mod arena_prepared;
 mod bind;
 pub mod plan;
 
