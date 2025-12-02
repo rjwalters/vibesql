@@ -3,6 +3,14 @@
 //! This crate defines the structure of SQL statements and expressions
 //! as parsed from SQL text. The AST is a tree representation that
 //! preserves the semantic structure of SQL queries.
+//!
+//! # Arena-allocated Types
+//!
+//! For performance-critical code paths, this crate provides arena-allocated
+//! versions of AST types in the [`arena`] module. These use bump allocation
+//! for improved cache locality and reduced allocation overhead.
+
+pub mod arena;
 
 mod ddl;
 mod dml;

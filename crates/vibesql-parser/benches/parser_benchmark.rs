@@ -3,8 +3,10 @@
 //! Measures parse times for various SQL query types to establish baselines
 //! and track optimization improvements.
 
+use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
+use vibesql_parser::arena_parser::ArenaParser;
 use vibesql_parser::{Lexer, Parser};
 
 /// Simple SELECT query - baseline for minimal parsing overhead
@@ -189,11 +191,89 @@ fn bench_identifiers(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark arena-allocated parser (SELECT statements only for Phase 1)
+fn bench_arena_parser(c: &mut Criterion) {
+    let mut group = c.benchmark_group("arena_parser");
+
+    // Only SELECT queries are supported by the arena parser
+    let queries = [
+        ("simple_select", SIMPLE_SELECT),
+        ("point_lookup", POINT_LOOKUP),
+        ("multi_column", MULTI_COLUMN),
+        ("tpch_q1", TPCH_Q1),
+        ("complex_join", COMPLEX_JOIN),
+        ("cte_query", CTE_QUERY),
+    ];
+
+    for (name, sql) in queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+        group.bench_with_input(BenchmarkId::new("parse", name), sql, |b, sql| {
+            b.iter(|| {
+                let arena = Bump::new();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                // Just verify parsing succeeded - result is tied to arena lifetime
+                let _ = black_box(&result);
+                drop(arena);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Compare standard parser vs arena parser
+fn bench_parser_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("parser_comparison");
+
+    // Note: Only queries that work with Phase 1 arena parser (no DATE literals, etc.)
+    let queries = [
+        ("simple_select", SIMPLE_SELECT),
+        ("point_lookup", POINT_LOOKUP),
+        ("multi_column", MULTI_COLUMN),
+        ("complex_join", COMPLEX_JOIN),
+    ];
+
+    for (name, sql) in queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+
+        // Standard parser
+        group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
+            b.iter(|| {
+                black_box(Parser::parse_sql(black_box(sql)).unwrap())
+            });
+        });
+
+        // Arena parser (fresh arena each time)
+        group.bench_with_input(BenchmarkId::new("arena", name), sql, |b, sql| {
+            b.iter(|| {
+                let arena = Bump::new();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                let _ = black_box(&result);
+                drop(arena);
+            });
+        });
+
+        // Arena parser with reused arena (amortized allocation cost)
+        group.bench_with_input(BenchmarkId::new("arena_reuse", name), sql, |b, sql| {
+            let mut arena = Bump::with_capacity(4096);
+            b.iter(|| {
+                arena.reset();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                let _ = black_box(&result);
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_lexer,
     bench_parser,
     bench_keywords,
     bench_identifiers,
+    bench_arena_parser,
+    bench_parser_comparison,
 );
 criterion_main!(benches);
