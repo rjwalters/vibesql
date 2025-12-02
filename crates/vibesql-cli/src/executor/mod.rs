@@ -197,6 +197,25 @@ impl SqlExecutor {
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
             }
+            vibesql_ast::Statement::Explain(explain_stmt) => {
+                match vibesql_executor::ExplainExecutor::execute(&explain_stmt, &self.db) {
+                    Ok(explain_result) => {
+                        // Format output based on requested format
+                        let output = match explain_stmt.format {
+                            vibesql_ast::ExplainFormat::Text => explain_result.to_text(),
+                            vibesql_ast::ExplainFormat::Json => explain_result.to_json(),
+                        };
+                        // Return as a single row with the plan output
+                        result.columns = vec!["QUERY PLAN".to_string()];
+                        // Split output into rows for better display
+                        for line in output.lines() {
+                            result.rows.push(vec![line.to_string()]);
+                        }
+                        result.row_count = result.rows.len();
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
             vibesql_ast::Statement::CreateIndex(index_stmt) => {
                 match vibesql_executor::CreateIndexExecutor::execute(&index_stmt, &mut self.db) {
                     Ok(msg) => {

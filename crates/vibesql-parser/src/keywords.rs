@@ -160,6 +160,7 @@ pub enum Keyword {
     Index,
     Analyze,
     Reindex,
+    Explain,
     Assertion,
     Specific,
     // Trigger-specific keywords
@@ -467,6 +468,7 @@ impl fmt::Display for Keyword {
             Keyword::Index => "INDEX",
             Keyword::Analyze => "ANALYZE",
             Keyword::Reindex => "REINDEX",
+            Keyword::Explain => "EXPLAIN",
             Keyword::Assertion => "ASSERTION",
             Keyword::Specific => "SPECIFIC",
             Keyword::Before => "BEFORE",

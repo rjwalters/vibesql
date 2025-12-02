@@ -71,3 +71,30 @@ pub struct DescribeStmt {
     /// Optional column name or pattern
     pub column_pattern: Option<String>,
 }
+
+// ============================================================================
+// EXPLAIN Statement
+// ============================================================================
+
+/// EXPLAIN statement output format
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ExplainFormat {
+    /// Plain text output (default)
+    #[default]
+    Text,
+    /// JSON output
+    Json,
+}
+
+/// EXPLAIN statement
+///
+/// Shows the query execution plan for a SELECT, INSERT, UPDATE, or DELETE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplainStmt {
+    /// The statement to explain
+    pub statement: Box<crate::Statement>,
+    /// Output format
+    pub format: ExplainFormat,
+    /// Whether to analyze the query (run it and show actual timing)
+    pub analyze: bool,
+}

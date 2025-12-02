@@ -11,12 +11,12 @@ use crate::{
     DeclareCursorStmt, DeleteStmt, DescribeStmt, DropAssertionStmt, DropCharacterSetStmt,
     DropCollationStmt, DropDomainStmt, DropFunctionStmt, DropIndexStmt, DropProcedureStmt,
     DropRoleStmt, DropSchemaStmt, DropSequenceStmt, DropTableStmt, DropTranslationStmt,
-    DropTriggerStmt, DropTypeStmt, DropViewStmt, ExecuteStmt, FetchStmt, GrantStmt, InsertStmt,
-    OpenCursorStmt, PrepareStmt, ReindexStmt, ReleaseSavepointStmt, RevokeStmt, RollbackStmt,
-    RollbackToSavepointStmt, SavepointStmt, SelectStmt, SetCatalogStmt, SetNamesStmt,
-    SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, ShowColumnsStmt,
-    ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt, TruncateTableStmt,
-    UpdateStmt,
+    DropTriggerStmt, DropTypeStmt, DropViewStmt, ExecuteStmt, ExplainStmt, FetchStmt, GrantStmt,
+    InsertStmt, OpenCursorStmt, PrepareStmt, ReindexStmt, ReleaseSavepointStmt, RevokeStmt,
+    RollbackStmt, RollbackToSavepointStmt, SavepointStmt, SelectStmt, SetCatalogStmt,
+    SetNamesStmt, SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt,
+    ShowColumnsStmt, ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt,
+    TruncateTableStmt, UpdateStmt,
 };
 
 // ============================================================================
@@ -99,4 +99,6 @@ pub enum Statement {
     ShowIndex(ShowIndexStmt),
     ShowCreateTable(ShowCreateTableStmt),
     Describe(DescribeStmt),
+    // Query plan introspection
+    Explain(ExplainStmt),
 }

@@ -233,3 +233,134 @@ fn test_show_index_without_from() {
     let result = Parser::parse_sql("SHOW INDEX");
     assert!(result.is_err());
 }
+
+// ============================================================================
+// EXPLAIN Statement Tests
+// ============================================================================
+
+#[test]
+fn test_explain_select() {
+    let stmt = Parser::parse_sql("EXPLAIN SELECT * FROM users").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(!explain.analyze);
+        assert_eq!(explain.format, ExplainFormat::Text);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_analyze_select() {
+    let stmt = Parser::parse_sql("EXPLAIN ANALYZE SELECT * FROM users").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.analyze);
+        assert_eq!(explain.format, ExplainFormat::Text);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_format_json() {
+    let stmt = Parser::parse_sql("EXPLAIN FORMAT JSON SELECT * FROM users").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(!explain.analyze);
+        assert_eq!(explain.format, ExplainFormat::Json);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_format_text() {
+    let stmt = Parser::parse_sql("EXPLAIN FORMAT TEXT SELECT * FROM users").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(!explain.analyze);
+        assert_eq!(explain.format, ExplainFormat::Text);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_analyze_format_json() {
+    let stmt = Parser::parse_sql("EXPLAIN ANALYZE FORMAT JSON SELECT * FROM users").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.analyze);
+        assert_eq!(explain.format, ExplainFormat::Json);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_insert() {
+    let stmt = Parser::parse_sql("EXPLAIN INSERT INTO users (name) VALUES ('test')").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(!explain.analyze);
+        assert!(matches!(*explain.statement, Statement::Insert(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_update() {
+    let stmt = Parser::parse_sql("EXPLAIN UPDATE users SET name = 'test' WHERE id = 1").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(!explain.analyze);
+        assert!(matches!(*explain.statement, Statement::Update(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_delete() {
+    let stmt = Parser::parse_sql("EXPLAIN DELETE FROM users WHERE id = 1").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(!explain.analyze);
+        assert!(matches!(*explain.statement, Statement::Delete(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_select_with_join() {
+    let stmt =
+        Parser::parse_sql("EXPLAIN SELECT * FROM users u JOIN orders o ON u.id = o.user_id")
+            .unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_invalid_statement() {
+    // EXPLAIN should not work with CREATE TABLE
+    let result = Parser::parse_sql("EXPLAIN CREATE TABLE foo (id INT)");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_explain_empty() {
+    let result = Parser::parse_sql("EXPLAIN");
+    assert!(result.is_err());
+}

@@ -17,6 +17,7 @@ mod truncate_table;
 mod truncate_validation;
 pub mod errors;
 pub mod evaluator;
+mod explain;
 mod grant;
 pub mod index_ddl;
 mod insert;
@@ -61,6 +62,7 @@ pub use truncate_table::TruncateTableExecutor;
 pub use errors::ExecutorError;
 pub use evaluator::ExpressionEvaluator;
 pub use evaluator::clear_in_subquery_cache;
+pub use explain::{ExplainExecutor, ExplainResult, PlanNode};
 pub use grant::GrantExecutor;
 pub use index_ddl::{
     AnalyzeExecutor, CreateIndexExecutor, DropIndexExecutor, IndexExecutor, ReindexExecutor,
