@@ -135,6 +135,11 @@ impl SelectExecutor<'_> {
                     "Unbound placeholder in aggregate context - placeholders must be bound before execution".to_string(),
                 ))
             }
+
+            // Conjunction and Disjunction - evaluate children recursively
+            vibesql_ast::Expression::Conjunction(_) | vibesql_ast::Expression::Disjunction(_) => {
+                simple::evaluate(self, expr, group_rows, group_key, evaluator)
+            }
         }
     }
 

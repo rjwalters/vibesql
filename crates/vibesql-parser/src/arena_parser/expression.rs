@@ -20,41 +20,47 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse OR expression (lowest precedence).
+    /// Produces a flat Disjunction for chains of 2+ OR operands.
     fn parse_or_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
-        let mut left = self.parse_and_expression()?;
+        let first = self.parse_and_expression()?;
+
+        // Check if there's at least one OR
+        if !self.peek_keyword(Keyword::Or) {
+            return Ok(first);
+        }
+
+        // Collect all OR operands into a flat vector
+        let mut terms = BumpVec::new_in(self.arena);
+        terms.push(first);
 
         while self.peek_keyword(Keyword::Or) {
             self.consume_keyword(Keyword::Or)?;
-            let right = self.parse_and_expression()?;
-            let left_ref = self.arena.alloc(left);
-            let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp {
-                op: BinaryOperator::Or,
-                left: left_ref,
-                right: right_ref,
-            };
+            terms.push(self.parse_and_expression()?);
         }
 
-        Ok(left)
+        Ok(Expression::Disjunction(terms))
     }
 
     /// Parse AND expression.
+    /// Produces a flat Conjunction for chains of 2+ AND operands.
     fn parse_and_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
-        let mut left = self.parse_not_expression()?;
+        let first = self.parse_not_expression()?;
+
+        // Check if there's at least one AND
+        if !self.peek_keyword(Keyword::And) {
+            return Ok(first);
+        }
+
+        // Collect all AND operands into a flat vector
+        let mut terms = BumpVec::new_in(self.arena);
+        terms.push(first);
 
         while self.peek_keyword(Keyword::And) {
             self.consume_keyword(Keyword::And)?;
-            let right = self.parse_not_expression()?;
-            let left_ref = self.arena.alloc(left);
-            let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp {
-                op: BinaryOperator::And,
-                left: left_ref,
-                right: right_ref,
-            };
+            terms.push(self.parse_not_expression()?);
         }
 
-        Ok(left)
+        Ok(Expression::Conjunction(terms))
     }
 
     /// Parse NOT expression.

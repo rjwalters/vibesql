@@ -32,12 +32,23 @@ pub enum Expression {
         column: String,
     },
 
-    /// Binary operation (a + b, x = y, p AND q)
+    /// Binary operation (a + b, x = y, etc.)
+    /// Note: AND/OR chains should use Conjunction/Disjunction for efficiency
     BinaryOp {
         op: BinaryOperator,
         left: Box<Expression>,
         right: Box<Expression>,
     },
+
+    /// Flattened conjunction (AND chain): a AND b AND c AND ...
+    /// Stored as a flat vector for O(1) depth traversal and better cache locality.
+    /// Always contains 2+ children (single predicates remain as-is).
+    Conjunction(Vec<Expression>),
+
+    /// Flattened disjunction (OR chain): a OR b OR c OR ...
+    /// Stored as a flat vector for O(1) depth traversal and better cache locality.
+    /// Always contains 2+ children (single predicates remain as-is).
+    Disjunction(Vec<Expression>),
 
     /// Unary operation (NOT x, -5)
     UnaryOp {

@@ -448,6 +448,10 @@ impl TableSchema {
                 Self::expression_references_column(left, column_name)
                     || Self::expression_references_column(right, column_name)
             }
+            vibesql_ast::Expression::Conjunction(children)
+            | vibesql_ast::Expression::Disjunction(children) => {
+                children.iter().any(|child| Self::expression_references_column(child, column_name))
+            }
             vibesql_ast::Expression::UnaryOp { expr, .. } => {
                 Self::expression_references_column(expr, column_name)
             }

@@ -373,6 +373,11 @@ where
             visit_arena_expression(left, visitor);
             visit_arena_expression(right, visitor);
         }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children.iter() {
+                visit_arena_expression(child, visitor);
+            }
+        }
         Expression::UnaryOp { expr: inner, .. } => {
             visit_arena_expression(inner, visitor);
         }

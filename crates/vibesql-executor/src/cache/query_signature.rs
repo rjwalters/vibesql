@@ -550,6 +550,12 @@ impl QuerySignature {
                 "SESSION_VARIABLE".hash(hasher);
                 name.hash(hasher);
             }
+
+            Expression::Conjunction(children) | Expression::Disjunction(children) => {
+                for child in children {
+                    Self::hash_expression(child, hasher);
+                }
+            }
         }
     }
 
@@ -743,6 +749,20 @@ impl QuerySignature {
                 std::mem::discriminant(op).hash(hasher);
                 Self::hash_arena_expression(left, hasher);
                 Self::hash_arena_expression(right, hasher);
+            }
+
+            ArenaExpression::Conjunction(children) => {
+                "CONJUNCTION".hash(hasher);
+                for child in children {
+                    Self::hash_arena_expression(child, hasher);
+                }
+            }
+
+            ArenaExpression::Disjunction(children) => {
+                "DISJUNCTION".hash(hasher);
+                for child in children {
+                    Self::hash_arena_expression(child, hasher);
+                }
             }
 
             ArenaExpression::UnaryOp { op, expr } => {

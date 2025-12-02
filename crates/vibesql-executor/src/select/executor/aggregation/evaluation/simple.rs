@@ -303,6 +303,40 @@ pub(super) fn evaluate(
             }
         }
 
+        // Conjunction (AND) - evaluate all children with short-circuit
+        vibesql_ast::Expression::Conjunction(children) => {
+            let mut result = vibesql_types::SqlValue::Boolean(true);
+            for child in children {
+                let val = executor.evaluate_with_aggregates(child, group_rows, group_key, evaluator)?;
+                match val {
+                    vibesql_types::SqlValue::Boolean(false) => return Ok(vibesql_types::SqlValue::Boolean(false)),
+                    vibesql_types::SqlValue::Null => result = vibesql_types::SqlValue::Null,
+                    vibesql_types::SqlValue::Boolean(true) => {}
+                    _ => return Err(ExecutorError::TypeError(
+                        format!("Conjunction requires boolean operands, got {:?}", val)
+                    )),
+                }
+            }
+            Ok(result)
+        }
+
+        // Disjunction (OR) - evaluate all children with short-circuit
+        vibesql_ast::Expression::Disjunction(children) => {
+            let mut result = vibesql_types::SqlValue::Boolean(false);
+            for child in children {
+                let val = executor.evaluate_with_aggregates(child, group_rows, group_key, evaluator)?;
+                match val {
+                    vibesql_types::SqlValue::Boolean(true) => return Ok(vibesql_types::SqlValue::Boolean(true)),
+                    vibesql_types::SqlValue::Null => result = vibesql_types::SqlValue::Null,
+                    vibesql_types::SqlValue::Boolean(false) => {}
+                    _ => return Err(ExecutorError::TypeError(
+                        format!("Disjunction requires boolean operands, got {:?}", val)
+                    )),
+                }
+            }
+            Ok(result)
+        }
+
         _ => Err(ExecutorError::UnsupportedExpression(format!(
             "Unexpected expression in simple evaluator: {:?}",
             expr

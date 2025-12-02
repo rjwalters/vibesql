@@ -251,6 +251,14 @@ pub(super) fn rewrite_expression_with_context(
             fractional_precision: *fractional_precision,
         },
 
+        Expression::Conjunction(children) => Expression::Conjunction(
+            children.iter().map(|child| rewrite_expression_with_context(child, rewrite_subquery_fn, outer_tables)).collect()
+        ),
+
+        Expression::Disjunction(children) => Expression::Disjunction(
+            children.iter().map(|child| rewrite_expression_with_context(child, rewrite_subquery_fn, outer_tables)).collect()
+        ),
+
         // Literals, column refs, and special expressions don't need rewriting
         Expression::Literal(_)
         | Expression::ColumnRef { .. }

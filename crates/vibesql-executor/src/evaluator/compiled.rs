@@ -39,11 +39,17 @@ pub enum CompiledPredicate {
     /// IS NOT NULL check
     IsNotNull { col_idx: usize },
 
-    /// AND of two compiled predicates
+    /// AND of two compiled predicates (legacy binary form)
     And(Box<CompiledPredicate>, Box<CompiledPredicate>),
 
-    /// OR of two compiled predicates
+    /// OR of two compiled predicates (legacy binary form)
     Or(Box<CompiledPredicate>, Box<CompiledPredicate>),
+
+    /// N-ary AND of multiple compiled predicates (flat conjunction)
+    Conjunction(Vec<CompiledPredicate>),
+
+    /// N-ary OR of multiple compiled predicates (flat disjunction)
+    Disjunction(Vec<CompiledPredicate>),
 
     /// Fallback: complex predicate that needs full evaluation
     /// This is used when we can't compile the predicate.
@@ -76,6 +82,46 @@ impl CompiledPredicate {
             // Simple binary operations: col = literal, col > literal, etc.
             Expression::BinaryOp { left, op, right } => {
                 Self::try_compile_binary_op(left, op, right, schema)
+            }
+
+            // Flattened conjunction (AND chain)
+            Expression::Conjunction(children) => {
+                let compiled: Vec<_> = children
+                    .iter()
+                    .filter_map(|child| Self::try_compile(child, schema))
+                    .collect();
+
+                // All children must be compilable
+                if compiled.len() != children.len() {
+                    return None;
+                }
+
+                // Check none are Complex
+                if compiled.iter().any(|c| matches!(c, CompiledPredicate::Complex(_))) {
+                    return None;
+                }
+
+                Some(CompiledPredicate::Conjunction(compiled))
+            }
+
+            // Flattened disjunction (OR chain)
+            Expression::Disjunction(children) => {
+                let compiled: Vec<_> = children
+                    .iter()
+                    .filter_map(|child| Self::try_compile(child, schema))
+                    .collect();
+
+                // All children must be compilable
+                if compiled.len() != children.len() {
+                    return None;
+                }
+
+                // Check none are Complex
+                if compiled.iter().any(|c| matches!(c, CompiledPredicate::Complex(_))) {
+                    return None;
+                }
+
+                Some(CompiledPredicate::Disjunction(compiled))
             }
 
             // IS NULL / IS NOT NULL
@@ -274,6 +320,9 @@ impl CompiledPredicate {
             CompiledPredicate::And(left, right) | CompiledPredicate::Or(left, right) => {
                 left.is_fully_compiled() && right.is_fully_compiled()
             }
+            CompiledPredicate::Conjunction(children) | CompiledPredicate::Disjunction(children) => {
+                children.iter().all(|c| c.is_fully_compiled())
+            }
             _ => true,
         }
     }
@@ -355,6 +404,42 @@ impl CompiledPredicate {
                     (Some(true), _) | (_, Some(true)) => Some(true),
                     (Some(false), Some(false)) => Some(false),
                     _ => None, // At least one NULL and no true
+                }
+            }
+
+            // N-ary conjunction (AND chain) with short-circuit evaluation
+            CompiledPredicate::Conjunction(children) => {
+                let mut has_null = false;
+                for child in children.iter() {
+                    match child.evaluate(row) {
+                        Some(false) => return Some(false), // Short-circuit
+                        Some(true) => {}
+                        None => has_null = true,
+                    }
+                }
+                // If any child was NULL and none were false, result is NULL
+                if has_null {
+                    None
+                } else {
+                    Some(true)
+                }
+            }
+
+            // N-ary disjunction (OR chain) with short-circuit evaluation
+            CompiledPredicate::Disjunction(children) => {
+                let mut has_null = false;
+                for child in children.iter() {
+                    match child.evaluate(row) {
+                        Some(true) => return Some(true), // Short-circuit
+                        Some(false) => {}
+                        None => has_null = true,
+                    }
+                }
+                // If any child was NULL and none were true, result is NULL
+                if has_null {
+                    None
+                } else {
+                    Some(false)
                 }
             }
 

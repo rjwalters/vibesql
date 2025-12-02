@@ -143,6 +143,12 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
         Expression::PseudoVariable { .. } => {
             // OLD/NEW pseudo-variables in triggers - skip validation
         }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                extract_column_refs(child, refs);
+            }
+        }
+
         // Terminals with no column references
         Expression::Literal(_)
         | Expression::Wildcard

@@ -231,6 +231,16 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
             walk_expression(visitor, right)
         }
 
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                let result = walk_expression(visitor, child);
+                if result.should_stop() {
+                    return VisitResult::Stop;
+                }
+            }
+            VisitResult::Continue
+        }
+
         Expression::UnaryOp { expr: inner, .. } => walk_expression(visitor, inner),
 
         Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
@@ -515,6 +525,14 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             left: Box::new(transform_expression(visitor, *left)),
             right: Box::new(transform_expression(visitor, *right)),
         },
+
+        Expression::Conjunction(children) => Expression::Conjunction(
+            children.into_iter().map(|c| transform_expression(visitor, c)).collect(),
+        ),
+
+        Expression::Disjunction(children) => Expression::Disjunction(
+            children.into_iter().map(|c| transform_expression(visitor, c)).collect(),
+        ),
 
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
             op,

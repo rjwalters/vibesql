@@ -339,6 +339,9 @@ impl SelectExecutor<'_> {
             ArenaExpression::BinaryOp { left, right, .. } => {
                 self.arena_expr_has_aggregate(left) || self.arena_expr_has_aggregate(right)
             }
+            ArenaExpression::Conjunction(children) | ArenaExpression::Disjunction(children) => {
+                children.iter().any(|c| self.arena_expr_has_aggregate(c))
+            }
             ArenaExpression::UnaryOp { expr, .. } => self.arena_expr_has_aggregate(expr),
             ArenaExpression::IsNull { expr, .. } => self.arena_expr_has_aggregate(expr),
             ArenaExpression::Literal(_)

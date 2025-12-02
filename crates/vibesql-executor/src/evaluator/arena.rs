@@ -191,6 +191,43 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 self.eval_binary_op(*op, left, right, row)
             }
 
+            // Conjunction (flattened AND chain) - short-circuit evaluation
+            ArenaExpression::Conjunction(children) => {
+                for child in children.iter() {
+                    match self.eval_with_depth(child, row)? {
+                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
+                        SqlValue::Null => return Ok(SqlValue::Null),
+                        SqlValue::Boolean(true) => continue,
+                        other => {
+                            return Err(ExecutorError::TypeError(format!(
+                                "AND requires boolean operands, got {:?}",
+                                other
+                            )))
+                        }
+                    }
+                }
+                Ok(SqlValue::Boolean(true))
+            }
+
+            // Disjunction (flattened OR chain) - short-circuit evaluation
+            ArenaExpression::Disjunction(children) => {
+                let mut found_null = false;
+                for child in children.iter() {
+                    match self.eval_with_depth(child, row)? {
+                        SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
+                        SqlValue::Null => found_null = true,
+                        SqlValue::Boolean(false) => continue,
+                        other => {
+                            return Err(ExecutorError::TypeError(format!(
+                                "OR requires boolean operands, got {:?}",
+                                other
+                            )))
+                        }
+                    }
+                }
+                Ok(if found_null { SqlValue::Null } else { SqlValue::Boolean(false) })
+            }
+
             // Unary operation
             ArenaExpression::UnaryOp { op, expr: inner } => {
                 let val = self.eval_with_depth(inner, row)?;

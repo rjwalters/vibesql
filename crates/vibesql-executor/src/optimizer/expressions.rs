@@ -330,6 +330,23 @@ pub fn optimize_expression(
         Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_) => Ok(expr.clone()),
+
+        // Conjunction and Disjunction - optimize children
+        Expression::Conjunction(children) => {
+            let optimized: Result<Vec<_>, _> = children
+                .iter()
+                .map(|child| optimize_expression(child, evaluator))
+                .collect();
+            Ok(Expression::Conjunction(optimized?))
+        }
+
+        Expression::Disjunction(children) => {
+            let optimized: Result<Vec<_>, _> = children
+                .iter()
+                .map(|child| optimize_expression(child, evaluator))
+                .collect();
+            Ok(Expression::Disjunction(optimized?))
+        }
     }
 }
 

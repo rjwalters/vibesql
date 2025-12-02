@@ -192,6 +192,10 @@ pub(super) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
 
         Expression::Interval { value, .. } => has_external_column_refs(value, subquery),
 
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            children.iter().any(|child| has_external_column_refs(child, subquery))
+        }
+
         // Literals and special expressions don't reference columns
         Expression::Literal(_)
         | Expression::Wildcard

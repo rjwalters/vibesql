@@ -138,7 +138,7 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
                 self.eval_column_ref(table.as_deref(), column, row)
             }
 
-            // Binary operations
+            // Binary operations (for non-AND/OR or legacy ASTs)
             Expression::BinaryOp { left, op, right } => {
                 // Short-circuit evaluation for AND/OR
                 match op {
@@ -179,6 +179,54 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
                         let right_val = self.with_depth().eval(right, row)?;
                         self.eval_binary_op(&left_val, op, &right_val)
                     }
+                }
+            }
+
+            // Flattened conjunction (AND chain) with short-circuit evaluation
+            Expression::Conjunction(terms) => {
+                let mut has_null = false;
+                for term in terms.iter() {
+                    let val = self.with_depth().eval(term, row)?;
+                    match val {
+                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
+                        SqlValue::Boolean(true) => {}
+                        SqlValue::Null => has_null = true,
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "AND operand must evaluate to BOOLEAN".to_string(),
+                            ))
+                        }
+                    }
+                }
+                // If any term was NULL and none were FALSE, result is NULL
+                if has_null {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Boolean(true))
+                }
+            }
+
+            // Flattened disjunction (OR chain) with short-circuit evaluation
+            Expression::Disjunction(terms) => {
+                let mut has_null = false;
+                for term in terms.iter() {
+                    let val = self.with_depth().eval(term, row)?;
+                    match val {
+                        SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
+                        SqlValue::Boolean(false) => {}
+                        SqlValue::Null => has_null = true,
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "OR operand must evaluate to BOOLEAN".to_string(),
+                            ))
+                        }
+                    }
+                }
+                // If any term was NULL and none were TRUE, result is NULL
+                if has_null {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Boolean(false))
                 }
             }
 

@@ -324,6 +324,56 @@ impl CombinedExpressionEvaluator<'_> {
                 }
             }
 
+            // N-ary conjunction (flattened AND chain)
+            // SQL three-valued logic: FALSE dominates, then NULL, then TRUE
+            vibesql_ast::Expression::Conjunction(terms) => {
+                use vibesql_types::SqlValue;
+                let mut has_null = false;
+                for term in terms {
+                    let val = self.eval(term, row)?;
+                    match val {
+                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
+                        SqlValue::Boolean(true) => {}
+                        SqlValue::Null => has_null = true,
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                format!("Conjunction term is not boolean: {:?}", val),
+                            ))
+                        }
+                    }
+                }
+                if has_null {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Boolean(true))
+                }
+            }
+
+            // N-ary disjunction (flattened OR chain)
+            // SQL three-valued logic: TRUE dominates, then NULL, then FALSE
+            vibesql_ast::Expression::Disjunction(terms) => {
+                use vibesql_types::SqlValue;
+                let mut has_null = false;
+                for term in terms {
+                    let val = self.eval(term, row)?;
+                    match val {
+                        SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
+                        SqlValue::Boolean(false) => {}
+                        SqlValue::Null => has_null = true,
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                format!("Disjunction term is not boolean: {:?}", val),
+                            ))
+                        }
+                    }
+                }
+                if has_null {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Boolean(false))
+                }
+            }
+
             // Unsupported expressions
             _ => Err(ExecutorError::UnsupportedExpression(format!("{:?}", expr))),
         }
