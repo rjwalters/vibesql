@@ -49,8 +49,8 @@ use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
 use crate::cache::{
-    CachedPlan, PkPointLookupPlan, PreparedStatement, PreparedStatementCache,
-    PreparedStatementError, ProjectionPlan,
+    ArenaParseError, ArenaPreparedStatement, CachedPlan, PkPointLookupPlan, PreparedStatement,
+    PreparedStatementCache, PreparedStatementError, ProjectionPlan,
 };
 use crate::errors::ExecutorError;
 use crate::{DeleteExecutor, InsertExecutor, SelectExecutor, SelectResult, UpdateExecutor};
@@ -193,6 +193,31 @@ impl<'a> Session<'a> {
     /// ```
     pub fn prepare(&self, sql: &str) -> Result<Arc<PreparedStatement>, SessionError> {
         self.cache.get_or_prepare(sql).map_err(SessionError::from)
+    }
+
+    /// Prepare a SQL SELECT statement using arena allocation
+    ///
+    /// This is optimized for SELECT statements and provides better cache locality.
+    /// Arena-based statements store the parsed AST in contiguous memory, which
+    /// can improve performance for frequently executed queries.
+    ///
+    /// For non-SELECT statements, this will return an error - use `prepare()` instead.
+    ///
+    /// # Performance Benefits
+    ///
+    /// Arena allocation provides:
+    /// - Better cache locality (contiguous memory layout)
+    /// - Lower allocation overhead (single arena vs multiple heap allocations)
+    /// - Potential for zero-copy parameter binding in future phases
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let stmt = session.prepare_arena("SELECT * FROM users WHERE id = ?")?;
+    /// assert_eq!(stmt.param_count(), 1);
+    /// ```
+    pub fn prepare_arena(&self, sql: &str) -> Result<Arc<ArenaPreparedStatement>, ArenaParseError> {
+        self.cache.get_or_prepare_arena(sql)
     }
 
     /// Execute a prepared SELECT statement with parameters
@@ -411,6 +436,13 @@ impl<'a> SessionMut<'a> {
     /// Prepare a SQL statement for execution
     pub fn prepare(&self, sql: &str) -> Result<Arc<PreparedStatement>, SessionError> {
         self.cache.get_or_prepare(sql).map_err(SessionError::from)
+    }
+
+    /// Prepare a SQL SELECT statement using arena allocation
+    ///
+    /// See [`Session::prepare_arena`] for details.
+    pub fn prepare_arena(&self, sql: &str) -> Result<Arc<ArenaPreparedStatement>, ArenaParseError> {
+        self.cache.get_or_prepare_arena(sql)
     }
 
     /// Execute a prepared statement with parameters (read-only)
@@ -766,5 +798,83 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.rows().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_session_prepare_arena() {
+        let db = create_test_db();
+        let session = Session::new(&db);
+
+        // Test prepare_arena for SELECT statement
+        let stmt = session
+            .prepare_arena("SELECT * FROM users WHERE id = ?")
+            .unwrap();
+        assert_eq!(stmt.param_count(), 1);
+
+        // Verify tables were extracted (arena parser uses uppercase)
+        assert!(stmt.tables().contains("USERS"));
+
+        // Test caching - second call should hit cache
+        let stmt2 = session
+            .prepare_arena("SELECT * FROM users WHERE id = ?")
+            .unwrap();
+        assert_eq!(stmt2.param_count(), 1);
+
+        // Verify it's the same cached statement
+        assert!(std::sync::Arc::ptr_eq(&stmt, &stmt2));
+    }
+
+    #[test]
+    fn test_session_prepare_arena_no_params() {
+        let db = create_test_db();
+        let session = Session::new(&db);
+
+        let stmt = session
+            .prepare_arena("SELECT * FROM users")
+            .unwrap();
+        assert_eq!(stmt.param_count(), 0);
+    }
+
+    #[test]
+    fn test_session_prepare_arena_join() {
+        let db = create_test_db();
+        let session = Session::new(&db);
+
+        // Create orders table first
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+
+        let orders_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("user_id".to_string(), DataType::Integer, false),
+        ];
+        let _orders_schema = TableSchema::with_primary_key(
+            "orders".to_string(),
+            orders_columns,
+            vec!["id".to_string()],
+        );
+
+        // We need a mutable db for this test, so we'll just test the parse works
+        // without actually querying
+        let stmt = session
+            .prepare_arena("SELECT u.id FROM users u JOIN orders o ON u.id = o.user_id")
+            .unwrap();
+
+        // Both tables should be tracked
+        let tables = stmt.tables();
+        assert!(tables.contains("USERS"), "Expected USERS in {:?}", tables);
+        assert!(tables.contains("ORDERS"), "Expected ORDERS in {:?}", tables);
+    }
+
+    #[test]
+    fn test_session_mut_prepare_arena() {
+        let mut db = create_test_db();
+        let session = SessionMut::new(&mut db);
+
+        // Test prepare_arena for SELECT statement
+        let stmt = session
+            .prepare_arena("SELECT * FROM users WHERE id = ?")
+            .unwrap();
+        assert_eq!(stmt.param_count(), 1);
     }
 }
