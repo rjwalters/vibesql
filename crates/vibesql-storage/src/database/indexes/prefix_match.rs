@@ -371,6 +371,17 @@ impl IndexData {
             return self.prefix_scan(prefix);
         }
 
+        // Check for inverted range (lower > upper) - this is valid SQL but returns no rows
+        // e.g., WHERE col BETWEEN 10 AND 5 should return empty, not panic
+        if let (Some(lb), Some(ub)) = (lower_bound, upper_bound) {
+            let normalized_lb = normalize_for_comparison(lb);
+            let normalized_ub = normalize_for_comparison(ub);
+            if normalized_lb > normalized_ub {
+                // Inverted range - no rows can match
+                return Vec::new();
+            }
+        }
+
         // Normalize values for consistent comparison
         let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
 
