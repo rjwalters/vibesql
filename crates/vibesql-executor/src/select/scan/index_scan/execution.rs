@@ -181,6 +181,9 @@ pub(crate) fn execute_index_scan(
         }
     };
 
+    // Track if we used reverse iteration (to skip manual reversal later)
+    let mut used_reverse_iteration = false;
+
     // Get row indices using the appropriate index operation
     let matching_row_indices: Vec<usize> = if let Some(ref keys) = composite_keys {
         if keys.is_empty() {
@@ -213,7 +216,21 @@ pub(crate) fn execute_index_scan(
     } else if let Some(ref prefix) = prefix_result {
         // Prefix key lookup - O(log n + k) where k is matching rows
         // This handles partial composite key matches
-        index_data.prefix_scan(&prefix.prefix_key)
+        // Check if DESC order is requested - if so, use reverse iteration for efficiency
+        let needs_desc_order = sorted_columns
+            .as_ref()
+            .and_then(|cols| cols.first())
+            .map(|(_, dir)| *dir == vibesql_ast::OrderDirection::Desc)
+            .unwrap_or(false);
+
+        if needs_desc_order {
+            // Use reverse iteration - rows come in descending key order
+            // This is more efficient than fetching all and reversing
+            used_reverse_iteration = true;
+            index_data.prefix_scan_reverse(&prefix.prefix_key)
+        } else {
+            index_data.prefix_scan(&prefix.prefix_key)
+        }
     } else {
         match index_predicate {
             Some(IndexPredicate::Range(range)) => {
@@ -342,10 +359,11 @@ pub(crate) fn execute_index_scan(
     // BTreeMap iteration is always ascending, but for DESC ORDER BY we need descending order
     // Check if we're using this index for ORDER BY and if the first ORDER BY column is DESC
     //
-    // NOTE: Skip this if we already applied limit pushdown with DESC order,
-    // because we already reversed the indices earlier to enable early termination.
+    // NOTE: Skip this if we already:
+    // - Applied limit pushdown with DESC order (reversed indices for early termination)
+    // - Used reverse iteration (prefix_scan_reverse already returns descending order)
     let mut filtered_row_refs = filtered_row_refs;
-    if !limit_already_applied {
+    if !limit_already_applied && !used_reverse_iteration {
         if let Some(ref sorted_cols) = sorted_columns {
             if let Some((_, first_order_direction)) = sorted_cols.first() {
                 if *first_order_direction == vibesql_ast::OrderDirection::Desc {
