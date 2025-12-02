@@ -33,6 +33,7 @@ use vibesql_types::SqlValue;
 
 use super::{extract_tables_from_statement, QuerySignature};
 
+pub mod arena;
 mod bind;
 pub mod plan;
 
@@ -165,8 +166,10 @@ pub struct PreparedStatementCacheStats {
 
 /// Thread-safe cache for prepared statements with LRU eviction
 pub struct PreparedStatementCache {
-    /// LRU cache mapping SQL string to prepared statement
+    /// LRU cache mapping SQL string to prepared statement (owned AST)
     cache: Mutex<LruCache<String, Arc<PreparedStatement>>>,
+    /// LRU cache for arena-based prepared statements (SELECT only)
+    arena_cache: Mutex<LruCache<String, Arc<arena::ArenaPreparedStatement>>>,
     /// Maximum cache size
     max_size: usize,
     /// Cache hit count
@@ -175,6 +178,10 @@ pub struct PreparedStatementCache {
     misses: AtomicUsize,
     /// Cache eviction count
     evictions: AtomicUsize,
+    /// Arena cache hit count
+    arena_hits: AtomicUsize,
+    /// Arena cache miss count
+    arena_misses: AtomicUsize,
 }
 
 impl PreparedStatementCache {
@@ -183,10 +190,13 @@ impl PreparedStatementCache {
         let cap = NonZeroUsize::new(max_size).unwrap_or(NonZeroUsize::new(1).unwrap());
         Self {
             cache: Mutex::new(LruCache::new(cap)),
+            arena_cache: Mutex::new(LruCache::new(cap)),
             max_size,
             hits: AtomicUsize::new(0),
             misses: AtomicUsize::new(0),
             evictions: AtomicUsize::new(0),
+            arena_hits: AtomicUsize::new(0),
+            arena_misses: AtomicUsize::new(0),
         }
     }
 
@@ -243,23 +253,91 @@ impl PreparedStatementCache {
         Ok(prepared)
     }
 
-    /// Clear all cached statements
+    /// Get or insert an arena-based prepared statement
+    ///
+    /// This method returns an arena-allocated SELECT statement for optimal
+    /// performance. It's only for SELECT statements - other statement types
+    /// will fail with `UnsupportedStatement`.
+    ///
+    /// Arena statements provide:
+    /// - Better cache locality (contiguous memory)
+    /// - Potentially lower allocation overhead
+    /// - Direct use with arena-based execution paths
+    ///
+    /// For non-SELECT statements, use `get_or_prepare` instead.
+    pub fn get_or_prepare_arena(
+        &self,
+        sql: &str,
+    ) -> Result<Arc<arena::ArenaPreparedStatement>, arena::ArenaParseError> {
+        // Acquire lock for both read and potential write
+        let mut cache = self.arena_cache.lock().unwrap();
+
+        // Check if already in cache
+        if let Some(stmt) = cache.get(sql) {
+            self.arena_hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(Arc::clone(stmt));
+        }
+
+        // Not in cache - parse the SQL using arena parser
+        self.arena_misses.fetch_add(1, Ordering::Relaxed);
+        let prepared = Arc::new(arena::ArenaPreparedStatement::create(sql)?);
+
+        // Check if we'll evict an entry
+        if cache.len() >= self.max_size {
+            self.evictions.fetch_add(1, Ordering::Relaxed);
+        }
+
+        // Insert into cache (LRU will automatically evict if at capacity)
+        cache.put(sql.to_string(), Arc::clone(&prepared));
+
+        Ok(prepared)
+    }
+
+    /// Get an arena-based prepared statement if it exists in cache
+    pub fn get_arena(&self, sql: &str) -> Option<Arc<arena::ArenaPreparedStatement>> {
+        let mut cache = self.arena_cache.lock().unwrap();
+        if let Some(stmt) = cache.get(sql) {
+            self.arena_hits.fetch_add(1, Ordering::Relaxed);
+            Some(Arc::clone(stmt))
+        } else {
+            None
+        }
+    }
+
+    /// Clear all cached statements (both owned and arena)
     pub fn clear(&self) {
         self.cache.lock().unwrap().clear();
+        self.arena_cache.lock().unwrap().clear();
     }
 
     /// Invalidate all statements referencing a table
     pub fn invalidate_table(&self, table: &str) {
-        let mut cache = self.cache.lock().unwrap();
-        // Collect keys to remove (can't modify while iterating)
-        let keys_to_remove: Vec<String> = cache
-            .iter()
-            .filter(|(_, stmt)| stmt.tables.iter().any(|t| t.eq_ignore_ascii_case(table)))
-            .map(|(k, _)| k.clone())
-            .collect();
+        // Invalidate owned statements
+        {
+            let mut cache = self.cache.lock().unwrap();
+            let keys_to_remove: Vec<String> = cache
+                .iter()
+                .filter(|(_, stmt)| stmt.tables.iter().any(|t| t.eq_ignore_ascii_case(table)))
+                .map(|(k, _)| k.clone())
+                .collect();
 
-        for key in keys_to_remove {
-            cache.pop(&key);
+            for key in keys_to_remove {
+                cache.pop(&key);
+            }
+        }
+
+        // Invalidate arena statements
+        {
+            let mut arena_cache = self.arena_cache.lock().unwrap();
+            let keys_to_remove: Vec<String> = arena_cache
+                .iter()
+                .filter(|(_, stmt)| stmt.tables().iter().any(|t| t.eq_ignore_ascii_case(table)))
+                .map(|(k, _)| k.clone())
+                .collect();
+
+            for key in keys_to_remove {
+                arena_cache.pop(&key);
+            }
         }
     }
 

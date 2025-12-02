@@ -26,6 +26,7 @@ rstar = { version = "0.12", optional = true }
 lru = "0.16"
 log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
+ouroboros = "0.18"
 ahash = "0.8"
 
 # Arrow dependencies for vectorized execution

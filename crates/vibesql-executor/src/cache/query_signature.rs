@@ -10,6 +10,13 @@ use std::{
 };
 
 use vibesql_ast::{Expression, Statement};
+use vibesql_ast::arena::{
+    Expression as ArenaExpression, FromClause as ArenaFromClause,
+    GroupByClause as ArenaGroupByClause, GroupingElement as ArenaGroupingElement,
+    GroupingSet as ArenaGroupingSet, MixedGroupingItem as ArenaMixedGroupingItem,
+    SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt,
+    WindowFunctionSpec as ArenaWindowFunctionSpec,
+};
 
 /// Unique identifier for a query based on its structure
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -32,6 +39,15 @@ impl QuerySignature {
     pub fn from_ast(stmt: &Statement) -> Self {
         let mut hasher = DefaultHasher::new();
         Self::hash_statement(stmt, &mut hasher);
+        let hash = hasher.finish();
+        Self { hash }
+    }
+
+    /// Create a signature from arena-allocated SelectStmt, ignoring literal values
+    pub fn from_arena_select(select: &ArenaSelectStmt<'_>) -> Self {
+        let mut hasher = DefaultHasher::new();
+        "SELECT".hash(&mut hasher);
+        Self::hash_arena_select(select, &mut hasher);
         let hash = hasher.finish();
         Self { hash }
     }
@@ -531,6 +547,435 @@ impl QuerySignature {
             }
 
             Expression::SessionVariable { name } => {
+                "SESSION_VARIABLE".hash(hasher);
+                name.hash(hasher);
+            }
+        }
+    }
+
+    // ========================================================================
+    // Arena-allocated type hashing
+    // ========================================================================
+
+    /// Hash an arena-allocated SELECT statement structure
+    fn hash_arena_select(select: &ArenaSelectStmt<'_>, hasher: &mut DefaultHasher) {
+        // Hash DISTINCT
+        select.distinct.hash(hasher);
+
+        // Hash select items
+        for item in &select.select_list {
+            match item {
+                ArenaSelectItem::Wildcard { .. } => "WILDCARD".hash(hasher),
+                ArenaSelectItem::QualifiedWildcard { qualifier, .. } => {
+                    "QUALIFIED_WILDCARD".hash(hasher);
+                    qualifier.hash(hasher);
+                }
+                ArenaSelectItem::Expression { expr, alias } => {
+                    Self::hash_arena_expression(expr, hasher);
+                    alias.hash(hasher);
+                }
+            }
+        }
+
+        // Hash FROM clause
+        if let Some(ref from) = select.from {
+            Self::hash_arena_from_clause(from, hasher);
+        }
+
+        // Hash WHERE clause
+        if let Some(ref where_clause) = select.where_clause {
+            Self::hash_arena_expression(where_clause, hasher);
+        }
+
+        // Hash GROUP BY
+        if let Some(ref group_by) = select.group_by {
+            Self::hash_arena_group_by(group_by, hasher);
+        }
+
+        // Hash HAVING
+        if let Some(ref having) = select.having {
+            Self::hash_arena_expression(having, hasher);
+        }
+
+        // Hash ORDER BY
+        if let Some(ref order_by) = select.order_by {
+            for item in order_by {
+                Self::hash_arena_expression(&item.expr, hasher);
+                std::mem::discriminant(&item.direction).hash(hasher);
+            }
+        }
+
+        // Hash LIMIT/OFFSET
+        select.limit.hash(hasher);
+        select.offset.hash(hasher);
+    }
+
+    /// Hash an arena-allocated FROM clause structure
+    fn hash_arena_from_clause(from: &ArenaFromClause<'_>, hasher: &mut DefaultHasher) {
+        match from {
+            ArenaFromClause::Table { name, alias } => {
+                "TABLE".hash(hasher);
+                name.hash(hasher);
+                alias.hash(hasher);
+            }
+            ArenaFromClause::Join {
+                left,
+                join_type,
+                right,
+                condition,
+                ..
+            } => {
+                "JOIN".hash(hasher);
+                Self::hash_arena_from_clause(left, hasher);
+                std::mem::discriminant(join_type).hash(hasher);
+                Self::hash_arena_from_clause(right, hasher);
+                if let Some(expr) = condition {
+                    Self::hash_arena_expression(expr, hasher);
+                }
+            }
+            ArenaFromClause::Subquery { query, alias } => {
+                "SUBQUERY".hash(hasher);
+                Self::hash_arena_select(query, hasher);
+                alias.hash(hasher);
+            }
+        }
+    }
+
+    fn hash_arena_group_by(group_by: &ArenaGroupByClause<'_>, hasher: &mut DefaultHasher) {
+        match group_by {
+            ArenaGroupByClause::Simple(exprs) => {
+                "SIMPLE".hash(hasher);
+                for expr in exprs {
+                    Self::hash_arena_expression(expr, hasher);
+                }
+            }
+            ArenaGroupByClause::Rollup(elements) => {
+                "ROLLUP".hash(hasher);
+                Self::hash_arena_grouping_elements(elements, hasher);
+            }
+            ArenaGroupByClause::Cube(elements) => {
+                "CUBE".hash(hasher);
+                Self::hash_arena_grouping_elements(elements, hasher);
+            }
+            ArenaGroupByClause::GroupingSets(sets) => {
+                "GROUPING_SETS".hash(hasher);
+                Self::hash_arena_grouping_sets(sets, hasher);
+            }
+            ArenaGroupByClause::Mixed(items) => {
+                "MIXED".hash(hasher);
+                for item in items {
+                    match item {
+                        ArenaMixedGroupingItem::Simple(expr) => {
+                            "SIMPLE".hash(hasher);
+                            Self::hash_arena_expression(expr, hasher);
+                        }
+                        ArenaMixedGroupingItem::Rollup(elements) => {
+                            "ROLLUP".hash(hasher);
+                            Self::hash_arena_grouping_elements(elements, hasher);
+                        }
+                        ArenaMixedGroupingItem::Cube(elements) => {
+                            "CUBE".hash(hasher);
+                            Self::hash_arena_grouping_elements(elements, hasher);
+                        }
+                        ArenaMixedGroupingItem::GroupingSets(sets) => {
+                            "GROUPING_SETS".hash(hasher);
+                            Self::hash_arena_grouping_sets(sets, hasher);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn hash_arena_grouping_sets(
+        sets: &bumpalo::collections::Vec<'_, ArenaGroupingSet<'_>>,
+        hasher: &mut DefaultHasher,
+    ) {
+        for set in sets {
+            "SET".hash(hasher);
+            for expr in &set.columns {
+                Self::hash_arena_expression(expr, hasher);
+            }
+        }
+    }
+
+    fn hash_arena_grouping_elements(
+        elements: &bumpalo::collections::Vec<'_, ArenaGroupingElement<'_>>,
+        hasher: &mut DefaultHasher,
+    ) {
+        for element in elements {
+            match element {
+                ArenaGroupingElement::Single(expr) => {
+                    "SINGLE".hash(hasher);
+                    Self::hash_arena_expression(expr, hasher);
+                }
+                ArenaGroupingElement::Composite(exprs) => {
+                    "COMPOSITE".hash(hasher);
+                    for expr in exprs {
+                        Self::hash_arena_expression(expr, hasher);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Hash an arena-allocated expression, replacing literals with a placeholder marker
+    fn hash_arena_expression(expr: &ArenaExpression<'_>, hasher: &mut DefaultHasher) {
+        match expr {
+            // All literals and placeholders hash to the same value
+            ArenaExpression::Literal(_)
+            | ArenaExpression::Placeholder(_)
+            | ArenaExpression::NumberedPlaceholder(_)
+            | ArenaExpression::NamedPlaceholder(_) => {
+                "LITERAL_PLACEHOLDER".hash(hasher)
+            }
+
+            ArenaExpression::ColumnRef { table, column } => {
+                "COLUMN".hash(hasher);
+                table.hash(hasher);
+                column.hash(hasher);
+            }
+
+            ArenaExpression::PseudoVariable { pseudo_table, column } => {
+                "PSEUDO_VARIABLE".hash(hasher);
+                std::mem::discriminant(pseudo_table).hash(hasher);
+                column.hash(hasher);
+            }
+
+            ArenaExpression::BinaryOp { op, left, right } => {
+                "BINARY_OP".hash(hasher);
+                std::mem::discriminant(op).hash(hasher);
+                Self::hash_arena_expression(left, hasher);
+                Self::hash_arena_expression(right, hasher);
+            }
+
+            ArenaExpression::UnaryOp { op, expr } => {
+                "UNARY_OP".hash(hasher);
+                std::mem::discriminant(op).hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+            }
+
+            ArenaExpression::Function { name, args, character_unit } => {
+                "FUNCTION".hash(hasher);
+                name.to_lowercase().hash(hasher);
+                for arg in args {
+                    Self::hash_arena_expression(arg, hasher);
+                }
+                if let Some(ref unit) = character_unit {
+                    std::mem::discriminant(unit).hash(hasher);
+                }
+            }
+
+            ArenaExpression::AggregateFunction { name, distinct, args } => {
+                "AGGREGATE".hash(hasher);
+                name.to_lowercase().hash(hasher);
+                distinct.hash(hasher);
+                for arg in args {
+                    Self::hash_arena_expression(arg, hasher);
+                }
+            }
+
+            ArenaExpression::IsNull { expr, negated } => {
+                "IS_NULL".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::Wildcard => "WILDCARD".hash(hasher),
+
+            ArenaExpression::Case { operand, when_clauses, else_result } => {
+                "CASE".hash(hasher);
+                if let Some(ref op) = operand {
+                    Self::hash_arena_expression(op, hasher);
+                }
+                for when in when_clauses {
+                    for cond in &when.conditions {
+                        Self::hash_arena_expression(cond, hasher);
+                    }
+                    Self::hash_arena_expression(&when.result, hasher);
+                }
+                if let Some(ref else_expr) = else_result {
+                    Self::hash_arena_expression(else_expr, hasher);
+                }
+            }
+
+            ArenaExpression::ScalarSubquery(subquery) => {
+                "SCALAR_SUBQUERY".hash(hasher);
+                Self::hash_arena_select(subquery, hasher);
+            }
+
+            ArenaExpression::In { expr, subquery, negated } => {
+                "IN_SUBQUERY".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                Self::hash_arena_select(subquery, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::InList { expr, values, negated } => {
+                "IN_LIST".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                values.len().hash(hasher);
+                for val in values {
+                    Self::hash_arena_expression(val, hasher);
+                }
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::Between { expr, low, high, negated, symmetric } => {
+                "BETWEEN".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                Self::hash_arena_expression(low, hasher);
+                Self::hash_arena_expression(high, hasher);
+                negated.hash(hasher);
+                symmetric.hash(hasher);
+            }
+
+            ArenaExpression::Cast { expr, data_type } => {
+                "CAST".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                std::mem::discriminant(data_type).hash(hasher);
+            }
+
+            ArenaExpression::Position { substring, string, character_unit } => {
+                "POSITION".hash(hasher);
+                Self::hash_arena_expression(substring, hasher);
+                Self::hash_arena_expression(string, hasher);
+                if let Some(ref unit) = character_unit {
+                    std::mem::discriminant(unit).hash(hasher);
+                }
+            }
+
+            ArenaExpression::Trim { position, removal_char, string } => {
+                "TRIM".hash(hasher);
+                if let Some(ref pos) = position {
+                    std::mem::discriminant(pos).hash(hasher);
+                }
+                if let Some(ref ch) = removal_char {
+                    Self::hash_arena_expression(ch, hasher);
+                }
+                Self::hash_arena_expression(string, hasher);
+            }
+
+            ArenaExpression::Extract { field, expr } => {
+                "EXTRACT".hash(hasher);
+                std::mem::discriminant(field).hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+            }
+
+            ArenaExpression::Like { expr, pattern, negated } => {
+                "LIKE".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                Self::hash_arena_expression(pattern, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::Exists { subquery, negated } => {
+                "EXISTS".hash(hasher);
+                Self::hash_arena_select(subquery, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::QuantifiedComparison { expr, op, quantifier, subquery } => {
+                "QUANTIFIED".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                std::mem::discriminant(op).hash(hasher);
+                std::mem::discriminant(quantifier).hash(hasher);
+                Self::hash_arena_select(subquery, hasher);
+            }
+
+            ArenaExpression::CurrentDate => "CURRENT_DATE".hash(hasher),
+
+            ArenaExpression::CurrentTime { precision } => {
+                "CURRENT_TIME".hash(hasher);
+                precision.hash(hasher);
+            }
+
+            ArenaExpression::CurrentTimestamp { precision } => {
+                "CURRENT_TIMESTAMP".hash(hasher);
+                precision.hash(hasher);
+            }
+
+            ArenaExpression::Interval {
+                value,
+                unit,
+                leading_precision,
+                fractional_precision,
+            } => {
+                "INTERVAL".hash(hasher);
+                Self::hash_arena_expression(value, hasher);
+                format!("{:?}", unit).hash(hasher);
+                leading_precision.hash(hasher);
+                fractional_precision.hash(hasher);
+            }
+
+            ArenaExpression::Default => "DEFAULT".hash(hasher),
+
+            ArenaExpression::DuplicateKeyValue { column } => {
+                "DUPLICATE_KEY_VALUE".hash(hasher);
+                column.hash(hasher);
+            }
+
+            ArenaExpression::WindowFunction { function, over } => {
+                "WINDOW_FUNCTION".hash(hasher);
+                match function {
+                    ArenaWindowFunctionSpec::Aggregate { name, args } => {
+                        "AGGREGATE".hash(hasher);
+                        name.to_lowercase().hash(hasher);
+                        for arg in args {
+                            Self::hash_arena_expression(arg, hasher);
+                        }
+                    }
+                    ArenaWindowFunctionSpec::Ranking { name, args } => {
+                        "RANKING".hash(hasher);
+                        name.to_lowercase().hash(hasher);
+                        for arg in args {
+                            Self::hash_arena_expression(arg, hasher);
+                        }
+                    }
+                    ArenaWindowFunctionSpec::Value { name, args } => {
+                        "VALUE".hash(hasher);
+                        name.to_lowercase().hash(hasher);
+                        for arg in args {
+                            Self::hash_arena_expression(arg, hasher);
+                        }
+                    }
+                }
+
+                if let Some(ref partition_by) = over.partition_by {
+                    for expr in partition_by {
+                        Self::hash_arena_expression(expr, hasher);
+                    }
+                }
+                if let Some(ref order_by) = over.order_by {
+                    for item in order_by {
+                        Self::hash_arena_expression(&item.expr, hasher);
+                        std::mem::discriminant(&item.direction).hash(hasher);
+                    }
+                }
+                if let Some(ref frame) = over.frame {
+                    std::mem::discriminant(&frame.unit).hash(hasher);
+                    std::mem::discriminant(&frame.start).hash(hasher);
+                    if let Some(ref end) = frame.end {
+                        std::mem::discriminant(end).hash(hasher);
+                    }
+                }
+            }
+
+            ArenaExpression::NextValue { sequence_name } => {
+                "NEXT_VALUE".hash(hasher);
+                sequence_name.hash(hasher);
+            }
+
+            ArenaExpression::MatchAgainst { columns, search_modifier, mode } => {
+                "MATCH_AGAINST".hash(hasher);
+                for col in columns {
+                    col.hash(hasher);
+                }
+                Self::hash_arena_expression(search_modifier, hasher);
+                std::mem::discriminant(mode).hash(hasher);
+            }
+
+            ArenaExpression::SessionVariable { name } => {
                 "SESSION_VARIABLE".hash(hasher);
                 name.hash(hasher);
             }
