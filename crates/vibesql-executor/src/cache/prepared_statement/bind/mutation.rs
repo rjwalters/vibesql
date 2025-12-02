@@ -187,19 +187,15 @@ fn bind_update_mut(stmt: &mut UpdateStmt, params: &[SqlValue]) {
         bind_expression_mut(&mut assignment.value, params);
     }
 
-    if let Some(where_clause) = &mut stmt.where_clause {
-        if let WhereClause::Condition(expr) = where_clause {
-            bind_expression_mut(expr, params);
-        }
+    if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
+        bind_expression_mut(expr, params);
     }
 }
 
 /// Bind parameters in a DELETE statement (in-place)
 fn bind_delete_mut(stmt: &mut DeleteStmt, params: &[SqlValue]) {
-    if let Some(where_clause) = &mut stmt.where_clause {
-        if let WhereClause::Condition(expr) = where_clause {
-            bind_expression_mut(expr, params);
-        }
+    if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
+        bind_expression_mut(expr, params);
     }
 }
 

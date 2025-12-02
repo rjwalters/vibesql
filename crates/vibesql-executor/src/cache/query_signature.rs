@@ -814,7 +814,7 @@ impl QuerySignature {
 
             ArenaExtendedExpr::Case { operand, when_clauses, else_result } => {
                 "CASE".hash(hasher);
-                if let Some(ref op) = operand {
+                if let Some(op) = operand {
                     Self::hash_arena_expression(op, hasher);
                 }
                 for when in when_clauses {
@@ -823,7 +823,7 @@ impl QuerySignature {
                     }
                     Self::hash_arena_expression(&when.result, hasher);
                 }
-                if let Some(ref else_expr) = else_result {
+                if let Some(else_expr) = else_result {
                     Self::hash_arena_expression(else_expr, hasher);
                 }
             }
@@ -869,17 +869,17 @@ impl QuerySignature {
                 "POSITION".hash(hasher);
                 Self::hash_arena_expression(substring, hasher);
                 Self::hash_arena_expression(string, hasher);
-                if let Some(ref unit) = character_unit {
+                if let Some(unit) = character_unit {
                     std::mem::discriminant(unit).hash(hasher);
                 }
             }
 
             ArenaExtendedExpr::Trim { position, removal_char, string } => {
                 "TRIM".hash(hasher);
-                if let Some(ref pos) = position {
+                if let Some(pos) = position {
                     std::mem::discriminant(pos).hash(hasher);
                 }
-                if let Some(ref ch) = removal_char {
+                if let Some(ch) = removal_char {
                     Self::hash_arena_expression(ch, hasher);
                 }
                 Self::hash_arena_expression(string, hasher);
