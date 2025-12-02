@@ -43,8 +43,8 @@ where
     F: Fn(&vibesql_ast::SelectStmt) -> Result<crate::select::SelectResult, ExecutorError> + Copy,
 {
     // Execute left and right sides with WHERE clause for predicate pushdown
-    // Note: ORDER BY is not optimized at JOIN level, so we pass None
-    let left_result = super::execute_from_clause(left, cte_results, database, where_clause, None, outer_row, outer_schema, execute_subquery)?;
+    // Note: ORDER BY and LIMIT are not optimized at JOIN level, so we pass None
+    let left_result = super::execute_from_clause(left, cte_results, database, where_clause, None, None, outer_row, outer_schema, execute_subquery)?;
 
     // For SEMI and ANTI joins (from IN/EXISTS subquery transformations), we must NOT pass
     // the outer WHERE clause to the right side. The right side represents the subquery
@@ -70,7 +70,7 @@ where
         }
         _ => where_clause.cloned(),
     };
-    let right_result = super::execute_from_clause(right, cte_results, database, right_where_clause.as_ref(), None, outer_row, outer_schema, execute_subquery)?;
+    let right_result = super::execute_from_clause(right, cte_results, database, right_where_clause.as_ref(), None, None, outer_row, outer_schema, execute_subquery)?;
 
     // For NATURAL JOIN, generate the implicit join condition based on common column names
     let natural_join_condition = if natural {

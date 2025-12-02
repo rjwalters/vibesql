@@ -9,9 +9,9 @@ use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSch
 
 use super::predicate::{
     build_residual_where_clause, extract_composite_predicates_with_in, extract_index_predicate,
-    extract_prefix_equality_predicates, generate_composite_keys,
+    extract_prefix_equality_predicates, extract_prefix_with_trailing_range, generate_composite_keys,
     where_clause_fully_satisfied_by_composite_key, CompositePredicateType, IndexPredicate,
-    PrefixPredicateResult,
+    PrefixPredicateResult, PrefixWithRangeResult,
 };
 
 /// Execute an index scan
@@ -22,10 +22,18 @@ use super::predicate::{
 /// If sorted_columns is provided, the function preserves index order and returns results
 /// marked as pre-sorted, allowing the caller to skip ORDER BY sorting.
 ///
+/// If limit is provided AND sorted_columns indicates the index satisfies ORDER BY,
+/// the scan will stop early after fetching enough rows, avoiding the cost of
+/// fetching all matching rows just to apply LIMIT later.
+///
 /// # Performance Optimization
 /// When the WHERE clause can be fully satisfied by the index predicate (e.g., simple
 /// predicates like `WHERE col = 5` or `WHERE col BETWEEN 10 AND 20`), we skip redundant
 /// WHERE clause re-evaluation, significantly improving performance for large result sets.
+///
+/// For ORDER BY with LIMIT queries:
+/// - Without pushdown: Fetch 30 rows, reverse, take 1 = O(30)
+/// - With pushdown: Scan from end, stop after 1 = O(1)
 #[allow(private_interfaces)]
 pub(crate) fn execute_index_scan(
     table_name: &str,
@@ -33,6 +41,7 @@ pub(crate) fn execute_index_scan(
     alias: Option<&String>,
     where_clause: Option<&Expression>,
     sorted_columns: Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+    limit: Option<usize>,
     database: &Database,
 ) -> Result<super::super::FromResult, ExecutorError> {
     // Get table and index
@@ -85,20 +94,30 @@ pub(crate) fn execute_index_scan(
     // Determine if we can use composite key point lookup
     let use_composite_lookup = composite_keys.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
 
+    // Try prefix + trailing range lookup first (for queries like WHERE s_w_id = 1 AND s_quantity < 10)
+    // This is more efficient than prefix-only lookup because it bounds the scan
+    let prefix_with_range_result: Option<PrefixWithRangeResult> = if !use_composite_lookup && is_multi_column_index {
+        where_clause.and_then(|expr| extract_prefix_with_trailing_range(expr, &index_column_names))
+    } else {
+        None
+    };
+
+    let use_prefix_bounded_lookup = prefix_with_range_result.is_some();
+
     // Try prefix lookup if full composite key not available (for partial prefix matches)
     // This handles queries like: WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100
     // where only c_w_id and c_d_id are in the index
-    let prefix_result: Option<PrefixPredicateResult> = if !use_composite_lookup && is_multi_column_index {
+    let prefix_result: Option<PrefixPredicateResult> = if !use_composite_lookup && !use_prefix_bounded_lookup && is_multi_column_index {
         where_clause.and_then(|expr| extract_prefix_equality_predicates(expr, &index_column_names))
     } else {
         None
     };
 
     // Check if we're using prefix lookup (partial composite key match)
-    let use_prefix_lookup = prefix_result.is_some() && !use_composite_lookup;
+    let use_prefix_lookup = prefix_result.is_some() && !use_composite_lookup && !use_prefix_bounded_lookup;
 
     // Fall back to single-column predicate extraction if neither composite nor prefix available
-    let index_predicate = if use_composite_lookup || use_prefix_lookup {
+    let index_predicate = if use_composite_lookup || use_prefix_lookup || use_prefix_bounded_lookup {
         None // Don't need single-column predicate - using composite/prefix key
     } else {
         where_clause.and_then(|expr| extract_index_predicate(expr, first_indexed_column))
@@ -106,7 +125,14 @@ pub(crate) fn execute_index_scan(
 
     // Build residual WHERE clause for prefix lookups
     // This contains only the predicates NOT covered by the index prefix
-    let residual_where = if let Some(ref prefix) = prefix_result {
+    let residual_where = if let Some(ref prefix_range) = prefix_with_range_result {
+        // Prefix + range lookup - use covered_columns from the prefix+range result
+        if let Some(where_expr) = where_clause {
+            build_residual_where_clause(where_expr, &prefix_range.covered_columns)
+        } else {
+            None
+        }
+    } else if let Some(ref prefix) = prefix_result {
         if let Some(where_expr) = where_clause {
             build_residual_where_clause(where_expr, &prefix.covered_columns)
         } else {
@@ -131,6 +157,12 @@ pub(crate) fn execute_index_scan(
             }
             None => (false, None),
         }
+    } else if use_prefix_bounded_lookup {
+        // Prefix + range lookup - apply only residual WHERE clause
+        match &residual_where {
+            Some(residual) => (true, Some(residual.clone())), // Apply residual only
+            None => (false, None), // All predicates covered by prefix+range - skip filtering
+        }
     } else if use_prefix_lookup {
         // Prefix lookup - apply only residual WHERE clause
         match &residual_where {
@@ -148,6 +180,9 @@ pub(crate) fn execute_index_scan(
             (None, _) => (false, None),  // No WHERE clause
         }
     };
+
+    // Track if we used reverse iteration (to skip manual reversal later)
+    let mut used_reverse_iteration = false;
 
     // Get row indices using the appropriate index operation
     let matching_row_indices: Vec<usize> = if let Some(ref keys) = composite_keys {
@@ -169,10 +204,33 @@ pub(crate) fn execute_index_scan(
             all_indices.dedup();
             all_indices
         }
+    } else if let Some(ref prefix_range) = prefix_with_range_result {
+        // Prefix + range lookup - O(log n + k) where k is matching rows
+        // This is the most efficient path for queries like WHERE s_w_id = 1 AND s_quantity < 10
+        // It avoids scanning all rows with prefix match and only scans up to the upper bound
+        index_data.prefix_bounded_scan(
+            &prefix_range.prefix_key,
+            &prefix_range.upper_bound,
+            prefix_range.inclusive_upper,
+        )
     } else if let Some(ref prefix) = prefix_result {
         // Prefix key lookup - O(log n + k) where k is matching rows
         // This handles partial composite key matches
-        index_data.prefix_scan(&prefix.prefix_key)
+        // Check if DESC order is requested - if so, use reverse iteration for efficiency
+        let needs_desc_order = sorted_columns
+            .as_ref()
+            .and_then(|cols| cols.first())
+            .map(|(_, dir)| *dir == vibesql_ast::OrderDirection::Desc)
+            .unwrap_or(false);
+
+        if needs_desc_order {
+            // Use reverse iteration - rows come in descending key order
+            // This is more efficient than fetching all and reversing
+            used_reverse_iteration = true;
+            index_data.prefix_scan_reverse(&prefix.prefix_key)
+        } else {
+            index_data.prefix_scan(&prefix.prefix_key)
+        }
     } else {
         match index_predicate {
             Some(IndexPredicate::Range(range)) => {
@@ -217,6 +275,42 @@ pub(crate) fn execute_index_scan(
     if sorted_columns.is_none() {
         matching_row_indices.sort_unstable();
     }
+
+    // LIMIT pushdown optimization for ORDER BY queries (#3253)
+    //
+    // When ORDER BY is satisfied by the index AND no post-filtering is needed,
+    // we can apply LIMIT early by:
+    // 1. For DESC: reverse indices and take first N
+    // 2. For ASC: just take first N
+    //
+    // This transforms ORDER BY ... LIMIT N from O(all_matching_rows) to O(N).
+    // Critical for TPC-C Order-Status where a customer may have 30+ orders but
+    // we only need the most recent one.
+    //
+    // Example: SELECT o_id FROM orders WHERE o_w_id=1 AND o_d_id=2 AND o_c_id=3
+    //          ORDER BY o_id DESC LIMIT 1
+    // - Before: Fetch all 30 orders, reverse, take 1
+    // - After: Reverse indices, take 1, fetch just 1 row
+    let limit_already_applied = if sorted_columns.is_some() && !need_where_filter && limit.is_some() {
+        let is_desc = sorted_columns.as_ref()
+            .and_then(|cols| cols.first())
+            .is_some_and(|(_, dir)| *dir == vibesql_ast::OrderDirection::Desc);
+
+        let limit_val = limit.unwrap();
+
+        if is_desc {
+            // For DESC: reverse and take first N
+            matching_row_indices.reverse();
+            matching_row_indices.truncate(limit_val);
+            true // We already handled the reverse
+        } else {
+            // For ASC: just take first N
+            matching_row_indices.truncate(limit_val);
+            false // ASC doesn't need reverse tracking
+        }
+    } else {
+        false
+    };
 
     // Fetch rows from table (zero-copy - returns references)
     let all_rows = table.scan();
@@ -264,11 +358,17 @@ pub(crate) fn execute_index_scan(
     // Reverse row refs if needed for DESC ORDER BY
     // BTreeMap iteration is always ascending, but for DESC ORDER BY we need descending order
     // Check if we're using this index for ORDER BY and if the first ORDER BY column is DESC
+    //
+    // NOTE: Skip this if we already:
+    // - Applied limit pushdown with DESC order (reversed indices for early termination)
+    // - Used reverse iteration (prefix_scan_reverse already returns descending order)
     let mut filtered_row_refs = filtered_row_refs;
-    if let Some(ref sorted_cols) = sorted_columns {
-        if let Some((_, first_order_direction)) = sorted_cols.first() {
-            if *first_order_direction == vibesql_ast::OrderDirection::Desc {
-                filtered_row_refs.reverse();
+    if !limit_already_applied && !used_reverse_iteration {
+        if let Some(ref sorted_cols) = sorted_columns {
+            if let Some((_, first_order_direction)) = sorted_cols.first() {
+                if *first_order_direction == vibesql_ast::OrderDirection::Desc {
+                    filtered_row_refs.reverse();
+                }
             }
         }
     }

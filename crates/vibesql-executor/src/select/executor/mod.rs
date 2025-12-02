@@ -8,8 +8,10 @@
 //! - `nonagg` - Non-aggregation execution path
 //! - `utils` - Utility methods for expression analysis
 //! - `index_optimization` - Index-based optimizations for WHERE and ORDER BY
+//! - `arena_execution` - Arena-based execution for zero-allocation prepared statements
 
 mod aggregation;
+mod arena_execution;
 mod builder;
 mod columns;
 mod columnar_execution;

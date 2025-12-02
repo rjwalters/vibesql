@@ -61,7 +61,11 @@ pub(crate) fn should_use_index_scan(
         return None;
     }
 
-    // Try to find an index that satisfies both WHERE and ORDER BY (if present)
+    // Find the best index (most pinned columns = better filtering)
+    // We evaluate all applicable indexes and pick the one that covers the most WHERE columns
+    let mut best_index: Option<(String, usize, bool, Option<Vec<(String, vibesql_ast::OrderDirection)>>)> = None;
+    // (index_name, pinned_count, can_use_for_order, sorted_columns)
+
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
             let first_indexed_column = index_metadata.columns.first()?;
@@ -71,10 +75,17 @@ pub(crate) fn should_use_index_scan(
                 .map(|expr| expression_filters_column(expr, &first_indexed_column.column_name))
                 .unwrap_or(false);
 
+            // Count how many leading index columns are pinned by equality predicates
+            let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
+
             // Check if this index can be used for ORDER BY clause
             let can_use_for_order = if let Some(order_items) = order_by {
-                // Check if ORDER BY columns match the index columns
-                let columns_match = can_use_index_for_order_by(order_items, &index_metadata.columns);
+                // Check if ORDER BY columns match the index columns (after skipping pinned columns)
+                let columns_match = can_use_index_for_order_by_with_pinned(
+                    order_items,
+                    &index_metadata.columns,
+                    pinned_columns,
+                );
 
                 // Don't use index for ORDER BY if any column is nullable
                 // BTreeMap orders NULLs first, but SQL default is NULLS LAST for ASC
@@ -88,31 +99,56 @@ pub(crate) fn should_use_index_scan(
                 false
             };
 
-            // Use this index if it satisfies WHERE, ORDER BY, or both
-            if can_use_for_where || can_use_for_order {
-                // Build sorted_columns metadata if ORDER BY can be satisfied
-                let sorted_columns = if can_use_for_order {
-                    // Build sorted_columns from all ORDER BY columns that match the index
-                    let order_items = order_by.unwrap();
-                    Some(
-                        order_items
-                            .iter()
-                            .map(|item| {
-                                let col_name = match &item.expr {
-                                    Expression::ColumnRef { column, .. } => column.clone(),
-                                    _ => unreachable!("can_use_index_for_order_by ensures simple column refs"),
-                                };
-                                (col_name, item.direction.clone())
-                            })
-                            .collect(),
-                    )
-                } else {
-                    None
-                };
+            // Skip if this index can't help with WHERE or ORDER BY
+            if !can_use_for_where && !can_use_for_order {
+                continue;
+            }
 
-                return Some((index_name.clone(), sorted_columns));
+            // Build sorted_columns metadata if ORDER BY can be satisfied
+            let sorted_columns = if can_use_for_order {
+                let order_items = order_by.unwrap();
+                Some(
+                    order_items
+                        .iter()
+                        .map(|item| {
+                            let col_name = match &item.expr {
+                                Expression::ColumnRef { column, .. } => column.clone(),
+                                _ => unreachable!("can_use_index_for_order_by ensures simple column refs"),
+                            };
+                            (col_name, item.direction.clone())
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            };
+
+            // Compare with best index so far
+            // Prefer: more pinned columns > can satisfy ORDER BY > first found
+            let is_better = match &best_index {
+                None => true,
+                Some((_, best_pinned, best_can_order, _)) => {
+                    // More pinned columns = better (narrows down rows more)
+                    if pinned_columns > *best_pinned {
+                        true
+                    } else if pinned_columns == *best_pinned {
+                        // Same pinned count: prefer one that can satisfy ORDER BY
+                        can_use_for_order && !*best_can_order
+                    } else {
+                        false
+                    }
+                }
+            };
+
+            if is_better {
+                best_index = Some((index_name.clone(), pinned_columns, can_use_for_order, sorted_columns));
             }
         }
+    }
+
+    // Return the best index if we found one
+    if let Some((index_name, _, _, sorted_columns)) = best_index {
+        return Some((index_name, sorted_columns));
     }
 
     None
@@ -178,12 +214,20 @@ pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool 
     }
 }
 
-/// Check if an expression is a literal value
+/// Check if an expression is a literal value or parameter placeholder
 ///
-/// Index scans can only filter on columns compared to literal values,
+/// Index scans can filter on columns compared to literal values or bound parameters,
 /// not columns compared to other columns (which are equijoin conditions).
+/// Parameter placeholders (?, $1, :name, etc.) are treated as literals for index selection
+/// because they are resolved to concrete values at execution time.
 fn is_literal(expr: &Expression) -> bool {
-    matches!(expr, Expression::Literal(_))
+    matches!(
+        expr,
+        Expression::Literal(_)
+            | Expression::Placeholder(_)
+            | Expression::NumberedPlaceholder(_)
+            | Expression::NamedPlaceholder(_)
+    )
 }
 
 /// Case-insensitive lookup of column statistics
@@ -208,25 +252,57 @@ fn get_column_stats_ignore_case<'a>(
 
 /// Check if an index can be used to satisfy an ORDER BY clause
 ///
-/// Returns true if the ORDER BY columns match a prefix of the index columns
-/// and the sort directions are compatible (considering ASC/DESC on both sides).
+/// Returns true if the ORDER BY columns match the index columns (after skipping
+/// any prefix columns pinned by equality predicates) and the sort directions
+/// are compatible (either all matching or all reversed).
 ///
 /// Examples:
 /// - ORDER BY col0 ASC can use index (col0 ASC)
-/// - ORDER BY col0 DESC can use index (col0 DESC)
+/// - ORDER BY col0 DESC can use index (col0 DESC) via reversal
 /// - ORDER BY col0, col1 can use index (col0, col1)
-/// - ORDER BY col0 cannot use index (col0 DESC) - wrong direction
+/// - WHERE col0 = 1 ORDER BY col1 can use index (col0, col1) - col0 is pinned
 pub(crate) fn can_use_index_for_order_by(
     order_items: &[vibesql_ast::OrderByItem],
     index_columns: &[vibesql_ast::IndexColumn],
 ) -> bool {
-    // ORDER BY must not have more columns than the index
-    if order_items.len() > index_columns.len() {
+    can_use_index_for_order_by_with_pinned(order_items, index_columns, 0)
+}
+
+/// Check if an index can be used for ORDER BY, accounting for pinned prefix columns
+///
+/// When a query has equality predicates on leading index columns (e.g., WHERE a = 1 AND b = 2),
+/// those columns are "pinned" and the index is effectively sorted by the remaining columns.
+/// This function skips over the pinned columns and checks if the ORDER BY matches.
+///
+/// For example, with index (a, b, c):
+/// - WHERE a = 1 ORDER BY b, c → can use index (skip 1 pinned column)
+/// - WHERE a = 1 AND b = 2 ORDER BY c → can use index (skip 2 pinned columns)
+/// - WHERE a = 1 ORDER BY c → cannot use index (b must come before c)
+pub(crate) fn can_use_index_for_order_by_with_pinned(
+    order_items: &[vibesql_ast::OrderByItem],
+    index_columns: &[vibesql_ast::IndexColumn],
+    pinned_columns: usize,
+) -> bool {
+    // Skip pinned columns
+    let remaining_index_columns = &index_columns[pinned_columns..];
+
+    // ORDER BY must not have more columns than remaining index columns
+    if order_items.len() > remaining_index_columns.len() {
         return false;
     }
 
+    // If no ORDER BY columns, nothing to match
+    if order_items.is_empty() {
+        return false;
+    }
+
+    // Check if ORDER BY matches index direction or is completely reversed
+    // (allowing reverse scan to satisfy DESC ordering)
+    let mut all_match = true;
+    let mut all_reversed = true;
+
     // Check each ORDER BY column against corresponding index column
-    for (order_item, index_col) in order_items.iter().zip(index_columns.iter()) {
+    for (order_item, index_col) in order_items.iter().zip(remaining_index_columns.iter()) {
         // ORDER BY expression must be a simple column reference
         let order_col_name = match &order_item.expr {
             Expression::ColumnRef { table: None, column } => column,
@@ -238,14 +314,87 @@ pub(crate) fn can_use_index_for_order_by(
             return false;
         }
 
-        // Sort directions must be compatible
-        // Note: IndexColumn uses OrderDirection enum, same as OrderByItem
-        if order_item.direction != index_col.direction {
-            return false;
+        // Check sort directions
+        let directions_match = order_item.direction == index_col.direction;
+        let directions_opposite = match (&order_item.direction, &index_col.direction) {
+            (vibesql_ast::OrderDirection::Asc, vibesql_ast::OrderDirection::Desc)
+            | (vibesql_ast::OrderDirection::Desc, vibesql_ast::OrderDirection::Asc) => true,
+            _ => false,
+        };
+
+        if !directions_match {
+            all_match = false;
+        }
+        if !directions_opposite {
+            all_reversed = false;
         }
     }
 
-    true
+    // Accept if all directions match OR all are reversed (reverse scan)
+    all_match || all_reversed
+}
+
+/// Count how many leading index columns are pinned by equality predicates
+///
+/// A column is "pinned" if there's an equality predicate (col = value) in the WHERE clause.
+/// Returns the number of consecutive leading index columns that are pinned.
+pub(crate) fn count_pinned_index_columns(
+    where_clause: Option<&Expression>,
+    index_columns: &[vibesql_ast::IndexColumn],
+) -> usize {
+    let where_clause = match where_clause {
+        Some(expr) => expr,
+        None => return 0,
+    };
+
+    // Collect all columns that have equality predicates
+    let mut pinned_columns = std::collections::HashSet::new();
+    collect_equality_columns(where_clause, &mut pinned_columns);
+
+    // Count consecutive leading index columns that are pinned
+    let mut count = 0;
+    for index_col in index_columns {
+        // Check if this index column is pinned (case-insensitive match)
+        let is_pinned = pinned_columns
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(&index_col.column_name));
+        if is_pinned {
+            count += 1;
+        } else {
+            break; // Stop at first non-pinned column
+        }
+    }
+    count
+}
+
+/// Collect all column names that have equality predicates (col = literal)
+fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::HashSet<String>) {
+    match expr {
+        Expression::BinaryOp { left, op, right } => {
+            match op {
+                vibesql_ast::BinaryOperator::Equal => {
+                    // Check for column = literal pattern
+                    if let Expression::ColumnRef { column, .. } = &**left {
+                        if is_literal(right) {
+                            columns.insert(column.to_uppercase());
+                        }
+                    }
+                    if let Expression::ColumnRef { column, .. } = &**right {
+                        if is_literal(left) {
+                            columns.insert(column.to_uppercase());
+                        }
+                    }
+                }
+                vibesql_ast::BinaryOperator::And => {
+                    // Recurse into both sides of AND
+                    collect_equality_columns(left, columns);
+                    collect_equality_columns(right, columns);
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Cost-based index selection using statistics
@@ -292,9 +441,10 @@ pub(crate) fn cost_based_index_selection(
         return None; // No indexes available
     }
 
-    // Try each index and find the one with lowest cost
+    // Try each index and find the one with best score (pinned columns + cost)
     #[allow(clippy::type_complexity)]
-    let mut best_index: Option<(String, AccessMethod, Option<Vec<(String, vibesql_ast::OrderDirection)>>)> = None;
+    let mut best_index: Option<(String, AccessMethod, usize, Option<Vec<(String, vibesql_ast::OrderDirection)>>)> = None;
+    // (index_name, access_method, pinned_count, sorted_columns)
     let mut has_applicable_index_without_stats = false;
 
     for index_name in &indexes {
@@ -307,8 +457,22 @@ pub(crate) fn cost_based_index_selection(
                 .map(|expr| expression_filters_column(expr, column_name))
                 .unwrap_or(false);
 
+            // Count how many leading index columns are pinned by equality predicates
+            let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
+
+            // Debug: trace index selection
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}",
+                    table_name, index_name, column_name, can_use_for_where);
+            }
+
             let can_use_for_order = if let Some(order_items) = order_by {
-                let columns_match = can_use_index_for_order_by(order_items, &index_metadata.columns);
+                // Check if ORDER BY columns match the index columns (after skipping pinned columns)
+                let columns_match = can_use_index_for_order_by_with_pinned(
+                    order_items,
+                    &index_metadata.columns,
+                    pinned_columns,
+                );
 
                 // Don't use index for ORDER BY if any column is nullable
                 // BTreeMap orders NULLs first, but SQL default is NULLS LAST for ASC
@@ -324,7 +488,15 @@ pub(crate) fn cost_based_index_selection(
 
             // Skip this index if it can't help with WHERE or ORDER BY
             if !can_use_for_where && !can_use_for_order {
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!("[INDEX_SELECT] skipping {} - can't use for where or order", index_name);
+                }
                 continue;
+            }
+
+            // Debug: continue trace
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] {} passed where/order check, checking stats...", index_name);
             }
 
             // Get column statistics for the indexed column (case-insensitive lookup)
@@ -332,10 +504,17 @@ pub(crate) fn cost_based_index_selection(
             if col_stats.is_none() {
                 // Track that we found an applicable index without column stats
                 // We'll fall back to rule-based selection if cost-based fails
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!("[INDEX_SELECT] {} no column stats for {}, will fallback", index_name, column_name);
+                }
                 has_applicable_index_without_stats = true;
                 continue; // No stats for this column, try next index
             }
             let col_stats = col_stats.unwrap();
+
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] {} has column stats for {}", index_name, column_name);
+            }
 
             // Estimate selectivity based on WHERE clause
             let selectivity = if let Some(where_expr) = where_clause {
@@ -350,6 +529,11 @@ pub(crate) fn cost_based_index_selection(
                 Some(col_stats),
                 selectivity,
             );
+
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] {} selectivity={:.4}, access_method={:?}, is_index_scan={}",
+                    index_name, selectivity, access_method, access_method.is_index_scan());
+            }
 
             // Build sorted_columns metadata if ORDER BY can be satisfied
             let sorted_columns = if can_use_for_order {
@@ -370,34 +554,62 @@ pub(crate) fn cost_based_index_selection(
                 None
             };
 
-            // Track the best index (lowest cost)
+            // Track the best index
+            // Priority: more pinned columns (better filtering) > lower cost
             if access_method.is_index_scan() {
-                match &best_index {
-                    None => {
-                        best_index = Some((index_name.clone(), access_method, sorted_columns));
-                    }
-                    Some((_, best_method, _)) => {
-                        if access_method.cost() < best_method.cost() {
-                            best_index = Some((index_name.clone(), access_method, sorted_columns));
+                let is_better = match &best_index {
+                    None => true,
+                    Some((_, best_method, best_pinned, _)) => {
+                        // More pinned columns is always better (filters more rows)
+                        if pinned_columns > *best_pinned {
+                            true
+                        } else if pinned_columns == *best_pinned {
+                            // Same pinned count: prefer lower cost
+                            access_method.cost() < best_method.cost()
+                        } else {
+                            false
                         }
                     }
+                };
+
+                if is_better {
+                    best_index = Some((index_name.clone(), access_method, pinned_columns, sorted_columns));
                 }
+            } else if selectivity < 0.40 && can_use_for_where {
+                // Cost-based chose table scan, but selectivity is good enough for index
+                // The cost model may be too conservative for in-memory/prefix scans
+                // Common fallback values: 0.33 (single predicate), 0.1089 (two predicates)
+                // Fall back to rule-based selection for selective queries
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!("[INDEX_SELECT] {} selectivity={:.4} good, falling back to rule-based",
+                        index_name, selectivity);
+                }
+                return should_use_index_scan(table_name, where_clause, order_by, database);
             }
         }
     }
 
     // Return the best index if we found one
-    if let Some((index_name, _, sorted_columns)) = best_index {
+    if let Some((index_name, _, _, sorted_columns)) = best_index {
+        if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+            eprintln!("[INDEX_SELECT] selected best_index={} for table={}", index_name, table_name);
+        }
         return Some((index_name, sorted_columns));
     }
 
     // If we have applicable indexes but no column stats, fall back to rule-based selection
     // This ensures we use indexes even when statistics are incomplete
     if has_applicable_index_without_stats {
+        if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+            eprintln!("[INDEX_SELECT] falling back to rule-based for table={}", table_name);
+        }
         return should_use_index_scan(table_name, where_clause, order_by, database);
     }
 
     // No applicable indexes found
+    if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+        eprintln!("[INDEX_SELECT] no index selected for table={}", table_name);
+    }
     None
 }
 
@@ -415,6 +627,7 @@ pub(crate) fn estimate_selectivity(
             match op {
                 vibesql_ast::BinaryOperator::Equal => {
                     // Check if this is a predicate on our column (case-insensitive)
+                    // For literal values, use actual statistics
                     if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) = (&**left, &**right) {
                         if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
@@ -423,6 +636,20 @@ pub(crate) fn estimate_selectivity(
                     if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) = (&**left, &**right) {
                         if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
+                        }
+                    }
+                    // For placeholder parameters, estimate using 1/n_distinct
+                    // This is more accurate than the generic 0.33 fallback for equality predicates
+                    let left_is_col = is_column_reference(left, column_name);
+                    let right_is_col = is_column_reference(right, column_name);
+                    let left_is_lit = is_literal(left);
+                    let right_is_lit = is_literal(right);
+
+                    if (left_is_col && right_is_lit) || (left_is_lit && right_is_col)
+                    {
+                        // Use 1/n_distinct as selectivity estimate for equality with parameter
+                        if col_stats.n_distinct > 0 {
+                            return 1.0 / col_stats.n_distinct as f64;
                         }
                     }
                     0.33 // Default fallback
@@ -443,6 +670,12 @@ pub(crate) fn estimate_selectivity(
                             };
                             return col_stats.estimate_range_selectivity(value, op_str);
                         }
+                    }
+                    // For placeholder parameters, use a conservative 0.25 (assume filtering ~75% of rows)
+                    if (is_column_reference(left, column_name) && is_literal(right))
+                        || (is_literal(left) && is_column_reference(right, column_name))
+                    {
+                        return 0.25;
                     }
                     0.33 // Default fallback
                 }

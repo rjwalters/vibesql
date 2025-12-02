@@ -12,6 +12,7 @@
 //   - point_lookup: Single-value equality operations
 //   - range_scan: Range query implementation
 //   - prefix_match: Multi-column index prefix matching
+//   - reverse_scan: Reverse iteration for DESC ORDER BY optimization
 // - index_maintenance: CRUD operations (create, drop, rebuild, update)
 // - index_manager: Core IndexManager coordination and queries
 
@@ -21,6 +22,7 @@ mod range_bounds;
 mod point_lookup;
 mod range_scan;
 mod prefix_match;
+mod reverse_scan;
 mod index_operations;
 mod index_maintenance;
 mod index_manager;

@@ -162,13 +162,9 @@ impl<'arena> ArenaParser<'arena> {
         // Parse optional column list
         let columns = if self.try_consume(&Token::LParen) {
             let mut cols = BumpVec::new_in(self.arena);
-            loop {
-                if let Token::Identifier(col) = self.peek() {
-                    cols.push(self.alloc_str(col));
-                    self.advance();
-                } else {
-                    break;
-                }
+            while let Token::Identifier(col) = self.peek() {
+                cols.push(self.alloc_str(col));
+                self.advance();
                 if !self.try_consume(&Token::Comma) {
                     break;
                 }
@@ -268,13 +264,9 @@ impl<'arena> ArenaParser<'arena> {
 
         // Parse variable list
         let mut vars = BumpVec::new_in(self.arena);
-        loop {
-            if let Token::Identifier(var) = self.peek() {
-                vars.push(self.alloc_str(var));
-                self.advance();
-            } else {
-                break;
-            }
+        while let Token::Identifier(var) = self.peek() {
+            vars.push(self.alloc_str(var));
+            self.advance();
             if !self.try_consume(&Token::Comma) {
                 break;
             }

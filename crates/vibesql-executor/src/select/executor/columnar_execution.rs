@@ -128,6 +128,7 @@ impl SelectExecutor<'_> {
             cte_results,
             None, // Don't filter here - columnar module will handle it with SIMD
             None, // ORDER BY applied after aggregation
+            None, // LIMIT applied after aggregation
         )?;
 
         // Extract schema before accessing rows (to avoid borrow checker issues)

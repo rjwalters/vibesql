@@ -38,7 +38,9 @@ impl Default for CostEstimator {
     fn default() -> Self {
         Self {
             seq_page_cost: 1.0,
-            random_page_cost: 4.0,
+            // For in-memory databases (BTreeMap), random access is fast.
+            // Using 1.5 instead of 4.0 (disk-based) to better reflect reality.
+            random_page_cost: 1.5,
             cpu_tuple_cost: 0.01,
             cpu_index_tuple_cost: 0.005,
             rows_per_page: 100.0,

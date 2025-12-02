@@ -14,7 +14,7 @@ pub mod table_extractor;
 pub use integration::{CacheManager, CachedQueryContext};
 pub use parameterized::{LiteralExtractor, LiteralValue, ParameterPosition, ParameterizedPlan};
 pub use prepared_statement::{
-    arena::{ArenaParseError, ArenaPreparedStatement},
+    arena_prepared::{ArenaBindError, ArenaParseError, ArenaPreparedStatement},
     CachedPlan, ColumnProjection, PkPointLookupPlan, PreparedStatement, PreparedStatementCache,
     PreparedStatementCacheStats, PreparedStatementError, ProjectionPlan,
 };

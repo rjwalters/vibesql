@@ -175,6 +175,95 @@ impl BTreeIndex {
         Ok(result)
     }
 
+    /// Perform a range scan returning only the first matching row
+    ///
+    /// This is an optimized version of range_scan for queries with LIMIT 1.
+    /// It returns immediately after finding the first matching row instead of
+    /// collecting all rows in the range.
+    ///
+    /// # Arguments
+    /// * `start_key` - Optional lower bound key (None = start from beginning)
+    /// * `end_key` - Optional upper bound key (None = scan to end)
+    /// * `inclusive_start` - Whether start_key is inclusive
+    /// * `inclusive_end` - Whether end_key is inclusive
+    ///
+    /// # Returns
+    /// The first row_id in the range, or None if no matching rows
+    ///
+    /// # Performance
+    /// O(log n) - only finds the first leaf and returns immediately
+    ///
+    /// # Example
+    /// ```ignore
+    /// // TPC-C Delivery: find oldest new_order for a district
+    /// // Only returns the first (minimum) order ID
+    /// let first = index.range_scan_first(
+    ///     Some(&vec![w_id, d_id]),  // prefix start
+    ///     Some(&vec![w_id, d_id + 1]),  // prefix end
+    ///     true, false
+    /// )?;
+    /// ```
+    pub fn range_scan_first(
+        &self,
+        start_key: Option<&Key>,
+        end_key: Option<&Key>,
+        inclusive_start: bool,
+        inclusive_end: bool,
+    ) -> Result<Option<RowId>, StorageError> {
+        // Find starting point
+        let mut current_leaf = if let Some(start) = start_key {
+            let (leaf, _) = self.find_leaf_path(start)?;
+            leaf
+        } else {
+            self.find_leftmost_leaf()?
+        };
+
+        let mut started = start_key.is_none();
+
+        // Scan through leaves looking for first match
+        loop {
+            for (key, row_ids) in &current_leaf.entries {
+                // Check if we're past the end key
+                if let Some(end) = end_key {
+                    let cmp = key.cmp(end);
+                    if cmp == std::cmp::Ordering::Greater {
+                        return Ok(None);
+                    }
+                    if cmp == std::cmp::Ordering::Equal && !inclusive_end {
+                        return Ok(None);
+                    }
+                }
+
+                // Check if we're before the start key
+                if !started {
+                    if let Some(start) = start_key {
+                        let cmp = key.cmp(start);
+                        if cmp == std::cmp::Ordering::Less {
+                            continue;
+                        }
+                        if cmp == std::cmp::Ordering::Equal && !inclusive_start {
+                            continue;
+                        }
+                        started = true;
+                    }
+                }
+
+                // Found a key in range - return immediately
+                if let Some(&first_row) = row_ids.first() {
+                    return Ok(Some(first_row));
+                }
+            }
+
+            // Move to next leaf
+            if current_leaf.next_leaf == super::super::super::NULL_PAGE_ID {
+                break;
+            }
+            current_leaf = self.read_leaf_node(current_leaf.next_leaf)?;
+        }
+
+        Ok(None)
+    }
+
     /// Lookup multiple keys in the B+ tree (for IN predicates)
     ///
     /// # Arguments
