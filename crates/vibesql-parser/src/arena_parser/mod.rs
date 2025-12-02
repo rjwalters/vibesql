@@ -500,6 +500,60 @@ pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression,
     Ok(vibesql_ast::Expression::from(arena_expr))
 }
 
+/// Parse INSERT SQL and return a heap-allocated (owned) InsertStmt.
+///
+/// Like [`parse_select_to_owned`], this provides arena parsing
+/// benefits while returning a standard `InsertStmt`.
+///
+/// # Example
+///
+/// ```ignore
+/// use vibesql_parser::arena_parser::parse_insert_to_owned;
+///
+/// let stmt = parse_insert_to_owned("INSERT INTO users (name) VALUES ('Alice')")?;
+/// ```
+pub fn parse_insert_to_owned(input: &str) -> Result<vibesql_ast::InsertStmt, ParseError> {
+    let arena = Bump::new();
+    let arena_stmt = ArenaParser::parse_insert(input, &arena)?;
+    Ok(vibesql_ast::InsertStmt::from(arena_stmt))
+}
+
+/// Parse UPDATE SQL and return a heap-allocated (owned) UpdateStmt.
+///
+/// Like [`parse_select_to_owned`], this provides arena parsing
+/// benefits while returning a standard `UpdateStmt`.
+///
+/// # Example
+///
+/// ```ignore
+/// use vibesql_parser::arena_parser::parse_update_to_owned;
+///
+/// let stmt = parse_update_to_owned("UPDATE users SET name = 'Bob' WHERE id = 1")?;
+/// ```
+pub fn parse_update_to_owned(input: &str) -> Result<vibesql_ast::UpdateStmt, ParseError> {
+    let arena = Bump::new();
+    let arena_stmt = ArenaParser::parse_update(input, &arena)?;
+    Ok(vibesql_ast::UpdateStmt::from(arena_stmt))
+}
+
+/// Parse DELETE SQL and return a heap-allocated (owned) DeleteStmt.
+///
+/// Like [`parse_select_to_owned`], this provides arena parsing
+/// benefits while returning a standard `DeleteStmt`.
+///
+/// # Example
+///
+/// ```ignore
+/// use vibesql_parser::arena_parser::parse_delete_to_owned;
+///
+/// let stmt = parse_delete_to_owned("DELETE FROM users WHERE id = 1")?;
+/// ```
+pub fn parse_delete_to_owned(input: &str) -> Result<vibesql_ast::DeleteStmt, ParseError> {
+    let arena = Bump::new();
+    let arena_stmt = ArenaParser::parse_delete(input, &arena)?;
+    Ok(vibesql_ast::DeleteStmt::from(arena_stmt))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
