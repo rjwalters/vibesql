@@ -326,9 +326,6 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &SelectStmt,
     ) -> Result<Vec<Row>, ExecutorError> {
-        #[cfg(feature = "fast-path-profile")]
-        let start = std::time::Instant::now();
-
         // Extract table name from FROM clause
         let (table_name, alias) = match &stmt.from {
             Some(vibesql_ast::FromClause::Table { name, alias }) => {
@@ -337,34 +334,15 @@ impl SelectExecutor<'_> {
             _ => unreachable!("Fast path requires simple table FROM clause"),
         };
 
-        #[cfg(feature = "fast-path-profile")]
-        let extract_time = start.elapsed();
-
         // Try ultra-fast PK lookup path first
         if let Some(result) = self.try_pk_lookup_fast(table_name, alias, stmt)? {
-            #[cfg(feature = "fast-path-profile")]
-            {
-                let total = start.elapsed();
-                eprintln!("[FAST-PATH] PK lookup succeeded for {}: extract={:?}, total={:?}", table_name, extract_time, total);
-            }
             return Ok(result);
         }
-
-        #[cfg(feature = "fast-path-profile")]
-        let pk_fail_time = start.elapsed();
 
         // Try secondary index lookup path next
         if let Some(result) = self.try_secondary_index_lookup_fast(table_name, alias, stmt)? {
-            #[cfg(feature = "fast-path-profile")]
-            {
-                let total = start.elapsed();
-                eprintln!("[FAST-PATH] Secondary index lookup succeeded for {}: pk_fail={:?}, total={:?}", table_name, pk_fail_time, total);
-            }
             return Ok(result);
         }
-
-        #[cfg(feature = "fast-path-profile")]
-        eprintln!("[FAST-PATH] Falling back to standard path for {}", table_name);
 
         // Fall back to standard fast path with execute_from_clause
         let from_result = crate::select::scan::execute_from_clause(
