@@ -122,18 +122,18 @@ impl<'a> Lexer<'a> {
             }
             '$' => {
                 // Check if followed by digits for numbered placeholder ($1, $2, etc.)
-                if self.peek(1).map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                if self.peek_byte(1).map(|b| b.is_ascii_digit()).unwrap_or(false) {
                     self.tokenize_numbered_placeholder()
                 } else {
                     Err(LexerError {
                         message: "Expected digit after '$' for numbered placeholder".to_string(),
-                        position: self.position,
+                        position: self.position(),
                     })
                 }
             }
             ':' => {
                 // Check if followed by alphabetic character or underscore for named placeholder
-                if self.peek(1).map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false) {
+                if self.peek_byte(1).map(|b| b.is_ascii_alphabetic() || b == b'_').unwrap_or(false) {
                     self.tokenize_named_placeholder()
                 } else {
                     // Just a colon symbol (could be used in other contexts)
@@ -311,7 +311,7 @@ impl<'a> Lexer<'a> {
     fn tokenize_numbered_placeholder(&mut self) -> Result<Token, LexerError> {
         self.advance(); // consume '$'
 
-        let start_pos = self.position;
+        let start_pos = self.position();
         let mut num_str = String::new();
 
         // Read all digits
@@ -368,7 +368,7 @@ impl<'a> Lexer<'a> {
         if name.is_empty() {
             return Err(LexerError {
                 message: "Expected identifier after ':' for named placeholder".to_string(),
-                position: self.position,
+                position: self.position(),
             });
         }
 
