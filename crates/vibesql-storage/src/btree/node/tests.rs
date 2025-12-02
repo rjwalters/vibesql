@@ -922,3 +922,309 @@ fn test_delete_specific_with_rebalancing() {
     let row_ids = index.lookup(&vec![SqlValue::Integer(10)]).unwrap();
     assert_eq!(row_ids, vec![1], "Non-deleted entries should still be accessible");
 }
+
+// ========================================================================
+// Tests for prev_leaf pointers and reverse iteration
+// ========================================================================
+
+#[test]
+fn test_leaf_node_split_maintains_prev_leaf() {
+    let mut leaf = LeafNode::new(1);
+
+    // Set an existing next_leaf
+    leaf.next_leaf = 10;
+
+    // Insert 6 entries
+    for i in 0..6 {
+        leaf.insert(vec![SqlValue::Integer(i * 10)], i as usize);
+    }
+
+    let (_, right_node) = leaf.split(2);
+
+    // Left node's prev_leaf should be unchanged (was NULL_PAGE_ID)
+    assert_eq!(leaf.prev_leaf, super::super::NULL_PAGE_ID);
+
+    // Right node's prev_leaf should point to left node
+    assert_eq!(right_node.prev_leaf, 1);
+
+    // Left's next_leaf now points to the new right node
+    assert_eq!(leaf.next_leaf, 2);
+
+    // Right node's next_leaf should be the original next_leaf
+    assert_eq!(right_node.next_leaf, 10);
+}
+
+#[test]
+fn test_bulk_load_maintains_prev_leaf() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+
+    // Create enough entries to force multiple leaf nodes
+    let sorted_entries: Vec<(Key, RowId)> = (0..500)
+        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
+        .collect();
+
+    let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+
+    // Verify doubly-linked list by traversing forward and backward
+    let leftmost = index.find_leftmost_leaf().unwrap();
+    let rightmost = index.find_rightmost_leaf().unwrap();
+
+    // Leftmost should have no prev_leaf
+    assert_eq!(leftmost.prev_leaf, super::super::NULL_PAGE_ID);
+
+    // Rightmost should have no next_leaf
+    assert_eq!(rightmost.next_leaf, super::super::NULL_PAGE_ID);
+
+    // Traverse forward and count leaves
+    let mut forward_count = 0;
+    let mut current = leftmost.clone();
+    loop {
+        forward_count += 1;
+        if current.next_leaf == super::super::NULL_PAGE_ID {
+            break;
+        }
+        current = index.read_leaf_node(current.next_leaf).unwrap();
+    }
+
+    // Traverse backward and count leaves
+    let mut backward_count = 0;
+    let mut current = rightmost;
+    loop {
+        backward_count += 1;
+        if current.prev_leaf == super::super::NULL_PAGE_ID {
+            break;
+        }
+        current = index.read_leaf_node(current.prev_leaf).unwrap();
+    }
+
+    // Both counts should be equal
+    assert_eq!(forward_count, backward_count, "Forward and backward traversal should visit same number of leaves");
+}
+
+#[test]
+fn test_insert_maintains_prev_leaf() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let mut index = BTreeIndex::new(page_manager, key_schema).unwrap();
+
+    let degree = index.degree();
+
+    // Insert enough keys to cause multiple splits
+    for i in 0..(degree * 3) {
+        let key = vec![SqlValue::Integer(i as i64 * 10)];
+        index.insert(key, i).unwrap();
+    }
+
+    // Verify doubly-linked list
+    let leftmost = index.find_leftmost_leaf().unwrap();
+    let rightmost = index.find_rightmost_leaf().unwrap();
+
+    // Leftmost should have no prev_leaf
+    assert_eq!(leftmost.prev_leaf, super::super::NULL_PAGE_ID);
+
+    // Rightmost should have no next_leaf
+    assert_eq!(rightmost.next_leaf, super::super::NULL_PAGE_ID);
+
+    // Traverse forward and count
+    let mut forward_count = 0;
+    let mut current = leftmost;
+    loop {
+        forward_count += 1;
+        if current.next_leaf == super::super::NULL_PAGE_ID {
+            break;
+        }
+        let prev_page_id = current.page_id;
+        current = index.read_leaf_node(current.next_leaf).unwrap();
+        // Verify prev_leaf points back
+        assert_eq!(current.prev_leaf, prev_page_id, "prev_leaf should point to previous node");
+    }
+
+    assert!(forward_count > 1, "Test requires multiple leaf nodes");
+}
+
+#[test]
+fn test_range_scan_reverse_basic() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let sorted_entries = vec![
+        (vec![SqlValue::Integer(10)], 0),
+        (vec![SqlValue::Integer(20)], 1),
+        (vec![SqlValue::Integer(30)], 2),
+        (vec![SqlValue::Integer(40)], 3),
+        (vec![SqlValue::Integer(50)], 4),
+    ];
+
+    let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+
+    // Full reverse scan
+    let result = index.range_scan_reverse(None, None, true, true).unwrap();
+    assert_eq!(result, vec![4, 3, 2, 1, 0], "Full reverse scan should return all rows in descending order");
+
+    // Compare with forward scan reversed
+    let forward = index.range_scan(None, None, true, true).unwrap();
+    let mut forward_reversed = forward.clone();
+    forward_reversed.reverse();
+    assert_eq!(result, forward_reversed, "Reverse scan should equal reversed forward scan");
+}
+
+#[test]
+fn test_range_scan_reverse_with_bounds() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let sorted_entries: Vec<(Key, RowId)> = (0..10)
+        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
+        .collect();
+
+    let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+
+    // Range [20, 60] in reverse
+    let start = vec![SqlValue::Integer(20)];
+    let end = vec![SqlValue::Integer(60)];
+    let result = index.range_scan_reverse(Some(&start), Some(&end), true, true).unwrap();
+    assert_eq!(result, vec![6, 5, 4, 3, 2], "Bounded reverse scan");
+
+    // Exclusive start
+    let result = index.range_scan_reverse(Some(&start), Some(&end), false, true).unwrap();
+    assert_eq!(result, vec![6, 5, 4, 3], "Reverse scan with exclusive start");
+
+    // Exclusive end
+    let result = index.range_scan_reverse(Some(&start), Some(&end), true, false).unwrap();
+    assert_eq!(result, vec![5, 4, 3, 2], "Reverse scan with exclusive end");
+}
+
+#[test]
+fn test_range_scan_reverse_multi_level() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+
+    // Create enough entries for multi-level tree
+    let sorted_entries: Vec<(Key, RowId)> = (0..500)
+        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
+        .collect();
+
+    let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+    assert!(index.height() > 1, "Test requires multi-level tree");
+
+    // Full reverse scan should return all 500 entries in descending order
+    let result = index.range_scan_reverse(None, None, true, true).unwrap();
+    assert_eq!(result.len(), 500);
+    assert_eq!(result[0], 499, "First element should be highest row_id");
+    assert_eq!(result[499], 0, "Last element should be lowest row_id");
+
+    // Verify it's actually reversed
+    for i in 0..499 {
+        assert!(result[i] > result[i + 1], "Results should be in descending order");
+    }
+}
+
+#[test]
+fn test_range_scan_reverse_first() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let sorted_entries: Vec<(Key, RowId)> = (0..100)
+        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
+        .collect();
+
+    let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+
+    // Get first element in reverse (should be highest)
+    let result = index.range_scan_reverse_first(None, None, true, true).unwrap();
+    assert_eq!(result, Some(99), "Reverse first should return highest row_id");
+
+    // Get first element in bounded range in reverse
+    let start = vec![SqlValue::Integer(200)];
+    let end = vec![SqlValue::Integer(500)];
+    let result = index.range_scan_reverse_first(Some(&start), Some(&end), true, true).unwrap();
+    assert_eq!(result, Some(50), "Bounded reverse first should return highest in range");
+
+    // Empty range
+    let start = vec![SqlValue::Integer(9999)];
+    let end = vec![SqlValue::Integer(10000)];
+    let result = index.range_scan_reverse_first(Some(&start), Some(&end), true, true).unwrap();
+    assert_eq!(result, None, "Empty range should return None");
+}
+
+#[test]
+fn test_find_rightmost_leaf() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+
+    // Create entries for multi-level tree
+    let sorted_entries: Vec<(Key, RowId)> = (0..500)
+        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
+        .collect();
+
+    let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+
+    let rightmost = index.find_rightmost_leaf().unwrap();
+
+    // Rightmost leaf should have no next_leaf
+    assert_eq!(rightmost.next_leaf, super::super::NULL_PAGE_ID);
+
+    // Rightmost leaf should contain the highest keys
+    assert!(!rightmost.entries.is_empty());
+    let highest_key = &rightmost.entries.last().unwrap().0;
+    assert_eq!(*highest_key, vec![SqlValue::Integer(4990)], "Rightmost leaf should contain highest key");
+}
+
+#[test]
+fn test_range_scan_reverse_with_duplicates() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    // Create entries with duplicate keys
+    let sorted_entries = vec![
+        (vec![SqlValue::Integer(10)], 0),
+        (vec![SqlValue::Integer(10)], 1),
+        (vec![SqlValue::Integer(20)], 2),
+        (vec![SqlValue::Integer(20)], 3),
+        (vec![SqlValue::Integer(20)], 4),
+        (vec![SqlValue::Integer(30)], 5),
+    ];
+
+    let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+
+    // Full reverse scan should return all row_ids in descending order
+    let result = index.range_scan_reverse(None, None, true, true).unwrap();
+    assert_eq!(result, vec![5, 4, 3, 2, 1, 0], "Reverse scan with duplicates");
+}
