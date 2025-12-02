@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use std::pin::Pin;
 
 use bumpalo::Bump;
-use vibesql_ast::arena::{Expression, SelectStmt};
+use vibesql_ast::arena::{ArenaInterner, Expression, SelectStmt};
 use vibesql_parser::arena_parser::ArenaParser;
 use vibesql_types::SqlValue;
 
@@ -34,6 +34,7 @@ use vibesql_types::SqlValue;
 /// 1. The arena is pinned and will not move after construction
 /// 2. The statement pointer is valid as long as the arena exists
 /// 3. The arena is only dropped when the ArenaPreparedStatement is dropped
+/// 4. The interner pointer is valid as long as the arena exists
 pub struct ArenaPreparedStatement {
     /// Original SQL with placeholders
     sql: String,
@@ -45,6 +46,10 @@ pub struct ArenaPreparedStatement {
     /// Since ArenaPreparedStatement owns the arena and only drops it in Drop,
     /// this pointer is always valid during the lifetime of the struct.
     statement_ptr: *const SelectStmt<'static>,
+    /// Pointer to the interner in the arena.
+    ///
+    /// SAFETY: Same invariants as statement_ptr.
+    interner_ptr: *const ArenaInterner<'static>,
     /// Number of parameters expected (? placeholders)
     param_count: usize,
     /// Tables referenced by this statement (for cache invalidation)
@@ -64,24 +69,31 @@ impl ArenaPreparedStatement {
         // Create pinned arena (won't move)
         let arena = Pin::new(Box::new(Bump::new()));
 
-        // Parse into arena
-        // We need to get a reference that lives as long as the arena
-        let stmt: &SelectStmt<'_> = ArenaParser::parse_select(&sql, &arena)
-            .map_err(|e| ArenaParseError::ParseError(e.to_string()))?;
+        // Parse into arena, getting both statement and interner
+        let (stmt, interner): (&SelectStmt<'_>, ArenaInterner<'_>) =
+            ArenaParser::parse_select_with_interner(&sql, &arena)
+                .map_err(|e| ArenaParseError::ParseError(e.to_string()))?;
 
-        // Count placeholders and extract tables
+        // Count placeholders and extract tables (using interner for symbol resolution)
         let param_count = count_arena_placeholders(stmt);
-        let tables = extract_arena_tables(stmt);
+        let tables = extract_arena_tables(stmt, &interner);
 
         // Store as raw pointer, erasing the lifetime.
         // SAFETY: The arena is owned by this struct and won't be dropped
         // while the statement exists. The pointer remains valid.
         let statement_ptr = stmt as *const SelectStmt<'_> as *const SelectStmt<'static>;
 
+        // Allocate interner in arena and store pointer
+        // SAFETY: Same invariants as statement_ptr
+        let interner_in_arena = arena.alloc(interner);
+        let interner_ptr =
+            interner_in_arena as *const ArenaInterner<'_> as *const ArenaInterner<'static>;
+
         Ok(Self {
             sql,
             arena,
             statement_ptr,
+            interner_ptr,
             param_count,
             tables,
         })
@@ -99,6 +111,14 @@ impl ArenaPreparedStatement {
         // SAFETY: The pointer is valid as documented in the struct invariants.
         // We're returning a reference tied to self's lifetime, which is correct.
         unsafe { &*self.statement_ptr }
+    }
+
+    /// Get a reference to the interner for symbol resolution.
+    ///
+    /// The returned reference is valid for the lifetime of this struct.
+    pub fn interner(&self) -> &ArenaInterner<'_> {
+        // SAFETY: The pointer is valid as documented in the struct invariants.
+        unsafe { &*self.interner_ptr }
     }
 
     /// Get the number of parameters expected.
@@ -192,9 +212,9 @@ fn count_arena_placeholders(stmt: &SelectStmt<'_>) -> usize {
 }
 
 /// Extract table names from an arena statement.
-fn extract_arena_tables(stmt: &SelectStmt<'_>) -> HashSet<String> {
+fn extract_arena_tables(stmt: &SelectStmt<'_>, interner: &ArenaInterner<'_>) -> HashSet<String> {
     let mut tables = HashSet::new();
-    visit_arena_from_clause(stmt.from.as_ref(), &mut tables);
+    visit_arena_from_clause(stmt.from.as_ref(), &mut tables, interner);
     tables
 }
 
@@ -276,19 +296,23 @@ where
 }
 
 /// Extract table names from a FROM clause.
-fn visit_arena_from_clause(from: Option<&vibesql_ast::arena::FromClause<'_>>, tables: &mut HashSet<String>) {
+fn visit_arena_from_clause(
+    from: Option<&vibesql_ast::arena::FromClause<'_>>,
+    tables: &mut HashSet<String>,
+    interner: &ArenaInterner<'_>,
+) {
     let Some(from) = from else { return };
 
     match from {
         vibesql_ast::arena::FromClause::Table { name, .. } => {
-            tables.insert(name.to_string());
+            tables.insert(interner.resolve(*name).to_string());
         }
         vibesql_ast::arena::FromClause::Subquery { query, .. } => {
-            visit_arena_from_clause(query.from.as_ref(), tables);
+            visit_arena_from_clause(query.from.as_ref(), tables, interner);
         }
         vibesql_ast::arena::FromClause::Join { left, right, .. } => {
-            visit_arena_from_clause(Some(left), tables);
-            visit_arena_from_clause(Some(right), tables);
+            visit_arena_from_clause(Some(left), tables, interner);
+            visit_arena_from_clause(Some(right), tables, interner);
         }
     }
 }

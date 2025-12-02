@@ -4,6 +4,7 @@ use bumpalo::collections::Vec as BumpVec;
 use vibesql_types::SqlValue;
 
 use crate::{BinaryOperator, UnaryOperator};
+use super::interner::Symbol;
 use super::SelectStmt;
 
 /// Arena-allocated SQL Expression.
@@ -22,12 +23,12 @@ pub enum Expression<'arena> {
     NumberedPlaceholder(usize),
 
     /// Named parameter placeholder (:name)
-    NamedPlaceholder(&'arena str),
+    NamedPlaceholder(Symbol),
 
     /// Column reference (id, users.id)
     ColumnRef {
-        table: Option<&'arena str>,
-        column: &'arena str,
+        table: Option<Symbol>,
+        column: Symbol,
     },
 
     /// Binary operation (a + b, x = y, etc.)
@@ -56,14 +57,14 @@ pub enum Expression<'arena> {
 
     /// Function call (UPPER(x), SUBSTRING(x, 1, 3))
     Function {
-        name: &'arena str,
+        name: Symbol,
         args: BumpVec<'arena, Expression<'arena>>,
         character_unit: Option<CharacterUnit>,
     },
 
     /// Aggregate function call (COUNT, SUM, AVG, MIN, MAX)
     AggregateFunction {
-        name: &'arena str,
+        name: Symbol,
         distinct: bool,
         args: BumpVec<'arena, Expression<'arena>>,
     },
@@ -174,7 +175,7 @@ pub enum Expression<'arena> {
     Default,
 
     /// VALUES() function for ON DUPLICATE KEY UPDATE
-    DuplicateKeyValue { column: &'arena str },
+    DuplicateKeyValue { column: Symbol },
 
     /// Window function with OVER clause
     WindowFunction {
@@ -183,11 +184,11 @@ pub enum Expression<'arena> {
     },
 
     /// NEXT VALUE FOR sequence expression
-    NextValue { sequence_name: &'arena str },
+    NextValue { sequence_name: Symbol },
 
     /// MATCH...AGAINST full-text search
     MatchAgainst {
-        columns: BumpVec<'arena, &'arena str>,
+        columns: BumpVec<'arena, Symbol>,
         search_modifier: &'arena Expression<'arena>,
         mode: FulltextMode,
     },
@@ -195,11 +196,11 @@ pub enum Expression<'arena> {
     /// Pseudo-variable reference (OLD/NEW in triggers)
     PseudoVariable {
         pseudo_table: PseudoTable,
-        column: &'arena str,
+        column: Symbol,
     },
 
     /// Session/system variable reference
-    SessionVariable { name: &'arena str },
+    SessionVariable { name: Symbol },
 }
 
 /// Full-text search mode specification
@@ -236,15 +237,15 @@ pub enum Quantifier {
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowFunctionSpec<'arena> {
     Aggregate {
-        name: &'arena str,
+        name: Symbol,
         args: BumpVec<'arena, Expression<'arena>>,
     },
     Ranking {
-        name: &'arena str,
+        name: Symbol,
         args: BumpVec<'arena, Expression<'arena>>,
     },
     Value {
-        name: &'arena str,
+        name: Symbol,
         args: BumpVec<'arena, Expression<'arena>>,
     },
 }

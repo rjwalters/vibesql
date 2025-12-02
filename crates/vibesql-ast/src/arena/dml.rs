@@ -5,6 +5,7 @@
 use bumpalo::collections::Vec as BumpVec;
 
 use super::expression::Expression;
+use super::interner::Symbol;
 use super::select::SelectStmt;
 
 // ============================================================================
@@ -32,8 +33,8 @@ pub enum ConflictClause {
 /// INSERT statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt<'arena> {
-    pub table_name: &'arena str,
-    pub columns: BumpVec<'arena, &'arena str>,
+    pub table_name: Symbol,
+    pub columns: BumpVec<'arena, Symbol>,
     pub source: InsertSource<'arena>,
     /// Conflict resolution strategy (None = fail on conflict)
     pub conflict_clause: Option<ConflictClause>,
@@ -51,13 +52,13 @@ pub enum WhereClause<'arena> {
     /// Normal WHERE condition
     Condition(Expression<'arena>),
     /// WHERE CURRENT OF cursor_name (positioned update/delete)
-    CurrentOf(&'arena str),
+    CurrentOf(Symbol),
 }
 
 /// UPDATE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateStmt<'arena> {
-    pub table_name: &'arena str,
+    pub table_name: Symbol,
     pub assignments: BumpVec<'arena, Assignment<'arena>>,
     pub where_clause: Option<WhereClause<'arena>>,
 }
@@ -65,7 +66,7 @@ pub struct UpdateStmt<'arena> {
 /// Column assignment (column = value)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assignment<'arena> {
-    pub column: &'arena str,
+    pub column: Symbol,
     pub value: Expression<'arena>,
 }
 
@@ -78,6 +79,6 @@ pub struct Assignment<'arena> {
 pub struct DeleteStmt<'arena> {
     /// If true, DELETE FROM ONLY (excludes derived tables in table inheritance)
     pub only: bool,
-    pub table_name: &'arena str,
+    pub table_name: Symbol,
     pub where_clause: Option<WhereClause<'arena>>,
 }

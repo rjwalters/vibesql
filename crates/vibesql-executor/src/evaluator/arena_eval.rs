@@ -13,11 +13,11 @@
 //! # Usage
 //!
 //! ```ignore
-//! let evaluator = ArenaExpressionEvaluator::new(schema, &params);
+//! let evaluator = ArenaExpressionEvaluator::new(schema, &params, interner);
 //! let result = evaluator.eval(expr, row)?;
 //! ```
 
-use vibesql_ast::arena::Expression;
+use vibesql_ast::arena::{ArenaInterner, Expression, Symbol};
 use vibesql_ast::BinaryOperator;
 use vibesql_catalog::TableSchema;
 use vibesql_storage::{Database, Row};
@@ -31,7 +31,7 @@ use crate::errors::ExecutorError;
 /// 1. The statement is stored as arena-allocated AST
 /// 2. Parameters are provided at execution time
 /// 3. Placeholders are resolved inline during evaluation (no AST cloning)
-pub struct ArenaExpressionEvaluator<'a, 'params> {
+pub struct ArenaExpressionEvaluator<'a, 'arena, 'params> {
     /// Schema of the current table
     schema: &'a TableSchema,
     /// Bound parameter values for placeholder resolution
@@ -40,16 +40,23 @@ pub struct ArenaExpressionEvaluator<'a, 'params> {
     database: Option<&'a Database>,
     /// Current depth in expression tree (stack overflow protection)
     depth: usize,
+    /// Interner for resolving symbols to strings
+    interner: &'arena ArenaInterner<'arena>,
 }
 
-impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
+impl<'a, 'arena, 'params> ArenaExpressionEvaluator<'a, 'arena, 'params> {
     /// Create a new arena expression evaluator.
-    pub fn new(schema: &'a TableSchema, params: &'params [SqlValue]) -> Self {
+    pub fn new(
+        schema: &'a TableSchema,
+        params: &'params [SqlValue],
+        interner: &'arena ArenaInterner<'arena>,
+    ) -> Self {
         Self {
             schema,
             params,
             database: None,
             depth: 0,
+            interner,
         }
     }
 
@@ -58,13 +65,21 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
         schema: &'a TableSchema,
         params: &'params [SqlValue],
         database: &'a Database,
+        interner: &'arena ArenaInterner<'arena>,
     ) -> Self {
         Self {
             schema,
             params,
             database: Some(database),
             depth: 0,
+            interner,
         }
+    }
+
+    /// Resolve a symbol to its string value.
+    #[inline]
+    fn resolve(&self, symbol: Symbol) -> &'arena str {
+        self.interner.resolve(symbol)
     }
 
     /// Evaluate an arena expression in the context of a row.
@@ -72,7 +87,7 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
     /// This method handles all expression types including placeholders,
     /// which are resolved inline from the params slice.
     #[inline]
-    pub fn eval<'arena>(
+    pub fn eval(
         &self,
         expr: &Expression<'arena>,
         row: &Row,
@@ -89,7 +104,7 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
     }
 
     /// Internal implementation of eval.
-    fn eval_impl<'arena>(
+    fn eval_impl(
         &self,
         expr: &Expression<'arena>,
         row: &Row,
@@ -128,12 +143,14 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
 
             // Named placeholders - not supported in positional binding
             Expression::NamedPlaceholder(name) => Err(ExecutorError::UnsupportedExpression(
-                format!("Named placeholder :{} requires named binding", name),
+                format!("Named placeholder :{} requires named binding", self.resolve(*name)),
             )),
 
             // Column reference
             Expression::ColumnRef { table, column } => {
-                self.eval_column_ref(table.as_deref(), column, row)
+                let table_str = table.map(|t| self.resolve(t));
+                let column_str = self.resolve(*column);
+                self.eval_column_ref(table_str, column_str, row)
             }
 
             // Binary operations (for non-AND/OR or legacy ASTs)
@@ -350,7 +367,8 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
                     vibesql_ast::arena::CharacterUnit::Octets => vibesql_ast::CharacterUnit::Octets,
                 });
 
-                super::functions::eval_scalar_function(name, &arg_values, &owned_char_unit, &sql_mode)
+                let name_str = self.resolve(*name);
+                super::functions::eval_scalar_function(name_str, &arg_values, &owned_char_unit, &sql_mode)
             }
 
             // CASE expression
@@ -451,7 +469,7 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
     }
 
     /// Evaluate a CASE expression.
-    fn eval_case<'arena>(
+    fn eval_case(
         &self,
         operand: &Option<&'arena Expression<'arena>>,
         when_clauses: &bumpalo::collections::Vec<'arena, vibesql_ast::arena::CaseWhen<'arena>>,
@@ -498,6 +516,7 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
             params: self.params,
             database: self.database,
             depth: self.depth + 1,
+            interner: self.interner,
         }
     }
 }
@@ -511,15 +530,16 @@ pub fn eval_arena_where_clause<'arena>(
     params: &[SqlValue],
     row: &Row,
     database: Option<&Database>,
+    interner: &'arena ArenaInterner<'arena>,
 ) -> Result<bool, ExecutorError> {
     let Some(expr) = where_clause else {
         return Ok(true); // No WHERE clause = all rows pass
     };
 
     let evaluator = if let Some(db) = database {
-        ArenaExpressionEvaluator::with_database(schema, params, db)
+        ArenaExpressionEvaluator::with_database(schema, params, db, interner)
     } else {
-        ArenaExpressionEvaluator::new(schema, params)
+        ArenaExpressionEvaluator::new(schema, params, interner)
     };
 
     match evaluator.eval(expr, row)? {
@@ -536,7 +556,7 @@ pub fn eval_arena_where_clause<'arena>(
 mod tests {
     use super::*;
     use bumpalo::Bump;
-    use vibesql_ast::arena::Expression;
+    use vibesql_ast::arena::{ArenaInterner, Expression};
     use vibesql_catalog::ColumnSchema;
     use vibesql_types::DataType;
 
@@ -559,9 +579,11 @@ mod tests {
 
     #[test]
     fn test_literal_evaluation() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
         let schema = create_test_schema();
         let params = vec![];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
 
         let row = create_test_row(1, Some("test"));
 
@@ -572,9 +594,11 @@ mod tests {
 
     #[test]
     fn test_placeholder_resolution() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
         let schema = create_test_schema();
         let params = vec![SqlValue::Integer(42), SqlValue::Varchar("hello".to_string())];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
 
         let row = create_test_row(1, Some("test"));
 
@@ -591,9 +615,11 @@ mod tests {
 
     #[test]
     fn test_numbered_placeholder_resolution() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
         let schema = create_test_schema();
         let params = vec![SqlValue::Integer(42), SqlValue::Varchar("hello".to_string())];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
 
         let row = create_test_row(1, Some("test"));
 
@@ -610,18 +636,22 @@ mod tests {
 
     #[test]
     fn test_column_ref_evaluation() {
+        let arena = Bump::new();
+        let mut interner = ArenaInterner::new(&arena);
         let schema = create_test_schema();
         let params = vec![];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
 
-        let arena = Bump::new();
+        // Intern the column name
+        let id_sym = interner.intern("ID");
+
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
+
         let row = create_test_row(1, Some("test"));
 
-        // Test column reference - using arena-allocated strings
-        let id_str = arena.alloc_str("ID");
+        // Test column reference - using interned symbol
         let expr = Expression::ColumnRef {
             table: None,
-            column: id_str,
+            column: id_sym,
         };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Integer(1));
@@ -629,18 +659,22 @@ mod tests {
 
     #[test]
     fn test_binary_op_with_placeholder() {
+        let arena = Bump::new();
+        let mut interner = ArenaInterner::new(&arena);
         let schema = create_test_schema();
         let params = vec![SqlValue::Integer(1)];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
 
-        let arena = Bump::new();
+        // Intern the column name
+        let id_sym = interner.intern("ID");
+
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
+
         let row = create_test_row(1, Some("test"));
 
         // Create: id = ?
-        let id_str = arena.alloc_str("ID");
         let col_ref = arena.alloc(Expression::ColumnRef {
             table: None,
-            column: id_str,
+            column: id_sym,
         });
         let placeholder = arena.alloc(Expression::Placeholder(0));
 
@@ -656,18 +690,22 @@ mod tests {
 
     #[test]
     fn test_is_null() {
+        let arena = Bump::new();
+        let mut interner = ArenaInterner::new(&arena);
         let schema = create_test_schema();
         let params = vec![];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
 
-        let arena = Bump::new();
+        // Intern the column name
+        let name_sym = interner.intern("NAME");
+
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
+
         let row = create_test_row(1, None);
 
         // name IS NULL (name is at index 1 which is NULL)
-        let name_str = arena.alloc_str("NAME");
         let col_ref = arena.alloc(Expression::ColumnRef {
             table: None,
-            column: name_str,
+            column: name_sym,
         });
 
         let expr = Expression::IsNull {
@@ -681,22 +719,26 @@ mod tests {
 
     #[test]
     fn test_in_list_with_placeholders() {
+        let arena = Bump::new();
+        let mut interner = ArenaInterner::new(&arena);
         let schema = create_test_schema();
         let params = vec![
             SqlValue::Integer(1),
             SqlValue::Integer(2),
             SqlValue::Integer(3),
         ];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
 
-        let arena = Bump::new();
+        // Intern the column name
+        let id_sym = interner.intern("ID");
+
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
+
         let row = create_test_row(2, Some("test"));
 
         // Create: id IN (?, ?, ?)
-        let id_str = arena.alloc_str("ID");
         let col_ref = arena.alloc(Expression::ColumnRef {
             table: None,
-            column: id_str,
+            column: id_sym,
         });
 
         let mut values = bumpalo::collections::Vec::new_in(&arena);

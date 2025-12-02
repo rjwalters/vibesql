@@ -28,7 +28,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use vibesql_ast::arena::{Expression as ArenaExpression, SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt};
+use vibesql_ast::arena::{ArenaInterner, Expression as ArenaExpression, SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt, Symbol};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -67,6 +67,7 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &ArenaSelectStmt<'arena>,
         params: &[SqlValue],
+        interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Vec<Row>, ExecutorError> {
         // Check for unsupported features
         if stmt.with_clause.is_some() {
@@ -102,8 +103,8 @@ impl SelectExecutor<'_> {
 
         // Execute based on FROM clause
         match &stmt.from {
-            Some(from) => self.execute_arena_with_from(stmt, from, params),
-            None => self.execute_arena_without_from(stmt, params),
+            Some(from) => self.execute_arena_with_from(stmt, from, params, interner),
+            None => self.execute_arena_without_from(stmt, params, interner),
         }
     }
 
@@ -112,6 +113,7 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &ArenaSelectStmt<'arena>,
         params: &[SqlValue],
+        interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Vec<Row>, ExecutorError> {
         // Create an empty schema and row for expression evaluation
         let schema = CombinedSchema {
@@ -119,7 +121,7 @@ impl SelectExecutor<'_> {
             total_columns: 0,
         };
         let empty_row = Row::new(vec![]);
-        let evaluator = ArenaExpressionEvaluator::new(&schema, params);
+        let evaluator = ArenaExpressionEvaluator::new(&schema, params, interner);
 
         // Evaluate each select item
         let mut values = Vec::with_capacity(stmt.select_list.len());
@@ -147,6 +149,7 @@ impl SelectExecutor<'_> {
         stmt: &ArenaSelectStmt<'arena>,
         from: &vibesql_ast::arena::FromClause<'arena>,
         params: &[SqlValue],
+        interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Vec<Row>, ExecutorError> {
         use vibesql_ast::arena::FromClause;
 
@@ -165,17 +168,20 @@ impl SelectExecutor<'_> {
             }
         };
 
+        // Resolve table name symbol to string
+        let table_name_str = interner.resolve(table_name);
+
         // Get the table
-        let table = self.database.get_table(table_name).ok_or_else(|| {
-            ExecutorError::TableNotFound(table_name.to_string())
+        let table = self.database.get_table(table_name_str).ok_or_else(|| {
+            ExecutorError::TableNotFound(table_name_str.to_string())
         })?;
 
         // Build schema - use alias if provided, otherwise table name
-        let schema_alias = alias.unwrap_or(table_name);
-        let schema = CombinedSchema::from_table(schema_alias.to_string(), table.schema.clone());
+        let schema_alias_str = alias.map(|a| interner.resolve(a)).unwrap_or(table_name_str);
+        let schema = CombinedSchema::from_table(schema_alias_str.to_string(), table.schema.clone());
 
         // Create evaluator
-        let evaluator = ArenaExpressionEvaluator::with_database(&schema, params, self.database);
+        let evaluator = ArenaExpressionEvaluator::with_database(&schema, params, self.database, interner);
 
         // Scan table and filter
         let mut results = Vec::new();
@@ -196,7 +202,7 @@ impl SelectExecutor<'_> {
             }
 
             // Project columns
-            let projected = self.project_arena_row(&stmt.select_list, row, &schema, &evaluator)?;
+            let projected = self.project_arena_row(&stmt.select_list, row, &schema, &evaluator, interner)?;
             results.push(projected);
 
             // Check timeout periodically
@@ -207,7 +213,7 @@ impl SelectExecutor<'_> {
 
         // Apply ORDER BY if present
         if let Some(order_by) = &stmt.order_by {
-            self.sort_arena_results(&mut results, order_by.as_slice(), &schema, params)?;
+            self.sort_arena_results(&mut results, order_by.as_slice(), &schema, params, interner)?;
         }
 
         // Apply LIMIT/OFFSET
@@ -221,6 +227,7 @@ impl SelectExecutor<'_> {
         row: &Row,
         schema: &CombinedSchema,
         evaluator: &ArenaExpressionEvaluator<'_, 'arena>,
+        interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Row, ExecutorError> {
         let mut values = Vec::with_capacity(select_list.len());
 
@@ -236,7 +243,8 @@ impl SelectExecutor<'_> {
                 }
                 ArenaSelectItem::QualifiedWildcard { qualifier, .. } => {
                     // Qualified wildcard (table.*) - expand columns from specific table
-                    if let Some(&(start, ref tbl_schema)) = schema.table_schemas.get(&qualifier.to_lowercase()) {
+                    let qualifier_str = interner.resolve(*qualifier);
+                    if let Some(&(start, ref tbl_schema)) = schema.table_schemas.get(&qualifier_str.to_lowercase()) {
                         for i in 0..tbl_schema.columns.len() {
                             if let Some(val) = row.get(start + i) {
                                 values.push(val.clone());
@@ -260,11 +268,12 @@ impl SelectExecutor<'_> {
         order_by: &[vibesql_ast::arena::OrderByItem<'arena>],
         schema: &CombinedSchema,
         params: &[SqlValue],
+        interner: &'arena ArenaInterner<'arena>,
     ) -> Result<(), ExecutorError> {
         use vibesql_ast::arena::OrderDirection;
 
         // Create evaluator for order by expressions
-        let evaluator = ArenaExpressionEvaluator::with_database(schema, params, self.database);
+        let evaluator = ArenaExpressionEvaluator::with_database(schema, params, self.database, interner);
 
         // Pre-compute order by values for each row to avoid repeated evaluation
         let mut keyed_rows: Vec<(Vec<SqlValue>, Row)> = results

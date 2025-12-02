@@ -31,7 +31,10 @@ mod select;
 mod update;
 
 use bumpalo::Bump;
-use vibesql_ast::arena::{AlterTableStmt, DeleteStmt, Expression, InsertStmt, SelectStmt, Statement, UpdateStmt};
+use vibesql_ast::arena::{
+    AlterTableStmt, ArenaInterner, Converter, DeleteStmt, Expression, InsertStmt, SelectStmt,
+    Statement, Symbol, UpdateStmt,
+};
 
 use crate::keywords::Keyword;
 use crate::{Lexer, ParseError, Token};
@@ -48,6 +51,7 @@ pub struct ArenaParser<'arena> {
     position: usize,
     placeholder_count: usize,
     arena: &'arena Bump,
+    interner: ArenaInterner<'arena>,
 }
 
 impl<'arena> ArenaParser<'arena> {
@@ -58,7 +62,18 @@ impl<'arena> ArenaParser<'arena> {
             position: 0,
             placeholder_count: 0,
             arena,
+            interner: ArenaInterner::new(arena),
         }
+    }
+
+    /// Returns a reference to the interner for symbol resolution during conversion.
+    pub fn interner(&self) -> &ArenaInterner<'arena> {
+        &self.interner
+    }
+
+    /// Consumes the parser and returns the interner.
+    pub fn into_interner(self) -> ArenaInterner<'arena> {
+        self.interner
     }
 
     /// Parse SQL input string into an arena-allocated Statement.
@@ -92,6 +107,23 @@ impl<'arena> ArenaParser<'arena> {
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_select_statement()
+    }
+
+    /// Parse SQL input string into an arena-allocated SelectStmt, returning the interner too.
+    ///
+    /// Use this method when you need to resolve Symbol values to strings.
+    pub fn parse_select_with_interner(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<(&'arena SelectStmt<'arena>, ArenaInterner<'arena>), ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        let stmt = parser.parse_select_statement()?;
+        Ok((stmt, parser.into_interner()))
     }
 
     /// Parse a single statement.
@@ -328,8 +360,90 @@ impl<'arena> ArenaParser<'arena> {
         parser.parse_replace_statement()
     }
 
-    /// Allocate a string in the arena.
+    /// Parse an ALTER TABLE statement, returning the interner for symbol resolution.
+    pub fn parse_alter_table_sql_with_interner(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<(&'arena AlterTableStmt<'arena>, ArenaInterner<'arena>), ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        let stmt = parser.parse_alter_table_statement()?;
+        Ok((stmt, parser.into_interner()))
+    }
+
+    /// Parse a DELETE statement, returning the interner for symbol resolution.
+    pub fn parse_delete_with_interner(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<(&'arena DeleteStmt<'arena>, ArenaInterner<'arena>), ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        let stmt = parser.parse_delete_statement()?;
+        Ok((stmt, parser.into_interner()))
+    }
+
+    /// Parse an UPDATE statement, returning the interner for symbol resolution.
+    pub fn parse_update_with_interner(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<(&'arena UpdateStmt<'arena>, ArenaInterner<'arena>), ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        let stmt = parser.parse_update_statement()?;
+        Ok((stmt, parser.into_interner()))
+    }
+
+    /// Parse an INSERT statement, returning the interner for symbol resolution.
+    pub fn parse_insert_with_interner(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<(&'arena InsertStmt<'arena>, ArenaInterner<'arena>), ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        let stmt = parser.parse_insert_statement()?;
+        Ok((stmt, parser.into_interner()))
+    }
+
+    /// Parse a REPLACE statement, returning the interner for symbol resolution.
+    pub fn parse_replace_with_interner(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<(&'arena InsertStmt<'arena>, ArenaInterner<'arena>), ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        let stmt = parser.parse_replace_statement()?;
+        Ok((stmt, parser.into_interner()))
+    }
+
+    /// Intern a string and return a Symbol.
     #[inline]
+    pub(crate) fn intern(&mut self, s: &str) -> Symbol {
+        self.interner.intern(s)
+    }
+
+    /// Allocate a string in the arena (for non-identifier strings).
+    #[inline]
+    #[allow(dead_code)]
     pub(crate) fn alloc_str(&self, s: &str) -> &'arena str {
         self.arena.alloc_str(s)
     }
@@ -440,13 +554,13 @@ impl<'arena> ArenaParser<'arena> {
     // Common parsing helpers
     // ========================================================================
 
-    /// Parse an identifier and allocate it in the arena.
-    pub(crate) fn parse_arena_identifier(&mut self) -> Result<&'arena str, ParseError> {
+    /// Parse an identifier and intern it, returning a Symbol.
+    pub(crate) fn parse_arena_identifier(&mut self) -> Result<Symbol, ParseError> {
         match self.peek() {
             Token::Identifier(name) => {
-                let name = self.alloc_str(name);
+                let name = name.clone();
                 self.advance();
-                Ok(name)
+                Ok(self.intern(&name))
             }
             _ => Err(ParseError {
                 message: format!("Expected identifier, found {:?}", self.peek()),
@@ -457,7 +571,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse a comma-separated list of identifiers.
     pub(crate) fn parse_identifier_list(
         &mut self,
-    ) -> Result<bumpalo::collections::Vec<'arena, &'arena str>, ParseError> {
+    ) -> Result<bumpalo::collections::Vec<'arena, Symbol>, ParseError> {
         let mut list = bumpalo::collections::Vec::new_in(self.arena);
         loop {
             list.push(self.parse_arena_identifier()?);
@@ -496,8 +610,15 @@ impl<'arena> ArenaParser<'arena> {
 /// ```
 pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, ParseError> {
     let arena = Bump::new();
-    let arena_stmt = ArenaParser::parse_select(input, &arena)?;
-    Ok(vibesql_ast::SelectStmt::from(arena_stmt))
+    let mut lexer = Lexer::new(input);
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+    let mut parser = ArenaParser::new(tokens, &arena);
+    let arena_stmt = parser.parse_select_statement()?;
+    let converter = Converter::new(parser.interner());
+    Ok(converter.convert_select(arena_stmt))
 }
 
 /// Parse an expression and return a heap-allocated (owned) Expression.
@@ -514,8 +635,15 @@ pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, Par
 /// ```
 pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression, ParseError> {
     let arena = Bump::new();
-    let arena_expr = ArenaParser::parse_expression_sql(input, &arena)?;
-    Ok(vibesql_ast::Expression::from(arena_expr))
+    let mut lexer = Lexer::new(input);
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+    let mut parser = ArenaParser::new(tokens, &arena);
+    let arena_expr = parser.parse_expression()?;
+    let converter = Converter::new(parser.interner());
+    Ok(converter.convert_expression(&arena_expr))
 }
 
 /// Parse INSERT SQL and return a heap-allocated (owned) InsertStmt.
@@ -532,8 +660,15 @@ pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression,
 /// ```
 pub fn parse_insert_to_owned(input: &str) -> Result<vibesql_ast::InsertStmt, ParseError> {
     let arena = Bump::new();
-    let arena_stmt = ArenaParser::parse_insert(input, &arena)?;
-    Ok(vibesql_ast::InsertStmt::from(arena_stmt))
+    let mut lexer = Lexer::new(input);
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+    let mut parser = ArenaParser::new(tokens, &arena);
+    let arena_stmt = parser.parse_insert_statement()?;
+    let converter = Converter::new(parser.interner());
+    Ok(converter.convert_insert(arena_stmt))
 }
 
 /// Parse UPDATE SQL and return a heap-allocated (owned) UpdateStmt.
@@ -550,8 +685,15 @@ pub fn parse_insert_to_owned(input: &str) -> Result<vibesql_ast::InsertStmt, Par
 /// ```
 pub fn parse_update_to_owned(input: &str) -> Result<vibesql_ast::UpdateStmt, ParseError> {
     let arena = Bump::new();
-    let arena_stmt = ArenaParser::parse_update(input, &arena)?;
-    Ok(vibesql_ast::UpdateStmt::from(arena_stmt))
+    let mut lexer = Lexer::new(input);
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+    let mut parser = ArenaParser::new(tokens, &arena);
+    let arena_stmt = parser.parse_update_statement()?;
+    let converter = Converter::new(parser.interner());
+    Ok(converter.convert_update(arena_stmt))
 }
 
 /// Parse DELETE SQL and return a heap-allocated (owned) DeleteStmt.
@@ -568,8 +710,15 @@ pub fn parse_update_to_owned(input: &str) -> Result<vibesql_ast::UpdateStmt, Par
 /// ```
 pub fn parse_delete_to_owned(input: &str) -> Result<vibesql_ast::DeleteStmt, ParseError> {
     let arena = Bump::new();
-    let arena_stmt = ArenaParser::parse_delete(input, &arena)?;
-    Ok(vibesql_ast::DeleteStmt::from(arena_stmt))
+    let mut lexer = Lexer::new(input);
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+    let mut parser = ArenaParser::new(tokens, &arena);
+    let arena_stmt = parser.parse_delete_statement()?;
+    let converter = Converter::new(parser.interner());
+    Ok(converter.convert_delete(arena_stmt))
 }
 
 #[cfg(test)]

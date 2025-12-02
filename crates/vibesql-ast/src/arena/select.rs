@@ -3,12 +3,13 @@
 use bumpalo::collections::Vec as BumpVec;
 
 use super::expression::{Expression, OrderByItem};
+use super::interner::Symbol;
 
 /// Common Table Expression (CTE) definition
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommonTableExpr<'arena> {
-    pub name: &'arena str,
-    pub columns: Option<BumpVec<'arena, &'arena str>>,
+    pub name: Symbol,
+    pub columns: Option<BumpVec<'arena, Symbol>>,
     pub query: &'arena SelectStmt<'arena>,
 }
 
@@ -18,8 +19,8 @@ pub struct SelectStmt<'arena> {
     pub with_clause: Option<BumpVec<'arena, CommonTableExpr<'arena>>>,
     pub distinct: bool,
     pub select_list: BumpVec<'arena, SelectItem<'arena>>,
-    pub into_table: Option<&'arena str>,
-    pub into_variables: Option<BumpVec<'arena, &'arena str>>,
+    pub into_table: Option<Symbol>,
+    pub into_variables: Option<BumpVec<'arena, Symbol>>,
     pub from: Option<FromClause<'arena>>,
     pub where_clause: Option<Expression<'arena>>,
     pub group_by: Option<GroupByClause<'arena>>,
@@ -74,15 +75,15 @@ pub struct SetOperation<'arena> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelectItem<'arena> {
     Wildcard {
-        alias: Option<BumpVec<'arena, &'arena str>>,
+        alias: Option<BumpVec<'arena, Symbol>>,
     },
     QualifiedWildcard {
-        qualifier: &'arena str,
-        alias: Option<BumpVec<'arena, &'arena str>>,
+        qualifier: Symbol,
+        alias: Option<BumpVec<'arena, Symbol>>,
     },
     Expression {
         expr: Expression<'arena>,
-        alias: Option<&'arena str>,
+        alias: Option<Symbol>,
     },
 }
 
@@ -90,8 +91,8 @@ pub enum SelectItem<'arena> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FromClause<'arena> {
     Table {
-        name: &'arena str,
-        alias: Option<&'arena str>,
+        name: Symbol,
+        alias: Option<Symbol>,
     },
     Join {
         left: &'arena FromClause<'arena>,
@@ -102,7 +103,7 @@ pub enum FromClause<'arena> {
     },
     Subquery {
         query: &'arena SelectStmt<'arena>,
-        alias: &'arena str,
+        alias: Symbol,
     },
 }
 

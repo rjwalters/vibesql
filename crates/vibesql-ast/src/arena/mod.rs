@@ -24,11 +24,14 @@ mod convert;
 mod ddl;
 mod dml;
 mod expression;
+mod interner;
 mod select;
 
+pub use convert::Converter;
 pub use ddl::*;
 pub use dml::*;
 pub use expression::*;
+pub use interner::{ArenaInterner, Symbol};
 pub use select::*;
 
 // Re-export Bump for convenience
