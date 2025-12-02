@@ -6,10 +6,21 @@
 //!
 //! ## Module Organization
 //!
-//! - `positional` - Binding for `?` and `$N` placeholders using a slice of values
-//! - `named` - Binding for `:name` placeholders using a HashMap
+//! - `positional` - Clone-based binding for `?` and `$N` placeholders (legacy)
+//! - `named` - Clone-based binding for `:name` placeholders (legacy)
+//! - `mutation` - **Preferred**: In-place mutation-based binding (no cloning)
 //! - `visitor` - AST traversal for counting and collecting placeholders
+//!
+//! ## Performance
+//!
+//! The mutation-based approach (`bind_statement_mut`) is preferred because it
+//! avoids cloning the entire AST. Instead of:
+//! - Clone 100 nodes, then modify 5 placeholders = O(100) allocations
+//!
+//! We do:
+//! - Clone once (caller), modify 5 placeholders in-place = O(5) operations
 
+mod mutation;
 mod named;
 mod positional;
 mod visitor;
@@ -17,13 +28,20 @@ mod visitor;
 use vibesql_ast::{Expression, Statement};
 use vibesql_types::SqlValue;
 
-// Re-export internal functions for use in tests and by the parent module
+// Re-export mutation-based functions (preferred for performance)
+pub use mutation::{bind_statement_mut, bind_statement_named_mut};
+
+// Re-export visitor for placeholder counting
+pub use visitor::visit_statement;
+
+// Keep the statement-level positional functions public for external use
+pub use positional::{bind_delete, bind_expression, bind_insert, bind_select, bind_update};
+
+// Keep the named binding functions public for external use
 pub use named::{
     bind_delete_named, bind_expression_named, bind_insert_named, bind_select_named,
     bind_update_named,
 };
-pub use positional::{bind_delete, bind_expression, bind_insert, bind_select, bind_update};
-pub use visitor::visit_statement;
 
 /// Count the number of placeholder parameters in a statement
 pub fn count_placeholders(stmt: &Statement) -> usize {
@@ -67,35 +85,31 @@ pub fn collect_named_placeholders(stmt: &Statement) -> Vec<String> {
 ///
 /// Returns a new statement with all placeholders replaced. The params slice must have
 /// exactly the right number of parameters (one for each placeholder index).
+///
+/// This function uses mutation-based binding internally: it clones the statement once,
+/// then mutates placeholders in-place, avoiding the O(n) cloning overhead of recursively
+/// copying every AST node.
 pub fn bind_parameters(stmt: &Statement, params: &[SqlValue]) -> Statement {
-    match stmt {
-        Statement::Select(select) => Statement::Select(Box::new(bind_select(select, params))),
-        Statement::Insert(insert) => Statement::Insert(bind_insert(insert, params)),
-        Statement::Update(update) => Statement::Update(bind_update(update, params)),
-        Statement::Delete(delete) => Statement::Delete(bind_delete(delete, params)),
-        // Other statement types don't typically have placeholders
-        other => other.clone(),
-    }
+    let mut result = stmt.clone();
+    bind_statement_mut(&mut result, params);
+    result
 }
 
 /// Bind named parameters to a statement by replacing NamedPlaceholder expressions with Literal values
 ///
 /// Returns a new statement with all named placeholders replaced. The params HashMap must
 /// contain values for all named placeholders in the statement.
+///
+/// This function uses mutation-based binding internally: it clones the statement once,
+/// then mutates placeholders in-place, avoiding the O(n) cloning overhead of recursively
+/// copying every AST node.
 pub fn bind_parameters_named(
     stmt: &Statement,
     params: &std::collections::HashMap<String, SqlValue>,
 ) -> Statement {
-    match stmt {
-        Statement::Select(select) => {
-            Statement::Select(Box::new(bind_select_named(select, params)))
-        }
-        Statement::Insert(insert) => Statement::Insert(bind_insert_named(insert, params)),
-        Statement::Update(update) => Statement::Update(bind_update_named(update, params)),
-        Statement::Delete(delete) => Statement::Delete(bind_delete_named(delete, params)),
-        // Other statement types don't typically have placeholders
-        other => other.clone(),
-    }
+    let mut result = stmt.clone();
+    bind_statement_named_mut(&mut result, params);
+    result
 }
 
 #[cfg(test)]
