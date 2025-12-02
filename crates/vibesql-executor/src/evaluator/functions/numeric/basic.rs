@@ -24,6 +24,8 @@ pub fn abs(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Float(n) => Ok(SqlValue::Float(n.abs())),
         SqlValue::Double(n) => Ok(SqlValue::Double(n.abs())),
         SqlValue::Real(n) => Ok(SqlValue::Real(n.abs())),
+        SqlValue::Numeric(n) => Ok(SqlValue::Numeric(n.abs())),
+        SqlValue::Unsigned(n) => Ok(SqlValue::Unsigned(*n)), // Unsigned is always positive
         val => Err(ExecutorError::UnsupportedFeature(format!(
             "ABS requires numeric argument, got {:?}",
             val
@@ -59,6 +61,14 @@ pub fn sign(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             };
             Ok(SqlValue::Bigint(sign))
         }
+        SqlValue::Smallint(n) => {
+            let sign: i16 = match n.cmp(&0) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Greater => 1,
+                std::cmp::Ordering::Equal => 0,
+            };
+            Ok(SqlValue::Smallint(sign))
+        }
         SqlValue::Float(n) => {
             let sign = if *n < 0.0 {
                 -1.0
@@ -88,6 +98,21 @@ pub fn sign(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 0.0
             };
             Ok(SqlValue::Real(sign))
+        }
+        SqlValue::Numeric(n) => {
+            let sign = if *n < 0.0 {
+                -1.0
+            } else if *n > 0.0 {
+                1.0
+            } else {
+                0.0
+            };
+            Ok(SqlValue::Numeric(sign))
+        }
+        SqlValue::Unsigned(n) => {
+            // Unsigned is always non-negative
+            let sign: u64 = if *n > 0 { 1 } else { 0 };
+            Ok(SqlValue::Unsigned(sign))
         }
         val => Err(ExecutorError::UnsupportedFeature(format!(
             "SIGN requires numeric argument, got {:?}",
