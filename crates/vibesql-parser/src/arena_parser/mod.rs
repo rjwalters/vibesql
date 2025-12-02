@@ -420,7 +420,7 @@ impl<'arena> ArenaParser<'arena> {
 /// ```
 pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, ParseError> {
     let arena = Bump::new();
-    let arena_stmt = ArenaParser::parse_sql(input, &arena)?;
+    let arena_stmt = ArenaParser::parse_select(input, &arena)?;
     Ok(vibesql_ast::SelectStmt::from(arena_stmt))
 }
 
