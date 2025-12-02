@@ -890,8 +890,35 @@ pub(crate) fn extract_index_predicate(expr: &Expression, column_name: &str) -> O
                 }
             }
         }
-        // Handle AND: try both sides
+        // Handle AND: check for contradictions between equality and IN predicates
+        // e.g., col = 40 AND col IN (84, 23, 58) should return empty result (contradiction)
         Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+            // Collect all predicates from both sides
+            let mut equality_values: Vec<SqlValue> = Vec::new();
+            let mut in_values: Option<Vec<SqlValue>> = None;
+            let mut range_pred: Option<RangePredicate> = None;
+
+            collect_column_predicates(left, column_name, &mut equality_values, &mut in_values, &mut range_pred);
+            collect_column_predicates(right, column_name, &mut equality_values, &mut in_values, &mut range_pred);
+
+            // Check for equality + IN contradiction
+            if !equality_values.is_empty() && in_values.is_some() {
+                let in_vals = in_values.as_ref().unwrap();
+                // If any equality value is NOT in the IN list, we have a contradiction
+                for eq_val in &equality_values {
+                    if !in_vals.contains(eq_val) {
+                        // Contradiction: equality value not in IN list - no rows can match
+                        // Return empty IN predicate to signal impossible query
+                        return Some(IndexPredicate::In(vec![]));
+                    }
+                }
+                // All equality values are in the IN list - use the range predicate if available
+                if let Some(range) = range_pred {
+                    return Some(IndexPredicate::Range(range));
+                }
+            }
+
+            // No contradiction found - fall back to normal extraction
             // Try left side first
             if let Some(pred) = extract_index_predicate(left, column_name) {
                 return Some(pred);
@@ -905,6 +932,75 @@ pub(crate) fn extract_index_predicate(expr: &Expression, column_name: &str) -> O
     }
 
     None
+}
+
+/// Helper to collect equality values, IN values, and range predicates for a column
+fn collect_column_predicates(
+    expr: &Expression,
+    column_name: &str,
+    equality_values: &mut Vec<SqlValue>,
+    in_values: &mut Option<Vec<SqlValue>>,
+    range_pred: &mut Option<RangePredicate>,
+) {
+    match expr {
+        // Equality: col = value
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
+            if is_column_reference(left, column_name) {
+                if let Expression::Literal(value) = right.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        equality_values.push(value.clone());
+                        // Also set range predicate for consistency
+                        if range_pred.is_none() {
+                            *range_pred = Some(RangePredicate {
+                                start: Some(value.clone()),
+                                end: Some(value.clone()),
+                                inclusive_start: true,
+                                inclusive_end: true,
+                            });
+                        }
+                    }
+                }
+            } else if is_column_reference(right, column_name) {
+                if let Expression::Literal(value) = left.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        equality_values.push(value.clone());
+                        if range_pred.is_none() {
+                            *range_pred = Some(RangePredicate {
+                                start: Some(value.clone()),
+                                end: Some(value.clone()),
+                                inclusive_start: true,
+                                inclusive_end: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        // IN list: col IN (val1, val2, ...)
+        Expression::InList { expr: col_expr, values: value_list, negated } => {
+            if !negated && is_column_reference(col_expr, column_name) {
+                let mut values = Vec::new();
+                let mut has_null = false;
+                for item in value_list {
+                    if let Expression::Literal(value) = item {
+                        if matches!(value, SqlValue::Null) {
+                            has_null = true;
+                        }
+                        values.push(value.clone());
+                    }
+                }
+                if !has_null && !values.is_empty() {
+                    *in_values = Some(values);
+                }
+            }
+        }
+        // Recurse into AND
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+            collect_column_predicates(left, column_name, equality_values, in_values, range_pred);
+            collect_column_predicates(right, column_name, equality_values, in_values, range_pred);
+        }
+        _ => {}
+    }
 }
 
 /// Check if WHERE clause can be fully satisfied by index predicate

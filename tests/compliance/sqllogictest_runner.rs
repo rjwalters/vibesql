@@ -345,7 +345,8 @@ impl VibeSqlDB {
             | vibesql_ast::Statement::CloseCursor(_)
             | vibesql_ast::Statement::Prepare(_)
             | vibesql_ast::Statement::Execute(_)
-            | vibesql_ast::Statement::Deallocate(_) => Ok(DBOutput::StatementComplete(0)),
+            | vibesql_ast::Statement::Deallocate(_)
+            | vibesql_ast::Statement::Explain(_) => Ok(DBOutput::StatementComplete(0)),
         }
     }
 
