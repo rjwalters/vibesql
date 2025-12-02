@@ -27,6 +27,35 @@ const INSERT_MULTI: &str = r#"INSERT INTO users (id, name, email) VALUES
     (2, 'Jane', 'jane@example.com'),
     (3, 'Bob', 'bob@example.com')"#;
 
+/// INSERT with SELECT subquery
+const INSERT_SELECT: &str = r#"INSERT INTO archive_orders (id, customer_id, total, created_at)
+    SELECT id, customer_id, total, created_at FROM orders WHERE status = 'completed'"#;
+
+/// UPDATE with single assignment
+const UPDATE_SIMPLE: &str = "UPDATE users SET status = 'active' WHERE id = 1";
+
+/// UPDATE with multiple assignments
+const UPDATE_MULTI: &str = r#"UPDATE orders SET
+    status = 'shipped',
+    shipped_at = '2024-01-15',
+    tracking_number = 'TRK123456'
+WHERE id = 42"#;
+
+/// UPDATE with complex WHERE clause
+const UPDATE_COMPLEX: &str = r#"UPDATE products SET
+    price = price * 1.1,
+    updated_at = '2024-01-15'
+WHERE category_id IN (1, 2, 3) AND stock_quantity > 0 AND is_active = 1"#;
+
+/// DELETE simple
+const DELETE_SIMPLE: &str = "DELETE FROM sessions WHERE user_id = 1";
+
+/// DELETE with complex WHERE clause
+const DELETE_COMPLEX: &str = r#"DELETE FROM audit_logs
+    WHERE created_at < '2023-01-01'
+    AND log_level = 'debug'
+    AND (user_id IS NULL OR user_id NOT IN (SELECT id FROM users WHERE is_admin = 1))"#;
+
 /// TPC-H Q1 - Complex aggregation query
 const TPCH_Q1: &str = r#"SELECT
     l_returnflag,
@@ -125,6 +154,12 @@ fn bench_parser(c: &mut Criterion) {
         ("multi_column", MULTI_COLUMN),
         ("insert_single", INSERT_SINGLE),
         ("insert_multi", INSERT_MULTI),
+        ("insert_select", INSERT_SELECT),
+        ("update_simple", UPDATE_SIMPLE),
+        ("update_multi", UPDATE_MULTI),
+        ("update_complex", UPDATE_COMPLEX),
+        ("delete_simple", DELETE_SIMPLE),
+        ("delete_complex", DELETE_COMPLEX),
         ("tpch_q1", TPCH_Q1),
         ("complex_join", COMPLEX_JOIN),
         ("create_table", CREATE_TABLE),
@@ -202,6 +237,10 @@ fn bench_arena_parser(c: &mut Criterion) {
         ("multi_column", MULTI_COLUMN),
         ("insert_single", INSERT_SINGLE),
         ("insert_multi", INSERT_MULTI),
+        ("insert_select", INSERT_SELECT),
+        ("update_simple", UPDATE_SIMPLE),
+        ("update_multi", UPDATE_MULTI),
+        ("delete_simple", DELETE_SIMPLE),
         ("tpch_q1", TPCH_Q1),
         ("complex_join", COMPLEX_JOIN),
         ("cte_query", CTE_QUERY),
@@ -307,6 +346,186 @@ fn bench_arena_with_conversion(c: &mut Criterion) {
     group.finish();
 }
 
+/// Dedicated DML statement comparison benchmark (INSERT, UPDATE, DELETE)
+/// Compares standard parser vs arena parser for DML operations
+fn bench_dml_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("dml_comparison");
+
+    // INSERT statement variations
+    let insert_queries = [
+        ("insert_simple", INSERT_SINGLE),
+        ("insert_multi_row", INSERT_MULTI),
+        ("insert_select", INSERT_SELECT),
+    ];
+
+    for (name, sql) in insert_queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+
+        // Standard parser
+        group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
+        });
+
+        // Arena parser with fresh arena
+        group.bench_with_input(BenchmarkId::new("arena", name), sql, |b, sql| {
+            b.iter(|| {
+                let arena = Bump::new();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            });
+        });
+
+        // Arena parser with reused arena (amortized cost)
+        group.bench_with_input(BenchmarkId::new("arena_reuse", name), sql, |b, sql| {
+            let mut arena = Bump::with_capacity(4096);
+            b.iter(|| {
+                arena.reset();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            });
+        });
+    }
+
+    // UPDATE statement variations
+    let update_queries = [
+        ("update_simple", UPDATE_SIMPLE),
+        ("update_multi_assign", UPDATE_MULTI),
+        ("update_complex_where", UPDATE_COMPLEX),
+    ];
+
+    for (name, sql) in update_queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+
+        group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
+        });
+
+        group.bench_with_input(BenchmarkId::new("arena", name), sql, |b, sql| {
+            b.iter(|| {
+                let arena = Bump::new();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("arena_reuse", name), sql, |b, sql| {
+            let mut arena = Bump::with_capacity(4096);
+            b.iter(|| {
+                arena.reset();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            });
+        });
+    }
+
+    // DELETE statement variations
+    let delete_queries = [
+        ("delete_simple", DELETE_SIMPLE),
+        ("delete_complex_where", DELETE_COMPLEX),
+    ];
+
+    for (name, sql) in delete_queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+
+        group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
+        });
+
+        group.bench_with_input(BenchmarkId::new("arena", name), sql, |b, sql| {
+            b.iter(|| {
+                let arena = Bump::new();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("arena_reuse", name), sql, |b, sql| {
+            let mut arena = Bump::with_capacity(4096);
+            b.iter(|| {
+                arena.reset();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Mixed DML workload benchmark (TPC-C style mix)
+/// Simulates a realistic OLTP workload with INSERT/UPDATE/DELETE ratio
+fn bench_mixed_dml_workload(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mixed_dml_workload");
+
+    // TPC-C style workload: 45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level
+    // For parser benchmarks, we focus on the DML operations:
+    // - New Order: INSERT (order) + UPDATE (stock)
+    // - Payment: UPDATE (customer, district, warehouse)
+    // - Delivery: UPDATE (order, customer) + DELETE (new_order)
+    let tpcc_queries = [
+        // New Order transaction queries
+        ("new_order_insert", "INSERT INTO orders (o_id, o_d_id, o_w_id, o_c_id, o_entry_d, o_ol_cnt, o_all_local) VALUES (1, 1, 1, 1, '2024-01-15 10:30:00', 5, 1)"),
+        ("new_order_line_insert", "INSERT INTO order_line (ol_o_id, ol_d_id, ol_w_id, ol_number, ol_i_id, ol_supply_w_id, ol_quantity, ol_amount, ol_dist_info) VALUES (1, 1, 1, 1, 100, 1, 5, 50.00, 'dist_info_01')"),
+        ("stock_update", "UPDATE stock SET s_quantity = s_quantity - 5, s_ytd = s_ytd + 5, s_order_cnt = s_order_cnt + 1 WHERE s_i_id = 100 AND s_w_id = 1"),
+        // Payment transaction queries
+        ("payment_warehouse_update", "UPDATE warehouse SET w_ytd = w_ytd + 100.00 WHERE w_id = 1"),
+        ("payment_district_update", "UPDATE district SET d_ytd = d_ytd + 100.00 WHERE d_w_id = 1 AND d_id = 1"),
+        ("payment_customer_update", "UPDATE customer SET c_balance = c_balance - 100.00, c_ytd_payment = c_ytd_payment + 100.00, c_payment_cnt = c_payment_cnt + 1 WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 1"),
+        // Delivery transaction queries
+        ("delivery_new_order_delete", "DELETE FROM new_order WHERE no_o_id = 1 AND no_d_id = 1 AND no_w_id = 1"),
+        ("delivery_order_update", "UPDATE orders SET o_carrier_id = 1 WHERE o_id = 1 AND o_d_id = 1 AND o_w_id = 1"),
+    ];
+
+    // Benchmark individual queries
+    for (name, sql) in tpcc_queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+
+        group.bench_with_input(BenchmarkId::new("standard", name), &sql, |b, sql| {
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
+        });
+
+        group.bench_with_input(BenchmarkId::new("arena_reuse", name), &sql, |b, sql| {
+            let mut arena = Bump::with_capacity(4096);
+            b.iter(|| {
+                arena.reset();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            });
+        });
+    }
+
+    // Benchmark full transaction (multiple queries)
+    let new_order_queries = [
+        "INSERT INTO orders (o_id, o_d_id, o_w_id, o_c_id, o_entry_d, o_ol_cnt, o_all_local) VALUES (1, 1, 1, 1, '2024-01-15', 5, 1)",
+        "INSERT INTO order_line (ol_o_id, ol_d_id, ol_w_id, ol_number, ol_i_id, ol_supply_w_id, ol_quantity, ol_amount, ol_dist_info) VALUES (1, 1, 1, 1, 100, 1, 5, 50.00, 'dist_info')",
+        "UPDATE stock SET s_quantity = s_quantity - 5 WHERE s_i_id = 100 AND s_w_id = 1",
+    ];
+
+    let total_bytes: u64 = new_order_queries.iter().map(|s| s.len() as u64).sum();
+    group.throughput(Throughput::Bytes(total_bytes));
+
+    group.bench_function("new_order_txn_standard", |b| {
+        b.iter(|| {
+            for sql in &new_order_queries {
+                black_box(Parser::parse_sql(black_box(sql)).unwrap());
+            }
+        });
+    });
+
+    group.bench_function("new_order_txn_arena_reuse", |b| {
+        let mut arena = Bump::with_capacity(8192);
+        b.iter(|| {
+            for sql in &new_order_queries {
+                arena.reset();
+                let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
+                black_box(&result);
+            }
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_lexer,
@@ -316,5 +535,7 @@ criterion_group!(
     bench_arena_parser,
     bench_parser_comparison,
     bench_arena_with_conversion,
+    bench_dml_comparison,
+    bench_mixed_dml_workload,
 );
 criterion_main!(benches);
