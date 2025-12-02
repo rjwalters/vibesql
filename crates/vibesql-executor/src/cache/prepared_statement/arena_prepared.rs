@@ -145,17 +145,12 @@ impl std::fmt::Debug for ArenaPreparedStatement {
 pub enum ArenaParseError {
     /// SQL parsing failed
     ParseError(String),
-    /// Unsupported statement type (only SELECT is supported)
-    UnsupportedStatement(String),
 }
 
 impl std::fmt::Display for ArenaParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ArenaParseError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            ArenaParseError::UnsupportedStatement(msg) => {
-                write!(f, "Unsupported statement: {}", msg)
-            }
         }
     }
 }
