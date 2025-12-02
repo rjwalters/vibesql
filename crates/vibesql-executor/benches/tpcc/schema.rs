@@ -359,9 +359,32 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         }
     }
 
+    // Primary key indexes for core tables - TPC-C uses storage layer directly
+    // so we need to manually create these (normally auto-created by executor in #3202)
+    // The pk_new_order index enables prefix_scan_first optimization for Delivery (#3242)
+    db.create_index(
+        "pk_new_order".to_string(),
+        "new_order".to_string(),
+        true,
+        vec![col("no_w_id"), col("no_d_id"), col("no_o_id")],
+    ).ok();
+
+    db.create_index(
+        "pk_orders".to_string(),
+        "orders".to_string(),
+        true,
+        vec![col("o_w_id"), col("o_d_id"), col("o_id")],
+    ).ok();
+
+    db.create_index(
+        "pk_order_line".to_string(),
+        "order_line".to_string(),
+        true,
+        vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id"), col("ol_number")],
+    ).ok();
+
     // Secondary indexes for queries - these match the indexes created by
     // SQLite, DuckDB, and MySQL for fair benchmark comparison.
-    // Primary key indexes are now auto-created from PRIMARY KEY constraints (#3202).
     db.create_index(
         "idx_customer_name".to_string(),
         "customer".to_string(),
@@ -369,11 +392,14 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         vec![col("c_w_id"), col("c_d_id"), col("c_last"), col("c_first")],
     ).ok();
 
+    // Include o_id in the index to support ORDER BY o_id DESC LIMIT 1 efficiently.
+    // This allows the Order-Status transaction to find a customer's most recent order
+    // via a single index scan rather than fetching all orders and sorting.
     db.create_index(
         "idx_orders_customer".to_string(),
         "orders".to_string(),
         false,
-        vec![col("o_w_id"), col("o_d_id"), col("o_c_id")],
+        vec![col("o_w_id"), col("o_d_id"), col("o_c_id"), col("o_id")],
     ).ok();
 
     // Stock-Level transaction index: enables efficient range scans on order_line
@@ -743,7 +769,7 @@ fn create_tpcc_indexes_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
-        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id);
         CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
@@ -1026,7 +1052,7 @@ fn create_tpcc_indexes_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         "
         CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first);
-        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id);
+        CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id);
         CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id);
         ",
     )
@@ -1366,7 +1392,7 @@ fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
         "CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first)"
     ).unwrap();
     conn.query_drop(
-        "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id)"
+        "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id)"
     ).unwrap();
     conn.query_drop(
         "CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id)"

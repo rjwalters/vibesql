@@ -26,6 +26,17 @@ use crate::select::parallel::parallel_scan_materialize;
 const SIMD_COLUMNAR_THRESHOLD: usize = 500;
 
 /// Execute a table scan (handles CTEs, views, and regular tables)
+///
+/// # Arguments
+/// * `table_name` - Name of the table to scan
+/// * `alias` - Optional table alias
+/// * `cte_results` - CTE context for the query
+/// * `database` - Database reference
+/// * `where_clause` - Optional WHERE clause for filtering
+/// * `order_by` - Optional ORDER BY clause for index selection
+/// * `limit` - Optional LIMIT value for early termination optimization (#3253)
+/// * `outer_row` - Outer row for correlated subqueries
+/// * `outer_schema` - Outer schema for correlated subqueries
 pub(crate) fn execute_table_scan(
     table_name: &str,
     alias: Option<&String>,
@@ -33,6 +44,7 @@ pub(crate) fn execute_table_scan(
     database: &vibesql_storage::Database,
     where_clause: Option<&vibesql_ast::Expression>,
     order_by: Option<&[vibesql_ast::OrderByItem]>,
+    limit: Option<usize>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
 ) -> Result<super::FromResult, ExecutorError> {
@@ -167,7 +179,18 @@ pub(crate) fn execute_table_scan(
     // Check if we should use an index scan (with cost-based selection)
     if let Some((index_name, sorted_columns)) = super::index_scan::cost_based_index_selection(table_name, where_clause, order_by, database) {
         // Use index scan for potentially better performance
-        return super::index_scan::execute_index_scan(table_name, &index_name, alias, where_clause, sorted_columns, database);
+        if std::env::var("TABLE_SCAN_DEBUG").is_ok() {
+            eprintln!("[TABLE_SCAN] Using index scan: table={}, index={}", table_name, index_name);
+        }
+        // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
+        return super::index_scan::execute_index_scan(table_name, &index_name, alias, where_clause, sorted_columns, limit, database);
+    }
+
+    // Debug: Log when table scan is used instead of index
+    if std::env::var("TABLE_SCAN_DEBUG").is_ok() && where_clause.is_some() {
+        let indexes = database.list_indexes_for_table(table_name);
+        eprintln!("[TABLE_SCAN] Falling back to table scan: table={}, available_indexes={:?}, where={:?}",
+            table_name, indexes, where_clause);
     }
 
     // Use database table (fall back to table scan)

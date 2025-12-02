@@ -138,6 +138,324 @@ impl IndexData {
         }
     }
 
+    /// Lookup the first row matching a multi-column prefix in a composite index
+    ///
+    /// This is an optimized version of `prefix_scan` that returns only the first matching row.
+    /// For queries with `ORDER BY <remaining_pk_column> LIMIT 1`, this avoids fetching all
+    /// matching rows when we only need the minimum/first one.
+    ///
+    /// # Arguments
+    /// * `prefix` - Prefix values for the first N index columns (N < total columns)
+    ///
+    /// # Returns
+    /// The row index of the first matching row, or None if no match
+    ///
+    /// # Performance
+    /// O(log n) - only accesses the first matching entry in the BTreeMap range
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // TPC-C Delivery: find oldest new_order for warehouse 1, district 5
+    /// // Index: (no_w_id, no_d_id, no_o_id)
+    /// // Returns the row with minimum no_o_id for the given warehouse/district
+    /// let first_row = index_data.prefix_scan_first(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
+    /// ```
+    pub fn prefix_scan_first(&self, prefix: &[SqlValue]) -> Option<usize> {
+        if prefix.is_empty() {
+            // Empty prefix - return first row in index
+            return self.values().flatten().next();
+        }
+
+        // Normalize prefix values for consistent comparison
+        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+
+        match self {
+            IndexData::InMemory { data } => {
+                // Calculate upper bound by incrementing the last element of the prefix
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                let start_bound: Bound<&[SqlValue]> = Bound::Included(normalized_prefix.as_slice());
+                let end_bound: Bound<&[SqlValue]> = match end_key.as_ref() {
+                    Some(key) => Bound::Excluded(key.as_slice()),
+                    None => Bound::Unbounded,
+                };
+
+                // Get just the first matching entry
+                for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                    // Verify prefix match (needed for Unbounded end bound case)
+                    if key_values.len() >= normalized_prefix.len()
+                        && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                    {
+                        // Return the first row index from this key
+                        return row_indices.first().copied();
+                    }
+                }
+
+                None
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // Calculate upper bound for disk-backed index
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => guard
+                        .range_scan_first(
+                            Some(&normalized_prefix),
+                            end_key.as_ref(),
+                            true,  // Inclusive start
+                            false, // Exclusive end
+                        )
+                        .unwrap_or(None),
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in prefix_scan_first: {}", e);
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    /// Bounded prefix scan - look up rows matching a prefix with an optional upper bound
+    /// on the next column
+    ///
+    /// This method is designed for queries like `WHERE col1 = 1 AND col2 < 10` on a
+    /// composite index `(col1, col2, col3)`. It's more efficient than `prefix_scan`
+    /// because it avoids scanning all rows with `col1 = 1` and only scans up to the bound.
+    ///
+    /// # Arguments
+    /// * `prefix` - Prefix values for the first N index columns (equality predicates)
+    /// * `upper_bound` - Upper bound for the (N+1)th column (exclusive)
+    ///
+    /// # Returns
+    /// Vector of row indices matching the prefix and bound
+    ///
+    /// # Performance
+    /// Uses BTreeMap's efficient range() method with computed bounds for O(log n + k)
+    /// complexity, where n is the number of unique keys and k is matching keys.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Index on (s_w_id, s_quantity, s_i_id)
+    /// // Find all rows where s_w_id = 1 AND s_quantity < 10
+    /// let rows = index_data.prefix_bounded_scan(
+    ///     &[SqlValue::Integer(1)],         // prefix: s_w_id = 1
+    ///     &SqlValue::Integer(10),           // upper_bound: s_quantity < 10
+    ///     false,                            // exclusive upper bound
+    /// );
+    /// ```
+    pub fn prefix_bounded_scan(
+        &self,
+        prefix: &[SqlValue],
+        upper_bound: &SqlValue,
+        inclusive_upper: bool,
+    ) -> Vec<usize> {
+        if prefix.is_empty() {
+            // Empty prefix with upper bound is not well-defined - fall back to full scan
+            return self.values().flatten().collect();
+        }
+
+        // Normalize values for consistent comparison
+        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_bound = normalize_for_comparison(upper_bound);
+
+        match self {
+            IndexData::InMemory { data } => {
+                use std::ops::Bound;
+
+                // Start bound: [prefix] (inclusive)
+                let start_key = normalized_prefix.clone();
+                let start_bound: Bound<Vec<SqlValue>> = Bound::Included(start_key);
+
+                // End bound: [prefix, upper_bound] (exclusive or inclusive depending on flag)
+                let mut end_key = normalized_prefix.clone();
+                end_key.push(normalized_bound);
+                let end_bound: Bound<Vec<SqlValue>> = if inclusive_upper {
+                    // For inclusive upper bound, we need to find the next value
+                    // to make it effectively inclusive
+                    let last_idx = end_key.len() - 1;
+                    match try_increment_sqlvalue(&end_key[last_idx]) {
+                        Some(next_val) => {
+                            end_key[last_idx] = next_val;
+                            Bound::Excluded(end_key)
+                        }
+                        None => {
+                            // Can't increment, use included bound
+                            Bound::Included(end_key)
+                        }
+                    }
+                } else {
+                    Bound::Excluded(end_key)
+                };
+
+                let mut matching_row_indices = Vec::new();
+
+                for (key_values, row_indices) in data.range((start_bound, end_bound)) {
+                    // Verify prefix match (needed for safety)
+                    if key_values.len() >= normalized_prefix.len()
+                        && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                    {
+                        matching_row_indices.extend(row_indices);
+                    }
+                }
+
+                matching_row_indices
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // For disk-backed indexes, construct start and end keys
+                let start_key = normalized_prefix.clone();
+
+                let mut end_key = normalized_prefix.clone();
+                end_key.push(normalized_bound);
+
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => guard
+                        .range_scan(
+                            Some(&start_key),
+                            Some(&end_key),
+                            true,            // Inclusive start
+                            inclusive_upper, // Inclusive/exclusive end
+                        )
+                        .unwrap_or_else(|_| vec![]),
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in prefix_bounded_scan: {}", e);
+                        vec![]
+                    }
+                }
+            }
+        }
+    }
+
+    /// Prefix scan with limit and optional reverse iteration
+    ///
+    /// This method is optimized for ORDER BY with LIMIT queries where the index
+    /// satisfies the ORDER BY clause. Instead of fetching all matching rows and
+    /// then applying LIMIT, this stops early after collecting enough rows.
+    ///
+    /// # Arguments
+    /// * `prefix` - Prefix values for the first N index columns
+    /// * `limit` - Maximum number of rows to return (None means no limit)
+    /// * `reverse` - If true, scan in reverse order (for DESC ORDER BY)
+    ///
+    /// # Returns
+    /// Vector of row indices matching the prefix, limited to `limit` rows
+    ///
+    /// # Performance
+    /// For ORDER BY ... LIMIT 1 queries on a customer with 30 orders:
+    /// - Without limit: Fetch all 30 rows, reverse, take 1 = O(30)
+    /// - With limit+reverse: Scan from end, stop after 1 = O(1)
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Find the most recent order for customer (ORDER BY o_id DESC LIMIT 1)
+    /// let prefix = vec![SqlValue::Integer(w_id), SqlValue::Integer(d_id), SqlValue::Integer(c_id)];
+    /// let rows = index_data.prefix_scan_limit(&prefix, Some(1), true);
+    /// ```
+    pub fn prefix_scan_limit(&self, prefix: &[SqlValue], limit: Option<usize>, reverse: bool) -> Vec<usize> {
+        // If no limit and not reverse, use the regular prefix_scan
+        if limit.is_none() && !reverse {
+            return self.prefix_scan(prefix);
+        }
+
+        if prefix.is_empty() {
+            // Empty prefix - either return all or first N rows
+            let all_rows: Vec<usize> = self.values().flatten().collect();
+            return match limit {
+                Some(n) if reverse => all_rows.into_iter().rev().take(n).collect(),
+                Some(n) => all_rows.into_iter().take(n).collect(),
+                None if reverse => all_rows.into_iter().rev().collect(),
+                None => all_rows,
+            };
+        }
+
+        // Normalize prefix values for consistent comparison
+        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+
+        match self {
+            IndexData::InMemory { data } => {
+                // Calculate upper bound by incrementing the last element of the prefix
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                let start_bound: Bound<&[SqlValue]> = Bound::Included(normalized_prefix.as_slice());
+                let end_bound: Bound<&[SqlValue]> = match end_key.as_ref() {
+                    Some(key) => Bound::Excluded(key.as_slice()),
+                    None => Bound::Unbounded,
+                };
+
+                let mut matching_row_indices = Vec::new();
+                let max_rows = limit.unwrap_or(usize::MAX);
+
+                if reverse {
+                    // Reverse iteration: collect all matching keys first, then iterate in reverse
+                    // BTreeMap's range doesn't support reverse iteration directly, so we collect
+                    // and reverse. For small result sets (typical with LIMIT), this is efficient.
+                    let matching_entries: Vec<_> = data
+                        .range::<[SqlValue], _>((start_bound, end_bound))
+                        .filter(|(key_values, _)| {
+                            key_values.len() >= normalized_prefix.len()
+                                && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                        })
+                        .collect();
+
+                    // Iterate in reverse order
+                    for (_, row_indices) in matching_entries.into_iter().rev() {
+                        // For each key, row indices are in insertion order
+                        // For DESC order, we want the last inserted rows first
+                        for &row_idx in row_indices.iter().rev() {
+                            matching_row_indices.push(row_idx);
+                            if matching_row_indices.len() >= max_rows {
+                                return matching_row_indices;
+                            }
+                        }
+                    }
+                } else {
+                    // Forward iteration with early termination
+                    for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                        // Double-check prefix match (needed for Unbounded end bound case)
+                        if key_values.len() >= normalized_prefix.len()
+                            && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                        {
+                            for &row_idx in row_indices {
+                                matching_row_indices.push(row_idx);
+                                if matching_row_indices.len() >= max_rows {
+                                    return matching_row_indices;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                matching_row_indices
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // For disk-backed, fall back to regular scan then limit
+                // TODO: Implement reverse scanning in BTreeIndex for better performance
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                let all_indices = match acquire_btree_lock(btree) {
+                    Ok(guard) => guard
+                        .range_scan(
+                            Some(&normalized_prefix),
+                            end_key.as_ref(),
+                            true,
+                            false,
+                        )
+                        .unwrap_or_else(|_| vec![]),
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in prefix_scan_limit: {}", e);
+                        vec![]
+                    }
+                };
+
+                match limit {
+                    Some(n) if reverse => all_indices.into_iter().rev().take(n).collect(),
+                    Some(n) => all_indices.into_iter().take(n).collect(),
+                    None if reverse => all_indices.into_iter().rev().collect(),
+                    None => all_indices,
+                }
+            }
+        }
+    }
+
     /// Batch prefix scan - look up multiple prefixes in a single call
     ///
     /// This method is optimized for batch prefix lookups where you need to retrieve
@@ -670,5 +988,209 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(results.contains(&0));
         assert!(results.contains(&1));
+    }
+
+    // ========================================================================
+    // prefix_scan_first() Tests - InMemory
+    // ========================================================================
+
+    #[test]
+    fn test_prefix_scan_first_basic() {
+        // Index on (w_id, d_id, o_id) - TPC-C style
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(200)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(300)], vec![2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(100)], vec![3]),
+        ]);
+
+        // Prefix [1, 1] should return first matching row (row 0)
+        let result = index.prefix_scan_first(&[SqlValue::Integer(1), SqlValue::Integer(1)]);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn test_prefix_scan_first_no_match() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
+        ]);
+
+        // Prefix [2, 1] should return None (no match)
+        let result = index.prefix_scan_first(&[SqlValue::Integer(2), SqlValue::Integer(1)]);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_prefix_scan_first_empty_prefix() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1)], vec![0]),
+            (vec![SqlValue::Integer(2)], vec![1]),
+        ]);
+
+        // Empty prefix should return first row in index
+        let result = index.prefix_scan_first(&[]);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn test_prefix_scan_first_returns_minimum_third_column() {
+        // Index on (w_id, d_id, o_id)
+        // This tests the TPC-C Delivery query pattern:
+        // SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id LIMIT 1
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(300)], vec![3]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(100)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(200)], vec![2]),
+        ]);
+
+        // Prefix [1, 5] should return row with minimum o_id (100) = row 1
+        // BTreeMap stores in sorted order, so [1, 5, 100] comes first
+        let result = index.prefix_scan_first(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
+        assert_eq!(result, Some(1)); // Row index for o_id=100
+    }
+
+    // ========================================================================
+    // prefix_scan_limit() Tests - LIMIT pushdown optimization (#3253)
+    // ========================================================================
+
+    #[test]
+    fn test_prefix_scan_limit_forward_with_limit() {
+        // Index on (w_id, d_id, o_id) - find first 2 orders for a customer
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(101)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(102)], vec![2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(103)], vec![3]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(100)], vec![4]),
+        ]);
+
+        // LIMIT 2 in forward order (ASC)
+        let results = index.prefix_scan_limit(
+            &[SqlValue::Integer(1), SqlValue::Integer(1)],
+            Some(2),
+            false, // ASC
+        );
+        assert_eq!(results, vec![0, 1]); // First 2 orders
+    }
+
+    #[test]
+    fn test_prefix_scan_limit_reverse_with_limit() {
+        // Index on (w_id, d_id, o_id) - find most recent order (DESC LIMIT 1)
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(101)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(102)], vec![2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(103)], vec![3]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(100)], vec![4]),
+        ]);
+
+        // LIMIT 1 in reverse order (DESC) - most recent order
+        let results = index.prefix_scan_limit(
+            &[SqlValue::Integer(1), SqlValue::Integer(1)],
+            Some(1),
+            true, // DESC
+        );
+        assert_eq!(results, vec![3]); // Last order (o_id=103)
+    }
+
+    #[test]
+    fn test_prefix_scan_limit_reverse_all() {
+        // Get all rows in reverse order (no limit)
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(30)], vec![2]),
+        ]);
+
+        // No limit, reverse order
+        let results = index.prefix_scan_limit(
+            &[SqlValue::Integer(1)],
+            None,
+            true, // DESC
+        );
+        assert_eq!(results, vec![2, 1, 0]); // Reverse order
+    }
+
+    #[test]
+    fn test_prefix_scan_limit_no_limit_no_reverse() {
+        // Falls back to regular prefix_scan
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![1]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(10)], vec![2]),
+        ]);
+
+        let results = index.prefix_scan_limit(
+            &[SqlValue::Integer(1)],
+            None,
+            false,
+        );
+        assert_eq!(results, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_prefix_scan_limit_tpcc_order_status() {
+        // Simulate TPC-C Order-Status: Find most recent order for a customer
+        // Customer has 30 orders, we need just the last one (ORDER BY o_id DESC LIMIT 1)
+        let mut entries = Vec::new();
+        let w_id = 1;
+        let d_id = 5;
+        let c_id = 42;
+
+        // Create 30 orders for the customer
+        for o_id in 1..=30 {
+            let key = vec![
+                SqlValue::Integer(w_id),
+                SqlValue::Integer(d_id),
+                SqlValue::Integer(c_id),
+                SqlValue::Integer(o_id),
+            ];
+            entries.push((key, vec![o_id as usize - 1]));
+        }
+
+        let index = create_test_index_data(entries);
+
+        // Most recent order (ORDER BY o_id DESC LIMIT 1)
+        let results = index.prefix_scan_limit(
+            &[SqlValue::Integer(w_id), SqlValue::Integer(d_id), SqlValue::Integer(c_id)],
+            Some(1),
+            true, // DESC
+        );
+
+        // Should get the last order (o_id=30, row_idx=29)
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], 29);
+    }
+
+    #[test]
+    fn test_prefix_scan_limit_empty_result() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+        ]);
+
+        // No match
+        let results = index.prefix_scan_limit(
+            &[SqlValue::Integer(2)],
+            Some(5),
+            true,
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_scan_limit_less_than_limit() {
+        // When there are fewer matching rows than the limit
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![1]),
+        ]);
+
+        // LIMIT 10 but only 2 rows match
+        let results = index.prefix_scan_limit(
+            &[SqlValue::Integer(1)],
+            Some(10),
+            false,
+        );
+        assert_eq!(results, vec![0, 1]); // All matching rows
     }
 }

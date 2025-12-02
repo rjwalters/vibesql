@@ -167,13 +167,15 @@ impl SelectExecutor<'_> {
                     cte_results.entry(name.clone()).or_insert_with(|| result.clone());
                 }
             }
-            // Pass WHERE and ORDER BY for join reordering optimization
+            // Pass WHERE, ORDER BY, and LIMIT for optimizations
             // This is critical for GROUP BY queries to avoid CROSS JOINs
+            // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
             Some(self.execute_from_with_where(
                 from_clause,
                 &cte_results,
                 stmt.where_clause.as_ref(),
                 stmt.order_by.as_deref(),
+                stmt.limit.map(|l| l as usize),
             )?)
         } else {
             None
@@ -430,11 +432,13 @@ impl SelectExecutor<'_> {
         };
 
         // Execute FROM clause to get input data
+        // Note: WHERE, ORDER BY, and LIMIT are handled by the pipeline, not here
         let from_result = self.execute_from_with_where(
             from_clause,
             cte_results,
             None, // Pipeline will apply WHERE filter
             None, // ORDER BY handled separately
+            None, // LIMIT applied after pipeline
         )?;
 
         // Build execution context
@@ -620,12 +624,14 @@ impl SelectExecutor<'_> {
             //
             // Fixes issues #1807, #1895, #1896, and #1902.
 
-            // Pass WHERE and ORDER BY to execute_from for optimization
+            // Pass WHERE, ORDER BY, and LIMIT to execute_from for optimization
+            // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
             let from_result = self.execute_from_with_where(
                 from_clause,
                 cte_results,
                 stmt.where_clause.as_ref(),
                 stmt.order_by.as_deref(),
+                stmt.limit.map(|l| l as usize),
             )?;
 
             // Validate column references BEFORE processing rows (issue #2654)
@@ -668,8 +674,9 @@ impl SelectExecutor<'_> {
         let right_results = if has_aggregates || has_group_by {
             self.execute_with_aggregation(right_stmt, cte_results)?
         } else if let Some(from_clause) = &right_stmt.from {
+            // Note: LIMIT is None for set operation sides - it's applied after the set operation
             let from_result =
-                self.execute_from_with_where(from_clause, cte_results, right_stmt.where_clause.as_ref(), right_stmt.order_by.as_deref())?;
+                self.execute_from_with_where(from_clause, cte_results, right_stmt.where_clause.as_ref(), right_stmt.order_by.as_deref(), None)?;
             self.execute_without_aggregation(right_stmt, from_result, cte_results)?
         } else {
             self.execute_select_without_from(right_stmt)?
@@ -687,16 +694,21 @@ impl SelectExecutor<'_> {
         Ok(left_results)
     }
 
-    /// Execute a FROM clause with WHERE and ORDER BY for optimization
+    /// Execute a FROM clause with WHERE, ORDER BY, and LIMIT for optimization
+    ///
+    /// The LIMIT parameter enables early termination optimization (#3253):
+    /// - When ORDER BY is satisfied by an index and no post-filter is needed,
+    ///   the index scan can stop after fetching LIMIT rows
     pub(super) fn execute_from_with_where(
         &self,
         from: &vibesql_ast::FromClause,
         cte_results: &HashMap<String, CteResult>,
         where_clause: Option<&vibesql_ast::Expression>,
         order_by: Option<&[vibesql_ast::OrderByItem]>,
+        limit: Option<usize>,
     ) -> Result<FromResult, ExecutorError> {
         use crate::select::scan::execute_from_clause;
-        let from_result = execute_from_clause(from, cte_results, self.database, where_clause, order_by, self.outer_row, self.outer_schema, |query| {
+        let from_result = execute_from_clause(from, cte_results, self.database, where_clause, order_by, limit, self.outer_row, self.outer_schema, |query| {
             // For derived table subqueries, create a child executor with CTE context
             // This allows CTEs from the outer WITH clause to be referenced in subqueries
             // Critical for queries like TPC-DS Q2 where CTEs are used in FROM subqueries
