@@ -6,7 +6,7 @@ impl Parser {
     /// Parse data type
     pub(in crate::parser) fn parse_data_type(&mut self) -> Result<vibesql_types::DataType, ParseError> {
         let type_upper = match self.peek() {
-            Token::Identifier(type_name) => type_name.to_uppercase(),
+            Token::Identifier(sym) => self.resolve_str(*sym).to_uppercase(),
             Token::Keyword(Keyword::Date) => "DATE".to_string(),
             Token::Keyword(Keyword::Time) => "TIME".to_string(),
             Token::Keyword(Keyword::Timestamp) => "TIMESTAMP".to_string(),
@@ -38,8 +38,8 @@ impl Parser {
                 let length = if matches!(self.peek(), Token::LParen) {
                     self.advance(); // consume (
                     let len = match self.peek() {
-                        Token::Number(n) => {
-                            let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                        Token::Number(sym) => {
+                            let parsed = self.resolve_str(*sym).parse::<usize>().map_err(|_| ParseError {
                                 message: "Invalid BIT length".to_string(),
                             })?;
                             self.advance();
@@ -64,8 +64,8 @@ impl Parser {
                 if matches!(self.peek(), Token::LParen) {
                     self.advance(); // consume (
                     let precision = match self.peek() {
-                        Token::Number(n) => {
-                            let p = n.parse::<u8>().map_err(|_| ParseError {
+                        Token::Number(sym) => {
+                            let p = self.resolve_str(*sym).parse::<u8>().map_err(|_| ParseError {
                                 message: "Invalid FLOAT precision".to_string(),
                             })?;
                             self.advance();
@@ -87,8 +87,8 @@ impl Parser {
             "REAL" => Ok(vibesql_types::DataType::Real),
             "DOUBLE" => {
                 // Check for DOUBLE PRECISION
-                if let Token::Identifier(next) = self.peek() {
-                    if next.to_uppercase() == "PRECISION" {
+                if let Token::Identifier(sym) = self.peek() {
+                    if self.resolve_str(*sym).to_uppercase() == "PRECISION" {
                         self.advance();
                         return Ok(vibesql_types::DataType::DoublePrecision);
                     }
@@ -104,8 +104,8 @@ impl Parser {
                     self.advance(); // consume (
 
                     let precision = match self.peek() {
-                        Token::Number(n) => {
-                            let p = n.parse::<u8>().map_err(|_| ParseError {
+                        Token::Number(sym) => {
+                            let p = self.resolve_str(*sym).parse::<u8>().map_err(|_| ParseError {
                                 message: "Invalid NUMERIC precision".to_string(),
                             })?;
                             self.advance();
@@ -121,8 +121,8 @@ impl Parser {
                     let scale = if matches!(self.peek(), Token::Comma) {
                         self.advance(); // consume comma
                         match self.peek() {
-                            Token::Number(n) => {
-                                let s = n.parse::<u8>().map_err(|_| ParseError {
+                            Token::Number(sym) => {
+                                let s = self.resolve_str(*sym).parse::<u8>().map_err(|_| ParseError {
                                     message: "Invalid NUMERIC scale".to_string(),
                                 })?;
                                 self.advance();
@@ -188,7 +188,7 @@ impl Parser {
                         self.advance(); // consume TO keyword
                         Some(self.parse_interval_field()?)
                     }
-                    Token::Identifier(word) if word.to_uppercase() == "TO" => {
+                    Token::Identifier(word) if self.resolve_str(*word).to_uppercase() == "TO" => {
                         self.advance(); // consume TO identifier (backward compat)
                         Some(self.parse_interval_field()?)
                     }
@@ -204,7 +204,7 @@ impl Parser {
                     self.advance(); // consume LParen
                     let len = match self.peek() {
                         Token::Number(n) => {
-                            let len = n.parse::<usize>().map_err(|_| ParseError {
+                            let len = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                 message: "Invalid VARCHAR length".to_string(),
                             })?;
                             self.advance();
@@ -239,7 +239,7 @@ impl Parser {
                 let is_varing = if !is_varying {
                     // Check for VARING as identifier (deprecated SQL:1999 variant)
                     if let Token::Identifier(next) = self.peek() {
-                        if next.to_uppercase() == "VARING" {
+                        if self.resolve_str(*next).to_uppercase() == "VARING" {
                             self.advance(); // consume VARING
                             true
                         } else {
@@ -258,7 +258,7 @@ impl Parser {
                         self.advance();
                         let len = match self.peek() {
                             Token::Number(n) => {
-                                let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                                let parsed = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                     message: "Invalid VARCHAR length".to_string(),
                                 })?;
                                 self.advance();
@@ -292,7 +292,7 @@ impl Parser {
                     self.advance(); // consume (
                     let len = match self.peek() {
                         Token::Number(n) => {
-                            let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                            let parsed = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                 message: "Invalid CHAR length".to_string(),
                             })?;
                             self.advance();
@@ -335,7 +335,7 @@ impl Parser {
                         self.advance();
                         let len = match self.peek() {
                             Token::Number(n) => {
-                                let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                                let parsed = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                     message: "Invalid NCHAR VARYING length".to_string(),
                                 })?;
                                 self.advance();
@@ -369,7 +369,7 @@ impl Parser {
                     self.advance(); // consume (
                     let len = match self.peek() {
                         Token::Number(n) => {
-                            let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                            let parsed = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                 message: "Invalid NCHAR length".to_string(),
                             })?;
                             self.advance();
@@ -405,7 +405,7 @@ impl Parser {
                     self.advance();
                     let len = match self.peek() {
                         Token::Number(n) => {
-                            let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                            let parsed = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                 message: "Invalid NVARCHAR length".to_string(),
                             })?;
                             self.advance();
@@ -448,7 +448,7 @@ impl Parser {
                     match self.peek() {
                         Token::Number(n) => {
                             // Validate it's a valid number (we don't store it currently)
-                            let _ = n.parse::<usize>().map_err(|_| ParseError {
+                            let _ = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                 message: format!("Invalid {} size", type_upper),
                             })?;
                             self.advance();
@@ -509,7 +509,7 @@ impl Parser {
 
                 // Look ahead to determine which national type follows
                 let next = match self.peek() {
-                    Token::Identifier(word) => word.to_uppercase(),
+                    Token::Identifier(word) => self.resolve_str(*word).to_uppercase(),
                     Token::Keyword(Keyword::Character) => "CHARACTER".to_string(),
                     _ => {
                         return Err(ParseError {
@@ -527,7 +527,7 @@ impl Parser {
                             self.advance();
                             let len = match self.peek() {
                                 Token::Number(n) => {
-                                    let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                                    let parsed = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                         message: "Invalid NATIONAL VARCHAR length".to_string(),
                                     })?;
                                     self.advance();
@@ -562,7 +562,7 @@ impl Parser {
                             self.advance(); // consume (
                             let len = match self.peek() {
                                 Token::Number(n) => {
-                                    let parsed = n.parse::<usize>().map_err(|_| ParseError {
+                                    let parsed = self.resolve_str(*n).parse::<usize>().map_err(|_| ParseError {
                                         message: "Invalid NATIONAL CHARACTER length".to_string(),
                                     })?;
                                     self.advance();
@@ -648,7 +648,7 @@ impl Parser {
         &mut self,
     ) -> Result<vibesql_types::IntervalField, ParseError> {
         let field_upper = match self.peek() {
-            Token::Identifier(field) => field.to_uppercase(),
+            Token::Identifier(field) => self.resolve_str(*field).to_uppercase(),
             Token::Keyword(Keyword::Year) => "YEAR".to_string(),
             Token::Keyword(Keyword::Month) => "MONTH".to_string(),
             Token::Keyword(Keyword::Day) => "DAY".to_string(),

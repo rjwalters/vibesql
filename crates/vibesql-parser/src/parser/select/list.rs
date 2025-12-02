@@ -34,7 +34,7 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                    columns.push(id.clone());
+                    columns.push(self.resolve(*id));
                     self.advance();
                 }
                 _ => {
@@ -67,7 +67,7 @@ impl Parser {
         let qualifier = if let Token::Identifier(ref qualifier)
         | Token::DelimitedIdentifier(ref qualifier) = self.peek()
         {
-            Some(qualifier.clone())
+            Some(self.resolve(*qualifier))
         } else {
             None
         };
@@ -104,7 +104,7 @@ impl Parser {
             self.consume_keyword(Keyword::As)?;
             match self.peek() {
                 Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                    let alias = id.clone();
+                    let alias = self.resolve(*id);
                     self.advance();
                     Some(alias)
                 }
@@ -116,7 +116,7 @@ impl Parser {
             // MySQL compatibility: allow aliases without AS keyword
             match self.peek() {
                 Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                    let alias = id.clone();
+                    let alias = self.resolve(*id);
                     self.advance();
                     Some(alias)
                 }

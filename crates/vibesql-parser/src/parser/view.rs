@@ -49,7 +49,7 @@ impl Parser {
             loop {
                 match self.peek() {
                     Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
-                        cols.push(name.clone());
+                        cols.push(self.resolve(*name));
                         self.advance();
                     }
                     _ => {

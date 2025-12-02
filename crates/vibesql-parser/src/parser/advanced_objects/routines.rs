@@ -471,7 +471,8 @@ impl Parser {
                     });
                 }
             } else if self.try_consume_keyword(Keyword::Comment) {
-                if let Token::String(s) = self.peek().clone() {
+                if let Token::String(sym) = self.peek() {
+                    let s = self.resolve(*sym);
                     self.advance();
                     comment = Some(s);
                 } else {
@@ -520,7 +521,8 @@ impl Parser {
                     });
                 }
             } else if self.try_consume_keyword(Keyword::Comment) {
-                if let Token::String(s) = self.peek().clone() {
+                if let Token::String(sym) = self.peek() {
+                    let s = self.resolve(*sym);
                     self.advance();
                     comment = Some(s);
                 } else {

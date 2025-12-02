@@ -190,20 +190,29 @@ fn test_token_display_keyword() {
 
 #[test]
 fn test_token_display_identifier() {
-    let token = Token::Identifier("users".to_string());
-    assert_eq!(format!("{}", token), "Identifier(users)");
+    use crate::interner::IdentifierInterner;
+    let mut interner = IdentifierInterner::new();
+    let sym = interner.get_or_intern("users");
+    let token = Token::Identifier(sym);
+    assert_eq!(format!("{}", token.display_with_interner(&interner)), "Identifier(users)");
 }
 
 #[test]
 fn test_token_display_number() {
-    let token = Token::Number("42".to_string());
-    assert_eq!(format!("{}", token), "Number(42)");
+    use crate::interner::IdentifierInterner;
+    let mut interner = IdentifierInterner::new();
+    let sym = interner.get_or_intern("42");
+    let token = Token::Number(sym);
+    assert_eq!(format!("{}", token.display_with_interner(&interner)), "Number(42)");
 }
 
 #[test]
 fn test_token_display_string() {
-    let token = Token::String("hello".to_string());
-    assert_eq!(format!("{}", token), "String('hello')");
+    use crate::interner::IdentifierInterner;
+    let mut interner = IdentifierInterner::new();
+    let sym = interner.get_or_intern("hello");
+    let token = Token::String(sym);
+    assert_eq!(format!("{}", token.display_with_interner(&interner)), "String('hello')");
 }
 
 #[test]
@@ -214,8 +223,11 @@ fn test_token_display_symbol() {
 
 #[test]
 fn test_token_display_operator() {
-    let token = Token::Operator("<=".to_string());
-    assert_eq!(format!("{}", token), "Operator(<=)");
+    use crate::interner::IdentifierInterner;
+    let mut interner = IdentifierInterner::new();
+    let sym = interner.get_or_intern("<=");
+    let token = Token::Operator(sym);
+    assert_eq!(format!("{}", token.display_with_interner(&interner)), "Operator(<=)");
 }
 
 #[test]

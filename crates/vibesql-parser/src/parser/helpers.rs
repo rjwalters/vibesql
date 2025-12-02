@@ -75,8 +75,8 @@ impl Parser {
     /// Parse an identifier token (regular or delimited).
     pub(super) fn parse_identifier(&mut self) -> Result<String, ParseError> {
         match self.peek() {
-            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
-                let identifier = name.clone();
+            Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                let identifier = self.resolve(*sym);
                 self.advance();
                 Ok(identifier)
             }
@@ -125,8 +125,8 @@ impl Parser {
 
         // Parse the number
         match self.peek() {
-            Token::Number(n) => {
-                num_str.push_str(n);
+            Token::Number(sym) => {
+                num_str.push_str(self.resolve_str(*sym));
                 self.advance();
                 Ok(num_str)
             }
@@ -138,8 +138,8 @@ impl Parser {
     pub(super) fn parse_qualified_identifier(&mut self) -> Result<String, ParseError> {
         // Parse first identifier
         let first_part = match self.peek() {
-            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
-                let identifier = name.clone();
+            Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                let identifier = self.resolve(*sym);
                 self.advance();
                 identifier
             }
@@ -155,8 +155,8 @@ impl Parser {
         if self.peek() == &Token::Symbol('.') {
             self.advance(); // consume the dot
             let second_part = match self.peek() {
-                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
-                    let identifier = name.clone();
+                Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                    let identifier = self.resolve(*sym);
                     self.advance();
                     identifier
                 }
@@ -178,8 +178,8 @@ impl Parser {
     /// Parse an integer literal and return its value
     pub(super) fn parse_integer_literal(&mut self) -> Result<i64, ParseError> {
         match self.peek() {
-            Token::Number(n) => {
-                let num_str = n.clone();
+            Token::Number(sym) => {
+                let num_str = self.resolve_str(*sym).to_string();
                 self.advance();
                 num_str.parse::<i64>().map_err(|_| ParseError {
                     message: format!("Expected integer, found '{}'", num_str),

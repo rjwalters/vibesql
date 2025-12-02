@@ -92,7 +92,7 @@ impl Parser {
                 // Parse the integer length
                 let length = match self.peek() {
                     Token::Number(n) => {
-                        let value = n.parse::<i64>().map_err(|_| ParseError {
+                        let value = self.resolve_str(*n).parse::<i64>().map_err(|_| ParseError {
                             message: "Invalid integer for column prefix length".to_string(),
                         })?;
                         self.advance();

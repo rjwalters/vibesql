@@ -1,6 +1,11 @@
 use std::fmt;
 
-use crate::{keywords::Keyword, lexer::Lexer, token::Token};
+use crate::{
+    interner::{IdentifierInterner, StringSymbol},
+    keywords::Keyword,
+    lexer::{Lexer, TokenStream},
+    token::Token,
+};
 
 mod advanced_objects;
 mod alter;
@@ -41,6 +46,7 @@ impl fmt::Display for ParseError {
 /// SQL Parser - converts tokens into AST
 pub struct Parser {
     tokens: Vec<Token>,
+    interner: IdentifierInterner,
     position: usize,
     /// Counter for placeholder parameters (?)
     /// Incremented each time a placeholder is parsed, providing 0-indexed parameter positions
@@ -48,9 +54,26 @@ pub struct Parser {
 }
 
 impl Parser {
-    /// Create a new parser from tokens
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, position: 0, placeholder_count: 0 }
+    /// Create a new parser from a token stream
+    pub fn new(token_stream: TokenStream) -> Self {
+        Parser {
+            tokens: token_stream.tokens,
+            interner: token_stream.interner,
+            position: 0,
+            placeholder_count: 0,
+        }
+    }
+
+    /// Resolve a string symbol to its string value.
+    #[inline]
+    pub(crate) fn resolve(&self, symbol: StringSymbol) -> String {
+        self.interner.resolve_unchecked(symbol).to_string()
+    }
+
+    /// Resolve a string symbol to a borrowed string slice.
+    #[inline]
+    pub(crate) fn resolve_str(&self, symbol: StringSymbol) -> &str {
+        self.interner.resolve_unchecked(symbol)
     }
 
     /// Parse a comma-separated list of items using a provided parser function
@@ -94,11 +117,11 @@ impl Parser {
 
     /// Parse SQL input string into a Statement
     pub fn parse_sql(input: &str) -> Result<vibesql_ast::Statement, ParseError> {
-        let mut lexer = Lexer::new(input);
-        let tokens =
+        let lexer = Lexer::new(input);
+        let token_stream =
             lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(token_stream);
         parser.parse_statement()
     }
 

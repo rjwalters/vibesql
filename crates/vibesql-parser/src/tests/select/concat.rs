@@ -74,19 +74,28 @@ fn test_parse_concat_precedence() {
 
 #[test]
 fn test_lex_concat_operator() {
-    let mut lexer = Lexer::new("'a' || 'b'");
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new("'a' || 'b'");
+    let stream = lexer.tokenize().unwrap();
 
-    assert_eq!(tokens.len(), 4); // 'a', ||, 'b', EOF
-    assert_eq!(tokens[0], Token::String("a".to_string()));
-    assert_eq!(tokens[1], Token::Operator("||".to_string()));
-    assert_eq!(tokens[2], Token::String("b".to_string()));
-    assert_eq!(tokens[3], Token::Eof);
+    assert_eq!(stream.tokens.len(), 4); // 'a', ||, 'b', EOF
+    match stream.tokens[0] {
+        Token::String(sym) => assert_eq!(stream.resolve(sym), "a"),
+        _ => panic!("Expected String token"),
+    }
+    match stream.tokens[1] {
+        Token::Operator(sym) => assert_eq!(stream.resolve(sym), "||"),
+        _ => panic!("Expected Operator token"),
+    }
+    match stream.tokens[2] {
+        Token::String(sym) => assert_eq!(stream.resolve(sym), "b"),
+        _ => panic!("Expected String token"),
+    }
+    assert_eq!(stream.tokens[3], Token::Eof);
 }
 
 #[test]
 fn test_lex_single_pipe_error() {
-    let mut lexer = Lexer::new("'a' | 'b'");
+    let lexer = Lexer::new("'a' | 'b'");
     let result = lexer.tokenize();
 
     assert!(result.is_err());

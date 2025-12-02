@@ -27,8 +27,8 @@ impl Parser {
 
         // Parse table name
         let table_name = match self.peek() {
-            Token::Identifier(name) => {
-                let table = name.clone();
+            Token::Identifier(sym) => {
+                let table = self.resolve(*sym);
                 self.advance();
                 table
             }
@@ -43,8 +43,8 @@ impl Parser {
         let columns = if matches!(self.peek(), Token::LParen) {
             self.advance(); // consume (
             let cols = self.parse_comma_separated_list(|p| match p.peek() {
-                Token::Identifier(col) => {
-                    let name = col.clone();
+                Token::Identifier(sym) => {
+                    let name = p.resolve(*sym);
                     p.advance();
                     Ok(name)
                 }
@@ -97,8 +97,8 @@ impl Parser {
             let mut assignments = Vec::new();
             loop {
                 let column = match self.peek() {
-                    Token::Identifier(col) => {
-                        let column_name = col.clone();
+                    Token::Identifier(sym) => {
+                        let column_name = self.resolve(*sym);
                         self.advance();
                         column_name
                     }
@@ -146,8 +146,8 @@ impl Parser {
 
         // Parse table name
         let table_name = match self.peek() {
-            Token::Identifier(name) => {
-                let table = name.clone();
+            Token::Identifier(sym) => {
+                let table = self.resolve(*sym);
                 self.advance();
                 table
             }
@@ -164,8 +164,8 @@ impl Parser {
             let mut cols = Vec::new();
             loop {
                 match self.peek() {
-                    Token::Identifier(col) => {
-                        cols.push(col.clone());
+                    Token::Identifier(sym) => {
+                        cols.push(self.resolve(*sym));
                         self.advance();
                     }
                     _ => return Err(ParseError { message: "Expected column name".to_string() }),
@@ -222,8 +222,8 @@ impl Parser {
             let mut assignments = Vec::new();
             loop {
                 let column = match self.peek() {
-                    Token::Identifier(col) => {
-                        let column_name = col.clone();
+                    Token::Identifier(sym) => {
+                        let column_name = self.resolve(*sym);
                         self.advance();
                         column_name
                     }

@@ -7,8 +7,8 @@ impl Parser {
     ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         // Extract identifier string from token (handles regular identifiers and keywords-as-identifiers)
         let first = match self.peek() {
-            Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                let name = id.clone();
+            Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                let name = self.resolve(*sym);
                 self.advance();
                 name
             }
@@ -24,8 +24,8 @@ impl Parser {
         // Check for hex/binary literal (x'...' or b'...')
         let first_upper = first.to_uppercase();
         if (first_upper == "X" || first_upper == "B") && matches!(self.peek(), Token::String(_)) {
-            if let Token::String(s) = self.peek() {
-                let string_val = s.clone();
+            if let Token::String(sym) = self.peek() {
+                let string_val = self.resolve(*sym);
                 self.advance();
 
                 if first_upper == "X" {
@@ -103,8 +103,8 @@ impl Parser {
         if matches!(self.peek(), Token::Symbol('.')) {
             self.advance(); // consume '.'
             match self.peek() {
-                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                    let column = col.clone();
+                Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                    let column = self.resolve(*sym);
                     self.advance();
 
                     // Check for pseudo-variable (OLD.column or NEW.column)

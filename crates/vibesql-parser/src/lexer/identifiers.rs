@@ -29,13 +29,13 @@ impl<'a> Lexer<'a> {
             // Use perfect hash map for O(1) keyword lookup
             match keywords::map_keyword(&upper_text) {
                 Some(keyword) => Ok(Token::Keyword(keyword)),
-                None => Ok(Token::Identifier(upper_text)),
+                None => Ok(Token::Identifier(self.intern(upper_text))),
             }
         } else {
             // Text is already uppercase - try keyword lookup on the slice directly
             match keywords::map_keyword(text) {
                 Some(keyword) => Ok(Token::Keyword(keyword)),
-                None => Ok(Token::Identifier(text.to_string())),
+                None => Ok(Token::Identifier(self.intern(text))),
             }
         }
     }
@@ -65,7 +65,7 @@ impl<'a> Lexer<'a> {
                             position: self.position(),
                         });
                     }
-                    return Ok(Token::DelimitedIdentifier(identifier));
+                    return Ok(Token::DelimitedIdentifier(self.intern(identifier)));
                 }
             } else {
                 identifier.push(ch);
@@ -104,7 +104,7 @@ impl<'a> Lexer<'a> {
                             position: self.position(),
                         });
                     }
-                    return Ok(Token::DelimitedIdentifier(identifier));
+                    return Ok(Token::DelimitedIdentifier(self.intern(identifier)));
                 }
             } else {
                 identifier.push(ch);

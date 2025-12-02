@@ -5,9 +5,9 @@ use vibesql_ast::Statement;
 #[test]
 fn test_truncate_table_basic() {
     let input = "TRUNCATE TABLE users;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -22,9 +22,9 @@ fn test_truncate_table_basic() {
 #[test]
 fn test_truncate_without_table_keyword() {
     let input = "TRUNCATE users;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -39,9 +39,9 @@ fn test_truncate_without_table_keyword() {
 #[test]
 fn test_truncate_table_if_exists() {
     let input = "TRUNCATE TABLE IF EXISTS users;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -56,9 +56,9 @@ fn test_truncate_table_if_exists() {
 #[test]
 fn test_truncate_if_exists_without_table() {
     let input = "TRUNCATE IF EXISTS users;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -73,9 +73,9 @@ fn test_truncate_if_exists_without_table() {
 #[test]
 fn test_truncate_qualified_table() {
     let input = "TRUNCATE TABLE myschema.users;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -90,9 +90,9 @@ fn test_truncate_qualified_table() {
 #[test]
 fn test_truncate_multiple_tables() {
     let input = "TRUNCATE TABLE orders, order_items, order_history;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -110,9 +110,9 @@ fn test_truncate_multiple_tables() {
 #[test]
 fn test_truncate_multiple_tables_without_table_keyword() {
     let input = "TRUNCATE orders, order_items;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -127,9 +127,9 @@ fn test_truncate_multiple_tables_without_table_keyword() {
 #[test]
 fn test_truncate_multiple_tables_if_exists() {
     let input = "TRUNCATE TABLE IF EXISTS temp_data, staging_data, cache_data;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {
@@ -147,9 +147,9 @@ fn test_truncate_multiple_tables_if_exists() {
 #[test]
 fn test_truncate_multiple_qualified_tables() {
     let input = "TRUNCATE TABLE schema1.table1, schema2.table2;";
-    let mut lexer = crate::lexer::Lexer::new(input);
-    let tokens = lexer.tokenize().unwrap();
-    let mut parser = crate::Parser::new(tokens);
+    let lexer = crate::lexer::Lexer::new(input);
+    let token_stream = lexer.tokenize().unwrap();
+    let mut parser = crate::Parser::new(token_stream);
     let stmt = parser.parse_statement().unwrap();
 
     match stmt {

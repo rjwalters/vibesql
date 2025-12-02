@@ -16,8 +16,8 @@ impl Parser {
     pub(super) fn parse_function_call(&mut self) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         // Try to match either an identifier or specific keywords that can be function names
         let function_name = match self.peek() {
-            Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                let name = id.clone();
+            Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                let name = self.resolve(*sym);
                 self.advance();
                 // Check if followed by '('
                 if !matches!(self.peek(), Token::LParen) {
@@ -72,8 +72,8 @@ impl Parser {
         if first.to_uppercase() == "VALUES" {
             // Expect a single column name as argument
             let column = match self.peek() {
-                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                    let column_name = col.clone();
+                Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                    let column_name = self.resolve(*sym);
                     self.advance();
                     column_name
                 }

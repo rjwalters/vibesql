@@ -32,8 +32,8 @@ impl Parser {
         }
 
         // Try to parse as a named placeholder (:name)
-        if let Token::NamedPlaceholder(name) = self.peek() {
-            let param_name = name.clone();
+        if let Token::NamedPlaceholder(sym) = self.peek() {
+            let param_name = self.resolve(*sym);
             self.advance();
             return Ok(vibesql_ast::Expression::NamedPlaceholder(param_name));
         }
@@ -44,8 +44,8 @@ impl Parser {
         }
 
         // Try to parse as a session variable (@@sql_mode, @@session.variable, etc.)
-        if let Token::SessionVariable(name) = self.peek() {
-            let var_name = name.clone();
+        if let Token::SessionVariable(sym) = self.peek() {
+            let var_name = self.resolve(*sym);
             self.advance();
             return Ok(vibesql_ast::Expression::SessionVariable { name: var_name });
         }

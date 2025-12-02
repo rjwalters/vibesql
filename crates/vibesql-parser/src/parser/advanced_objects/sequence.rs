@@ -118,7 +118,7 @@ pub fn parse_alter_sequence(parser: &mut crate::Parser) -> Result<AlterSequenceS
         if parser.try_consume_keyword(Keyword::Restart) {
             if parser.try_consume_keyword(Keyword::With) {
                 let num_str = match parser.peek() {
-                    Token::Number(n) => n.clone(),
+                    Token::Number(sym) => parser.resolve(*sym),
                     _ => {
                         return Err(ParseError {
                             message: "Expected number after RESTART WITH".to_string(),
@@ -136,7 +136,7 @@ pub fn parse_alter_sequence(parser: &mut crate::Parser) -> Result<AlterSequenceS
         } else if parser.try_consume_keyword(Keyword::Increment) {
             parser.expect_keyword(Keyword::By)?;
             let num_str = match parser.peek() {
-                Token::Number(n) => n.clone(),
+                Token::Number(sym) => parser.resolve(*sym),
                 _ => {
                     return Err(ParseError {
                         message: "Expected number after INCREMENT BY".to_string(),
@@ -149,7 +149,7 @@ pub fn parse_alter_sequence(parser: &mut crate::Parser) -> Result<AlterSequenceS
             })?);
         } else if parser.try_consume_keyword(Keyword::Minvalue) {
             let num_str = match parser.peek() {
-                Token::Number(n) => n.clone(),
+                Token::Number(sym) => parser.resolve(*sym),
                 _ => {
                     return Err(ParseError {
                         message: "Expected number after MINVALUE".to_string(),
@@ -163,7 +163,7 @@ pub fn parse_alter_sequence(parser: &mut crate::Parser) -> Result<AlterSequenceS
                 })?));
         } else if parser.try_consume_keyword(Keyword::Maxvalue) {
             let num_str = match parser.peek() {
-                Token::Number(n) => n.clone(),
+                Token::Number(sym) => parser.resolve(*sym),
                 _ => {
                     return Err(ParseError {
                         message: "Expected number after MAXVALUE".to_string(),

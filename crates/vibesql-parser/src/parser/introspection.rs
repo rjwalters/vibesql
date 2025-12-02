@@ -9,7 +9,7 @@ impl Parser {
     fn parse_string(&mut self) -> Result<String, ParseError> {
         match self.peek() {
             Token::String(s) => {
-                let string_val = s.clone();
+                let string_val = self.resolve(*s);
                 self.advance();
                 Ok(string_val)
             }

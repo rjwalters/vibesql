@@ -13,19 +13,19 @@ impl<'a> Lexer<'a> {
                     match (ch, next_ch) {
                         ('<', '=') => {
                             self.advance();
-                            Ok(Token::Operator("<=".to_string()))
+                            Ok(Token::Operator(self.intern("<=")))
                         }
                         ('>', '=') => {
                             self.advance();
-                            Ok(Token::Operator(">=".to_string()))
+                            Ok(Token::Operator(self.intern(">=")))
                         }
                         ('!', '=') => {
                             self.advance();
-                            Ok(Token::Operator("!=".to_string()))
+                            Ok(Token::Operator(self.intern("!=")))
                         }
                         ('<', '>') => {
                             self.advance();
-                            Ok(Token::Operator("<>".to_string()))
+                            Ok(Token::Operator(self.intern("<>")))
                         }
                         _ => Ok(Token::Symbol(ch)),
                     }
@@ -37,7 +37,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 if !self.is_eof() && self.current_char() == '|' {
                     self.advance();
-                    Ok(Token::Operator("||".to_string()))
+                    Ok(Token::Operator(self.intern("||")))
                 } else {
                     Err(LexerError {
                         message: "Unexpected character: '|' (did you mean '||'?)".to_string(),

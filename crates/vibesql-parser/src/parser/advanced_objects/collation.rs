@@ -35,13 +35,13 @@ pub fn parse_create_collation(
     let source_collation = if parser.try_consume_keyword(Keyword::From) {
         match parser.peek() {
             Token::Identifier(s) | Token::DelimitedIdentifier(s) => {
-                let source = s.clone();
+                let source = parser.resolve(*s);
                 parser.advance();
                 Some(source)
             }
             Token::String(s) => {
                 // SQL:1999 allows string literal for locale (e.g., 'de_DE')
-                let source = s.clone();
+                let source = parser.resolve(*s);
                 parser.advance();
                 Some(source)
             }

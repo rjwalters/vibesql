@@ -78,7 +78,7 @@ impl Parser {
             let op = match self.peek() {
                 Token::Symbol('+') => vibesql_ast::BinaryOperator::Plus,
                 Token::Symbol('-') => vibesql_ast::BinaryOperator::Minus,
-                Token::Operator(ref s) if s == "||" => vibesql_ast::BinaryOperator::Concat,
+                Token::Operator(sym) if self.resolve_str(*sym) == "||" => vibesql_ast::BinaryOperator::Concat,
                 _ => break,
             };
             self.advance();
@@ -275,7 +275,7 @@ impl Parser {
         // Note: Exclude || (concat) operator which should be handled in additive expression
         let is_comparison = match self.peek() {
             Token::Symbol('=') | Token::Symbol('<') | Token::Symbol('>') => true,
-            Token::Operator(ref s) => matches!(s.as_str(), "<=" | ">=" | "!=" | "<>"),
+            Token::Operator(sym) => matches!(self.resolve_str(*sym), "<=" | ">=" | "!=" | "<>"),
             _ => false,
         };
 
@@ -284,12 +284,12 @@ impl Parser {
                 Token::Symbol('=') => vibesql_ast::BinaryOperator::Equal,
                 Token::Symbol('<') => vibesql_ast::BinaryOperator::LessThan,
                 Token::Symbol('>') => vibesql_ast::BinaryOperator::GreaterThan,
-                Token::Operator(ref s) => match s.as_str() {
+                Token::Operator(sym) => match self.resolve_str(*sym) {
                     "<=" => vibesql_ast::BinaryOperator::LessThanOrEqual,
                     ">=" => vibesql_ast::BinaryOperator::GreaterThanOrEqual,
                     "!=" => vibesql_ast::BinaryOperator::NotEqual,
                     "<>" => vibesql_ast::BinaryOperator::NotEqual, // SQL standard
-                    _ => return Err(ParseError { message: format!("Unexpected operator: {}", s) }),
+                    op_str => return Err(ParseError { message: format!("Unexpected operator: {}", op_str) }),
                 },
                 _ => unreachable!(),
             };

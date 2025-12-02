@@ -5,7 +5,7 @@ impl Parser {
     pub(super) fn parse_special_form(&mut self) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         match self.peek() {
             // CURRENT_DATE, CURRENT_TIME, CURRENT_TIMESTAMP (as identifiers)
-            Token::Identifier(ref id) if id.to_uppercase() == "CURRENT_DATE" => {
+            Token::Identifier(sym) if self.resolve_str(*sym).to_uppercase() == "CURRENT_DATE" => {
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Function {
                     name: "CURRENT_DATE".to_string(),
@@ -13,7 +13,7 @@ impl Parser {
                     character_unit: None,
                 }))
             }
-            Token::Identifier(ref id) if id.to_uppercase() == "CURRENT_TIME" => {
+            Token::Identifier(sym) if self.resolve_str(*sym).to_uppercase() == "CURRENT_TIME" => {
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Function {
                     name: "CURRENT_TIME".to_string(),
@@ -21,7 +21,7 @@ impl Parser {
                     character_unit: None,
                 }))
             }
-            Token::Identifier(ref id) if id.to_uppercase() == "CURRENT_TIMESTAMP" => {
+            Token::Identifier(sym) if self.resolve_str(*sym).to_uppercase() == "CURRENT_TIMESTAMP" => {
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Function {
                     name: "CURRENT_TIMESTAMP".to_string(),
@@ -37,8 +37,9 @@ impl Parser {
                 self.advance(); // consume CURRENT
 
                 // Check for underscore followed by DATE/TIME/TIMESTAMP
-                if let Token::Identifier(ref id) = self.peek() {
-                    let function_name = match id.to_uppercase().as_str() {
+                if let Token::Identifier(sym) = self.peek() {
+                    let id_str = self.resolve_str(*sym);
+                    let function_name = match id_str.to_uppercase().as_str() {
                         "_DATE" => {
                             self.advance(); // consume _DATE
                             "CURRENT_DATE"
@@ -55,7 +56,7 @@ impl Parser {
                             return Err(ParseError {
                                 message: format!(
                                     "Expected DATE, TIME, or TIMESTAMP after CURRENT, found {}",
-                                    id
+                                    id_str
                                 ),
                             })
                         }
@@ -235,7 +236,7 @@ impl Parser {
                 self.advance(); // consume CURRENT_TIME
                 let precision = if self.try_consume(&Token::LParen) {
                     let prec_str = match self.peek() {
-                        Token::Number(n) => n.clone(),
+                        Token::Number(sym) => self.resolve(*sym),
                         _ => {
                             return Err(ParseError {
                                 message: "Expected integer precision for CURRENT_TIME".to_string(),
@@ -265,7 +266,7 @@ impl Parser {
                 self.advance(); // consume CURRENT_TIMESTAMP
                 let precision = if self.try_consume(&Token::LParen) {
                     let prec_str = match self.peek() {
-                        Token::Number(n) => n.clone(),
+                        Token::Number(sym) => self.resolve(*sym),
                         _ => {
                             return Err(ParseError {
                                 message: "Expected integer precision for CURRENT_TIMESTAMP"
@@ -306,7 +307,7 @@ impl Parser {
 
             // Parse "VALUE" as identifier (not a reserved keyword)
             match self.peek() {
-                Token::Identifier(s) if s.eq_ignore_ascii_case("VALUE") => {
+                Token::Identifier(s) if self.resolve_str(*s).eq_ignore_ascii_case("VALUE") => {
                     self.advance();
                 }
                 _ => return Err(ParseError { message: "Expected VALUE after NEXT".to_string() }),
@@ -348,10 +349,14 @@ impl Parser {
                     self.advance(); // consume BOOLEAN
                     // MODE is a required keyword after BOOLEAN in MySQL syntax
                     // It might be a keyword or identifier depending on lexer
-                    if matches!(self.peek(), Token::Identifier(s) | Token::DelimitedIdentifier(s) if s.eq_ignore_ascii_case("MODE")) {
-                        self.advance(); // consume MODE
-                    } else if self.peek_keyword(Keyword::Mode) {
-                        self.advance(); // consume MODE keyword if it exists
+                    match self.peek() {
+                        Token::Identifier(s) | Token::DelimitedIdentifier(s) if self.resolve_str(*s).eq_ignore_ascii_case("MODE") => {
+                            self.advance(); // consume MODE
+                        }
+                        _ if self.peek_keyword(Keyword::Mode) => {
+                            self.advance(); // consume MODE keyword if it exists
+                        }
+                        _ => {} // MODE is optional in some implementations
                     }
                     vibesql_ast::FulltextMode::Boolean
                 } else {

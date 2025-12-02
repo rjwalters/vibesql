@@ -7,8 +7,8 @@ impl Parser {
 
         // Parse table name
         let table_name = match self.peek() {
-            Token::Identifier(name) => {
-                let table = name.clone();
+            Token::Identifier(sym) => {
+                let table = self.resolve(*sym);
                 self.advance();
                 table
             }
@@ -25,8 +25,8 @@ impl Parser {
         loop {
             // Parse column name
             let column = match self.peek() {
-                Token::Identifier(col) => {
-                    let c = col.clone();
+                Token::Identifier(sym) => {
+                    let c = self.resolve(*sym);
                     self.advance();
                     c
                 }

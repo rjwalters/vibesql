@@ -58,8 +58,8 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let number = self.slice_from(start).to_string();
-        Ok(Token::Number(number))
+        let number = self.slice_from(start);
+        Ok(Token::Number(self.intern(number)))
     }
 }
 
@@ -82,19 +82,19 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let mut lexer = Lexer::new(input);
-            let tokens =
+            let lexer = Lexer::new(input);
+            let stream =
                 lexer.tokenize().unwrap_or_else(|_| panic!("Failed to tokenize: {}", input));
 
             // Should have exactly 2 tokens: the number and EOF
-            assert_eq!(tokens.len(), 2, "Input: {}", input);
+            assert_eq!(stream.tokens.len(), 2, "Input: {}", input);
 
-            match &tokens[0] {
-                Token::Number(n) => assert_eq!(n, expected, "Input: {}", input),
+            match stream.tokens[0] {
+                Token::Number(sym) => assert_eq!(stream.resolve(sym), expected, "Input: {}", input),
                 other => panic!("Expected Number token for {}, got {:?}", input, other),
             }
 
-            assert_eq!(tokens[1], Token::Eof);
+            assert_eq!(stream.tokens[1], Token::Eof);
         }
     }
 
@@ -104,14 +104,14 @@ mod tests {
         let test_cases = vec![(".5", ".5"), (".123", ".123"), (".2E+2", ".2E+2")];
 
         for (input, expected) in test_cases {
-            let mut lexer = Lexer::new(input);
-            let tokens =
+            let lexer = Lexer::new(input);
+            let stream =
                 lexer.tokenize().unwrap_or_else(|_| panic!("Failed to tokenize: {}", input));
 
-            assert_eq!(tokens.len(), 2, "Input: {}", input);
+            assert_eq!(stream.tokens.len(), 2, "Input: {}", input);
 
-            match &tokens[0] {
-                Token::Number(n) => assert_eq!(n, expected, "Input: {}", input),
+            match stream.tokens[0] {
+                Token::Number(sym) => assert_eq!(stream.resolve(sym), expected, "Input: {}", input),
                 other => panic!("Expected Number token for {}, got {:?}", input, other),
             }
         }
@@ -127,7 +127,7 @@ mod tests {
         ];
 
         for input in invalid_cases {
-            let mut lexer = Lexer::new(input);
+            let lexer = Lexer::new(input);
             let result = lexer.tokenize();
             assert!(result.is_err(), "Expected error for input: {}", input);
         }

@@ -54,7 +54,7 @@ impl Parser {
                 let variables = self.parse_comma_separated_list(|p| {
                     match p.peek() {
                         Token::UserVariable(var_name) => {
-                            let name = var_name.clone();
+                            let name = p.resolve(*var_name);
                             p.advance();
                             Ok(name)
                         }
@@ -197,8 +197,9 @@ impl Parser {
             self.consume_keyword(Keyword::Limit)?;
             match self.peek() {
                 Token::Number(n) => {
-                    let limit_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid LIMIT value: {}", n),
+                    let n_str = self.resolve_str(*n);
+                    let limit_value = n_str.parse::<usize>().map_err(|_| ParseError {
+                        message: format!("Invalid LIMIT value: {}", n_str),
                     })?;
 
                     self.advance();
@@ -215,8 +216,9 @@ impl Parser {
             self.consume_keyword(Keyword::Offset)?;
             match self.peek() {
                 Token::Number(n) => {
-                    let offset_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid OFFSET value: {}", n),
+                    let n_str = self.resolve_str(*n);
+                    let offset_value = n_str.parse::<usize>().map_err(|_| ParseError {
+                        message: format!("Invalid OFFSET value: {}", n_str),
                     })?;
                     self.advance();
                     Some(offset_value)
@@ -265,7 +267,7 @@ impl Parser {
         // Parse CTE name
         let name = match self.peek() {
             Token::Identifier(id) => {
-                let name = id.clone();
+                let name = self.resolve(*id);
                 self.advance();
                 name
             }
@@ -284,7 +286,7 @@ impl Parser {
             // Parse comma-separated list of column identifiers
             let cols = self.parse_comma_separated_list(|p| match p.peek() {
                 Token::Identifier(col) => {
-                    let name = col.clone();
+                    let name = p.resolve(*col);
                     p.advance();
                     Ok(name)
                 }

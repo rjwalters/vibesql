@@ -20,7 +20,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 } else {
                     // End of string
-                    return Ok(Token::String(string_content));
+                    return Ok(Token::String(self.intern(string_content)));
                 }
             } else {
                 string_content.push(ch);

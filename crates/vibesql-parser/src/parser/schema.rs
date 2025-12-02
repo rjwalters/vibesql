@@ -98,7 +98,7 @@ pub fn parse_set_names(parser: &mut crate::Parser) -> Result<vibesql_ast::SetNam
     // Parse charset name (can be identifier or string literal)
     let charset_name = match parser.peek() {
         crate::token::Token::String(s) => {
-            let val = s.clone();
+            let val = parser.resolve(*s);
             parser.advance();
             val
         }
@@ -110,7 +110,7 @@ pub fn parse_set_names(parser: &mut crate::Parser) -> Result<vibesql_ast::SetNam
         parser.advance();
         Some(match parser.peek() {
             crate::token::Token::String(s) => {
-                let val = s.clone();
+                let val = parser.resolve(*s);
                 parser.advance();
                 val
             }
@@ -138,7 +138,7 @@ pub fn parse_set_time_zone(parser: &mut crate::Parser) -> Result<vibesql_ast::Se
         // Parse the interval string
         let interval_str = match parser.peek() {
             crate::token::Token::String(s) => {
-                let val = s.clone();
+                let val = parser.resolve(*s);
                 parser.advance();
                 val
             }

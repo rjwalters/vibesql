@@ -179,7 +179,7 @@ impl Parser {
                         self.advance();
                         Ok(vibesql_ast::FrameBound::CurrentRow)
                     }
-                    Token::Identifier(ref id) if id.to_uppercase() == "ROW" => {
+                    Token::Identifier(ref id) if self.resolve_str(*id).to_uppercase() == "ROW" => {
                         self.advance();
                         Ok(vibesql_ast::FrameBound::CurrentRow)
                     }

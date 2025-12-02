@@ -9,6 +9,7 @@
 
 use std::fmt;
 
+use crate::interner::IdentifierInterner;
 use crate::token::Token;
 
 mod identifiers;
@@ -30,24 +31,54 @@ impl fmt::Display for LexerError {
     }
 }
 
+/// A stream of tokens bundled with the interner for resolving symbols.
+///
+/// This is the result of lexing and provides everything needed for parsing.
+#[derive(Debug)]
+pub struct TokenStream {
+    /// The tokens produced by lexing
+    pub tokens: Vec<Token>,
+    /// The interner for resolving string symbols
+    pub interner: IdentifierInterner,
+}
+
+impl TokenStream {
+    /// Get a slice of all tokens.
+    #[inline]
+    pub fn tokens(&self) -> &[Token] {
+        &self.tokens
+    }
+
+    /// Resolve a symbol to its string value.
+    #[inline]
+    pub fn resolve(&self, sym: crate::interner::StringSymbol) -> &str {
+        self.interner.resolve_unchecked(sym)
+    }
+}
+
 /// SQL Lexer - converts SQL text into tokens.
 ///
 /// Uses direct &str access for zero-copy tokenization.
 /// Tracks byte position for efficient slicing.
+/// Owns an interner for deduplicating identifier strings.
 pub struct Lexer<'a> {
     input: &'a str,
     byte_pos: usize,
+    interner: IdentifierInterner,
 }
 
 impl<'a> Lexer<'a> {
     /// Create a new lexer from SQL input.
     #[inline]
     pub fn new(input: &'a str) -> Self {
-        Lexer { input, byte_pos: 0 }
+        Lexer { input, byte_pos: 0, interner: IdentifierInterner::new() }
     }
 
-    /// Tokenize the entire input.
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, LexerError> {
+    /// Tokenize the entire input and return a TokenStream.
+    ///
+    /// The TokenStream contains both the tokens and the interner needed
+    /// to resolve string symbols back to their values.
+    pub fn tokenize(mut self) -> Result<TokenStream, LexerError> {
         // Pre-allocate based on estimated token count (~1 token per 6 bytes)
         let estimated_tokens = (self.input.len() / 6).max(4);
         let mut tokens = Vec::with_capacity(estimated_tokens);
@@ -64,7 +95,13 @@ impl<'a> Lexer<'a> {
             tokens.push(token);
         }
 
-        Ok(tokens)
+        Ok(TokenStream { tokens, interner: self.interner })
+    }
+
+    /// Intern a string and return its symbol.
+    #[inline]
+    pub(super) fn intern(&mut self, s: impl AsRef<str>) -> crate::interner::StringSymbol {
+        self.interner.get_or_intern(s)
     }
 
     /// Get the next token.
@@ -275,8 +312,8 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let var_name = self.slice_from(start).to_string();
-        Ok(Token::SessionVariable(var_name))
+        let var_name = self.slice_from(start);
+        Ok(Token::SessionVariable(self.intern(var_name)))
     }
 
     /// Tokenize a user variable (@variable).
@@ -302,8 +339,8 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let var_name = self.slice_from(start).to_string();
-        Ok(Token::UserVariable(var_name))
+        let var_name = self.slice_from(start);
+        Ok(Token::UserVariable(self.intern(var_name)))
     }
 
     /// Tokenize a numbered placeholder ($1, $2, etc.).
@@ -372,6 +409,6 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        Ok(Token::NamedPlaceholder(name))
+        Ok(Token::NamedPlaceholder(self.intern(name)))
     }
 }

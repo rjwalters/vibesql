@@ -14,8 +14,8 @@ impl Parser {
 
             // Parse the integer length
             let length = match self.peek() {
-                Token::Number(n) => {
-                    let value = n.parse::<i64>().map_err(|_| ParseError {
+                Token::Number(sym) => {
+                    let value = self.resolve_str(*sym).parse::<i64>().map_err(|_| ParseError {
                         message: "Invalid integer for column prefix length".to_string(),
                     })?;
                     self.advance();
@@ -135,8 +135,8 @@ impl Parser {
             let name = if self.peek_keyword(Keyword::Constraint) {
                 self.advance(); // consume CONSTRAINT
                 match self.peek() {
-                    Token::Identifier(n) => {
-                        let constraint_name = n.clone();
+                    Token::Identifier(sym) => {
+                        let constraint_name = self.resolve(*sym);
                         self.advance();
                         Some(constraint_name)
                     }
@@ -197,8 +197,8 @@ impl Parser {
                 Token::Keyword(Keyword::References) => {
                     self.advance(); // consume REFERENCES
                     let table = match self.peek() {
-                        Token::Identifier(t) => {
-                            let table_name = t.clone();
+                        Token::Identifier(sym) => {
+                            let table_name = self.resolve(*sym);
                             self.advance();
                             table_name
                         }
@@ -211,8 +211,8 @@ impl Parser {
 
                     self.expect_token(Token::LParen)?;
                     let column = match self.peek() {
-                        Token::Identifier(c) => {
-                            let col_name = c.clone();
+                        Token::Identifier(sym) => {
+                            let col_name = self.resolve(*sym);
                             self.advance();
                             col_name
                         }
@@ -274,7 +274,7 @@ impl Parser {
             self.advance(); // consume CONSTRAINT
             match self.peek() {
                 Token::Identifier(n) => {
-                    let constraint_name = n.clone();
+                    let constraint_name = self.resolve(*n);
                     self.advance();
                     Some(constraint_name)
                 }
@@ -317,7 +317,7 @@ impl Parser {
                 loop {
                     match self.peek() {
                         Token::Identifier(col) => {
-                            columns.push(col.clone());
+                            columns.push(self.resolve(*col));
                             self.advance();
                         }
                         _ => {
@@ -339,7 +339,7 @@ impl Parser {
 
                 let references_table = match self.peek() {
                     Token::Identifier(t) => {
-                        let table_name = t.clone();
+                        let table_name = self.resolve(*t);
                         self.advance();
                         table_name
                     }
@@ -356,7 +356,7 @@ impl Parser {
                 loop {
                     match self.peek() {
                         Token::Identifier(col) => {
-                            references_columns.push(col.clone());
+                            references_columns.push(self.resolve(*col));
                             self.advance();
                         }
                         _ => {
@@ -421,10 +421,10 @@ impl Parser {
                 // Optional index name
                 let index_name = if matches!(self.peek(), Token::Identifier(_)) {
                     // Look ahead to see if next token is LParen
-                    if self.position + 1 < self.tokens.len() 
+                    if self.position + 1 < self.tokens.len()
                         && matches!(self.tokens[self.position + 1], Token::LParen) {
                         let name = match self.peek() {
-                            Token::Identifier(n) => Some(n.clone()),
+                            Token::Identifier(sym) => Some(self.resolve(*sym)),
                             _ => None,
                         };
                         if name.is_some() {

@@ -4,8 +4,8 @@ impl Parser {
     /// Parse literal expressions (numbers, strings, booleans, NULL)
     pub(super) fn parse_literal(&mut self) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         match self.peek() {
-            Token::Number(n) => {
-                let num_str = n.clone();
+            Token::Number(sym) => {
+                let num_str = self.resolve_str(*sym).to_string();
                 self.advance();
 
                 // Try to parse as integer first
@@ -21,8 +21,8 @@ impl Parser {
                     }
                 }
             }
-            Token::String(s) => {
-                let string_val = s.clone();
+            Token::String(sym) => {
+                let string_val = self.resolve(*sym);
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(string_val))))
             }
@@ -42,8 +42,8 @@ impl Parser {
             Token::Keyword(Keyword::Date) => {
                 self.advance();
                 match self.peek() {
-                    Token::String(s) => {
-                        let date_str = s.clone();
+                    Token::String(sym) => {
+                        let date_str = self.resolve(*sym);
                         self.advance();
 
                         // Parse the date string into a Date type
@@ -62,8 +62,8 @@ impl Parser {
             Token::Keyword(Keyword::Time) => {
                 self.advance();
                 match self.peek() {
-                    Token::String(s) => {
-                        let time_str = s.clone();
+                    Token::String(sym) => {
+                        let time_str = self.resolve(*sym);
                         self.advance();
 
                         // Parse the time string into a Time type
@@ -82,8 +82,8 @@ impl Parser {
             Token::Keyword(Keyword::Timestamp) => {
                 self.advance();
                 match self.peek() {
-                    Token::String(s) => {
-                        let timestamp_str = s.clone();
+                    Token::String(sym) => {
+                        let timestamp_str = self.resolve(*sym);
                         self.advance();
 
                         // Parse the timestamp string into a Timestamp type
@@ -103,13 +103,13 @@ impl Parser {
                 self.advance();
                 // Parse INTERVAL 'value' field [TO field]
                 match self.peek() {
-                    Token::String(interval_str) => {
-                        let value_str = interval_str.clone();
+                    Token::String(sym) => {
+                        let value_str = self.resolve(*sym);
                         self.advance();
 
                         // Parse interval field (YEAR, MONTH, DAY, etc.)
                         let start_field = match self.peek() {
-                            Token::Identifier(field) => field.to_uppercase(),
+                            Token::Identifier(sym) => self.resolve_str(*sym).to_uppercase(),
                             Token::Keyword(Keyword::Year) => "YEAR".to_string(),
                             Token::Keyword(Keyword::Month) => "MONTH".to_string(),
                             Token::Keyword(Keyword::Day) => "DAY".to_string(),
@@ -130,7 +130,7 @@ impl Parser {
                             Token::Keyword(Keyword::To) => {
                                 self.advance(); // consume TO keyword
                                 let end_field = match self.peek() {
-                                    Token::Identifier(field) => field.to_uppercase(),
+                                    Token::Identifier(sym) => self.resolve_str(*sym).to_uppercase(),
                                     Token::Keyword(Keyword::Year) => "YEAR".to_string(),
                                     Token::Keyword(Keyword::Month) => "MONTH".to_string(),
                                     Token::Keyword(Keyword::Day) => "DAY".to_string(),
@@ -146,10 +146,10 @@ impl Parser {
                                 self.advance();
                                 format!("{} {} TO {}", value_str, start_field, end_field)
                             }
-                            Token::Identifier(word) if word.to_uppercase() == "TO" => {
+                            Token::Identifier(sym) if self.resolve_str(*sym).to_uppercase() == "TO" => {
                                 self.advance(); // consume TO identifier (backward compat)
                                 let end_field = match self.peek() {
-                                    Token::Identifier(field) => field.to_uppercase(),
+                                    Token::Identifier(sym) => self.resolve_str(*sym).to_uppercase(),
                                     Token::Keyword(Keyword::Year) => "YEAR".to_string(),
                                     Token::Keyword(Keyword::Month) => "MONTH".to_string(),
                                     Token::Keyword(Keyword::Day) => "DAY".to_string(),

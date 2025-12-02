@@ -38,8 +38,8 @@ impl Parser {
 
             // Parse column name
             let name = match self.peek() {
-                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                    let c = col.clone();
+                Token::Identifier(sym) | Token::DelimitedIdentifier(sym) => {
+                    let c = self.resolve(*sym);
                     self.advance();
                     c
                 }
@@ -67,8 +67,8 @@ impl Parser {
             let comment = if self.peek_keyword(Keyword::Comment) {
                 self.advance(); // consume COMMENT
                 match self.peek() {
-                    Token::String(s) => {
-                        let c = s.clone();
+                    Token::String(sym) => {
+                        let c = self.resolve(*sym);
                         self.advance();
                         Some(c)
                     }

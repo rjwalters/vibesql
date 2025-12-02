@@ -84,7 +84,7 @@ impl Parser {
                     // Parse alias (required for derived tables)
                     let alias = match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                            let alias = id.clone();
+                            let alias = self.resolve(*id);
                             self.advance();
                             alias
                         }
@@ -131,7 +131,7 @@ impl Parser {
                     self.consume_keyword(Keyword::As)?;
                     match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                            let alias = id.clone();
+                            let alias = self.resolve(*id);
                             self.advance();
                             Some(alias)
                         }
@@ -145,7 +145,7 @@ impl Parser {
                     // Implicit alias (no AS keyword) - but not a JOIN keyword
                     match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                            let alias = id.clone();
+                            let alias = self.resolve(*id);
                             self.advance();
                             Some(alias)
                         }

@@ -70,7 +70,7 @@ impl Parser {
         // Parse string value
         match self.peek() {
             Token::String(s) => {
-                let val = s.clone();
+                let val = self.resolve(*s);
                 self.advance();
                 Ok(vibesql_ast::TableOption::Connection(Some(val)))
             }
@@ -105,7 +105,7 @@ impl Parser {
             loop {
                 match self.peek() {
                     Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                        tables.push(id.clone());
+                        tables.push(self.resolve(*id));
                         self.advance();
                     }
                     _ => {
@@ -176,7 +176,7 @@ impl Parser {
         // Parse string value
         match self.peek() {
             Token::String(s) => {
-                let val = s.clone();
+                let val = self.resolve(*s);
                 self.advance();
                 Ok(vibesql_ast::TableOption::Password(Some(val)))
             }
@@ -215,7 +215,7 @@ impl Parser {
         let value = if self.try_consume_keyword(Keyword::Null) {
             Some("NULL".to_string())
         } else if let Token::Identifier(id) = self.peek() {
-            let val = id.clone();
+            let val = self.resolve(*id);
             self.advance();
             Some(val)
         } else {
@@ -230,7 +230,7 @@ impl Parser {
         // Parse collation name
         match self.peek() {
             Token::Identifier(id) => {
-                let val = id.clone();
+                let val = self.resolve(*id);
                 self.advance();
                 Ok(vibesql_ast::TableOption::Collate(Some(val)))
             }
@@ -244,7 +244,7 @@ impl Parser {
         // Parse string value
         match self.peek() {
             Token::String(s) => {
-                let val = s.clone();
+                let val = self.resolve(*s);
                 self.advance();
                 Ok(vibesql_ast::TableOption::Comment(Some(val)))
             }
@@ -272,10 +272,11 @@ impl Parser {
     /// Parse a numeric value that can be integer or float (converts float to int by truncation)
     pub(super) fn parse_numeric_value(&mut self) -> Result<Option<i64>, ParseError> {
         if let Token::Number(n) = self.peek() {
+            let n_str = self.resolve_str(*n);
             // Try parsing as i64 first, then as f64 and truncate
-            let val = if let Ok(int_val) = n.parse::<i64>() {
+            let val = if let Ok(int_val) = n_str.parse::<i64>() {
                 int_val
-            } else if let Ok(float_val) = n.parse::<f64>() {
+            } else if let Ok(float_val) = n_str.parse::<f64>() {
                 float_val as i64
             } else {
                 return Err(ParseError { message: "Invalid numeric value".to_string() });

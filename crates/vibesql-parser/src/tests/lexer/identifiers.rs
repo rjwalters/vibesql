@@ -4,31 +4,43 @@ use super::super::*;
 
 #[test]
 fn test_tokenize_simple_identifier() {
-    let mut lexer = Lexer::new("users");
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new("users");
+    let stream = lexer.tokenize().unwrap();
     // Regular identifiers are normalized to uppercase
-    assert_eq!(tokens[0], Token::Identifier("USERS".to_string()));
+    match stream.tokens[0] {
+        Token::Identifier(sym) => assert_eq!(stream.resolve(sym), "USERS"),
+        _ => panic!("Expected Identifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_identifier_with_underscore() {
-    let mut lexer = Lexer::new("user_id");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("USER_ID".to_string()));
+    let lexer = Lexer::new("user_id");
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::Identifier(sym) => assert_eq!(stream.resolve(sym), "USER_ID"),
+        _ => panic!("Expected Identifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_identifier_with_numbers() {
-    let mut lexer = Lexer::new("table123");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("TABLE123".to_string()));
+    let lexer = Lexer::new("table123");
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::Identifier(sym) => assert_eq!(stream.resolve(sym), "TABLE123"),
+        _ => panic!("Expected Identifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_identifier_starting_with_underscore() {
-    let mut lexer = Lexer::new("_internal");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("_INTERNAL".to_string()));
+    let lexer = Lexer::new("_internal");
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::Identifier(sym) => assert_eq!(stream.resolve(sym), "_INTERNAL"),
+        _ => panic!("Expected Identifier token"),
+    }
 }
 
 // ============================================================================
@@ -37,52 +49,70 @@ fn test_tokenize_identifier_starting_with_underscore() {
 
 #[test]
 fn test_tokenize_delimited_identifier_simple() {
-    let mut lexer = Lexer::new(r#""columnName""#);
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new(r#""columnName""#);
+    let stream = lexer.tokenize().unwrap();
     // Delimited identifiers preserve case
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("columnName".to_string()));
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "columnName"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_delimited_identifier_uppercase() {
-    let mut lexer = Lexer::new(r#""A""#);
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("A".to_string()));
+    let lexer = Lexer::new(r#""A""#);
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "A"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_delimited_identifier_lowercase() {
-    let mut lexer = Lexer::new(r#""a""#);
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("a".to_string()));
+    let lexer = Lexer::new(r#""a""#);
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "a"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_delimited_identifier_with_spaces() {
-    let mut lexer = Lexer::new(r#""First Name""#);
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("First Name".to_string()));
+    let lexer = Lexer::new(r#""First Name""#);
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "First Name"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_delimited_identifier_reserved_word() {
-    let mut lexer = Lexer::new(r#""SELECT""#);
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new(r#""SELECT""#);
+    let stream = lexer.tokenize().unwrap();
     // Reserved words can be used as delimited identifiers
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("SELECT".to_string()));
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "SELECT"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_delimited_identifier_with_escaped_quotes() {
-    let mut lexer = Lexer::new(r#""O""Reilly""#);
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new(r#""O""Reilly""#);
+    let stream = lexer.tokenize().unwrap();
     // Doubled quotes become single quote in the identifier
-    assert_eq!(tokens[0], Token::DelimitedIdentifier(r#"O"Reilly"#.to_string()));
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), r#"O"Reilly"#),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_empty_delimited_identifier_error() {
-    let mut lexer = Lexer::new(r#""""#);
+    let lexer = Lexer::new(r#""""#);
     let result = lexer.tokenize();
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("Empty delimited identifier"));
@@ -90,7 +120,7 @@ fn test_tokenize_empty_delimited_identifier_error() {
 
 #[test]
 fn test_tokenize_unterminated_delimited_identifier_error() {
-    let mut lexer = Lexer::new(r#""unterminated"#);
+    let lexer = Lexer::new(r#""unterminated"#);
     let result = lexer.tokenize();
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("Unterminated delimited identifier"));
@@ -98,14 +128,20 @@ fn test_tokenize_unterminated_delimited_identifier_error() {
 
 #[test]
 fn test_tokenize_mixed_identifiers() {
-    let mut lexer = Lexer::new(r#"SELECT "columnName", regularColumn FROM table"#);
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
-    assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
-    assert_eq!(tokens[2], Token::Comma);
-    assert_eq!(tokens[3], Token::Identifier("REGULARCOLUMN".to_string()));
-    assert_eq!(tokens[4], Token::Keyword(Keyword::From));
-    assert_eq!(tokens[5], Token::Keyword(Keyword::Table)); // "table" is a reserved keyword
+    let lexer = Lexer::new(r#"SELECT "columnName", regularColumn FROM table"#);
+    let stream = lexer.tokenize().unwrap();
+    assert_eq!(stream.tokens[0], Token::Keyword(Keyword::Select));
+    match stream.tokens[1] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "columnName"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
+    assert_eq!(stream.tokens[2], Token::Comma);
+    match stream.tokens[3] {
+        Token::Identifier(sym) => assert_eq!(stream.resolve(sym), "REGULARCOLUMN"),
+        _ => panic!("Expected Identifier token"),
+    }
+    assert_eq!(stream.tokens[4], Token::Keyword(Keyword::From));
+    assert_eq!(stream.tokens[5], Token::Keyword(Keyword::Table)); // "table" is a reserved keyword
 }
 
 // ============================================================================
@@ -114,59 +150,80 @@ fn test_tokenize_mixed_identifiers() {
 
 #[test]
 fn test_tokenize_backtick_identifier_simple() {
-    let mut lexer = Lexer::new("`columnName`");
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new("`columnName`");
+    let stream = lexer.tokenize().unwrap();
     // Backtick identifiers preserve case
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("columnName".to_string()));
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "columnName"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_backtick_identifier_uppercase() {
-    let mut lexer = Lexer::new("`A`");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("A".to_string()));
+    let lexer = Lexer::new("`A`");
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "A"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_backtick_identifier_lowercase() {
-    let mut lexer = Lexer::new("`a`");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("a".to_string()));
+    let lexer = Lexer::new("`a`");
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "a"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_backtick_identifier_with_spaces() {
-    let mut lexer = Lexer::new("`First Name`");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("First Name".to_string()));
+    let lexer = Lexer::new("`First Name`");
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "First Name"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_backtick_identifier_with_special_chars() {
-    let mut lexer = Lexer::new("`my-table`");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("my-table".to_string()));
+    let lexer = Lexer::new("`my-table`");
+    let stream = lexer.tokenize().unwrap();
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "my-table"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_backtick_identifier_reserved_word() {
-    let mut lexer = Lexer::new("`SELECT`");
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new("`SELECT`");
+    let stream = lexer.tokenize().unwrap();
     // Reserved words can be used as backtick identifiers
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("SELECT".to_string()));
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "SELECT"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_backtick_identifier_with_escaped_backticks() {
-    let mut lexer = Lexer::new("`O``Reilly`");
-    let tokens = lexer.tokenize().unwrap();
+    let lexer = Lexer::new("`O``Reilly`");
+    let stream = lexer.tokenize().unwrap();
     // Doubled backticks become single backtick in the identifier
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("O`Reilly".to_string()));
+    match stream.tokens[0] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "O`Reilly"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_empty_backtick_identifier_error() {
-    let mut lexer = Lexer::new("``");
+    let lexer = Lexer::new("``");
     let result = lexer.tokenize();
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("Empty delimited identifier"));
@@ -174,7 +231,7 @@ fn test_tokenize_empty_backtick_identifier_error() {
 
 #[test]
 fn test_tokenize_unterminated_backtick_identifier_error() {
-    let mut lexer = Lexer::new("`unterminated");
+    let lexer = Lexer::new("`unterminated");
     let result = lexer.tokenize();
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("Unterminated delimited identifier"));
@@ -182,26 +239,41 @@ fn test_tokenize_unterminated_backtick_identifier_error() {
 
 #[test]
 fn test_tokenize_mixed_backtick_and_regular_identifiers() {
-    let mut lexer = Lexer::new("SELECT `columnName`, regularColumn FROM `table_name`");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
-    assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
-    assert_eq!(tokens[2], Token::Comma);
-    assert_eq!(tokens[3], Token::Identifier("REGULARCOLUMN".to_string()));
-    assert_eq!(tokens[4], Token::Keyword(Keyword::From));
-    assert_eq!(tokens[5], Token::DelimitedIdentifier("table_name".to_string()));
+    let lexer = Lexer::new("SELECT `columnName`, regularColumn FROM `table_name`");
+    let stream = lexer.tokenize().unwrap();
+    assert_eq!(stream.tokens[0], Token::Keyword(Keyword::Select));
+    match stream.tokens[1] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "columnName"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
+    assert_eq!(stream.tokens[2], Token::Comma);
+    match stream.tokens[3] {
+        Token::Identifier(sym) => assert_eq!(stream.resolve(sym), "REGULARCOLUMN"),
+        _ => panic!("Expected Identifier token"),
+    }
+    assert_eq!(stream.tokens[4], Token::Keyword(Keyword::From));
+    match stream.tokens[5] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "table_name"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
 }
 
 #[test]
 fn test_tokenize_backtick_vs_doublequote_identifiers() {
-    let mut lexer = Lexer::new("SELECT `backtick`, \"doublequote\" FROM table");
-    let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
-    assert_eq!(tokens[1], Token::DelimitedIdentifier("backtick".to_string()));
-    assert_eq!(tokens[2], Token::Comma);
-    assert_eq!(tokens[3], Token::DelimitedIdentifier("doublequote".to_string()));
-    assert_eq!(tokens[4], Token::Keyword(Keyword::From));
-    assert_eq!(tokens[5], Token::Keyword(Keyword::Table));
+    let lexer = Lexer::new("SELECT `backtick`, \"doublequote\" FROM table");
+    let stream = lexer.tokenize().unwrap();
+    assert_eq!(stream.tokens[0], Token::Keyword(Keyword::Select));
+    match stream.tokens[1] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "backtick"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
+    assert_eq!(stream.tokens[2], Token::Comma);
+    match stream.tokens[3] {
+        Token::DelimitedIdentifier(sym) => assert_eq!(stream.resolve(sym), "doublequote"),
+        _ => panic!("Expected DelimitedIdentifier token"),
+    }
+    assert_eq!(stream.tokens[4], Token::Keyword(Keyword::From));
+    assert_eq!(stream.tokens[5], Token::Keyword(Keyword::Table));
 }
 
 // ============================================================================
