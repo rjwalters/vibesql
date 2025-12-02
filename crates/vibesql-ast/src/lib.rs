@@ -9,8 +9,20 @@
 //! For performance-critical code paths, this crate provides arena-allocated
 //! versions of AST types in the [`arena`] module. These use bump allocation
 //! for improved cache locality and reduced allocation overhead.
+//!
+//! # Visitor Pattern
+//!
+//! The [`visitor`] module provides traits for traversing and transforming
+//! AST nodes without duplicating traversal logic:
+//!
+//! - [`visitor::ExpressionVisitor`]: Read-only expression traversal
+//! - [`visitor::ExpressionMutVisitor`]: Expression transformation
+//! - [`visitor::StatementVisitor`]: Statement traversal
+//!
+//! See the module documentation for usage examples.
 
 pub mod arena;
+pub mod visitor;
 
 mod ddl;
 mod dml;
