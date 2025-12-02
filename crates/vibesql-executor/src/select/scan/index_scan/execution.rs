@@ -227,7 +227,17 @@ pub(crate) fn execute_index_scan(
             // Use reverse iteration - rows come in descending key order
             // This is more efficient than fetching all and reversing
             used_reverse_iteration = true;
-            index_data.prefix_scan_reverse(&prefix.prefix_key)
+
+            // Optimization: Use prefix_scan_reverse_limit for true early termination (#3285)
+            // When we have DESC order + LIMIT + no WHERE filtering needed,
+            // stop scanning at the index level instead of fetching all rows
+            if let (Some(limit_val), false) = (limit, need_where_filter) {
+                // O(log n + limit) instead of O(log n + k) where k = all matching rows
+                // Critical for TPC-C Order Status: customer may have 30+ orders, we only need 1
+                index_data.prefix_scan_reverse_limit(&prefix.prefix_key, limit_val)
+            } else {
+                index_data.prefix_scan_reverse(&prefix.prefix_key)
+            }
         } else {
             index_data.prefix_scan(&prefix.prefix_key)
         }
