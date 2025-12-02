@@ -37,6 +37,12 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 left: Box::new(Expression::from(*left)),
                 right: Box::new(Expression::from(*right)),
             },
+            arena_expr::Expression::Conjunction(children) => {
+                Expression::Conjunction(children.iter().map(Expression::from).collect())
+            }
+            arena_expr::Expression::Disjunction(children) => {
+                Expression::Disjunction(children.iter().map(Expression::from).collect())
+            }
             arena_expr::Expression::UnaryOp { op, expr } => Expression::UnaryOp {
                 op: *op,
                 expr: Box::new(Expression::from(*expr)),

@@ -235,6 +235,14 @@ pub fn bind_expression_named(expr: &Expression, params: &HashMap<String, SqlValu
             right: Box::new(bind_expression_named(right, params)),
         },
 
+        Expression::Conjunction(children) => Expression::Conjunction(
+            children.iter().map(|c| bind_expression_named(c, params)).collect(),
+        ),
+
+        Expression::Disjunction(children) => Expression::Disjunction(
+            children.iter().map(|c| bind_expression_named(c, params)).collect(),
+        ),
+
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
             op: *op,
             expr: Box::new(bind_expression_named(inner, params)),

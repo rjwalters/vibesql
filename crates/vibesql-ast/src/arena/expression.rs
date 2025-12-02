@@ -30,12 +30,23 @@ pub enum Expression<'arena> {
         column: &'arena str,
     },
 
-    /// Binary operation (a + b, x = y, p AND q)
+    /// Binary operation (a + b, x = y, etc.)
+    /// Note: AND/OR chains should use Conjunction/Disjunction for efficiency
     BinaryOp {
         op: BinaryOperator,
         left: &'arena Expression<'arena>,
         right: &'arena Expression<'arena>,
     },
+
+    /// Flattened conjunction (AND chain): a AND b AND c AND ...
+    /// Stored as a flat vector for O(1) depth traversal and better cache locality.
+    /// Always contains 2+ children (single predicates remain as-is).
+    Conjunction(BumpVec<'arena, Expression<'arena>>),
+
+    /// Flattened disjunction (OR chain): a OR b OR c OR ...
+    /// Stored as a flat vector for O(1) depth traversal and better cache locality.
+    /// Always contains 2+ children (single predicates remain as-is).
+    Disjunction(BumpVec<'arena, Expression<'arena>>),
 
     /// Unary operation (NOT x, -5)
     UnaryOp {

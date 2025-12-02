@@ -327,6 +327,12 @@ impl LiteralExtractor {
                 Self::extract_from_expression(right, literals);
             }
 
+            Expression::Conjunction(children) | Expression::Disjunction(children) => {
+                for child in children {
+                    Self::extract_from_expression(child, literals);
+                }
+            }
+
             Expression::UnaryOp { expr, .. } => {
                 Self::extract_from_expression(expr, literals);
             }

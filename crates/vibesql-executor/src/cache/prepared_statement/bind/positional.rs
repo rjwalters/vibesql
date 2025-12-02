@@ -211,6 +211,14 @@ pub fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
             right: Box::new(bind_expression(right, params)),
         },
 
+        Expression::Conjunction(children) => Expression::Conjunction(
+            children.iter().map(|c| bind_expression(c, params)).collect(),
+        ),
+
+        Expression::Disjunction(children) => Expression::Disjunction(
+            children.iter().map(|c| bind_expression(c, params)).collect(),
+        ),
+
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
             op: *op,
             expr: Box::new(bind_expression(inner, params)),

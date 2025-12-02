@@ -257,6 +257,12 @@ pub fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             bind_expression_mut(right, params);
         }
 
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                bind_expression_mut(child, params);
+            }
+        }
+
         Expression::UnaryOp { expr: inner, .. } => {
             bind_expression_mut(inner, params);
         }
@@ -601,6 +607,12 @@ pub fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String,
         Expression::BinaryOp { left, right, .. } => {
             bind_expression_named_mut(left, params);
             bind_expression_named_mut(right, params);
+        }
+
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                bind_expression_named_mut(child, params);
+            }
         }
 
         Expression::UnaryOp { expr: inner, .. } => {

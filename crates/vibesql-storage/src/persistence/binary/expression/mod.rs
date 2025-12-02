@@ -66,6 +66,8 @@ enum ExprTag {
     PseudoVariable = 0x1C,
     SessionVariable = 0x1D,
     Extract = 0x1E,
+    Conjunction = 0x1F,
+    Disjunction = 0x20,
 }
 
 impl ExprTag {
@@ -102,6 +104,8 @@ impl ExprTag {
             0x1C => Ok(ExprTag::PseudoVariable),
             0x1D => Ok(ExprTag::SessionVariable),
             0x1E => Ok(ExprTag::Extract),
+            0x1F => Ok(ExprTag::Conjunction),
+            0x20 => Ok(ExprTag::Disjunction),
             _ => Err(StorageError::NotImplemented(format!(
                 "Unknown expression tag: 0x{:02X}",
                 tag
@@ -393,6 +397,20 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                     .to_string(),
             ));
         }
+        Expression::Conjunction(children) => {
+            write_tag!(writer, ExprTag::Conjunction);
+            write_u32(writer, children.len() as u32)?;
+            for child in children {
+                write_expression(writer, child)?;
+            }
+        }
+        Expression::Disjunction(children) => {
+            write_tag!(writer, ExprTag::Disjunction);
+            write_u32(writer, children.len() as u32)?;
+            for child in children {
+                write_expression(writer, child)?;
+            }
+        }
     }
     Ok(())
 }
@@ -666,6 +684,22 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let field = read_interval_unit(reader)?;
             let expr = Box::new(read_expression(reader)?);
             Ok(Expression::Extract { field, expr })
+        }
+        ExprTag::Conjunction => {
+            let count = read_u32(reader)?;
+            let mut children = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                children.push(read_expression(reader)?);
+            }
+            Ok(Expression::Conjunction(children))
+        }
+        ExprTag::Disjunction => {
+            let count = read_u32(reader)?;
+            let mut children = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                children.push(read_expression(reader)?);
+            }
+            Ok(Expression::Disjunction(children))
         }
     }
 }

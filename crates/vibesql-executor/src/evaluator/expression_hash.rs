@@ -157,6 +157,12 @@ impl ExpressionHasher {
             | vibesql_ast::Expression::Default
             | vibesql_ast::Expression::DuplicateKeyValue { .. } => true,
 
+            // Conjunction and Disjunction - check all children
+            vibesql_ast::Expression::Conjunction(children)
+            | vibesql_ast::Expression::Disjunction(children) => {
+                children.iter().all(Self::is_deterministic)
+            }
+
             // MATCH AGAINST is deterministic if the search term is constant
             vibesql_ast::Expression::MatchAgainst { .. } => {
                 // MATCH AGAINST always operates on columns, which are non-deterministic
@@ -404,6 +410,13 @@ impl ExpressionHasher {
 
             vibesql_ast::Expression::NamedPlaceholder(name) => {
                 name.hash(hasher);
+            }
+
+            vibesql_ast::Expression::Conjunction(children) | vibesql_ast::Expression::Disjunction(children) => {
+                children.len().hash(hasher);
+                for child in children {
+                    Self::hash_expression(child, hasher);
+                }
             }
         }
     }

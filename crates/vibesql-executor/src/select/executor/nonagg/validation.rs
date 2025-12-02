@@ -447,5 +447,13 @@ fn validate_expression_column_refs(
         Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_) => Ok(()),
+
+        // Conjunction and Disjunction - validate all children
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                validate_expression_column_refs(child, schema, outer_schema, allowed_aliases)?;
+            }
+            Ok(())
+        }
     }
 }

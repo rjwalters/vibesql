@@ -10,7 +10,7 @@ use vibesql_ast::{
 
 /// Visit all expressions in a statement (for counting placeholders)
 ///
-/// This is a convenience wrapper around `vibesql_ast::visitor::visit_expressions`
+/// This is a convenience wrapper around `vibesql_ast::visitor::walk_statement`
 /// that maintains backward compatibility with the existing API.
 pub fn visit_statement<F>(stmt: &Statement, visitor: &mut F)
 where
