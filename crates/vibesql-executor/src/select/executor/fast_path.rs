@@ -339,6 +339,11 @@ impl SelectExecutor<'_> {
             return Ok(result);
         }
 
+        // Try PK prefix lookup with early LIMIT termination (TPC-C Delivery optimization)
+        if let Some(result) = self.try_pk_prefix_with_limit_fast(table_name, alias, stmt)? {
+            return Ok(result);
+        }
+
         // Try secondary index lookup path next
         if let Some(result) = self.try_secondary_index_lookup_fast(table_name, alias, stmt)? {
             return Ok(result);
@@ -481,6 +486,136 @@ impl SelectExecutor<'_> {
 
         // Apply projection
         let projected = self.apply_projection_fast(&stmt.select_list, vec![row.clone()], &schema)?;
+        Ok(Some(projected))
+    }
+
+    /// Try PK prefix lookup with early LIMIT termination
+    ///
+    /// This optimization handles queries like TPC-C Delivery:
+    /// `SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id LIMIT 1`
+    ///
+    /// For tables with composite PK (no_w_id, no_d_id, no_o_id), this query:
+    /// 1. Filters by prefix of PK (no_w_id, no_d_id)
+    /// 2. Orders by the remaining PK column (no_o_id)
+    /// 3. Uses LIMIT 1
+    ///
+    /// The optimization uses prefix_scan_first to return just the first matching row,
+    /// avoiding the overhead of fetching all matching rows and sorting.
+    ///
+    /// # Performance
+    /// - Before: O(log n + k) to fetch all k matching rows, then sort, then take 1
+    /// - After: O(log n) to fetch just the first matching row (already sorted in index)
+    fn try_pk_prefix_with_limit_fast(
+        &self,
+        table_name: &str,
+        alias: Option<&String>,
+        stmt: &SelectStmt,
+    ) -> Result<Option<Vec<Row>>, ExecutorError> {
+        // Only applies when LIMIT 1 is specified (most common case for this pattern)
+        if stmt.limit != Some(1) {
+            return Ok(None);
+        }
+
+        // Must have an ORDER BY clause
+        let order_by = match &stmt.order_by {
+            Some(ob) if !ob.is_empty() => ob,
+            _ => return Ok(None),
+        };
+
+        // Must have a WHERE clause
+        let where_clause = match &stmt.where_clause {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        // Get the table
+        let table = match self.database.get_table(table_name) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Get primary key columns
+        let pk_column_names = match &table.schema.primary_key {
+            Some(cols) if cols.len() >= 2 => cols, // Need at least 2 columns for prefix pattern
+            _ => return Ok(None),
+        };
+
+        let pk_columns: Vec<&str> = pk_column_names.iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        // Extract equality predicates from WHERE clause
+        let equality_values = self.extract_pk_values(where_clause, &pk_columns);
+
+        // Check if we have a prefix match (equality on first N-1 columns)
+        // For a 3-column PK (a, b, c), we need equality on (a, b) and ORDER BY c
+        let prefix_len = pk_columns.len() - 1;
+        if equality_values.len() != prefix_len {
+            return Ok(None);
+        }
+
+        // Verify we have equality values for the first N-1 columns (in order)
+        let mut prefix_key = Vec::with_capacity(prefix_len);
+        for col in pk_columns.iter().take(prefix_len) {
+            match equality_values.get(*col) {
+                Some(val) => prefix_key.push(val.clone()),
+                None => return Ok(None), // Missing a prefix column
+            }
+        }
+
+        // Verify ORDER BY is on the last PK column
+        let last_pk_col = pk_columns.last().unwrap();
+        let order_col = match &order_by[0].expr {
+            Expression::ColumnRef { column, .. } => column.as_str(),
+            _ => return Ok(None),
+        };
+
+        if !order_col.eq_ignore_ascii_case(last_pk_col) {
+            return Ok(None);
+        }
+
+        // For ASC order, prefix_scan_first gives us the minimum
+        // For DESC order, we would need prefix_scan_last (not implemented yet)
+        if order_by[0].direction != vibesql_ast::OrderDirection::Asc {
+            return Ok(None);
+        }
+
+        // Get PK index from database's index infrastructure (pk_{table_name})
+        let pk_index_name = format!("pk_{}", table_name);
+        let pk_index_data = match self.database.get_index_data(&pk_index_name) {
+            Some(idx) => idx,
+            None => return Ok(None),
+        };
+
+        // Use prefix_scan_first to get just the first matching row
+        let row_idx = match pk_index_data.prefix_scan_first(&prefix_key) {
+            Some(idx) => idx,
+            None => {
+                // No matching rows - return empty result
+                return Ok(Some(vec![]));
+            }
+        };
+
+        // Fetch the single row
+        let all_rows = table.scan();
+        let row = match all_rows.get(row_idx) {
+            Some(r) => r.clone(),
+            None => return Ok(Some(vec![])), // Invalid row index
+        };
+
+        // Build schema for projection
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+
+        // Apply projection
+        let is_select_star = stmt.select_list.len() == 1
+            && matches!(&stmt.select_list[0], SelectItem::Wildcard { .. });
+
+        if is_select_star {
+            return Ok(Some(vec![row]));
+        }
+
+        let projected = self.apply_projection_fast(&stmt.select_list, vec![row], &schema)?;
         Ok(Some(projected))
     }
 

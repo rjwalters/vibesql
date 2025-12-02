@@ -138,6 +138,83 @@ impl IndexData {
         }
     }
 
+    /// Lookup the first row matching a multi-column prefix in a composite index
+    ///
+    /// This is an optimized version of `prefix_scan` that returns only the first matching row.
+    /// For queries with `ORDER BY <remaining_pk_column> LIMIT 1`, this avoids fetching all
+    /// matching rows when we only need the minimum/first one.
+    ///
+    /// # Arguments
+    /// * `prefix` - Prefix values for the first N index columns (N < total columns)
+    ///
+    /// # Returns
+    /// The row index of the first matching row, or None if no match
+    ///
+    /// # Performance
+    /// O(log n) - only accesses the first matching entry in the BTreeMap range
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // TPC-C Delivery: find oldest new_order for warehouse 1, district 5
+    /// // Index: (no_w_id, no_d_id, no_o_id)
+    /// // Returns the row with minimum no_o_id for the given warehouse/district
+    /// let first_row = index_data.prefix_scan_first(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
+    /// ```
+    pub fn prefix_scan_first(&self, prefix: &[SqlValue]) -> Option<usize> {
+        if prefix.is_empty() {
+            // Empty prefix - return first row in index
+            return self.values().flatten().next();
+        }
+
+        // Normalize prefix values for consistent comparison
+        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+
+        match self {
+            IndexData::InMemory { data } => {
+                // Calculate upper bound by incrementing the last element of the prefix
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                let start_bound: Bound<&[SqlValue]> = Bound::Included(normalized_prefix.as_slice());
+                let end_bound: Bound<&[SqlValue]> = match end_key.as_ref() {
+                    Some(key) => Bound::Excluded(key.as_slice()),
+                    None => Bound::Unbounded,
+                };
+
+                // Get just the first matching entry
+                for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                    // Verify prefix match (needed for Unbounded end bound case)
+                    if key_values.len() >= normalized_prefix.len()
+                        && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                    {
+                        // Return the first row index from this key
+                        return row_indices.first().copied();
+                    }
+                }
+
+                None
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // Calculate upper bound for disk-backed index
+                let end_key = compute_prefix_upper_bound(&normalized_prefix);
+
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => guard
+                        .range_scan_first(
+                            Some(&normalized_prefix),
+                            end_key.as_ref(),
+                            true,  // Inclusive start
+                            false, // Exclusive end
+                        )
+                        .unwrap_or(None),
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in prefix_scan_first: {}", e);
+                        None
+                    }
+                }
+            }
+        }
+    }
+
     /// Batch prefix scan - look up multiple prefixes in a single call
     ///
     /// This method is optimized for batch prefix lookups where you need to retrieve
@@ -670,5 +747,64 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(results.contains(&0));
         assert!(results.contains(&1));
+    }
+
+    // ========================================================================
+    // prefix_scan_first() Tests - InMemory
+    // ========================================================================
+
+    #[test]
+    fn test_prefix_scan_first_basic() {
+        // Index on (w_id, d_id, o_id) - TPC-C style
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(200)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(300)], vec![2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(100)], vec![3]),
+        ]);
+
+        // Prefix [1, 1] should return first matching row (row 0)
+        let result = index.prefix_scan_first(&[SqlValue::Integer(1), SqlValue::Integer(1)]);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn test_prefix_scan_first_no_match() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
+        ]);
+
+        // Prefix [2, 1] should return None (no match)
+        let result = index.prefix_scan_first(&[SqlValue::Integer(2), SqlValue::Integer(1)]);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_prefix_scan_first_empty_prefix() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1)], vec![0]),
+            (vec![SqlValue::Integer(2)], vec![1]),
+        ]);
+
+        // Empty prefix should return first row in index
+        let result = index.prefix_scan_first(&[]);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn test_prefix_scan_first_returns_minimum_third_column() {
+        // Index on (w_id, d_id, o_id)
+        // This tests the TPC-C Delivery query pattern:
+        // SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id LIMIT 1
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(300)], vec![3]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(100)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(200)], vec![2]),
+        ]);
+
+        // Prefix [1, 5] should return row with minimum o_id (100) = row 1
+        // BTreeMap stores in sorted order, so [1, 5, 100] comes first
+        let result = index.prefix_scan_first(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
+        assert_eq!(result, Some(1)); // Row index for o_id=100
     }
 }
