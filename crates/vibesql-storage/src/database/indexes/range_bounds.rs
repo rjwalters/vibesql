@@ -104,6 +104,33 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
     }
 }
 
+/// Increment the last element of a prefix key to get a key just past the prefix range
+///
+/// This is used for unbounded upper range scans - to find all keys with a given prefix,
+/// we scan from `[prefix]` to `[prefix_incremented]` (exclusive).
+///
+/// # Example
+/// ```rust,ignore
+/// // Find all keys starting with [1, 2]
+/// // We scan from Included([1, 2]) to Excluded([1, 3])
+/// let upper = try_increment_sqlvalue_prefix(&vec![SqlValue::Integer(1), SqlValue::Integer(2)]);
+/// // Returns Some([SqlValue::Integer(1), SqlValue::Integer(3)])
+/// ```
+pub fn try_increment_sqlvalue_prefix(prefix: &[SqlValue]) -> Option<Vec<SqlValue>> {
+    if prefix.is_empty() {
+        return None;
+    }
+    let mut result = prefix.to_vec();
+    let last_idx = result.len() - 1;
+    match try_increment_sqlvalue(&result[last_idx]) {
+        Some(next_val) => {
+            result[last_idx] = next_val;
+            Some(result)
+        }
+        None => None,
+    }
+}
+
 /// Smart increment that chooses the right strategy based on SQL type
 ///
 /// For actual integer SQL types (Integer, Smallint, Bigint, Unsigned), adds 1.

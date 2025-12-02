@@ -199,16 +199,6 @@ pub(super) fn hash_semi_join_with_filter(
         }
     }
 
-    // Log build-time filtering if significant
-    if std::env::var("SEMI_JOIN_DEBUG").is_ok() && filtered_count > 0 {
-        eprintln!(
-            "[SEMI_JOIN] Build-time filtering: {} rows filtered out of {} ({:.1}%)",
-            filtered_count,
-            right_slice.len(),
-            (filtered_count as f64 / right_slice.len() as f64) * 100.0
-        );
-    }
-
     // Probe phase: Check each left row for a match that passes the probe filter
     let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);

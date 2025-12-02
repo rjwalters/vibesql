@@ -6,7 +6,7 @@ use std::ops::Bound;
 use vibesql_types::SqlValue;
 
 use super::index_metadata::{acquire_btree_lock, IndexData};
-use super::range_bounds::try_increment_sqlvalue;
+use super::range_bounds::{try_increment_sqlvalue, try_increment_sqlvalue_prefix};
 use super::value_normalization::normalize_for_comparison;
 
 impl IndexData {
@@ -318,6 +318,158 @@ impl IndexData {
                         .unwrap_or_else(|_| vec![]),
                     Err(e) => {
                         log::warn!("BTreeIndex lock acquisition failed in prefix_bounded_scan: {}", e);
+                        vec![]
+                    }
+                }
+            }
+        }
+    }
+
+    /// Prefix + range scan with both lower and upper bounds on the trailing column
+    ///
+    /// This method combines prefix matching with a range scan on the next column,
+    /// supporting both lower and upper bounds. Essential for queries like:
+    /// `WHERE ol_w_id = 1 AND ol_d_id = 1 AND ol_o_id >= 2981 AND ol_o_id < 3001`
+    ///
+    /// # Arguments
+    /// * `prefix` - Prefix values for the first N index columns (equality)
+    /// * `lower_bound` - Lower bound for the (N+1)th column, if any
+    /// * `inclusive_lower` - Whether lower bound is inclusive (>=) or exclusive (>)
+    /// * `upper_bound` - Upper bound for the (N+1)th column, if any
+    /// * `inclusive_upper` - Whether upper bound is inclusive (<=) or exclusive (<)
+    ///
+    /// # Returns
+    /// Vector of row indices matching the prefix and range constraint
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Index on (ol_w_id, ol_d_id, ol_o_id, ol_number)
+    /// // Find all rows where ol_w_id = 1 AND ol_d_id = 1 AND ol_o_id >= 2981 AND ol_o_id < 3001
+    /// let rows = index_data.prefix_range_scan(
+    ///     &[SqlValue::Integer(1), SqlValue::Integer(1)],  // prefix
+    ///     Some(&SqlValue::Integer(2981)),                  // lower_bound
+    ///     true,                                            // inclusive_lower (>=)
+    ///     Some(&SqlValue::Integer(3001)),                  // upper_bound
+    ///     false,                                           // exclusive upper (<)
+    /// );
+    /// ```
+    pub fn prefix_range_scan(
+        &self,
+        prefix: &[SqlValue],
+        lower_bound: Option<&SqlValue>,
+        inclusive_lower: bool,
+        upper_bound: Option<&SqlValue>,
+        inclusive_upper: bool,
+    ) -> Vec<usize> {
+        if prefix.is_empty() {
+            // Empty prefix with range is not well-defined - fall back to full scan
+            return self.values().flatten().collect();
+        }
+
+        // If no bounds are specified, fall back to regular prefix scan
+        if lower_bound.is_none() && upper_bound.is_none() {
+            return self.prefix_scan(prefix);
+        }
+
+        // Normalize values for consistent comparison
+        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+
+        match self {
+            IndexData::InMemory { data } => {
+                use std::ops::Bound;
+
+                // Build start key: [prefix, lower_bound?]
+                let start_bound: Bound<Vec<SqlValue>> = if let Some(lb) = lower_bound {
+                    let normalized_lb = normalize_for_comparison(lb);
+                    let mut start_key = normalized_prefix.clone();
+                    start_key.push(normalized_lb);
+                    if inclusive_lower {
+                        Bound::Included(start_key)
+                    } else {
+                        Bound::Excluded(start_key)
+                    }
+                } else {
+                    Bound::Included(normalized_prefix.clone())
+                };
+
+                // Build end key: [prefix, upper_bound?]
+                let end_bound: Bound<Vec<SqlValue>> = if let Some(ub) = upper_bound {
+                    let normalized_ub = normalize_for_comparison(ub);
+                    let mut end_key = normalized_prefix.clone();
+                    end_key.push(normalized_ub);
+                    if inclusive_upper {
+                        // For inclusive upper bound, we need to find the next value
+                        let last_idx = end_key.len() - 1;
+                        match try_increment_sqlvalue(&end_key[last_idx]) {
+                            Some(next_val) => {
+                                end_key[last_idx] = next_val;
+                                Bound::Excluded(end_key)
+                            }
+                            None => {
+                                // Can't increment, use included bound
+                                Bound::Included(end_key)
+                            }
+                        }
+                    } else {
+                        Bound::Excluded(end_key)
+                    }
+                } else {
+                    // No upper bound - need to scan up to the end of the prefix range
+                    // Create a key that is just past the end of the prefix
+                    let mut end_key = normalized_prefix.clone();
+                    // For unbounded upper, we need to capture all values with this prefix
+                    // We do this by constructing a key just past the prefix range
+                    match try_increment_sqlvalue_prefix(&end_key) {
+                        Some(next_prefix) => Bound::Excluded(next_prefix),
+                        None => Bound::Unbounded,
+                    }
+                };
+
+                let mut matching_row_indices = Vec::new();
+
+                for (key_values, row_indices) in data.range((start_bound, end_bound)) {
+                    // Verify prefix match (needed for safety when we have a lower bound)
+                    if key_values.len() >= normalized_prefix.len()
+                        && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                    {
+                        matching_row_indices.extend(row_indices);
+                    }
+                }
+
+                matching_row_indices
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // For disk-backed indexes, construct start and end keys
+                let start_key = if let Some(lb) = lower_bound {
+                    let normalized_lb = normalize_for_comparison(lb);
+                    let mut key = normalized_prefix.clone();
+                    key.push(normalized_lb);
+                    Some(key)
+                } else {
+                    Some(normalized_prefix.clone())
+                };
+
+                let end_key = if let Some(ub) = upper_bound {
+                    let normalized_ub = normalize_for_comparison(ub);
+                    let mut key = normalized_prefix.clone();
+                    key.push(normalized_ub);
+                    Some(key)
+                } else {
+                    // For unbounded upper, construct a key just past the prefix
+                    try_increment_sqlvalue_prefix(&normalized_prefix)
+                };
+
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => guard
+                        .range_scan(
+                            start_key.as_ref(),
+                            end_key.as_ref(),
+                            inclusive_lower || lower_bound.is_none(), // Inclusive start if no lower bound
+                            inclusive_upper,
+                        )
+                        .unwrap_or_else(|_| vec![]),
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in prefix_range_scan: {}", e);
                         vec![]
                     }
                 }
