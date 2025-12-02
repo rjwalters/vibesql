@@ -13,8 +13,8 @@ use std::collections::HashMap;
 
 use super::predicates::{apply_table_local_predicates, apply_table_local_predicates_ref};
 use crate::{
-    errors::ExecutorError, optimizer::PredicatePlan, privilege_checker::PrivilegeChecker,
-    schema::CombinedSchema, select::cte::CteResult,
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::PredicatePlan,
+    privilege_checker::PrivilegeChecker, schema::CombinedSchema, select::cte::CteResult,
     select::columnar::{ColumnarBatch, ColumnPredicate, simd_filter_batch},
 };
 
@@ -368,10 +368,21 @@ fn try_primary_key_lookup(
     // Perform O(1) lookup in primary key index
     let rows = match pk_index.get(&pk_values) {
         Some(&row_idx) => {
-            // Found the row - return it
+            // Found the row via PK index - but we must still apply the FULL WHERE clause
+            // in case there are additional predicates beyond the PK columns.
+            // Example: SELECT * FROM stock WHERE s_w_id = 1 AND s_i_id = 123 AND s_quantity < 10
+            // The PK lookup finds the row, but we must also check s_quantity < 10.
             let all_rows = table.scan();
             if row_idx < all_rows.len() {
-                vec![all_rows[row_idx].clone()]
+                let row = &all_rows[row_idx];
+
+                // Evaluate the full WHERE clause on this row
+                let evaluator = CombinedExpressionEvaluator::with_database(&schema, database);
+                match evaluator.eval(where_expr, row) {
+                    Ok(vibesql_types::SqlValue::Boolean(true)) => vec![row.clone()],
+                    Ok(_) => vec![], // Row doesn't match full WHERE clause (false or NULL)
+                    Err(_) => vec![], // Evaluation error - treat as no match
+                }
             } else {
                 vec![] // Index points to invalid row (shouldn't happen)
             }
@@ -395,7 +406,6 @@ fn extract_primary_key_values(
     pk_column_names: &[&str],
 ) -> Option<Vec<vibesql_types::SqlValue>> {
     use std::collections::HashMap;
-    use vibesql_ast::{BinaryOperator, Expression};
 
     // Collect all equality predicates: column_name -> value
     let mut predicates: HashMap<String, vibesql_types::SqlValue> = HashMap::new();
