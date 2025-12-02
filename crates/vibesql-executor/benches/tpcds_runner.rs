@@ -52,9 +52,7 @@ use tpcds::schema::load_duckdb;
 const SLOW_QUERIES: &[&str] = &[
     "Q4",  // Complex CTE with 6-way self-join
     "Q11", // Customer web vs store sales growth (complex)
-    "Q17", // Store sales-returns-catalog analysis
-    "Q24", // Complex multi-table join
-    "Q29", // Large date dimension join
+    // Q17, Q24, Q29 were fixed by PR #3347 (hash join for derived tables)
 ];
 
 /// Default batch size for query execution
@@ -119,6 +117,12 @@ fn main() {
         HashSet::new()
     };
 
+    // Query filter: run only specific queries (comma-separated, e.g., "Q17,Q24,Q29")
+    let query_filter: HashSet<String> = std::env::var("QUERY_FILTER")
+        .ok()
+        .map(|s| s.split(',').map(|q| q.trim().to_uppercase()).collect())
+        .unwrap_or_default();
+
     // Check for validation mode
     let validate_mode = std::env::var("VALIDATE").is_ok();
 
@@ -137,6 +141,9 @@ fn main() {
     println!("  Allocator:       {}", if is_jemalloc_enabled() { "jemalloc" } else { "system" });
     if skip_slow {
         println!("  Skipping:        {} known slow queries", SLOW_QUERIES.len());
+    }
+    if !query_filter.is_empty() {
+        println!("  Query filter:    {:?}", query_filter);
     }
     if validate_mode {
         println!("  Mode:            VALIDATION (comparing with DuckDB)");
@@ -207,6 +214,11 @@ fn main() {
     let mut fail_count = 0;
 
     for (idx, (name, sql)) in TPCDS_QUERIES.iter().enumerate() {
+        // Check if query should be filtered out
+        if !query_filter.is_empty() && !query_filter.contains(&name.to_uppercase()) {
+            continue; // Skip silently when using filter
+        }
+
         // Check if query should be skipped
         if slow_queries.contains(name) {
             skipped_count += 1;
