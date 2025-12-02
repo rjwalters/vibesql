@@ -260,6 +260,7 @@ impl<'arena> ArenaParser<'arena> {
 
     /// Get a reference to the arena.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn arena(&self) -> &'arena Bump {
         self.arena
     }
