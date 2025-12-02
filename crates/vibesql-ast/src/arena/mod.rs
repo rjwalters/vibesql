@@ -19,12 +19,28 @@
 //! let expr = arena.alloc(Expression::Literal(SqlValue::Integer(42)));
 //! // All allocations freed when arena is dropped
 //! ```
+//!
+//! # Conversion to Standard Types
+//!
+//! Arena types can be converted to standard heap-allocated types using `From` traits:
+//!
+//! ```ignore
+//! use bumpalo::Bump;
+//! use vibesql_ast::{SelectStmt, arena};
+//!
+//! let arena = Bump::new();
+//! let arena_stmt: &arena::SelectStmt = /* ... */;
+//! let std_stmt: SelectStmt = SelectStmt::from(arena_stmt);
+//! ```
 
+mod convert;
 mod ddl;
+mod dml;
 mod expression;
 mod select;
 
 pub use ddl::*;
+pub use dml::*;
 pub use expression::*;
 pub use select::*;
 

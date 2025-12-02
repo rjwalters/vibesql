@@ -339,6 +339,11 @@ impl SelectExecutor<'_> {
             return Ok(result);
         }
 
+        // Try PK prefix lookup with early LIMIT termination (TPC-C Delivery optimization)
+        if let Some(result) = self.try_pk_prefix_with_limit_fast(table_name, alias, stmt)? {
+            return Ok(result);
+        }
+
         // Try secondary index lookup path next
         if let Some(result) = self.try_secondary_index_lookup_fast(table_name, alias, stmt)? {
             return Ok(result);
@@ -451,9 +456,10 @@ impl SelectExecutor<'_> {
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?
         };
 
-        let rows = match row {
-            Some(r) => vec![r.clone()],
-            None => vec![],
+        // If no row found, return empty result
+        let row = match row {
+            Some(r) => r,
+            None => return Ok(Some(vec![])),
         };
 
         // Check if we need projection
@@ -461,16 +467,155 @@ impl SelectExecutor<'_> {
             && matches!(&stmt.select_list[0], SelectItem::Wildcard { .. });
 
         if is_select_star {
-            // No projection needed for SELECT *
-            return Ok(Some(rows));
+            // No projection needed for SELECT * - clone the full row
+            return Ok(Some(vec![row.clone()]));
         }
 
-        // Need to build schema for projection
+        // Try ultra-fast direct column projection (no full row clone)
+        // Only clone the columns we actually need
+        if let Some(col_indices) = self.try_extract_simple_column_indices(&stmt.select_list, &table.schema) {
+            let projected_values: Vec<SqlValue> = col_indices.iter()
+                .map(|&idx| row.values[idx].clone())
+                .collect();
+            return Ok(Some(vec![Row { values: projected_values }]));
+        }
+
+        // Fall back to full projection with evaluator for complex expressions
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
 
         // Apply projection
-        let projected = self.apply_projection_fast(&stmt.select_list, rows, &schema)?;
+        let projected = self.apply_projection_fast(&stmt.select_list, vec![row.clone()], &schema)?;
+        Ok(Some(projected))
+    }
+
+    /// Try PK prefix lookup with early LIMIT termination
+    ///
+    /// This optimization handles queries like TPC-C Delivery:
+    /// `SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id LIMIT 1`
+    ///
+    /// For tables with composite PK (no_w_id, no_d_id, no_o_id), this query:
+    /// 1. Filters by prefix of PK (no_w_id, no_d_id)
+    /// 2. Orders by the remaining PK column (no_o_id)
+    /// 3. Uses LIMIT 1
+    ///
+    /// The optimization uses prefix_scan_first to return just the first matching row,
+    /// avoiding the overhead of fetching all matching rows and sorting.
+    ///
+    /// # Performance
+    /// - Before: O(log n + k) to fetch all k matching rows, then sort, then take 1
+    /// - After: O(log n) to fetch just the first matching row (already sorted in index)
+    fn try_pk_prefix_with_limit_fast(
+        &self,
+        table_name: &str,
+        alias: Option<&String>,
+        stmt: &SelectStmt,
+    ) -> Result<Option<Vec<Row>>, ExecutorError> {
+        // Only applies when LIMIT 1 is specified (most common case for this pattern)
+        if stmt.limit != Some(1) {
+            return Ok(None);
+        }
+
+        // Must have an ORDER BY clause
+        let order_by = match &stmt.order_by {
+            Some(ob) if !ob.is_empty() => ob,
+            _ => return Ok(None),
+        };
+
+        // Must have a WHERE clause
+        let where_clause = match &stmt.where_clause {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        // Get the table
+        let table = match self.database.get_table(table_name) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Get primary key columns
+        let pk_column_names = match &table.schema.primary_key {
+            Some(cols) if cols.len() >= 2 => cols, // Need at least 2 columns for prefix pattern
+            _ => return Ok(None),
+        };
+
+        let pk_columns: Vec<&str> = pk_column_names.iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        // Extract equality predicates from WHERE clause
+        let equality_values = self.extract_pk_values(where_clause, &pk_columns);
+
+        // Check if we have a prefix match (equality on first N-1 columns)
+        // For a 3-column PK (a, b, c), we need equality on (a, b) and ORDER BY c
+        let prefix_len = pk_columns.len() - 1;
+        if equality_values.len() != prefix_len {
+            return Ok(None);
+        }
+
+        // Verify we have equality values for the first N-1 columns (in order)
+        let mut prefix_key = Vec::with_capacity(prefix_len);
+        for col in pk_columns.iter().take(prefix_len) {
+            match equality_values.get(*col) {
+                Some(val) => prefix_key.push(val.clone()),
+                None => return Ok(None), // Missing a prefix column
+            }
+        }
+
+        // Verify ORDER BY is on the last PK column
+        let last_pk_col = pk_columns.last().unwrap();
+        let order_col = match &order_by[0].expr {
+            Expression::ColumnRef { column, .. } => column.as_str(),
+            _ => return Ok(None),
+        };
+
+        if !order_col.eq_ignore_ascii_case(last_pk_col) {
+            return Ok(None);
+        }
+
+        // For ASC order, prefix_scan_first gives us the minimum
+        // For DESC order, we would need prefix_scan_last (not implemented yet)
+        if order_by[0].direction != vibesql_ast::OrderDirection::Asc {
+            return Ok(None);
+        }
+
+        // Get PK index from database's index infrastructure (pk_{table_name})
+        let pk_index_name = format!("pk_{}", table_name);
+        let pk_index_data = match self.database.get_index_data(&pk_index_name) {
+            Some(idx) => idx,
+            None => return Ok(None),
+        };
+
+        // Use prefix_scan_first to get just the first matching row
+        let row_idx = match pk_index_data.prefix_scan_first(&prefix_key) {
+            Some(idx) => idx,
+            None => {
+                // No matching rows - return empty result
+                return Ok(Some(vec![]));
+            }
+        };
+
+        // Fetch the single row
+        let all_rows = table.scan();
+        let row = match all_rows.get(row_idx) {
+            Some(r) => r.clone(),
+            None => return Ok(Some(vec![])), // Invalid row index
+        };
+
+        // Build schema for projection
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+
+        // Apply projection
+        let is_select_star = stmt.select_list.len() == 1
+            && matches!(&stmt.select_list[0], SelectItem::Wildcard { .. });
+
+        if is_select_star {
+            return Ok(Some(vec![row]));
+        }
+
+        let projected = self.apply_projection_fast(&stmt.select_list, vec![row], &schema)?;
         Ok(Some(projected))
     }
 
@@ -516,38 +661,53 @@ impl SelectExecutor<'_> {
                 .map(|c| c.column_name.as_str())
                 .collect();
 
-            // Try to extract equality values for all index columns
+            // Try to extract equality values from WHERE clause
             let index_values = self.extract_pk_values(where_clause, &index_columns);
 
-            // Check if we have values for all index columns
-            if index_values.len() != index_columns.len() {
-                continue; // Try next index
+            // Need at least one column value to use the index
+            if index_values.is_empty() {
+                continue;
             }
 
-            // Build key values in column order (use lowercase for lookup to match insert)
-            let key_values: Vec<SqlValue> = index_columns.iter()
-                .filter_map(|col| index_values.get(&col.to_ascii_lowercase()).cloned())
-                .collect();
-
-            if key_values.len() != index_columns.len() {
-                continue; // Missing some values
+            // Build key values for the prefix of columns we have equality predicates for
+            // This supports partial index usage (e.g., 3-column prefix of 4-column index)
+            // Use case-insensitive lookup since schema may have different case than parser output
+            let mut key_values: Vec<SqlValue> = Vec::new();
+            for col in &index_columns {
+                let col_lower = col.to_ascii_lowercase();
+                if let Some(val) = index_values.get(&col_lower) {
+                    key_values.push(val.clone());
+                } else {
+                    break; // Stop at first missing column (must be contiguous prefix)
+                }
             }
 
-            // Perform index lookup - O(log n)
-            let rows_result = self.database.lookup_by_index(index_name, &key_values)
-                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+            // Need at least one value to use the index
+            if key_values.is_empty() {
+                continue;
+            }
 
-            let rows = match rows_result {
-                Some(refs) => refs.into_iter().cloned().collect::<Vec<_>>(),
-                None => vec![],
+            // Perform index lookup
+            let rows = if key_values.len() == index_columns.len() {
+                // Full key match - use exact lookup
+                let rows_result = self.database.lookup_by_index(index_name, &key_values)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+                match rows_result {
+                    Some(refs) => refs.into_iter().cloned().collect::<Vec<_>>(),
+                    None => vec![],
+                }
+            } else {
+                // Prefix match - use prefix lookup
+                self.database.lookup_by_index_prefix(index_name, &key_values)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?
+                    .into_iter().cloned().collect::<Vec<_>>()
             };
 
-            // Build schema for filtering and projection
-            let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-            let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
-
-            // Apply ORDER BY if needed
+            // Apply ORDER BY if needed (requires schema for column lookup)
             let sorted_rows = if let Some(order_by) = &stmt.order_by {
+                // Only build schema if we need ORDER BY
+                let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+                let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
                 // Index lookup doesn't guarantee order, so always sort
                 self.apply_order_by_fast(order_by, rows, &schema)?
             } else {
@@ -569,7 +729,15 @@ impl SelectExecutor<'_> {
                 return Ok(Some(limited_rows));
             }
 
-            // Apply projection
+            // Try ultra-fast direct column projection (no schema clone, no evaluator)
+            if let Some(col_indices) = self.try_extract_simple_column_indices(&stmt.select_list, &table.schema) {
+                let projected = self.project_by_indices_fast(limited_rows, &col_indices);
+                return Ok(Some(projected));
+            }
+
+            // Fall back to full projection with evaluator for complex expressions
+            let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+            let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
             let projected = self.apply_projection_fast(&stmt.select_list, limited_rows, &schema)?;
             return Ok(Some(projected));
         }
@@ -607,6 +775,7 @@ impl SelectExecutor<'_> {
                     // Check for column = literal pattern
                     if let Some((col_name, value)) = self.extract_column_literal_pair(left, right) {
                         // Case-insensitive comparison for SQL identifiers
+                        // Parser uppercases identifiers but schema may have lowercase column names
                         if pk_columns.iter().any(|pk| pk.eq_ignore_ascii_case(&col_name)) {
                             // Store with lowercase key for consistent lookup
                             values.insert(col_name.to_ascii_lowercase(), value);
@@ -831,6 +1000,58 @@ impl SelectExecutor<'_> {
         });
 
         Ok(rows)
+    }
+
+    /// Try to extract simple column indices from a SELECT list
+    ///
+    /// Returns Some(indices) if all SELECT items are simple column references,
+    /// None otherwise (indicating fallback to full evaluator path is needed).
+    ///
+    /// This is an optimization for TPC-C style queries where the SELECT list
+    /// contains only column references like `SELECT c_id, c_first, c_middle ...`
+    fn try_extract_simple_column_indices(
+        &self,
+        select_list: &[SelectItem],
+        table_schema: &vibesql_catalog::TableSchema,
+    ) -> Option<Vec<usize>> {
+        let mut indices = Vec::with_capacity(select_list.len());
+
+        for item in select_list {
+            match item {
+                SelectItem::Expression { expr: Expression::ColumnRef { table: _, column }, .. } => {
+                    // Find column index by name (case-insensitive)
+                    let idx = table_schema.columns.iter()
+                        .position(|c| c.name.eq_ignore_ascii_case(column))?;
+                    indices.push(idx);
+                }
+                _ => return None, // Not a simple column reference
+            }
+        }
+
+        Some(indices)
+    }
+
+    /// Project rows by direct column indices (ultra-fast path)
+    ///
+    /// This avoids:
+    /// - Creating CombinedSchema (which clones TableSchema)
+    /// - Creating CombinedExpressionEvaluator
+    /// - Going through the full evaluator machinery
+    ///
+    /// For simple column projections, this is 10-100x faster than the full path.
+    fn project_by_indices_fast(
+        &self,
+        rows: Vec<Row>,
+        col_indices: &[usize],
+    ) -> Vec<Row> {
+        rows.into_iter()
+            .map(|row| {
+                let projected_values: Vec<SqlValue> = col_indices.iter()
+                    .map(|&idx| row.values[idx].clone())
+                    .collect();
+                Row { values: projected_values }
+            })
+            .collect()
     }
 }
 

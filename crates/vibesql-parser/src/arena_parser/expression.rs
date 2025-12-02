@@ -233,7 +233,7 @@ impl<'arena> ArenaParser<'arena> {
                     }
                     _ => {
                         return Err(ParseError {
-                            message: format!("Unexpected operator: {}", s),
+                            message: "Unexpected || operator in comparison".to_string(),
                         })
                     }
                 },
@@ -529,9 +529,133 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Some(Expression::Default)
             }
+            // Typed literals: DATE 'string', TIME 'string', TIMESTAMP 'string'
+            Token::Keyword(Keyword::Date) => {
+                self.advance();
+                match self.peek() {
+                    Token::String(s) => {
+                        let date_str = s.clone();
+                        self.advance();
+                        match date_str.parse::<vibesql_types::Date>() {
+                            Ok(date) => Some(Expression::Literal(SqlValue::Date(date))),
+                            Err(e) => {
+                                return Err(ParseError {
+                                    message: format!("Invalid DATE literal: {}", e),
+                                })
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected string literal after DATE keyword".to_string(),
+                        })
+                    }
+                }
+            }
+            Token::Keyword(Keyword::Time) => {
+                self.advance();
+                match self.peek() {
+                    Token::String(s) => {
+                        let time_str = s.clone();
+                        self.advance();
+                        match time_str.parse::<vibesql_types::Time>() {
+                            Ok(time) => Some(Expression::Literal(SqlValue::Time(time))),
+                            Err(e) => {
+                                return Err(ParseError {
+                                    message: format!("Invalid TIME literal: {}", e),
+                                })
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected string literal after TIME keyword".to_string(),
+                        })
+                    }
+                }
+            }
+            Token::Keyword(Keyword::Timestamp) => {
+                self.advance();
+                match self.peek() {
+                    Token::String(s) => {
+                        let timestamp_str = s.clone();
+                        self.advance();
+                        match timestamp_str.parse::<vibesql_types::Timestamp>() {
+                            Ok(timestamp) => Some(Expression::Literal(SqlValue::Timestamp(timestamp))),
+                            Err(e) => {
+                                return Err(ParseError {
+                                    message: format!("Invalid TIMESTAMP literal: {}", e),
+                                })
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected string literal after TIMESTAMP keyword".to_string(),
+                        })
+                    }
+                }
+            }
+            Token::Keyword(Keyword::Interval) => {
+                return self.parse_interval_literal();
+            }
             _ => None,
         };
         Ok(expr)
+    }
+
+    /// Parse INTERVAL literal: INTERVAL 'value' field [TO field]
+    fn parse_interval_literal(&mut self) -> Result<Option<Expression<'arena>>, ParseError> {
+        self.advance(); // consume INTERVAL keyword
+        match self.peek() {
+            Token::String(interval_str) => {
+                let value_str = interval_str.clone();
+                self.advance();
+
+                // Parse interval field (YEAR, MONTH, DAY, etc.)
+                let start_field = self.parse_interval_field()?;
+
+                // Check for TO (multi-field interval)
+                let interval_spec = if self.try_consume_keyword(Keyword::To) {
+                    let end_field = self.parse_interval_field()?;
+                    format!("{} {} TO {}", value_str, start_field, end_field)
+                } else {
+                    format!("{} {}", value_str, start_field)
+                };
+
+                // Parse the interval string into an Interval type
+                match interval_spec.parse::<vibesql_types::Interval>() {
+                    Ok(interval) => Ok(Some(Expression::Literal(SqlValue::Interval(interval)))),
+                    Err(e) => Err(ParseError {
+                        message: format!("Invalid INTERVAL literal: {}", e),
+                    }),
+                }
+            }
+            _ => Err(ParseError {
+                message: "Expected string literal after INTERVAL keyword".to_string(),
+            }),
+        }
+    }
+
+    /// Parse an interval field name (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND).
+    fn parse_interval_field(&mut self) -> Result<String, ParseError> {
+        let field = match self.peek() {
+            Token::Identifier(field) => field.to_uppercase(),
+            Token::Keyword(Keyword::Year) => "YEAR".to_string(),
+            Token::Keyword(Keyword::Month) => "MONTH".to_string(),
+            Token::Keyword(Keyword::Day) => "DAY".to_string(),
+            Token::Keyword(Keyword::Hour) => "HOUR".to_string(),
+            Token::Keyword(Keyword::Minute) => "MINUTE".to_string(),
+            Token::Keyword(Keyword::Second) => "SECOND".to_string(),
+            _ => {
+                return Err(ParseError {
+                    message: "Expected interval field (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND)"
+                        .to_string(),
+                })
+            }
+        };
+        self.advance();
+        Ok(field)
     }
 
     /// Parse EXISTS / NOT EXISTS.

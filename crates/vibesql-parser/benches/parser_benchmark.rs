@@ -6,7 +6,7 @@
 use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
-use vibesql_parser::arena_parser::ArenaParser;
+use vibesql_parser::arena_parser::{parse_select_to_owned, ArenaParser};
 use vibesql_parser::{Lexer, Parser};
 
 /// Simple SELECT query - baseline for minimal parsing overhead
@@ -191,15 +191,17 @@ fn bench_identifiers(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark arena-allocated parser (SELECT statements only for Phase 1)
+/// Benchmark arena-allocated parser (supports full AST as of Phase 2)
 fn bench_arena_parser(c: &mut Criterion) {
     let mut group = c.benchmark_group("arena_parser");
 
-    // Only SELECT queries are supported by the arena parser
+    // Arena parser now supports DML and DDL statements
     let queries = [
         ("simple_select", SIMPLE_SELECT),
         ("point_lookup", POINT_LOOKUP),
         ("multi_column", MULTI_COLUMN),
+        ("insert_single", INSERT_SINGLE),
+        ("insert_multi", INSERT_MULTI),
         ("tpch_q1", TPCH_Q1),
         ("complex_join", COMPLEX_JOIN),
         ("cte_query", CTE_QUERY),
@@ -212,8 +214,8 @@ fn bench_arena_parser(c: &mut Criterion) {
                 let arena = Bump::new();
                 let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
                 // Just verify parsing succeeded - result is tied to arena lifetime
-                let _ = black_box(&result);
-                drop(arena);
+                // Arena is dropped at end of scope, deallocating everything
+                black_box(&result);
             });
         });
     }
@@ -225,12 +227,14 @@ fn bench_arena_parser(c: &mut Criterion) {
 fn bench_parser_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("parser_comparison");
 
-    // Note: Only queries that work with Phase 1 arena parser (no DATE literals, etc.)
+    // Phase 2: Arena parser now supports DML statements + DATE/INTERVAL literals (TPC-H Q1)
     let queries = [
         ("simple_select", SIMPLE_SELECT),
         ("point_lookup", POINT_LOOKUP),
         ("multi_column", MULTI_COLUMN),
+        ("insert_single", INSERT_SINGLE),
         ("complex_join", COMPLEX_JOIN),
+        ("tpch_q1", TPCH_Q1),
     ];
 
     for (name, sql) in queries {
@@ -248,8 +252,8 @@ fn bench_parser_comparison(c: &mut Criterion) {
             b.iter(|| {
                 let arena = Bump::new();
                 let result = ArenaParser::parse_sql(black_box(sql), &arena).unwrap();
-                let _ = black_box(&result);
-                drop(arena);
+                // Arena is dropped at end of scope, deallocating everything
+                black_box(&result);
             });
         });
 
@@ -267,6 +271,42 @@ fn bench_parser_comparison(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark arena parsing with conversion to owned types
+/// This measures the end-to-end performance of:
+/// 1. Arena parsing (fast)
+/// 2. Conversion to standard AST (additional allocation)
+fn bench_arena_with_conversion(c: &mut Criterion) {
+    let mut group = c.benchmark_group("arena_conversion");
+
+    let queries = [
+        ("simple_select", SIMPLE_SELECT),
+        ("point_lookup", POINT_LOOKUP),
+        ("multi_column", MULTI_COLUMN),
+        ("complex_join", COMPLEX_JOIN),
+    ];
+
+    for (name, sql) in queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+
+        // Standard parser (baseline)
+        group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
+            b.iter(|| {
+                black_box(Parser::parse_sql(black_box(sql)).unwrap())
+            });
+        });
+
+        // Arena parser with conversion to owned
+        // This is the recommended approach for Phase 3 integration
+        group.bench_with_input(BenchmarkId::new("arena_to_owned", name), sql, |b, sql| {
+            b.iter(|| {
+                black_box(parse_select_to_owned(black_box(sql)).unwrap())
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_lexer,
@@ -275,5 +315,6 @@ criterion_group!(
     bench_identifiers,
     bench_arena_parser,
     bench_parser_comparison,
+    bench_arena_with_conversion,
 );
 criterion_main!(benches);
