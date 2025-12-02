@@ -34,9 +34,13 @@
 //! ```
 
 mod convert;
+mod ddl;
+mod dml;
 mod expression;
 mod select;
 
+pub use ddl::*;
+pub use dml::*;
 pub use expression::*;
 pub use select::*;
 
