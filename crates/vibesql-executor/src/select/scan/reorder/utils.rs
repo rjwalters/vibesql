@@ -1,9 +1,55 @@
 //! Utility functions for join reordering
 
 use std::collections::HashMap;
-use vibesql_ast::FromClause;
+use vibesql_ast::{Expression, FromClause, SelectItem};
 use crate::schema::CombinedSchema;
 use crate::select::cte::CteResult;
+
+/// Extract column names from a SELECT list for subquery schema inference
+///
+/// This enables join optimizer to resolve column indices for derived tables,
+/// which is required for hash join optimization with arithmetic equijoins.
+fn extract_column_names_from_select_list(select_list: &[SelectItem]) -> Vec<String> {
+    let mut columns = Vec::new();
+    for item in select_list {
+        match item {
+            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => {
+                // For SELECT *, we can't know column names without executing the query
+                // Return empty to fall back to CTE-fallback path
+                return Vec::new();
+            }
+            SelectItem::Expression { expr, alias } => {
+                let col_name = if let Some(a) = alias {
+                    a.to_lowercase()
+                } else {
+                    // Extract column name from expression
+                    extract_column_name_from_expr(expr).to_lowercase()
+                };
+                columns.push(col_name);
+            }
+        }
+    }
+    columns
+}
+
+/// Extract a column name from an expression (for schema inference)
+fn extract_column_name_from_expr(expr: &Expression) -> String {
+    match expr {
+        Expression::ColumnRef { column, .. } => column.clone(),
+        Expression::AggregateFunction { name, args, .. } => {
+            // For aggregates like SUM(col), use the column name if simple
+            if args.len() == 1 {
+                if let Expression::ColumnRef { column, .. } = &args[0] {
+                    return column.clone();
+                }
+            }
+            name.clone()
+        }
+        Expression::Function { name, .. } => name.clone(),
+        Expression::BinaryOp { left, .. } => extract_column_name_from_expr(left),
+        _ => "?column?".to_string(),
+    }
+}
 
 /// Check if join reordering optimization should be applied
 ///
@@ -194,10 +240,17 @@ pub(super) fn build_column_to_table_map(
         // Get column names for this table
         let column_names: Vec<String> = if let Some(tr) = table_ref {
             if tr.is_subquery {
-                // For subqueries, we don't have schema info readily available
-                // Skip for now - subqueries need explicit qualification anyway
-                continue;
-            } else if let Some(cte_result) = cte_results.get(&tr.name) {
+                // For subqueries (derived tables), infer column names from SELECT list
+                // This enables hash join optimization for queries with derived tables
+                if let Some(subquery) = &tr.subquery {
+                    extract_column_names_from_select_list(&subquery.select_list)
+                } else {
+                    continue;
+                }
+            } else if let Some(cte_result) = cte_results.get(&tr.name)
+                .or_else(|| cte_results.get(&tr.name.to_lowercase()))
+                .or_else(|| cte_results.get(&tr.name.to_uppercase()))
+            {
                 // CTE: get columns from CTE result schema (CteResult is a tuple: (TableSchema, Vec<Row>))
                 cte_result.0.columns.iter().map(|c| c.name.to_lowercase()).collect()
             } else {
