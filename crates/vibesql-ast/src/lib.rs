@@ -65,8 +65,8 @@ pub use expression::{
 };
 pub use grant::{GrantStmt, ObjectType, PrivilegeType};
 pub use introspection::{
-    DescribeStmt, ShowColumnsStmt, ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt,
-    ShowTablesStmt,
+    DescribeStmt, ExplainFormat, ExplainStmt, ShowColumnsStmt, ShowCreateTableStmt,
+    ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt,
 };
 pub use operators::{BinaryOperator, UnaryOperator};
 pub use revoke::{CascadeOption, RevokeStmt};

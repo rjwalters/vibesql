@@ -215,4 +215,71 @@ impl Parser {
 
         Ok(vibesql_ast::DescribeStmt { table_name, column_pattern })
     }
+
+    /// Parse EXPLAIN [ANALYZE] statement
+    ///
+    /// Syntax: EXPLAIN [ANALYZE] [FORMAT {TEXT | JSON}] statement
+    pub fn parse_explain_statement(&mut self) -> Result<vibesql_ast::ExplainStmt, ParseError> {
+        self.expect_keyword(Keyword::Explain)?;
+
+        // Check for ANALYZE option
+        let analyze = if matches!(self.peek(), Token::Keyword(Keyword::Analyze)) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        // Check for FORMAT option (optional)
+        let format = if matches!(self.peek(), Token::Identifier(ref s) if s.to_uppercase() == "FORMAT") {
+            self.advance(); // consume FORMAT
+            match self.peek() {
+                Token::Identifier(ref s) if s.to_uppercase() == "TEXT" => {
+                    self.advance();
+                    vibesql_ast::ExplainFormat::Text
+                }
+                Token::Identifier(ref s) if s.to_uppercase() == "JSON" => {
+                    self.advance();
+                    vibesql_ast::ExplainFormat::Json
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: format!("Expected TEXT or JSON after FORMAT, found {:?}", self.peek()),
+                    });
+                }
+            }
+        } else {
+            vibesql_ast::ExplainFormat::Text
+        };
+
+        // Parse the inner statement (SELECT, INSERT, UPDATE, DELETE)
+        let statement = match self.peek() {
+            Token::Keyword(Keyword::Select) | Token::Keyword(Keyword::With) => {
+                let select_stmt = self.parse_select_statement()?;
+                vibesql_ast::Statement::Select(Box::new(select_stmt))
+            }
+            Token::Keyword(Keyword::Insert) => {
+                let insert_stmt = self.parse_insert_statement()?;
+                vibesql_ast::Statement::Insert(insert_stmt)
+            }
+            Token::Keyword(Keyword::Update) => {
+                let update_stmt = self.parse_update_statement()?;
+                vibesql_ast::Statement::Update(update_stmt)
+            }
+            Token::Keyword(Keyword::Delete) => {
+                let delete_stmt = self.parse_delete_statement()?;
+                vibesql_ast::Statement::Delete(delete_stmt)
+            }
+            _ => {
+                return Err(ParseError {
+                    message: format!(
+                        "EXPLAIN requires SELECT, INSERT, UPDATE, or DELETE statement, found {:?}",
+                        self.peek()
+                    ),
+                });
+            }
+        };
+
+        Ok(vibesql_ast::ExplainStmt { statement: Box::new(statement), format, analyze })
+    }
 }
