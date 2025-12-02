@@ -9,7 +9,7 @@ use vibesql_types::SqlValue;
 
 use super::ArenaParser;
 use crate::keywords::Keyword;
-use crate::token::Token;
+use crate::token::{MultiCharOperator, Token};
 use crate::ParseError;
 
 impl<'arena> ArenaParser<'arena> {
@@ -210,7 +210,13 @@ impl<'arena> ArenaParser<'arena> {
         // Check for comparison operators
         let is_comparison = match self.peek() {
             Token::Symbol('=') | Token::Symbol('<') | Token::Symbol('>') => true,
-            Token::Operator(ref s) => matches!(s.as_str(), "<=" | ">=" | "!=" | "<>"),
+            Token::Operator(s) => matches!(
+                s,
+                MultiCharOperator::LessEqual
+                    | MultiCharOperator::GreaterEqual
+                    | MultiCharOperator::NotEqual
+                    | MultiCharOperator::NotEqualAlt
+            ),
             _ => false,
         };
 
@@ -219,10 +225,12 @@ impl<'arena> ArenaParser<'arena> {
                 Token::Symbol('=') => BinaryOperator::Equal,
                 Token::Symbol('<') => BinaryOperator::LessThan,
                 Token::Symbol('>') => BinaryOperator::GreaterThan,
-                Token::Operator(ref s) => match s.as_str() {
-                    "<=" => BinaryOperator::LessThanOrEqual,
-                    ">=" => BinaryOperator::GreaterThanOrEqual,
-                    "!=" | "<>" => BinaryOperator::NotEqual,
+                Token::Operator(s) => match s {
+                    MultiCharOperator::LessEqual => BinaryOperator::LessThanOrEqual,
+                    MultiCharOperator::GreaterEqual => BinaryOperator::GreaterThanOrEqual,
+                    MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
+                        BinaryOperator::NotEqual
+                    }
                     _ => {
                         return Err(ParseError {
                             message: format!("Unexpected operator: {}", s),
@@ -294,7 +302,7 @@ impl<'arena> ArenaParser<'arena> {
             let op = match self.peek() {
                 Token::Symbol('+') => BinaryOperator::Plus,
                 Token::Symbol('-') => BinaryOperator::Minus,
-                Token::Operator(ref s) if s == "||" => BinaryOperator::Concat,
+                Token::Operator(MultiCharOperator::Concat) => BinaryOperator::Concat,
                 _ => break,
             };
             self.advance();
