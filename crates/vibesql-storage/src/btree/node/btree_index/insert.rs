@@ -92,6 +92,13 @@ impl BTreeIndex {
                 // Split the leaf
                 let (split_key, right_leaf) = root_leaf.split(new_page_id);
 
+                // Update the original next neighbor's prev_leaf pointer if it exists
+                if right_leaf.next_leaf != super::super::super::NULL_PAGE_ID {
+                    let mut next_neighbor = self.read_leaf_node(right_leaf.next_leaf)?;
+                    next_neighbor.prev_leaf = right_leaf.page_id;
+                    self.write_leaf_node(&next_neighbor)?;
+                }
+
                 // Write both leaves
                 self.write_leaf_node(&root_leaf)?;
                 self.write_leaf_node(&right_leaf)?;
@@ -120,6 +127,13 @@ impl BTreeIndex {
 
             // Split the leaf
             let (split_key, right_leaf) = leaf.split(new_page_id);
+
+            // Update the original next neighbor's prev_leaf pointer if it exists
+            if right_leaf.next_leaf != super::super::super::NULL_PAGE_ID {
+                let mut next_neighbor = self.read_leaf_node(right_leaf.next_leaf)?;
+                next_neighbor.prev_leaf = right_leaf.page_id;
+                self.write_leaf_node(&next_neighbor)?;
+            }
 
             // Write both leaves
             self.write_leaf_node(&leaf)?;

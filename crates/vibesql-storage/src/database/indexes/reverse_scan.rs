@@ -101,11 +101,7 @@ impl IndexData {
                 matching_row_indices
             }
             IndexData::DiskBacked { btree, .. } => {
-                // For disk-backed indexes, we don't have efficient reverse iteration
-                // (no prev_leaf pointers), so we do a forward scan and reverse.
-                // This is correct but not optimal for large result sets.
-
-                // Handle empty prefix - scan entire index and reverse
+                // Use the efficient range_scan_reverse with prev_leaf pointers
                 let (start_key, end_key) = if normalized_prefix.is_empty() {
                     (None, None)
                 } else {
@@ -114,16 +110,14 @@ impl IndexData {
 
                 match acquire_btree_lock(btree) {
                     Ok(guard) => {
-                        let mut results = guard
-                            .range_scan(
+                        guard
+                            .range_scan_reverse(
                                 start_key.as_ref(),
                                 end_key.as_ref(),
                                 true,  // Inclusive start
                                 false, // Exclusive end
                             )
-                            .unwrap_or_else(|_| vec![]);
-                        results.reverse();
-                        results
+                            .unwrap_or_else(|_| vec![])
                     }
                     Err(e) => {
                         log::warn!(
@@ -217,8 +211,7 @@ impl IndexData {
                 matching_row_indices
             }
             IndexData::DiskBacked { btree, .. } => {
-                // For disk-backed, do forward scan then reverse
-                // Handle empty prefix - scan entire index
+                // Use the efficient range_scan_reverse with prev_leaf pointers
                 let (start_key, end_key) = if normalized_prefix.is_empty() {
                     (None, None)
                 } else {
@@ -228,7 +221,7 @@ impl IndexData {
                 match acquire_btree_lock(btree) {
                     Ok(guard) => {
                         let results = guard
-                            .range_scan(
+                            .range_scan_reverse(
                                 start_key.as_ref(),
                                 end_key.as_ref(),
                                 true,
@@ -236,11 +229,8 @@ impl IndexData {
                             )
                             .unwrap_or_else(|_| vec![]);
 
-                        // Take last `limit` elements (they have the highest keys)
-                        let start = results.len().saturating_sub(limit);
-                        let mut limited: Vec<usize> = results[start..].to_vec();
-                        limited.reverse();
-                        limited
+                        // Take first `limit` elements (they have the highest keys in DESC order)
+                        results.into_iter().take(limit).collect()
                     }
                     Err(e) => {
                         log::warn!(

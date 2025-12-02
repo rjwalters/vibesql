@@ -89,9 +89,12 @@ impl BTreeIndex {
                 }
             }
 
-            // Update linked list pointers
+            // Update doubly-linked list pointers
             if let Some(prev_id) = prev_leaf_page_id {
-                // We need to update the previous leaf's next_leaf pointer
+                // Update prev_leaf pointer of current leaf
+                leaf.prev_leaf = prev_id;
+
+                // Update the previous leaf's next_leaf pointer
                 // Read previous leaf, update it, and write it back
                 let mut prev_leaf = super::super::super::serialize::read_leaf_node(&page_manager, prev_id)?;
                 prev_leaf.next_leaf = page_id;

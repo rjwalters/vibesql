@@ -53,15 +53,18 @@ impl InternalNode {
 ///
 /// Leaf nodes store the actual key-value pairs (key -> Vec<row_id>).
 /// Each key can map to multiple row IDs to support non-unique indexes.
-/// They also maintain a linked list structure via next_leaf for range scans.
+/// They maintain a doubly-linked list structure via next_leaf and prev_leaf
+/// for efficient forward and reverse range scans.
 #[derive(Debug, Clone)]
 pub struct LeafNode {
     /// Page ID of this node
     pub page_id: PageId,
     /// Key-value entries (sorted by key), supporting multiple row_ids per key for non-unique indexes
     pub entries: Vec<(Key, Vec<RowId>)>,
-    /// Page ID of next leaf node (for range scans), or NULL_PAGE_ID
+    /// Page ID of next leaf node (for forward range scans), or NULL_PAGE_ID
     pub next_leaf: PageId,
+    /// Page ID of previous leaf node (for reverse range scans), or NULL_PAGE_ID
+    pub prev_leaf: PageId,
 }
 
 impl LeafNode {
@@ -71,6 +74,7 @@ impl LeafNode {
             page_id,
             entries: Vec::new(),
             next_leaf: NULL_PAGE_ID,
+            prev_leaf: NULL_PAGE_ID,
         }
     }
 

@@ -228,6 +228,11 @@ pub fn write_leaf_node(
         .write_all(&node.next_leaf.to_le_bytes())
         .map_err(|e| StorageError::IoError(format!("Failed to write next_leaf: {}", e)))?;
 
+    // Write prev_leaf pointer
+    cursor
+        .write_all(&node.prev_leaf.to_le_bytes())
+        .map_err(|e| StorageError::IoError(format!("Failed to write prev_leaf: {}", e)))?;
+
     // Check if we exceeded page size
     let bytes_written = cursor.position() as usize;
     if bytes_written > PAGE_SIZE {
@@ -307,6 +312,12 @@ pub fn read_leaf_node(
     std::io::Read::read_exact(&mut cursor, &mut next_leaf_bytes)
         .map_err(|e| StorageError::IoError(format!("Failed to read next_leaf: {}", e)))?;
     node.next_leaf = u64::from_le_bytes(next_leaf_bytes);
+
+    // Read prev_leaf pointer
+    let mut prev_leaf_bytes = [0u8; 8];
+    std::io::Read::read_exact(&mut cursor, &mut prev_leaf_bytes)
+        .map_err(|e| StorageError::IoError(format!("Failed to read prev_leaf: {}", e)))?;
+    node.prev_leaf = u64::from_le_bytes(prev_leaf_bytes);
 
     Ok(node)
 }
