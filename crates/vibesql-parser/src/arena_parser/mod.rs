@@ -14,14 +14,15 @@
 //! let result = ArenaParser::parse_sql("SELECT * FROM users", &arena);
 //! ```
 
+mod ddl;
 mod expression;
 mod select;
 
 use bumpalo::Bump;
-use vibesql_ast::arena::{Expression, SelectStmt};
+use vibesql_ast::arena::{AlterTableStmt, Expression, SelectStmt};
 
-use crate::{Lexer, ParseError, Token};
 use crate::keywords::Keyword;
+use crate::{Lexer, ParseError, Token};
 
 /// Arena-based SQL parser.
 ///
@@ -79,16 +80,24 @@ impl<'arena> ArenaParser<'arena> {
         Ok(arena.alloc(expr))
     }
 
+    /// Parse SQL input string into an arena-allocated AlterTableStmt.
+    pub fn parse_alter_table_sql(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<&'arena AlterTableStmt<'arena>, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        parser.parse_alter_table_statement()
+    }
+
     /// Allocate a string in the arena.
     #[inline]
     pub(crate) fn alloc_str(&self, s: &str) -> &'arena str {
         self.arena.alloc_str(s)
-    }
-
-    /// Get a reference to the arena.
-    #[inline]
-    pub(crate) fn arena(&self) -> &'arena Bump {
-        self.arena
     }
 
     // ========================================================================

@@ -20,9 +20,11 @@
 //! // All allocations freed when arena is dropped
 //! ```
 
+mod ddl;
 mod expression;
 mod select;
 
+pub use ddl::*;
 pub use expression::*;
 pub use select::*;
 
