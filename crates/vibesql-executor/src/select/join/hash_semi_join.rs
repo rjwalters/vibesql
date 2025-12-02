@@ -159,7 +159,7 @@ pub(super) fn hash_semi_join_with_filter(
     // Build phase: Create hash table from right side with right-only predicate filtering
     use ahash::AHashMap;
     let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
-    let mut filtered_count = 0usize;
+    let mut _filtered_count = 0usize;
 
     for (idx, row) in right_slice.iter().enumerate() {
         // Check timeout periodically during build phase
@@ -184,12 +184,12 @@ pub(super) fn hash_semi_join_with_filter(
                 Ok(vibesql_types::SqlValue::Boolean(false))
                 | Ok(vibesql_types::SqlValue::Null) => {
                     // Row doesn't pass filter, skip it
-                    filtered_count += 1;
+                    _filtered_count += 1;
                     continue;
                 }
                 Err(_) | Ok(_) => {
                     // Filter evaluation error or non-boolean, skip this row
-                    filtered_count += 1;
+                    _filtered_count += 1;
                     continue;
                 }
             }

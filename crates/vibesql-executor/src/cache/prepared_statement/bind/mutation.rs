@@ -19,6 +19,7 @@
 //! // stmt now has placeholders replaced with literals
 //! ```
 
+#[cfg(test)]
 use std::collections::HashMap;
 use vibesql_ast::{
     DeleteStmt, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet, InsertSource,
@@ -42,6 +43,7 @@ pub fn bind_statement_mut(stmt: &mut Statement, params: &[SqlValue]) {
 }
 
 /// Bind named parameters to a statement by mutating placeholders in-place
+#[cfg(test)]
 pub fn bind_statement_named_mut(stmt: &mut Statement, params: &HashMap<String, SqlValue>) {
     match stmt {
         Statement::Select(select) => bind_select_named_mut(select, params),
@@ -57,7 +59,7 @@ pub fn bind_statement_named_mut(stmt: &mut Statement, params: &HashMap<String, S
 // =============================================================================
 
 /// Bind parameters in a SELECT statement (in-place)
-pub fn bind_select_mut(stmt: &mut SelectStmt, params: &[SqlValue]) {
+fn bind_select_mut(stmt: &mut SelectStmt, params: &[SqlValue]) {
     // CTEs
     if let Some(ctes) = &mut stmt.with_clause {
         for cte in ctes {
@@ -160,7 +162,7 @@ fn bind_grouping_set_mut(set: &mut GroupingSet, params: &[SqlValue]) {
 }
 
 /// Bind parameters in an INSERT statement (in-place)
-pub fn bind_insert_mut(stmt: &mut InsertStmt, params: &[SqlValue]) {
+fn bind_insert_mut(stmt: &mut InsertStmt, params: &[SqlValue]) {
     match &mut stmt.source {
         InsertSource::Values(rows) => {
             for row in rows {
@@ -180,7 +182,7 @@ pub fn bind_insert_mut(stmt: &mut InsertStmt, params: &[SqlValue]) {
 }
 
 /// Bind parameters in an UPDATE statement (in-place)
-pub fn bind_update_mut(stmt: &mut UpdateStmt, params: &[SqlValue]) {
+fn bind_update_mut(stmt: &mut UpdateStmt, params: &[SqlValue]) {
     for assignment in &mut stmt.assignments {
         bind_expression_mut(&mut assignment.value, params);
     }
@@ -193,7 +195,7 @@ pub fn bind_update_mut(stmt: &mut UpdateStmt, params: &[SqlValue]) {
 }
 
 /// Bind parameters in a DELETE statement (in-place)
-pub fn bind_delete_mut(stmt: &mut DeleteStmt, params: &[SqlValue]) {
+fn bind_delete_mut(stmt: &mut DeleteStmt, params: &[SqlValue]) {
     if let Some(where_clause) = &mut stmt.where_clause {
         if let WhereClause::Condition(expr) = where_clause {
             bind_expression_mut(expr, params);
@@ -218,7 +220,7 @@ fn bind_from_clause_mut(from: &mut FromClause, params: &[SqlValue]) {
 /// Bind parameters in an expression (in-place)
 ///
 /// This is the core function that replaces placeholder expressions with literal values.
-pub fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
+fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
     match expr {
         // The key cases: replace placeholders with literal values
         Expression::Placeholder(idx) => {
@@ -416,9 +418,10 @@ fn bind_frame_bound_mut(bound: &mut vibesql_ast::FrameBound, params: &[SqlValue]
 }
 
 // =============================================================================
-// Named parameter binding (:name)
+// Named parameter binding (:name) - only used for tests
 // =============================================================================
 
+#[cfg(test)]
 fn bind_select_named_mut(stmt: &mut SelectStmt, params: &HashMap<String, SqlValue>) {
     // CTEs
     if let Some(ctes) = &mut stmt.with_clause {
@@ -467,6 +470,7 @@ fn bind_select_named_mut(stmt: &mut SelectStmt, params: &HashMap<String, SqlValu
     }
 }
 
+#[cfg(test)]
 fn bind_group_by_named_mut(clause: &mut GroupByClause, params: &HashMap<String, SqlValue>) {
     match clause {
         GroupByClause::Simple(exprs) => {
@@ -502,6 +506,7 @@ fn bind_group_by_named_mut(clause: &mut GroupByClause, params: &HashMap<String, 
     }
 }
 
+#[cfg(test)]
 fn bind_grouping_elements_named_mut(
     elements: &mut [GroupingElement],
     params: &HashMap<String, SqlValue>,
@@ -518,12 +523,14 @@ fn bind_grouping_elements_named_mut(
     }
 }
 
+#[cfg(test)]
 fn bind_grouping_set_named_mut(set: &mut GroupingSet, params: &HashMap<String, SqlValue>) {
     for expr in &mut set.columns {
         bind_expression_named_mut(expr, params);
     }
 }
 
+#[cfg(test)]
 fn bind_insert_named_mut(stmt: &mut InsertStmt, params: &HashMap<String, SqlValue>) {
     match &mut stmt.source {
         InsertSource::Values(rows) => {
@@ -543,6 +550,7 @@ fn bind_insert_named_mut(stmt: &mut InsertStmt, params: &HashMap<String, SqlValu
     }
 }
 
+#[cfg(test)]
 fn bind_update_named_mut(stmt: &mut UpdateStmt, params: &HashMap<String, SqlValue>) {
     for assignment in &mut stmt.assignments {
         bind_expression_named_mut(&mut assignment.value, params);
@@ -555,6 +563,7 @@ fn bind_update_named_mut(stmt: &mut UpdateStmt, params: &HashMap<String, SqlValu
     }
 }
 
+#[cfg(test)]
 fn bind_delete_named_mut(stmt: &mut DeleteStmt, params: &HashMap<String, SqlValue>) {
     if let Some(where_clause) = &mut stmt.where_clause {
         if let WhereClause::Condition(expr) = where_clause {
@@ -563,6 +572,7 @@ fn bind_delete_named_mut(stmt: &mut DeleteStmt, params: &HashMap<String, SqlValu
     }
 }
 
+#[cfg(test)]
 fn bind_from_clause_named_mut(from: &mut FromClause, params: &HashMap<String, SqlValue>) {
     match from {
         FromClause::Table { .. } => {}
@@ -578,7 +588,8 @@ fn bind_from_clause_named_mut(from: &mut FromClause, params: &HashMap<String, Sq
 }
 
 /// Bind named parameters in an expression (in-place)
-pub fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, SqlValue>) {
+#[cfg(test)]
+fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, SqlValue>) {
     match expr {
         // The key case: replace named placeholders with literal values
         Expression::NamedPlaceholder(name) => {
@@ -721,6 +732,7 @@ pub fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String,
     }
 }
 
+#[cfg(test)]
 fn bind_window_function_spec_named_mut(
     spec: &mut vibesql_ast::WindowFunctionSpec,
     params: &HashMap<String, SqlValue>,
@@ -736,6 +748,7 @@ fn bind_window_function_spec_named_mut(
     }
 }
 
+#[cfg(test)]
 fn bind_window_spec_named_mut(spec: &mut vibesql_ast::WindowSpec, params: &HashMap<String, SqlValue>) {
     if let Some(partition_by) = &mut spec.partition_by {
         for expr in partition_by {
@@ -752,6 +765,7 @@ fn bind_window_spec_named_mut(spec: &mut vibesql_ast::WindowSpec, params: &HashM
     }
 }
 
+#[cfg(test)]
 fn bind_window_frame_named_mut(frame: &mut vibesql_ast::WindowFrame, params: &HashMap<String, SqlValue>) {
     bind_frame_bound_named_mut(&mut frame.start, params);
     if let Some(end) = &mut frame.end {
@@ -759,6 +773,7 @@ fn bind_window_frame_named_mut(frame: &mut vibesql_ast::WindowFrame, params: &Ha
     }
 }
 
+#[cfg(test)]
 fn bind_frame_bound_named_mut(bound: &mut vibesql_ast::FrameBound, params: &HashMap<String, SqlValue>) {
     match bound {
         vibesql_ast::FrameBound::Preceding(expr) | vibesql_ast::FrameBound::Following(expr) => {

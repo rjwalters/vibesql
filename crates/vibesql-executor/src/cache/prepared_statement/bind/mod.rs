@@ -6,9 +6,7 @@
 //!
 //! ## Module Organization
 //!
-//! - `positional` - Clone-based binding for `?` and `$N` placeholders (legacy)
-//! - `named` - Clone-based binding for `:name` placeholders (legacy)
-//! - `mutation` - **Preferred**: In-place mutation-based binding (no cloning)
+//! - `mutation` - In-place mutation-based binding (no cloning)
 //! - `visitor` - AST traversal for counting and collecting placeholders
 //!
 //! ## Performance
@@ -21,27 +19,18 @@
 //! - Clone once (caller), modify 5 placeholders in-place = O(5) operations
 
 mod mutation;
-mod named;
-mod positional;
 mod visitor;
 
 use vibesql_ast::{Expression, Statement};
 use vibesql_types::SqlValue;
 
-// Re-export mutation-based functions (preferred for performance)
-pub use mutation::{bind_statement_mut, bind_statement_named_mut};
+// Re-export mutation-based functions
+pub use mutation::bind_statement_mut;
+#[cfg(test)]
+use mutation::bind_statement_named_mut;
 
 // Re-export visitor for placeholder counting
 pub use visitor::visit_statement;
-
-// Keep the statement-level positional functions public for external use
-pub use positional::{bind_delete, bind_expression, bind_insert, bind_select, bind_update};
-
-// Keep the named binding functions public for external use
-pub use named::{
-    bind_delete_named, bind_expression_named, bind_insert_named, bind_select_named,
-    bind_update_named,
-};
 
 /// Count the number of placeholder parameters in a statement
 pub fn count_placeholders(stmt: &Statement) -> usize {
@@ -57,7 +46,8 @@ pub fn count_placeholders(stmt: &Statement) -> usize {
 /// Get the maximum numbered placeholder index in a statement.
 /// Returns None if no numbered placeholders are found.
 /// Returns Some(max) where max is the highest $N value (1-indexed).
-pub fn max_numbered_placeholder(stmt: &Statement) -> Option<usize> {
+#[cfg(test)]
+fn max_numbered_placeholder(stmt: &Statement) -> Option<usize> {
     let mut max: Option<usize> = None;
     visit_statement(stmt, &mut |expr| {
         if let Expression::NumberedPlaceholder(n) = expr {
@@ -69,7 +59,8 @@ pub fn max_numbered_placeholder(stmt: &Statement) -> Option<usize> {
 
 /// Collect all named placeholder names in a statement.
 /// Returns a vector of unique parameter names.
-pub fn collect_named_placeholders(stmt: &Statement) -> Vec<String> {
+#[cfg(test)]
+fn collect_named_placeholders(stmt: &Statement) -> Vec<String> {
     let mut names = Vec::new();
     visit_statement(stmt, &mut |expr| {
         if let Expression::NamedPlaceholder(name) = expr {
@@ -103,7 +94,8 @@ pub fn bind_parameters(stmt: &Statement, params: &[SqlValue]) -> Statement {
 /// This function uses mutation-based binding internally: it clones the statement once,
 /// then mutates placeholders in-place, avoiding the O(n) cloning overhead of recursively
 /// copying every AST node.
-pub fn bind_parameters_named(
+#[cfg(test)]
+fn bind_parameters_named(
     stmt: &Statement,
     params: &std::collections::HashMap<String, SqlValue>,
 ) -> Statement {

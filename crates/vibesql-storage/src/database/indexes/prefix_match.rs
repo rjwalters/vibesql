@@ -416,7 +416,7 @@ impl IndexData {
                 } else {
                     // No upper bound - need to scan up to the end of the prefix range
                     // Create a key that is just past the end of the prefix
-                    let mut end_key = normalized_prefix.clone();
+                    let end_key = normalized_prefix.clone();
                     // For unbounded upper, we need to capture all values with this prefix
                     // We do this by constructing a key just past the prefix range
                     match try_increment_sqlvalue_prefix(&end_key) {
