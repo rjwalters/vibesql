@@ -17,9 +17,9 @@ impl<'arena> ArenaParser<'arena> {
 
         // Parse table name
         let table_name = if let Token::Identifier(name) = self.peek() {
-            let name = self.alloc_str(name);
+            let name = name.clone();
             self.advance();
-            name
+            self.intern(&name)
         } else {
             return Err(ParseError {
                 message: "Expected table name after UPDATE".to_string(),
@@ -38,9 +38,9 @@ impl<'arena> ArenaParser<'arena> {
             if self.try_consume_keyword(Keyword::Current) {
                 self.consume_keyword(Keyword::Of)?;
                 let cursor_name = if let Token::Identifier(name) = self.peek() {
-                    let name = self.alloc_str(name);
+                    let name = name.clone();
                     self.advance();
-                    name
+                    self.intern(&name)
                 } else {
                     return Err(ParseError {
                         message: "Expected cursor name after WHERE CURRENT OF".to_string(),
@@ -76,9 +76,9 @@ impl<'arena> ArenaParser<'arena> {
         loop {
             // Parse column name
             let column = if let Token::Identifier(col) = self.peek() {
-                let col = self.alloc_str(col);
+                let col = col.clone();
                 self.advance();
-                col
+                self.intern(&col)
             } else {
                 return Err(ParseError {
                     message: "Expected column name in SET clause".to_string(),

@@ -34,9 +34,9 @@ impl<'arena> ArenaParser<'arena> {
 
         // Parse table name
         let table_name = if let Token::Identifier(name) = self.peek() {
-            let name = self.alloc_str(name);
+            let name = name.clone();
             self.advance();
-            name
+            self.intern(&name)
         } else {
             return Err(ParseError {
                 message: "Expected table name after INSERT INTO".to_string(),
@@ -100,9 +100,9 @@ impl<'arena> ArenaParser<'arena> {
 
         // Parse table name
         let table_name = if let Token::Identifier(name) = self.peek() {
-            let name = self.alloc_str(name);
+            let name = name.clone();
             self.advance();
-            name
+            self.intern(&name)
         } else {
             return Err(ParseError {
                 message: "Expected table name after REPLACE INTO".to_string(),

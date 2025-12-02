@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
-use vibesql_ast::arena::{self as arena_ast, Expression as ArenaExpression};
+use vibesql_ast::arena::{self as arena_ast, ArenaInterner, Expression as ArenaExpression, Symbol};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -50,8 +50,8 @@ pub struct ArenaExpressionEvaluator<'a, 'arena> {
     column_cache: RefCell<HashMap<u64, usize>>,
     /// Current depth in expression tree (for preventing stack overflow)
     depth: usize,
-    /// Phantom data for arena lifetime
-    _arena: std::marker::PhantomData<&'arena ()>,
+    /// Interner for resolving symbols to strings
+    interner: &'arena ArenaInterner<'arena>,
 }
 
 impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
@@ -61,7 +61,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
     ///
     /// * `schema` - Combined schema for column resolution
     /// * `params` - Slice of parameter values for placeholder resolution
-    pub fn new(schema: &'a CombinedSchema, params: &'a [SqlValue]) -> Self {
+    /// * `interner` - Interner for resolving symbols to strings
+    pub fn new(
+        schema: &'a CombinedSchema,
+        params: &'a [SqlValue],
+        interner: &'arena ArenaInterner<'arena>,
+    ) -> Self {
         ArenaExpressionEvaluator {
             schema,
             params,
@@ -69,7 +74,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             sql_mode: vibesql_types::SqlMode::default(),
             column_cache: RefCell::new(HashMap::new()),
             depth: 0,
-            _arena: std::marker::PhantomData,
+            interner,
         }
     }
 
@@ -80,10 +85,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
     /// * `schema` - Combined schema for column resolution
     /// * `params` - Slice of parameter values for placeholder resolution
     /// * `database` - Database reference for subquery execution
+    /// * `interner` - Interner for resolving symbols to strings
     pub fn with_database(
         schema: &'a CombinedSchema,
         params: &'a [SqlValue],
         database: &'a vibesql_storage::Database,
+        interner: &'arena ArenaInterner<'arena>,
     ) -> Self {
         ArenaExpressionEvaluator {
             schema,
@@ -92,8 +99,14 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             sql_mode: database.sql_mode(),
             column_cache: RefCell::new(HashMap::new()),
             depth: 0,
-            _arena: std::marker::PhantomData,
+            interner,
         }
+    }
+
+    /// Resolve a symbol to its string value.
+    #[inline]
+    fn resolve(&self, symbol: Symbol) -> &'arena str {
+        self.interner.resolve(symbol)
     }
 
     /// Evaluate an arena-allocated expression against a row.
@@ -159,25 +172,28 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             ArenaExpression::NamedPlaceholder(name) => {
                 Err(ExecutorError::UnsupportedExpression(format!(
                     "Named placeholder '{}' not supported in arena evaluator",
-                    name
+                    self.resolve(*name)
                 )))
             }
 
             // Column reference
             ArenaExpression::ColumnRef { table, column } => {
+                let column_str = self.resolve(*column);
+                let table_str = table.map(|t| self.resolve(t));
+
                 // Special case: "*" is a wildcard used in COUNT(*)
-                if *column == "*" {
+                if column_str == "*" {
                     return Ok(SqlValue::Null);
                 }
 
-                if let Some(col_index) = self.get_column_index_cached(*table, column) {
+                if let Some(col_index) = self.get_column_index_cached(table_str, column_str) {
                     row.get(col_index)
                         .cloned()
                         .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_index })
                 } else {
                     Err(ExecutorError::ColumnNotFound {
-                        column_name: (*column).to_string(),
-                        table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                        column_name: column_str.to_string(),
+                        table_name: table_str.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
                         searched_tables: self.schema.table_schemas.keys().cloned().collect(),
                         available_columns: self.get_available_columns(),
                     })
@@ -215,14 +231,15 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     arena_ast::CharacterUnit::Characters => vibesql_ast::CharacterUnit::Characters,
                     arena_ast::CharacterUnit::Octets => vibesql_ast::CharacterUnit::Octets,
                 });
-                super::functions::eval_scalar_function(name, &evaluated_args?, &char_unit, &self.sql_mode)
+                let name_str = self.resolve(*name);
+                super::functions::eval_scalar_function(name_str, &evaluated_args?, &char_unit, &self.sql_mode)
             }
 
             // Aggregate function - should be pre-computed
             ArenaExpression::AggregateFunction { name, .. } => {
                 Err(ExecutorError::UnsupportedExpression(format!(
                     "Aggregate function '{}' must be pre-computed before arena evaluation",
-                    name
+                    self.resolve(*name)
                 )))
             }
 
@@ -420,7 +437,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             sql_mode: self.sql_mode.clone(),
             column_cache: RefCell::new(HashMap::new()), // Don't share cache across depth
             depth: self.depth + 1,
-            _arena: std::marker::PhantomData,
+            interner: self.interner,
         };
         child.eval(expr, row)
     }
@@ -677,6 +694,8 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bumpalo::Bump;
+    use vibesql_ast::arena::ArenaInterner;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
 
@@ -691,9 +710,11 @@ mod tests {
 
     #[test]
     fn test_eval_literal() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
         let schema = make_schema();
         let params = vec![];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
         let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
 
         let expr = ArenaExpression::Literal(SqlValue::Integer(42));
@@ -703,9 +724,11 @@ mod tests {
 
     #[test]
     fn test_eval_placeholder() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
         let schema = make_schema();
         let params = vec![SqlValue::Integer(100), SqlValue::Varchar("test".to_string())];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
         let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
 
         // First placeholder (index 0)
@@ -721,21 +744,28 @@ mod tests {
 
     #[test]
     fn test_eval_column_ref() {
+        let arena = Bump::new();
+        let mut interner = ArenaInterner::new(&arena);
         let schema = make_schema();
         let params = vec![];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
+
+        // Intern the column names (uppercased to match schema lookup)
+        let id_sym = interner.intern("ID");
+        let name_sym = interner.intern("NAME");
+
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
         let row = Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar("Bob".to_string())]);
 
         let expr = ArenaExpression::ColumnRef {
             table: None,
-            column: "id",
+            column: id_sym,
         };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Integer(42));
 
         let expr = ArenaExpression::ColumnRef {
             table: None,
-            column: "name",
+            column: name_sym,
         };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Varchar("Bob".to_string()));
@@ -743,26 +773,33 @@ mod tests {
 
     #[test]
     fn test_eval_is_null() {
+        let arena = Bump::new();
+        let mut interner = ArenaInterner::new(&arena);
         let schema = make_schema();
         let params = vec![];
-        let evaluator = ArenaExpressionEvaluator::new(&schema, &params);
+
+        // Intern column names (uppercased to match schema lookup)
+        let name_sym = interner.intern("NAME");
+        let id_sym = interner.intern("ID");
+
+        let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
         let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Null]);
 
         let expr = ArenaExpression::IsNull {
-            expr: Box::leak(Box::new(ArenaExpression::ColumnRef {
+            expr: arena.alloc(ArenaExpression::ColumnRef {
                 table: None,
-                column: "name",
-            })),
+                column: name_sym,
+            }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Boolean(true));
 
         let expr = ArenaExpression::IsNull {
-            expr: Box::leak(Box::new(ArenaExpression::ColumnRef {
+            expr: arena.alloc(ArenaExpression::ColumnRef {
                 table: None,
-                column: "id",
-            })),
+                column: id_sym,
+            }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();

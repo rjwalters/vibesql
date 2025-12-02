@@ -7,6 +7,7 @@ use bumpalo::collections::Vec as BumpVec;
 use vibesql_types::DataType;
 
 use super::expression::Expression;
+use super::interner::Symbol;
 use super::select::SelectStmt;
 
 // ============================================================================
@@ -27,20 +28,20 @@ pub struct RollbackStmt;
 
 /// SAVEPOINT statement
 #[derive(Debug, Clone, PartialEq)]
-pub struct SavepointStmt<'arena> {
-    pub name: &'arena str,
+pub struct SavepointStmt {
+    pub name: Symbol,
 }
 
 /// ROLLBACK TO SAVEPOINT statement
 #[derive(Debug, Clone, PartialEq)]
-pub struct RollbackToSavepointStmt<'arena> {
-    pub name: &'arena str,
+pub struct RollbackToSavepointStmt {
+    pub name: Symbol,
 }
 
 /// RELEASE SAVEPOINT statement
 #[derive(Debug, Clone, PartialEq)]
-pub struct ReleaseSavepointStmt<'arena> {
-    pub name: &'arena str,
+pub struct ReleaseSavepointStmt {
+    pub name: Symbol,
 }
 
 // ============================================================================
@@ -68,7 +69,7 @@ pub enum StorageFormat {
 /// CREATE TABLE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTableStmt<'arena> {
-    pub table_name: &'arena str,
+    pub table_name: Symbol,
     pub columns: BumpVec<'arena, ColumnDef<'arena>>,
     pub table_constraints: BumpVec<'arena, TableConstraint<'arena>>,
     pub storage_format: Option<StorageFormat>,
@@ -77,18 +78,18 @@ pub struct CreateTableStmt<'arena> {
 /// Column definition
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnDef<'arena> {
-    pub name: &'arena str,
+    pub name: Symbol,
     pub data_type: DataType,
     pub nullable: bool,
     pub constraints: BumpVec<'arena, ColumnConstraint<'arena>>,
     pub default_value: Option<&'arena Expression<'arena>>,
-    pub comment: Option<&'arena str>,
+    pub comment: Option<Symbol>,
 }
 
 /// Column-level constraint
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnConstraint<'arena> {
-    pub name: Option<&'arena str>,
+    pub name: Option<Symbol>,
     pub kind: ColumnConstraintKind<'arena>,
 }
 
@@ -100,8 +101,8 @@ pub enum ColumnConstraintKind<'arena> {
     Unique,
     Check(&'arena Expression<'arena>),
     References {
-        table: &'arena str,
-        column: &'arena str,
+        table: Symbol,
+        column: Symbol,
         on_delete: Option<ReferentialAction>,
         on_update: Option<ReferentialAction>,
     },
@@ -112,7 +113,7 @@ pub enum ColumnConstraintKind<'arena> {
 /// Table-level constraint
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableConstraint<'arena> {
-    pub name: Option<&'arena str>,
+    pub name: Option<Symbol>,
     pub kind: TableConstraintKind<'arena>,
 }
 
@@ -120,24 +121,24 @@ pub struct TableConstraint<'arena> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableConstraintKind<'arena> {
     PrimaryKey {
-        columns: BumpVec<'arena, IndexColumn<'arena>>,
+        columns: BumpVec<'arena, IndexColumn>,
     },
     ForeignKey {
-        columns: BumpVec<'arena, &'arena str>,
-        references_table: &'arena str,
-        references_columns: BumpVec<'arena, &'arena str>,
+        columns: BumpVec<'arena, Symbol>,
+        references_table: Symbol,
+        references_columns: BumpVec<'arena, Symbol>,
         on_delete: Option<ReferentialAction>,
         on_update: Option<ReferentialAction>,
     },
     Unique {
-        columns: BumpVec<'arena, IndexColumn<'arena>>,
+        columns: BumpVec<'arena, IndexColumn>,
     },
     Check {
         expr: &'arena Expression<'arena>,
     },
     Fulltext {
-        index_name: Option<&'arena str>,
-        columns: BumpVec<'arena, IndexColumn<'arena>>,
+        index_name: Option<Symbol>,
+        columns: BumpVec<'arena, IndexColumn>,
     },
 }
 
@@ -147,15 +148,15 @@ pub enum TableConstraintKind<'arena> {
 
 /// DROP TABLE statement
 #[derive(Debug, Clone, PartialEq)]
-pub struct DropTableStmt<'arena> {
-    pub table_name: &'arena str,
+pub struct DropTableStmt {
+    pub table_name: Symbol,
     pub if_exists: bool,
 }
 
 /// TRUNCATE TABLE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct TruncateTableStmt<'arena> {
-    pub table_names: BumpVec<'arena, &'arena str>,
+    pub table_names: BumpVec<'arena, Symbol>,
     pub if_exists: bool,
     pub cascade: Option<TruncateCascadeOption>,
 }
@@ -175,11 +176,11 @@ pub enum TruncateCascadeOption {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AlterTableStmt<'arena> {
     AddColumn(AddColumnStmt<'arena>),
-    DropColumn(DropColumnStmt<'arena>),
+    DropColumn(DropColumnStmt),
     AlterColumn(AlterColumnStmt<'arena>),
     AddConstraint(AddConstraintStmt<'arena>),
-    DropConstraint(DropConstraintStmt<'arena>),
-    RenameTable(RenameTableStmt<'arena>),
+    DropConstraint(DropConstraintStmt),
+    RenameTable(RenameTableStmt),
     /// MySQL-style MODIFY COLUMN (change column definition without renaming)
     ModifyColumn(ModifyColumnStmt<'arena>),
     /// MySQL-style CHANGE COLUMN (rename and modify column)
@@ -189,15 +190,15 @@ pub enum AlterTableStmt<'arena> {
 /// ADD COLUMN operation
 #[derive(Debug, Clone, PartialEq)]
 pub struct AddColumnStmt<'arena> {
-    pub table_name: &'arena str,
+    pub table_name: Symbol,
     pub column_def: ColumnDef<'arena>,
 }
 
 /// DROP COLUMN operation
 #[derive(Debug, Clone, PartialEq)]
-pub struct DropColumnStmt<'arena> {
-    pub table_name: &'arena str,
-    pub column_name: &'arena str,
+pub struct DropColumnStmt {
+    pub table_name: Symbol,
+    pub column_name: Symbol,
     pub if_exists: bool,
 }
 
@@ -205,58 +206,58 @@ pub struct DropColumnStmt<'arena> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AlterColumnStmt<'arena> {
     SetDefault {
-        table_name: &'arena str,
-        column_name: &'arena str,
+        table_name: Symbol,
+        column_name: Symbol,
         default: Expression<'arena>,
     },
     DropDefault {
-        table_name: &'arena str,
-        column_name: &'arena str,
+        table_name: Symbol,
+        column_name: Symbol,
     },
     SetNotNull {
-        table_name: &'arena str,
-        column_name: &'arena str,
+        table_name: Symbol,
+        column_name: Symbol,
     },
     DropNotNull {
-        table_name: &'arena str,
-        column_name: &'arena str,
+        table_name: Symbol,
+        column_name: Symbol,
     },
 }
 
 /// ADD CONSTRAINT operation
 #[derive(Debug, Clone, PartialEq)]
 pub struct AddConstraintStmt<'arena> {
-    pub table_name: &'arena str,
+    pub table_name: Symbol,
     pub constraint: TableConstraint<'arena>,
 }
 
 /// DROP CONSTRAINT operation
 #[derive(Debug, Clone, PartialEq)]
-pub struct DropConstraintStmt<'arena> {
-    pub table_name: &'arena str,
-    pub constraint_name: &'arena str,
+pub struct DropConstraintStmt {
+    pub table_name: Symbol,
+    pub constraint_name: Symbol,
 }
 
 /// RENAME TABLE operation
 #[derive(Debug, Clone, PartialEq)]
-pub struct RenameTableStmt<'arena> {
-    pub table_name: &'arena str,
-    pub new_table_name: &'arena str,
+pub struct RenameTableStmt {
+    pub table_name: Symbol,
+    pub new_table_name: Symbol,
 }
 
 /// MODIFY COLUMN operation (MySQL-style - change column definition without renaming)
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModifyColumnStmt<'arena> {
-    pub table_name: &'arena str,
-    pub column_name: &'arena str,
+    pub table_name: Symbol,
+    pub column_name: Symbol,
     pub new_column_def: ColumnDef<'arena>,
 }
 
 /// CHANGE COLUMN operation (MySQL-style - rename and modify column)
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChangeColumnStmt<'arena> {
-    pub table_name: &'arena str,
-    pub old_column_name: &'arena str,
+    pub table_name: Symbol,
+    pub old_column_name: Symbol,
     pub new_column_def: ColumnDef<'arena>,
 }
 
@@ -268,10 +269,10 @@ pub struct ChangeColumnStmt<'arena> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateIndexStmt<'arena> {
     pub if_not_exists: bool,
-    pub index_name: &'arena str,
-    pub table_name: &'arena str,
+    pub index_name: Symbol,
+    pub table_name: Symbol,
     pub index_type: IndexType,
-    pub columns: BumpVec<'arena, IndexColumn<'arena>>,
+    pub columns: BumpVec<'arena, IndexColumn>,
 }
 
 /// Index type specification
@@ -284,17 +285,17 @@ pub enum IndexType {
 
 /// Index column specification
 #[derive(Debug, Clone, PartialEq)]
-pub struct IndexColumn<'arena> {
-    pub column_name: &'arena str,
+pub struct IndexColumn {
+    pub column_name: Symbol,
     pub direction: super::expression::OrderDirection,
     pub prefix_length: Option<u64>,
 }
 
 /// DROP INDEX statement
 #[derive(Debug, Clone, PartialEq)]
-pub struct DropIndexStmt<'arena> {
+pub struct DropIndexStmt {
     pub if_exists: bool,
-    pub index_name: &'arena str,
+    pub index_name: Symbol,
 }
 
 // ============================================================================
@@ -304,8 +305,8 @@ pub struct DropIndexStmt<'arena> {
 /// CREATE VIEW statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateViewStmt<'arena> {
-    pub view_name: &'arena str,
-    pub columns: Option<BumpVec<'arena, &'arena str>>,
+    pub view_name: Symbol,
+    pub columns: Option<BumpVec<'arena, Symbol>>,
     pub query: &'arena SelectStmt<'arena>,
     pub with_check_option: bool,
     pub or_replace: bool,
@@ -314,8 +315,8 @@ pub struct CreateViewStmt<'arena> {
 
 /// DROP VIEW statement
 #[derive(Debug, Clone, PartialEq)]
-pub struct DropViewStmt<'arena> {
-    pub view_name: &'arena str,
+pub struct DropViewStmt {
+    pub view_name: Symbol,
     pub if_exists: bool,
     pub cascade: bool,
     pub restrict: bool,
@@ -328,8 +329,8 @@ pub struct DropViewStmt<'arena> {
 /// ANALYZE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalyzeStmt<'arena> {
-    pub table_name: Option<&'arena str>,
-    pub columns: Option<BumpVec<'arena, &'arena str>>,
+    pub table_name: Option<Symbol>,
+    pub columns: Option<BumpVec<'arena, Symbol>>,
 }
 
 // ============================================================================
@@ -361,25 +362,25 @@ pub enum Statement<'arena> {
 
     // DDL - Table
     CreateTable(CreateTableStmt<'arena>),
-    DropTable(DropTableStmt<'arena>),
+    DropTable(DropTableStmt),
     TruncateTable(TruncateTableStmt<'arena>),
     AlterTable(AlterTableStmt<'arena>),
 
     // DDL - Index
     CreateIndex(CreateIndexStmt<'arena>),
-    DropIndex(DropIndexStmt<'arena>),
+    DropIndex(DropIndexStmt),
 
     // DDL - View
     CreateView(CreateViewStmt<'arena>),
-    DropView(DropViewStmt<'arena>),
+    DropView(DropViewStmt),
 
     // Transaction
     BeginTransaction(BeginStmt),
     Commit(CommitStmt),
     Rollback(RollbackStmt),
-    Savepoint(SavepointStmt<'arena>),
-    RollbackToSavepoint(RollbackToSavepointStmt<'arena>),
-    ReleaseSavepoint(ReleaseSavepointStmt<'arena>),
+    Savepoint(SavepointStmt),
+    RollbackToSavepoint(RollbackToSavepointStmt),
+    ReleaseSavepoint(ReleaseSavepointStmt),
 
     // Analysis
     Analyze(AnalyzeStmt<'arena>),

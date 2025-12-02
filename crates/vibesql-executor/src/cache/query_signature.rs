@@ -11,7 +11,7 @@ use std::{
 
 use vibesql_ast::{Expression, Statement};
 use vibesql_ast::arena::{
-    Expression as ArenaExpression, FromClause as ArenaFromClause,
+    ArenaInterner, Expression as ArenaExpression, FromClause as ArenaFromClause,
     GroupByClause as ArenaGroupByClause, GroupingElement as ArenaGroupingElement,
     GroupingSet as ArenaGroupingSet, MixedGroupingItem as ArenaMixedGroupingItem,
     SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt,
@@ -763,7 +763,8 @@ impl QuerySignature {
 
             ArenaExpression::Function { name, args, character_unit } => {
                 "FUNCTION".hash(hasher);
-                name.to_lowercase().hash(hasher);
+                // Hash the Symbol directly - case normalization is handled at parse time
+                name.hash(hasher);
                 for arg in args {
                     Self::hash_arena_expression(arg, hasher);
                 }
@@ -774,7 +775,8 @@ impl QuerySignature {
 
             ArenaExpression::AggregateFunction { name, distinct, args } => {
                 "AGGREGATE".hash(hasher);
-                name.to_lowercase().hash(hasher);
+                // Hash the Symbol directly - case normalization is handled at parse time
+                name.hash(hasher);
                 distinct.hash(hasher);
                 for arg in args {
                     Self::hash_arena_expression(arg, hasher);
@@ -926,21 +928,24 @@ impl QuerySignature {
                 match function {
                     ArenaWindowFunctionSpec::Aggregate { name, args } => {
                         "AGGREGATE".hash(hasher);
-                        name.to_lowercase().hash(hasher);
+                        // Hash the Symbol directly - case normalization is handled at parse time
+                        name.hash(hasher);
                         for arg in args {
                             Self::hash_arena_expression(arg, hasher);
                         }
                     }
                     ArenaWindowFunctionSpec::Ranking { name, args } => {
                         "RANKING".hash(hasher);
-                        name.to_lowercase().hash(hasher);
+                        // Hash the Symbol directly - case normalization is handled at parse time
+                        name.hash(hasher);
                         for arg in args {
                             Self::hash_arena_expression(arg, hasher);
                         }
                     }
                     ArenaWindowFunctionSpec::Value { name, args } => {
                         "VALUE".hash(hasher);
-                        name.to_lowercase().hash(hasher);
+                        // Hash the Symbol directly - case normalization is handled at parse time
+                        name.hash(hasher);
                         for arg in args {
                             Self::hash_arena_expression(arg, hasher);
                         }

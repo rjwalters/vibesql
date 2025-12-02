@@ -2,7 +2,8 @@
 
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_ast::arena::{
-    CaseWhen, Expression, OrderByItem, OrderDirection, Quantifier, WindowFunctionSpec, WindowSpec,
+    CaseWhen, Expression, OrderByItem, OrderDirection, Quantifier, Symbol, WindowFunctionSpec,
+    WindowSpec,
 };
 use vibesql_ast::{BinaryOperator, UnaryOperator};
 use vibesql_types::SqlValue;
@@ -396,15 +397,17 @@ impl<'arena> ArenaParser<'arena> {
 
         // Named placeholder (:name)
         if let Token::NamedPlaceholder(name) = self.peek() {
-            let name = self.alloc_str(name);
+            let name = name.clone();
             self.advance();
+            let name = self.intern(&name);
             return Ok(Expression::NamedPlaceholder(name));
         }
 
         // Session variable (@@...)
         if let Token::SessionVariable(name) = self.peek() {
-            let name = self.alloc_str(name);
+            let name = name.clone();
             self.advance();
+            let name = self.intern(&name);
             return Ok(Expression::SessionVariable { name });
         }
 
@@ -446,16 +449,17 @@ impl<'arena> ArenaParser<'arena> {
 
             // Otherwise it's a column reference
             self.advance();
-            let name = self.alloc_str(&name);
+            let name_sym = self.intern(&name);
 
             // Check for qualified name (table.column)
             if self.try_consume(&Token::Symbol('.')) {
                 if let Token::Identifier(col) = self.peek() {
-                    let col = self.alloc_str(col);
+                    let col = col.clone();
                     self.advance();
+                    let col_sym = self.intern(&col);
                     return Ok(Expression::ColumnRef {
-                        table: Some(name),
-                        column: col,
+                        table: Some(name_sym),
+                        column: col_sym,
                     });
                 } else if matches!(self.peek(), Token::Symbol('*')) {
                     self.advance();
@@ -465,7 +469,7 @@ impl<'arena> ArenaParser<'arena> {
 
             return Ok(Expression::ColumnRef {
                 table: None,
-                column: name,
+                column: name_sym,
             });
         }
 
@@ -795,13 +799,14 @@ impl<'arena> ArenaParser<'arena> {
 
     /// Parse function call.
     fn parse_function_call(&mut self, name: &str) -> Result<Expression<'arena>, ParseError> {
-        let name = self.alloc_str(name);
+        let name_upper = name.to_uppercase();
+        let name_sym = self.intern(name);
         self.advance(); // consume function name
         self.expect_token(Token::LParen)?;
 
         // Check for aggregate functions with DISTINCT
         let is_aggregate = matches!(
-            name.to_uppercase().as_str(),
+            name_upper.as_str(),
             "COUNT" | "SUM" | "AVG" | "MIN" | "MAX"
         );
 
@@ -819,11 +824,11 @@ impl<'arena> ArenaParser<'arena> {
 
             // Check for OVER clause (window function)
             if self.peek_keyword(Keyword::Over) {
-                return self.parse_window_function(name, args);
+                return self.parse_window_function(name_sym, args);
             }
 
             return Ok(Expression::AggregateFunction {
-                name,
+                name: name_sym,
                 distinct,
                 args,
             });
@@ -840,11 +845,11 @@ impl<'arena> ArenaParser<'arena> {
 
         // Check for OVER clause
         if self.peek_keyword(Keyword::Over) {
-            return self.parse_window_function(name, args);
+            return self.parse_window_function(name_sym, args);
         }
 
         Ok(Expression::Function {
-            name,
+            name: name_sym,
             args,
             character_unit: None,
         })
@@ -853,7 +858,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse window function (OVER clause).
     fn parse_window_function(
         &mut self,
-        name: &'arena str,
+        name: Symbol,
         args: BumpVec<'arena, Expression<'arena>>,
     ) -> Result<Expression<'arena>, ParseError> {
         self.consume_keyword(Keyword::Over)?;

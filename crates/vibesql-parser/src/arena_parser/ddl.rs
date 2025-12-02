@@ -13,7 +13,7 @@ use vibesql_ast::arena::{
     CreateIndexStmt, CreateViewStmt, DropColumnStmt, DropConstraintStmt, DropIndexStmt,
     DropTableStmt, DropViewStmt, Expression, IndexColumn, IndexType, ModifyColumnStmt,
     OrderDirection, ReferentialAction, ReleaseSavepointStmt, RenameTableStmt, RollbackStmt,
-    RollbackToSavepointStmt, SavepointStmt, TableConstraint, TableConstraintKind,
+    RollbackToSavepointStmt, SavepointStmt, Symbol, TableConstraint, TableConstraintKind,
     TruncateCascadeOption, TruncateTableStmt,
 };
 
@@ -60,7 +60,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse ROLLBACK TO SAVEPOINT statement.
     pub(crate) fn parse_rollback_to_savepoint_statement(
         &mut self,
-    ) -> Result<RollbackToSavepointStmt<'arena>, ParseError> {
+    ) -> Result<RollbackToSavepointStmt, ParseError> {
         self.consume_keyword(Keyword::Rollback)?;
         self.consume_keyword(Keyword::To)?;
         self.consume_keyword(Keyword::Savepoint)?;
@@ -71,7 +71,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse SAVEPOINT statement.
     pub(crate) fn parse_savepoint_statement(
         &mut self,
-    ) -> Result<SavepointStmt<'arena>, ParseError> {
+    ) -> Result<SavepointStmt, ParseError> {
         self.consume_keyword(Keyword::Savepoint)?;
         let name = self.parse_arena_identifier()?;
         Ok(SavepointStmt { name })
@@ -80,7 +80,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse RELEASE SAVEPOINT statement.
     pub(crate) fn parse_release_savepoint_statement(
         &mut self,
-    ) -> Result<ReleaseSavepointStmt<'arena>, ParseError> {
+    ) -> Result<ReleaseSavepointStmt, ParseError> {
         self.consume_keyword(Keyword::Release)?;
         self.consume_keyword(Keyword::Savepoint)?;
         let name = self.parse_arena_identifier()?;
@@ -198,7 +198,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse DROP TABLE statement.
     pub(crate) fn parse_drop_table_statement(
         &mut self,
-    ) -> Result<DropTableStmt<'arena>, ParseError> {
+    ) -> Result<DropTableStmt, ParseError> {
         self.consume_keyword(Keyword::Drop)?;
         self.consume_keyword(Keyword::Table)?;
 
@@ -220,7 +220,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse DROP INDEX statement.
     pub(crate) fn parse_drop_index_statement(
         &mut self,
-    ) -> Result<DropIndexStmt<'arena>, ParseError> {
+    ) -> Result<DropIndexStmt, ParseError> {
         self.consume_keyword(Keyword::Drop)?;
         self.consume_keyword(Keyword::Index)?;
 
@@ -242,7 +242,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse DROP VIEW statement.
     pub(crate) fn parse_drop_view_statement(
         &mut self,
-    ) -> Result<DropViewStmt<'arena>, ParseError> {
+    ) -> Result<DropViewStmt, ParseError> {
         self.consume_keyword(Keyword::Drop)?;
         self.consume_keyword(Keyword::View)?;
 
@@ -398,12 +398,12 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse a table name (identifier).
-    fn parse_table_name(&mut self) -> Result<&'arena str, ParseError> {
+    fn parse_table_name(&mut self) -> Result<Symbol, ParseError> {
         match self.peek() {
             Token::Identifier(name) => {
-                let name = self.alloc_str(name);
+                let name = name.clone();
                 self.advance();
-                Ok(name)
+                Ok(self.intern(&name))
             }
             _ => Err(ParseError {
                 message: format!("Expected table name, found {:?}", self.peek()),
@@ -412,12 +412,12 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse a column name (identifier).
-    fn parse_column_name(&mut self) -> Result<&'arena str, ParseError> {
+    fn parse_column_name(&mut self) -> Result<Symbol, ParseError> {
         match self.peek() {
             Token::Identifier(name) => {
-                let name = self.alloc_str(name);
+                let name = name.clone();
                 self.advance();
-                Ok(name)
+                Ok(self.intern(&name))
             }
             _ => Err(ParseError {
                 message: format!("Expected column name, found {:?}", self.peek()),
@@ -428,7 +428,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse ADD COLUMN operation.
     fn parse_add_column(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         let column_name = self.parse_column_name()?;
         let data_type = self.parse_data_type()?;
@@ -504,7 +504,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse DROP COLUMN operation.
     fn parse_drop_column(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         let if_exists =
             self.try_consume_keyword(Keyword::If) && self.try_consume_keyword(Keyword::Exists);
@@ -517,7 +517,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse ALTER COLUMN operation.
     fn parse_alter_column(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         let column_name = self.parse_column_name()?;
 
@@ -579,7 +579,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse ADD CONSTRAINT operation.
     fn parse_add_constraint(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         let constraint = self.parse_table_constraint()?;
         Ok(AlterTableStmt::AddConstraint(AddConstraintStmt { table_name, constraint }))
@@ -588,7 +588,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse DROP CONSTRAINT operation.
     fn parse_drop_constraint(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         let constraint_name = self.parse_column_name()?;
         Ok(AlterTableStmt::DropConstraint(DropConstraintStmt { table_name, constraint_name }))
@@ -597,7 +597,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse RENAME TO operation.
     fn parse_rename_table(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         self.expect_keyword(Keyword::To)?;
         let new_table_name = self.parse_table_name()?;
@@ -607,7 +607,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse MODIFY COLUMN operation (MySQL-style).
     fn parse_modify_column(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         // MODIFY [COLUMN] column_name new_definition
         if self.peek_keyword(Keyword::Column) {
@@ -649,7 +649,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse CHANGE COLUMN operation (MySQL-style - rename and modify).
     fn parse_change_column(
         &mut self,
-        table_name: &'arena str,
+        table_name: Symbol,
     ) -> Result<AlterTableStmt<'arena>, ParseError> {
         // CHANGE [COLUMN] old_column_name new_column_name new_definition
         if self.peek_keyword(Keyword::Column) {
@@ -808,7 +808,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse index column list for constraints.
     fn parse_index_column_list(
         &mut self,
-    ) -> Result<BumpVec<'arena, IndexColumn<'arena>>, ParseError> {
+    ) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
 
         loop {
@@ -850,7 +850,7 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse column name list.
-    fn parse_column_name_list(&mut self) -> Result<BumpVec<'arena, &'arena str>, ParseError> {
+    fn parse_column_name_list(&mut self) -> Result<BumpVec<'arena, Symbol>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
 
         loop {
@@ -949,7 +949,7 @@ impl<'arena> ArenaParser<'arena> {
     /// Parse index column specifications.
     fn parse_index_columns(
         &mut self,
-    ) -> Result<BumpVec<'arena, IndexColumn<'arena>>, ParseError> {
+    ) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
         loop {
             let column_name = self.parse_arena_identifier()?;
