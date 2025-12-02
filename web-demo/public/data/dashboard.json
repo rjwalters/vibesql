@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-12-01T12:39:49.083038Z",
+  "generated_at": "2025-12-01T19:21:21.991507Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -12,7 +12,7 @@
     "tpch": {
       "queries_passing": 22,
       "queries_total": 22,
-      "geo_mean_ms": 32.39,
+      "geo_mean_ms": 41.35,
       "trend_7d_pct": null
     }
   },
@@ -21,21 +21,29 @@
       "description": "TPC-H Decision Support - 22 analytical queries",
       "scale_factor": 0.01,
       "latest_run": {
-        "timestamp": "2025-12-01T10:06:07.771860",
-        "commit": "213b8fcd",
+        "timestamp": "2025-12-01T18:09:40.406277",
+        "commit": "b01adfc8",
         "branch": "main"
       },
       "queries_passing": 22,
       "queries_total": 22,
-      "geo_mean_ms": 32.39,
+      "geo_mean_ms": 41.35,
       "queries": {
         "Q1": {
           "latest": {
-            "vibesql_ms": 12.02,
+            "vibesql_ms": 34.57,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 34.57
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 19.6
+            },
             {
               "date": "2025-12-01",
               "ms": 12.02
@@ -106,20 +114,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 67.77,
-            "avg_30d_ms": 258.2,
+            "avg_7d_ms": 16.41,
+            "avg_30d_ms": 233.87,
             "best_ms": 9.14,
-            "trend": "improving",
-            "trend_pct": -13.65
+            "trend": "regressing",
+            "trend_pct": 76.38
           }
         },
         "Q10": {
           "latest": {
-            "vibesql_ms": 82.97,
+            "vibesql_ms": 92.81,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 92.81
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 98.44
+            },
             {
               "date": "2025-12-01",
               "ms": 82.97
@@ -190,20 +206,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 131.19,
-            "avg_30d_ms": 271.56,
+            "avg_7d_ms": 91.2,
+            "avg_30d_ms": 253.04,
             "best_ms": 82.54,
-            "trend": "improving",
-            "trend_pct": -17.06
+            "trend": "stable",
+            "trend_pct": -5.72
           }
         },
         "Q11": {
           "latest": {
-            "vibesql_ms": 13.05,
+            "vibesql_ms": 15.59,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 15.59
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 33.53
+            },
             {
               "date": "2025-12-01",
               "ms": 13.05
@@ -274,20 +298,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 14.13,
-            "avg_30d_ms": 12.49,
+            "avg_7d_ms": 17.77,
+            "avg_30d_ms": 13.76,
             "best_ms": 9.81,
             "trend": "improving",
-            "trend_pct": -31.57
+            "trend_pct": -53.5
           }
         },
         "Q12": {
           "latest": {
-            "vibesql_ms": 86.09,
+            "vibesql_ms": 93.11,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 93.11
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 196.82
+            },
             {
               "date": "2025-12-01",
               "ms": 86.09
@@ -358,20 +390,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 120.94,
-            "avg_30d_ms": 218.69,
+            "avg_7d_ms": 106.79,
+            "avg_30d_ms": 210.93,
             "best_ms": 86.09,
             "trend": "improving",
-            "trend_pct": -12.05
+            "trend_pct": -52.69
           }
         },
         "Q13": {
           "latest": {
-            "vibesql_ms": 44.39,
+            "vibesql_ms": 50.36,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 50.36
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 137.02
+            },
             {
               "date": "2025-12-01",
               "ms": 44.39
@@ -442,20 +482,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 48.75,
-            "avg_30d_ms": 50.34,
+            "avg_7d_ms": 62.62,
+            "avg_30d_ms": 54.91,
             "best_ms": 42.27,
             "trend": "improving",
-            "trend_pct": -25.92
+            "trend_pct": -63.25
           }
         },
         "Q14": {
           "latest": {
-            "vibesql_ms": 37.4,
+            "vibesql_ms": 43.65,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 43.65
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 63.52
+            },
             {
               "date": "2025-12-01",
               "ms": 37.4
@@ -522,20 +570,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 37.09,
-            "avg_30d_ms": 24.14,
+            "avg_7d_ms": 44.78,
+            "avg_30d_ms": 27.42,
             "best_ms": 12.36,
             "trend": "improving",
-            "trend_pct": -17.58
+            "trend_pct": -31.28
           }
         },
         "Q15": {
           "latest": {
-            "vibesql_ms": 2.93,
+            "vibesql_ms": 11.34,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 11.34
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 6.91
+            },
             {
               "date": "2025-12-01",
               "ms": 2.93
@@ -606,20 +662,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 7.29,
-            "avg_30d_ms": 21.4,
+            "avg_7d_ms": 5.06,
+            "avg_30d_ms": 20.11,
             "best_ms": 2.77,
-            "trend": "improving",
-            "trend_pct": -21.66
+            "trend": "regressing",
+            "trend_pct": 64.11
           }
         },
         "Q16": {
           "latest": {
-            "vibesql_ms": 47.54,
+            "vibesql_ms": 49.22,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 49.22
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 76.48
+            },
             {
               "date": "2025-12-01",
               "ms": 47.54
@@ -690,20 +754,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 49.76,
-            "avg_30d_ms": 36.43,
+            "avg_7d_ms": 55.89,
+            "avg_30d_ms": 39.21,
             "best_ms": 20.93,
             "trend": "improving",
-            "trend_pct": -16.7
+            "trend_pct": -35.64
           }
         },
         "Q17": {
           "latest": {
-            "vibesql_ms": 24.77,
+            "vibesql_ms": 27.13,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 27.13
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 32.6
+            },
             {
               "date": "2025-12-01",
               "ms": 24.77
@@ -774,20 +846,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 26.51,
-            "avg_30d_ms": 24.06,
+            "avg_7d_ms": 28.25,
+            "avg_30d_ms": 24.68,
             "best_ms": 19.53,
             "trend": "improving",
-            "trend_pct": -20.28
+            "trend_pct": -16.78
           }
         },
         "Q18": {
           "latest": {
-            "vibesql_ms": 129.3,
+            "vibesql_ms": 144.98,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 144.98
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 157.55
+            },
             {
               "date": "2025-12-01",
               "ms": 129.3
@@ -858,20 +938,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 138.25,
-            "avg_30d_ms": 129.34,
+            "avg_7d_ms": 145.86,
+            "avg_30d_ms": 131.65,
             "best_ms": 102.77,
-            "trend": "improving",
-            "trend_pct": -20.17
+            "trend": "stable",
+            "trend_pct": -7.98
           }
         },
         "Q19": {
           "latest": {
-            "vibesql_ms": 338.94,
+            "vibesql_ms": 354.49,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 354.49
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 470.27
+            },
             {
               "date": "2025-12-01",
               "ms": 338.94
@@ -942,20 +1030,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 350.17,
-            "avg_30d_ms": 359.84,
+            "avg_7d_ms": 370.25,
+            "avg_30d_ms": 365.37,
             "best_ms": 338.22,
-            "trend": "stable",
-            "trend_pct": -6.25
+            "trend": "improving",
+            "trend_pct": -24.62
           }
         },
         "Q2": {
           "latest": {
-            "vibesql_ms": 9.66,
+            "vibesql_ms": 15.62,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 15.62
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 15.4
+            },
             {
               "date": "2025-12-01",
               "ms": 9.66
@@ -1026,20 +1122,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 11.4,
-            "avg_30d_ms": 15.97,
+            "avg_7d_ms": 12.16,
+            "avg_30d_ms": 15.92,
             "best_ms": 9.49,
-            "trend": "improving",
-            "trend_pct": -23.39
+            "trend": "stable",
+            "trend_pct": 1.43
           }
         },
         "Q20": {
           "latest": {
-            "vibesql_ms": 39.78,
+            "vibesql_ms": 42.03,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 42.03
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 74.53
+            },
             {
               "date": "2025-12-01",
               "ms": 39.78
@@ -1110,20 +1214,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 38.7,
-            "avg_30d_ms": 30.34,
+            "avg_7d_ms": 46.21,
+            "avg_30d_ms": 33.29,
             "best_ms": 3.31,
-            "trend": "stable",
-            "trend_pct": -4.9
+            "trend": "improving",
+            "trend_pct": -43.61
           }
         },
         "Q21": {
           "latest": {
-            "vibesql_ms": 47.83,
+            "vibesql_ms": 47.62,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 47.62
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 163.13
+            },
             {
               "date": "2025-12-01",
               "ms": 47.83
@@ -1194,20 +1306,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 57.83,
-            "avg_30d_ms": 94.03,
+            "avg_7d_ms": 65.09,
+            "avg_30d_ms": 95.23,
             "best_ms": 43.84,
             "trend": "improving",
-            "trend_pct": -12.69
+            "trend_pct": -70.81
           }
         },
         "Q22": {
           "latest": {
-            "vibesql_ms": 5.11,
+            "vibesql_ms": 8.83,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 8.83
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 24.38
+            },
             {
               "date": "2025-12-01",
               "ms": 5.11
@@ -1278,20 +1398,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 5.79,
-            "avg_30d_ms": 5.97,
+            "avg_7d_ms": 9.11,
+            "avg_30d_ms": 7.09,
             "best_ms": 4.71,
             "trend": "improving",
-            "trend_pct": -28.23
+            "trend_pct": -63.78
           }
         },
         "Q3": {
           "latest": {
-            "vibesql_ms": 83.5,
+            "vibesql_ms": 96.64,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 96.64
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 94.27
+            },
             {
               "date": "2025-12-01",
               "ms": 83.5
@@ -1362,20 +1490,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 140.14,
-            "avg_30d_ms": 289.52,
+            "avg_7d_ms": 96.25,
+            "avg_30d_ms": 269.1,
             "best_ms": 83.5,
-            "trend": "improving",
-            "trend_pct": -13.17
+            "trend": "stable",
+            "trend_pct": 2.51
           }
         },
         "Q4": {
           "latest": {
-            "vibesql_ms": 23.85,
+            "vibesql_ms": 27.43,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 27.43
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 26.46
+            },
             {
               "date": "2025-12-01",
               "ms": 23.85
@@ -1446,20 +1582,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 24.72,
-            "avg_30d_ms": 21.35,
+            "avg_7d_ms": 26.49,
+            "avg_30d_ms": 21.94,
             "best_ms": 15.76,
-            "trend": "improving",
-            "trend_pct": -12.77
+            "trend": "stable",
+            "trend_pct": 3.67
           }
         },
         "Q5": {
           "latest": {
-            "vibesql_ms": 31.01,
+            "vibesql_ms": 32.69,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 32.69
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 34.22
+            },
             {
               "date": "2025-12-01",
               "ms": 31.01
@@ -1530,20 +1674,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 53.99,
-            "avg_30d_ms": 79.9,
+            "avg_7d_ms": 44.94,
+            "avg_30d_ms": 75.01,
             "best_ms": 29.25,
-            "trend": "improving",
-            "trend_pct": -29.12
+            "trend": "stable",
+            "trend_pct": -4.47
           }
         },
         "Q6": {
           "latest": {
-            "vibesql_ms": 0.91,
+            "vibesql_ms": 1.03,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 1.03
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 1.02
+            },
             {
               "date": "2025-12-01",
               "ms": 0.91
@@ -1614,20 +1766,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 8.43,
-            "avg_30d_ms": 39.08,
+            "avg_7d_ms": 0.98,
+            "avg_30d_ms": 35.07,
             "best_ms": 0.87,
-            "trend": "improving",
-            "trend_pct": -13.33
+            "trend": "stable",
+            "trend_pct": 0.98
           }
         },
         "Q7": {
           "latest": {
-            "vibesql_ms": 303.05,
+            "vibesql_ms": 339.24,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 339.24
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 348.0
+            },
             {
               "date": "2025-12-01",
               "ms": 303.05
@@ -1698,20 +1858,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 349.08,
-            "avg_30d_ms": 411.0,
+            "avg_7d_ms": 334.88,
+            "avg_30d_ms": 403.9,
             "best_ms": 302.11,
-            "trend": "improving",
-            "trend_pct": -14.26
+            "trend": "stable",
+            "trend_pct": -2.52
           }
         },
         "Q8": {
           "latest": {
-            "vibesql_ms": 21.54,
+            "vibesql_ms": 30.12,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 30.12
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 37.51
+            },
             {
               "date": "2025-12-01",
               "ms": 21.54
@@ -1782,20 +1950,28 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 37.89,
-            "avg_30d_ms": 78.19,
+            "avg_7d_ms": 28.92,
+            "avg_30d_ms": 73.52,
             "best_ms": 21.54,
             "trend": "improving",
-            "trend_pct": -39.31
+            "trend_pct": -19.7
           }
         },
         "Q9": {
           "latest": {
-            "vibesql_ms": 175.07,
+            "vibesql_ms": 182.5,
             "status": "passed",
-            "timestamp": "2025-12-01T10:06:07.771860"
+            "timestamp": "2025-12-01T18:09:40.406277"
           },
           "history": [
+            {
+              "date": "2025-12-01",
+              "ms": 182.5
+            },
+            {
+              "date": "2025-12-01",
+              "ms": 169.65
+            },
             {
               "date": "2025-12-01",
               "ms": 175.07
@@ -1866,11 +2042,11 @@
             }
           ],
           "stats": {
-            "avg_7d_ms": 176.05,
-            "avg_30d_ms": 183.39,
+            "avg_7d_ms": 178.93,
+            "avg_30d_ms": 182.62,
             "best_ms": 137.83,
             "trend": "stable",
-            "trend_pct": -1.51
+            "trend_pct": 7.57
           }
         }
       }
@@ -1879,48 +2055,48 @@
       "description": "TPC-DS Decision Support - 99 complex queries",
       "queries_passing": 9,
       "queries_total": 9,
-      "geo_mean_ms": 1.85,
+      "geo_mean_ms": 3.21,
       "queries": {
         "Q1": {
           "latest": {
-            "vibesql_ms": 5.53,
+            "vibesql_ms": 18.67,
             "status": "passed",
-            "timestamp": "2025-12-01T10:29:19.929821"
+            "timestamp": "2025-12-01T18:58:02.084063"
           }
         },
         "Q2": {
           "latest": {
             "vibesql_ms": 150.81,
             "status": "passed",
-            "timestamp": "2025-12-01T10:29:19.929821"
+            "timestamp": "2025-12-01T18:58:02.084063"
           }
         },
         "Q3": {
           "latest": {
-            "vibesql_ms": 12.99,
+            "vibesql_ms": 50.41,
             "status": "passed",
-            "timestamp": "2025-12-01T10:29:19.929821"
+            "timestamp": "2025-12-01T18:58:02.084063"
           }
         },
         "sanity_date": {
           "latest": {
-            "vibesql_ms": 0.03,
+            "vibesql_ms": 0.04,
             "status": "passed",
-            "timestamp": "2025-12-01T10:29:19.929821"
+            "timestamp": "2025-12-01T18:58:02.084063"
           }
         },
         "sanity_join": {
           "latest": {
-            "vibesql_ms": 73.66,
+            "vibesql_ms": 119.5,
             "status": "passed",
-            "timestamp": "2025-12-01T10:29:19.929821"
+            "timestamp": "2025-12-01T18:58:02.084063"
           }
         },
         "sanity_sales": {
           "latest": {
-            "vibesql_ms": 0.07,
+            "vibesql_ms": 0.17,
             "status": "passed",
-            "timestamp": "2025-12-01T10:29:19.929821"
+            "timestamp": "2025-12-01T18:58:02.084063"
           }
         }
       }
@@ -1929,22 +2105,26 @@
       "description": "TPC-C OLTP - Mixed read/write transactions",
       "scale_factor": 1,
       "latest": {
-        "timestamp": "2025-12-01T10:11:28.930539",
-        "commit": "c60c93e0",
-        "vibesql_tps": 66.7,
+        "timestamp": "2025-12-01T18:31:18.337499",
+        "commit": "b01adfc8",
+        "vibesql_tps": 57.23,
         "transactions": {
           "mixed": {
             "vibesql": {
-              "tps": 66.7,
-              "latency_us": 22129.0
+              "tps": 57.23,
+              "latency_us": 26744.3
             },
             "sqlite": {
-              "tps": 3383.96,
-              "latency_us": 1383.57
+              "tps": 1862.93,
+              "latency_us": 2565.6
             },
             "duckdb": {
-              "tps": 391.5,
-              "latency_us": 2249.53
+              "tps": 308.42,
+              "latency_us": 3272.49
+            },
+            "mysql": {
+              "tps": 15893587.17,
+              "latency_us": null
             }
           }
         }
@@ -1954,8 +2134,8 @@
     "sysbench": {
       "description": "Sysbench OLTP - Point operations",
       "latest": {
-        "timestamp": "2025-12-01T10:46:27.546197",
-        "commit": "6f0d48fb"
+        "timestamp": "2025-12-01T19:19:29.513509",
+        "commit": "15da6ee3"
       },
       "tests": {
         "point_select_10000": {
@@ -1963,20 +2143,20 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 7.13,
-              "std_dev_us": 0.07
+              "mean_us": 6.01,
+              "std_dev_us": 0.01
             },
             "vibesql_direct": {
-              "mean_us": 0.18,
+              "mean_us": 0.16,
               "std_dev_us": 0.0
             },
             "sqlite": {
-              "mean_us": 0.44,
+              "mean_us": 0.39,
               "std_dev_us": 0.0
             },
             "duckdb": {
-              "mean_us": 271.54,
-              "std_dev_us": 5.18
+              "mean_us": 148.87,
+              "std_dev_us": 0.29
             }
           }
         },
@@ -1985,16 +2165,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 3.11,
-              "std_dev_us": 0.04
+              "mean_us": 2.63,
+              "std_dev_us": 0.01
             },
             "sqlite": {
-              "mean_us": 4.23,
-              "std_dev_us": 0.14
+              "mean_us": 3.67,
+              "std_dev_us": 0.12
             },
             "duckdb": {
-              "mean_us": 409.98,
-              "std_dev_us": 46.27
+              "mean_us": 335.25,
+              "std_dev_us": 8.87
             }
           }
         },
@@ -2003,16 +2183,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 6776.7,
-              "std_dev_us": 30.85
+              "mean_us": 7010.2,
+              "std_dev_us": 41.15
             },
             "sqlite": {
-              "mean_us": 76.47,
-              "std_dev_us": 0.86
+              "mean_us": 77.9,
+              "std_dev_us": 1.4
             },
             "duckdb": {
-              "mean_us": 1307.2,
-              "std_dev_us": 14.95
+              "mean_us": 1437.4,
+              "std_dev_us": 48.65
             }
           }
         },
@@ -2021,16 +2201,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 0.78,
+              "mean_us": 0.87,
               "std_dev_us": 0.0
             },
             "sqlite": {
-              "mean_us": 1.66,
-              "std_dev_us": 0.07
+              "mean_us": 1.73,
+              "std_dev_us": 0.01
             },
             "duckdb": {
-              "mean_us": 276.54,
-              "std_dev_us": 7.92
+              "mean_us": 555.56,
+              "std_dev_us": 58.94
             }
           }
         },
@@ -2039,16 +2219,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 2.03,
-              "std_dev_us": 0.0
+              "mean_us": 2.59,
+              "std_dev_us": 0.04
             },
             "sqlite": {
-              "mean_us": 1.31,
+              "mean_us": 1.42,
               "std_dev_us": 0.0
             },
             "duckdb": {
-              "mean_us": 185.92,
-              "std_dev_us": 1.47
+              "mean_us": 239.41,
+              "std_dev_us": 2.87
             }
           }
         },
@@ -2057,16 +2237,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 5158.7,
-              "std_dev_us": 5.88
+              "mean_us": 6052.7,
+              "std_dev_us": 29.93
             },
             "sqlite": {
-              "mean_us": 5.02,
-              "std_dev_us": 0.03
+              "mean_us": 5.84,
+              "std_dev_us": 0.02
             },
             "duckdb": {
-              "mean_us": 1222.9,
-              "std_dev_us": 13.72
+              "mean_us": 2603.2,
+              "std_dev_us": 775.48
             }
           }
         },
@@ -2075,16 +2255,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 58.61,
-              "std_dev_us": 1.21
+              "mean_us": 58.95,
+              "std_dev_us": 0.12
             },
             "sqlite": {
-              "mean_us": 4.77,
-              "std_dev_us": 0.06
+              "mean_us": 5.08,
+              "std_dev_us": 0.01
             },
             "duckdb": {
-              "mean_us": 1897.3,
-              "std_dev_us": 12.82
+              "mean_us": 1986.0,
+              "std_dev_us": 17.82
             }
           }
         },
@@ -2093,16 +2273,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 1657.3,
-              "std_dev_us": 3.6
+              "mean_us": 1782.5,
+              "std_dev_us": 3.85
             },
             "sqlite": {
-              "mean_us": 38.53,
-              "std_dev_us": 0.08
+              "mean_us": 38.88,
+              "std_dev_us": 0.1
             },
             "duckdb": {
-              "mean_us": 2778.4,
-              "std_dev_us": 9.82
+              "mean_us": 2938.2,
+              "std_dev_us": 14.12
             }
           }
         },
@@ -2111,16 +2291,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 54.28,
-              "std_dev_us": 0.21
+              "mean_us": 56.65,
+              "std_dev_us": 0.38
             },
             "sqlite": {
-              "mean_us": 3.37,
+              "mean_us": 3.68,
               "std_dev_us": 0.01
             },
             "duckdb": {
-              "mean_us": 1350.3,
-              "std_dev_us": 6.83
+              "mean_us": 1453.4,
+              "std_dev_us": 6.15
             }
           }
         },
@@ -2129,16 +2309,16 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 512.06,
-              "std_dev_us": 1.87
+              "mean_us": 506.24,
+              "std_dev_us": 1.19
             },
             "sqlite": {
-              "mean_us": 3.49,
-              "std_dev_us": 0.01
+              "mean_us": 3.7,
+              "std_dev_us": 0.02
             },
             "duckdb": {
-              "mean_us": 189.89,
-              "std_dev_us": 0.5
+              "mean_us": 198.88,
+              "std_dev_us": 1.05
             }
           }
         }
@@ -2215,11 +2395,11 @@
   "timeline": [
     {
       "date": "2025-12-01",
-      "commit": "6f0d48fb",
+      "commit": "15da6ee3",
       "conformance_pass_rate": 100.0,
-      "tpch_geo_mean_ms": 32.39,
+      "tpch_geo_mean_ms": 41.35,
       "tpch_passing": 22,
-      "tpcc_tps": 66.7,
+      "tpcc_tps": 57.23,
       "events": []
     }
   ]
