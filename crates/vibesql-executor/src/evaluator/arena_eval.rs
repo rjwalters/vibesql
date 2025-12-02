@@ -17,7 +17,7 @@
 //! let result = evaluator.eval(expr, row)?;
 //! ```
 
-use vibesql_ast::arena::Expression;
+use vibesql_ast::arena::{Expression, ExtendedExpr};
 use vibesql_ast::BinaryOperator;
 use vibesql_catalog::TableSchema;
 use vibesql_storage::{Database, Row};
@@ -95,6 +95,8 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
         row: &Row,
     ) -> Result<SqlValue, ExecutorError> {
         match expr {
+            // === Inline variants (hot path) ===
+
             // Literals - just return the value
             Expression::Literal(val) => Ok(val.clone()),
 
@@ -194,8 +196,46 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
                 Ok(SqlValue::Boolean(result))
             }
 
+            // Wildcard not supported in expressions
+            Expression::Wildcard => Err(ExecutorError::UnsupportedExpression(
+                "Wildcard (*) not supported in expressions".to_string(),
+            )),
+
+            // Current date/time
+            Expression::CurrentDate => {
+                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+                super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &sql_mode)
+            }
+
+            Expression::CurrentTime { .. } => {
+                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+                super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &sql_mode)
+            }
+
+            Expression::CurrentTimestamp { .. } => {
+                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+                super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &sql_mode)
+            }
+
+            // DEFAULT keyword
+            Expression::Default => Err(ExecutorError::UnsupportedExpression(
+                "DEFAULT keyword is only valid in INSERT VALUES and UPDATE SET clauses".to_string(),
+            )),
+
+            // === Extended variants (cold path) ===
+            Expression::Extended(ext) => self.eval_extended(ext, row),
+        }
+    }
+
+    /// Evaluate extended expression variants.
+    fn eval_extended<'arena>(
+        &self,
+        ext: &ExtendedExpr<'arena>,
+        row: &Row,
+    ) -> Result<SqlValue, ExecutorError> {
+        match ext {
             // IN list
-            Expression::InList {
+            ExtendedExpr::InList {
                 expr: inner,
                 values,
                 negated,
@@ -215,7 +255,7 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
             }
 
             // BETWEEN predicate
-            Expression::Between {
+            ExtendedExpr::Between {
                 expr: inner,
                 low,
                 high,
@@ -237,7 +277,7 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
             }
 
             // LIKE pattern matching
-            Expression::Like {
+            ExtendedExpr::Like {
                 expr: inner,
                 pattern,
                 negated,
@@ -262,30 +302,14 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
             }
 
             // CAST expression
-            Expression::Cast { expr: inner, data_type } => {
+            ExtendedExpr::Cast { expr: inner, data_type } => {
                 let val = self.with_depth().eval(inner, row)?;
                 let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
                 super::casting::cast_value(&val, data_type, &sql_mode)
             }
 
-            // Current date/time
-            Expression::CurrentDate => {
-                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &sql_mode)
-            }
-
-            Expression::CurrentTime { .. } => {
-                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &sql_mode)
-            }
-
-            Expression::CurrentTimestamp { .. } => {
-                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &sql_mode)
-            }
-
             // Function calls
-            Expression::Function { name, args, character_unit } => {
+            ExtendedExpr::Function { name, args, character_unit } => {
                 // Evaluate all arguments
                 let mut arg_values = Vec::with_capacity(args.len());
                 for arg in args.iter() {
@@ -306,59 +330,49 @@ impl<'a, 'params> ArenaExpressionEvaluator<'a, 'params> {
             }
 
             // CASE expression
-            Expression::Case {
+            ExtendedExpr::Case {
                 operand,
                 when_clauses,
                 else_result,
             } => self.eval_case(operand, when_clauses, else_result, row),
 
-            // Wildcard not supported in expressions
-            Expression::Wildcard => Err(ExecutorError::UnsupportedExpression(
-                "Wildcard (*) not supported in expressions".to_string(),
-            )),
-
-            // DEFAULT keyword
-            Expression::Default => Err(ExecutorError::UnsupportedExpression(
-                "DEFAULT keyword is only valid in INSERT VALUES and UPDATE SET clauses".to_string(),
-            )),
-
             // Aggregate functions need special handling
-            Expression::AggregateFunction { .. } => Err(ExecutorError::UnsupportedExpression(
+            ExtendedExpr::AggregateFunction { .. } => Err(ExecutorError::UnsupportedExpression(
                 "Aggregate functions should be evaluated in aggregation context".to_string(),
             )),
 
             // Window functions need special handling
-            Expression::WindowFunction { .. } => Err(ExecutorError::UnsupportedExpression(
+            ExtendedExpr::WindowFunction { .. } => Err(ExecutorError::UnsupportedExpression(
                 "Window functions should be evaluated separately".to_string(),
             )),
 
             // Subqueries - need full executor context
-            Expression::ScalarSubquery(_) => Err(ExecutorError::UnsupportedExpression(
+            ExtendedExpr::ScalarSubquery(_) => Err(ExecutorError::UnsupportedExpression(
                 "Scalar subqueries not yet supported in arena evaluation".to_string(),
             )),
 
-            Expression::In { .. } => Err(ExecutorError::UnsupportedExpression(
+            ExtendedExpr::In { .. } => Err(ExecutorError::UnsupportedExpression(
                 "IN subqueries not yet supported in arena evaluation".to_string(),
             )),
 
-            Expression::Exists { .. } => Err(ExecutorError::UnsupportedExpression(
+            ExtendedExpr::Exists { .. } => Err(ExecutorError::UnsupportedExpression(
                 "EXISTS subqueries not yet supported in arena evaluation".to_string(),
             )),
 
-            Expression::QuantifiedComparison { .. } => Err(ExecutorError::UnsupportedExpression(
+            ExtendedExpr::QuantifiedComparison { .. } => Err(ExecutorError::UnsupportedExpression(
                 "Quantified comparisons not yet supported in arena evaluation".to_string(),
             )),
 
             // Other unsupported expressions
-            Expression::Position { .. }
-            | Expression::Trim { .. }
-            | Expression::Extract { .. }
-            | Expression::Interval { .. }
-            | Expression::DuplicateKeyValue { .. }
-            | Expression::NextValue { .. }
-            | Expression::MatchAgainst { .. }
-            | Expression::PseudoVariable { .. }
-            | Expression::SessionVariable { .. } => Err(ExecutorError::UnsupportedExpression(
+            ExtendedExpr::Position { .. }
+            | ExtendedExpr::Trim { .. }
+            | ExtendedExpr::Extract { .. }
+            | ExtendedExpr::Interval { .. }
+            | ExtendedExpr::DuplicateKeyValue { .. }
+            | ExtendedExpr::NextValue { .. }
+            | ExtendedExpr::MatchAgainst { .. }
+            | ExtendedExpr::PseudoVariable { .. }
+            | ExtendedExpr::SessionVariable { .. } => Err(ExecutorError::UnsupportedExpression(
                 "Expression type not yet supported in arena evaluation".to_string(),
             )),
         }
@@ -633,6 +647,8 @@ mod tests {
 
     #[test]
     fn test_in_list_with_placeholders() {
+        use vibesql_ast::arena::ExtendedExpr;
+
         let schema = create_test_schema();
         let params = vec![
             SqlValue::Integer(1),
@@ -656,11 +672,12 @@ mod tests {
         values.push(Expression::Placeholder(1));
         values.push(Expression::Placeholder(2));
 
-        let expr = Expression::InList {
+        let ext = arena.alloc(ExtendedExpr::InList {
             expr: col_ref,
             values,
             negated: false,
-        };
+        });
+        let expr = Expression::Extended(ext);
 
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Boolean(true));

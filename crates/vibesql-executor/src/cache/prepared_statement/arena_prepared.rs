@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use std::pin::Pin;
 
 use bumpalo::Bump;
-use vibesql_ast::arena::{Expression, SelectStmt};
+use vibesql_ast::arena::{Expression, ExtendedExpr, SelectStmt};
 use vibesql_parser::arena_parser::ArenaParser;
 use vibesql_types::SqlValue;
 
@@ -368,6 +368,7 @@ where
     visitor(expr);
 
     match expr {
+        // === Inline variants (hot path) ===
         Expression::BinaryOp { left, right, .. } => {
             visit_arena_expression(left, visitor);
             visit_arena_expression(right, visitor);
@@ -375,15 +376,38 @@ where
         Expression::UnaryOp { expr: inner, .. } => {
             visit_arena_expression(inner, visitor);
         }
-        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+        Expression::IsNull { expr: inner, .. } => {
+            visit_arena_expression(inner, visitor);
+        }
+        // Leaf nodes - no recursion needed
+        Expression::Literal(_)
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_)
+        | Expression::ColumnRef { .. }
+        | Expression::Wildcard
+        | Expression::CurrentDate
+        | Expression::CurrentTime { .. }
+        | Expression::CurrentTimestamp { .. }
+        | Expression::Default => {}
+
+        // === Extended variants (cold path) ===
+        Expression::Extended(ext) => visit_arena_extended_expression(ext, visitor),
+    }
+}
+
+/// Visit all expressions in an extended arena expression.
+fn visit_arena_extended_expression<F>(ext: &ExtendedExpr<'_>, visitor: &mut F)
+where
+    F: FnMut(&Expression<'_>),
+{
+    match ext {
+        ExtendedExpr::Function { args, .. } | ExtendedExpr::AggregateFunction { args, .. } => {
             for arg in args.iter() {
                 visit_arena_expression(arg, visitor);
             }
         }
-        Expression::IsNull { expr: inner, .. } => {
-            visit_arena_expression(inner, visitor);
-        }
-        Expression::Case {
+        ExtendedExpr::Case {
             operand,
             when_clauses,
             else_result,
@@ -401,8 +425,8 @@ where
                 visit_arena_expression(e, visitor);
             }
         }
-        Expression::ScalarSubquery(select) => visit_arena_statement(select, visitor),
-        Expression::In {
+        ExtendedExpr::ScalarSubquery(select) => visit_arena_statement(select, visitor),
+        ExtendedExpr::In {
             expr: inner,
             subquery,
             ..
@@ -410,7 +434,7 @@ where
             visit_arena_expression(inner, visitor);
             visit_arena_statement(subquery, visitor);
         }
-        Expression::InList {
+        ExtendedExpr::InList {
             expr: inner,
             values,
             ..
@@ -420,7 +444,7 @@ where
                 visit_arena_expression(v, visitor);
             }
         }
-        Expression::Between {
+        ExtendedExpr::Between {
             expr: inner,
             low,
             high,
@@ -430,16 +454,16 @@ where
             visit_arena_expression(low, visitor);
             visit_arena_expression(high, visitor);
         }
-        Expression::Cast { expr: inner, .. } => {
+        ExtendedExpr::Cast { expr: inner, .. } => {
             visit_arena_expression(inner, visitor);
         }
-        Expression::Position {
+        ExtendedExpr::Position {
             substring, string, ..
         } => {
             visit_arena_expression(substring, visitor);
             visit_arena_expression(string, visitor);
         }
-        Expression::Trim {
+        ExtendedExpr::Trim {
             removal_char,
             string,
             ..
@@ -449,10 +473,10 @@ where
             }
             visit_arena_expression(string, visitor);
         }
-        Expression::Extract { expr: inner, .. } => {
+        ExtendedExpr::Extract { expr: inner, .. } => {
             visit_arena_expression(inner, visitor);
         }
-        Expression::Like {
+        ExtendedExpr::Like {
             expr: inner,
             pattern,
             ..
@@ -460,10 +484,10 @@ where
             visit_arena_expression(inner, visitor);
             visit_arena_expression(pattern, visitor);
         }
-        Expression::Exists { subquery, .. } => {
+        ExtendedExpr::Exists { subquery, .. } => {
             visit_arena_statement(subquery, visitor);
         }
-        Expression::QuantifiedComparison {
+        ExtendedExpr::QuantifiedComparison {
             expr: inner,
             subquery,
             ..
@@ -471,10 +495,10 @@ where
             visit_arena_expression(inner, visitor);
             visit_arena_statement(subquery, visitor);
         }
-        Expression::Interval { value, .. } => {
+        ExtendedExpr::Interval { value, .. } => {
             visit_arena_expression(value, visitor);
         }
-        Expression::WindowFunction { function, over } => {
+        ExtendedExpr::WindowFunction { function, over } => {
             match function {
                 vibesql_ast::arena::WindowFunctionSpec::Aggregate { args, .. }
                 | vibesql_ast::arena::WindowFunctionSpec::Ranking { args, .. }
@@ -495,24 +519,14 @@ where
                 }
             }
         }
-        Expression::MatchAgainst { search_modifier, .. } => {
+        ExtendedExpr::MatchAgainst { search_modifier, .. } => {
             visit_arena_expression(search_modifier, visitor);
         }
         // Leaf nodes - no recursion needed
-        Expression::Literal(_)
-        | Expression::Placeholder(_)
-        | Expression::NumberedPlaceholder(_)
-        | Expression::NamedPlaceholder(_)
-        | Expression::ColumnRef { .. }
-        | Expression::Wildcard
-        | Expression::CurrentDate
-        | Expression::CurrentTime { .. }
-        | Expression::CurrentTimestamp { .. }
-        | Expression::Default
-        | Expression::DuplicateKeyValue { .. }
-        | Expression::NextValue { .. }
-        | Expression::PseudoVariable { .. }
-        | Expression::SessionVariable { .. } => {}
+        ExtendedExpr::DuplicateKeyValue { .. }
+        | ExtendedExpr::NextValue { .. }
+        | ExtendedExpr::PseudoVariable { .. }
+        | ExtendedExpr::SessionVariable { .. } => {}
     }
 }
 

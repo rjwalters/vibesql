@@ -2,7 +2,8 @@
 
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_ast::arena::{
-    CaseWhen, Expression, OrderByItem, OrderDirection, Quantifier, WindowFunctionSpec, WindowSpec,
+    CaseWhen, Expression, ExtendedExpr, OrderByItem, OrderDirection, Quantifier,
+    WindowFunctionSpec, WindowSpec,
 };
 use vibesql_ast::{BinaryOperator, UnaryOperator};
 use vibesql_types::SqlValue;
@@ -100,20 +101,22 @@ impl<'arena> ArenaParser<'arena> {
                     let subquery = self.parse_select_statement()?;
                     self.expect_token(Token::RParen)?;
                     let left_ref = self.arena.alloc(left);
-                    return Ok(Expression::In {
+                    let ext = self.arena.alloc(ExtendedExpr::In {
                         expr: left_ref,
                         subquery,
                         negated: true,
                     });
+                    return Ok(Expression::Extended(ext));
                 } else {
                     let values = self.parse_expression_list()?;
                     self.expect_token(Token::RParen)?;
                     let left_ref = self.arena.alloc(left);
-                    return Ok(Expression::InList {
+                    let ext = self.arena.alloc(ExtendedExpr::InList {
                         expr: left_ref,
                         values,
                         negated: true,
                     });
+                    return Ok(Expression::Extended(ext));
                 }
             } else if self.peek_keyword(Keyword::Between) {
                 self.consume_keyword(Keyword::Between)?;
@@ -130,23 +133,25 @@ impl<'arena> ArenaParser<'arena> {
                 let low_ref = self.arena.alloc(low);
                 let high_ref = self.arena.alloc(high);
 
-                return Ok(Expression::Between {
+                let ext = self.arena.alloc(ExtendedExpr::Between {
                     expr: left_ref,
                     low: low_ref,
                     high: high_ref,
                     negated: true,
                     symmetric,
                 });
+                return Ok(Expression::Extended(ext));
             } else if self.peek_keyword(Keyword::Like) {
                 self.consume_keyword(Keyword::Like)?;
                 let pattern = self.parse_additive_expression()?;
                 let left_ref = self.arena.alloc(left);
                 let pattern_ref = self.arena.alloc(pattern);
-                return Ok(Expression::Like {
+                let ext = self.arena.alloc(ExtendedExpr::Like {
                     expr: left_ref,
                     pattern: pattern_ref,
                     negated: true,
                 });
+                return Ok(Expression::Extended(ext));
             } else {
                 self.position = saved_pos;
             }
@@ -158,20 +163,22 @@ impl<'arena> ArenaParser<'arena> {
                 let subquery = self.parse_select_statement()?;
                 self.expect_token(Token::RParen)?;
                 let left_ref = self.arena.alloc(left);
-                return Ok(Expression::In {
+                let ext = self.arena.alloc(ExtendedExpr::In {
                     expr: left_ref,
                     subquery,
                     negated: false,
                 });
+                return Ok(Expression::Extended(ext));
             } else {
                 let values = self.parse_expression_list()?;
                 self.expect_token(Token::RParen)?;
                 let left_ref = self.arena.alloc(left);
-                return Ok(Expression::InList {
+                let ext = self.arena.alloc(ExtendedExpr::InList {
                     expr: left_ref,
                     values,
                     negated: false,
                 });
+                return Ok(Expression::Extended(ext));
             }
         } else if self.peek_keyword(Keyword::Between) {
             self.consume_keyword(Keyword::Between)?;
@@ -188,23 +195,25 @@ impl<'arena> ArenaParser<'arena> {
             let low_ref = self.arena.alloc(low);
             let high_ref = self.arena.alloc(high);
 
-            return Ok(Expression::Between {
+            let ext = self.arena.alloc(ExtendedExpr::Between {
                 expr: left_ref,
                 low: low_ref,
                 high: high_ref,
                 negated: false,
                 symmetric,
             });
+            return Ok(Expression::Extended(ext));
         } else if self.peek_keyword(Keyword::Like) {
             self.consume_keyword(Keyword::Like)?;
             let pattern = self.parse_additive_expression()?;
             let left_ref = self.arena.alloc(left);
             let pattern_ref = self.arena.alloc(pattern);
-            return Ok(Expression::Like {
+            let ext = self.arena.alloc(ExtendedExpr::Like {
                 expr: left_ref,
                 pattern: pattern_ref,
                 negated: false,
             });
+            return Ok(Expression::Extended(ext));
         }
 
         // Check for comparison operators
@@ -260,12 +269,13 @@ impl<'arena> ArenaParser<'arena> {
                 self.expect_token(Token::RParen)?;
 
                 let left_ref = self.arena.alloc(left);
-                return Ok(Expression::QuantifiedComparison {
+                let ext = self.arena.alloc(ExtendedExpr::QuantifiedComparison {
                     expr: left_ref,
                     op,
                     quantifier,
                     subquery,
                 });
+                return Ok(Expression::Extended(ext));
             }
 
             let right = self.parse_additive_expression()?;
@@ -399,7 +409,8 @@ impl<'arena> ArenaParser<'arena> {
         if let Token::SessionVariable(name) = self.peek() {
             let name = self.alloc_str(name);
             self.advance();
-            return Ok(Expression::SessionVariable { name });
+            let ext = self.arena.alloc(ExtendedExpr::SessionVariable { name });
+            return Ok(Expression::Extended(ext));
         }
 
         // Literals
@@ -477,7 +488,8 @@ impl<'arena> ArenaParser<'arena> {
             if self.peek_keyword(Keyword::Select) {
                 let subquery = self.parse_select_statement()?;
                 self.expect_token(Token::RParen)?;
-                return Ok(Expression::ScalarSubquery(subquery));
+                let ext = self.arena.alloc(ExtendedExpr::ScalarSubquery(subquery));
+                return Ok(Expression::Extended(ext));
             }
 
             // Regular parenthesized expression
@@ -676,7 +688,8 @@ impl<'arena> ArenaParser<'arena> {
             self.expect_token(Token::LParen)?;
             let subquery = self.parse_select_statement()?;
             self.expect_token(Token::RParen)?;
-            return Ok(Some(Expression::Exists { subquery, negated }));
+            let ext = self.arena.alloc(ExtendedExpr::Exists { subquery, negated });
+            return Ok(Some(Expression::Extended(ext)));
         }
 
         Ok(None)
@@ -723,11 +736,12 @@ impl<'arena> ArenaParser<'arena> {
 
         self.consume_keyword(Keyword::End)?;
 
-        Ok(Expression::Case {
+        let ext = self.arena.alloc(ExtendedExpr::Case {
             operand,
             when_clauses,
             else_result,
-        })
+        });
+        Ok(Expression::Extended(ext))
     }
 
     /// Parse CAST expression.
@@ -743,10 +757,11 @@ impl<'arena> ArenaParser<'arena> {
 
         self.expect_token(Token::RParen)?;
 
-        Ok(Expression::Cast {
+        let ext = self.arena.alloc(ExtendedExpr::Cast {
             expr: expr_ref,
             data_type,
-        })
+        });
+        Ok(Expression::Extended(ext))
     }
 
     /// Parse current date/time functions.
@@ -816,11 +831,12 @@ impl<'arena> ArenaParser<'arena> {
                 return self.parse_window_function(name, args);
             }
 
-            return Ok(Expression::AggregateFunction {
+            let ext = self.arena.alloc(ExtendedExpr::AggregateFunction {
                 name,
                 distinct,
                 args,
             });
+            return Ok(Expression::Extended(ext));
         }
 
         // Regular function
@@ -837,11 +853,12 @@ impl<'arena> ArenaParser<'arena> {
             return self.parse_window_function(name, args);
         }
 
-        Ok(Expression::Function {
+        let ext = self.arena.alloc(ExtendedExpr::Function {
             name,
             args,
             character_unit: None,
-        })
+        });
+        Ok(Expression::Extended(ext))
     }
 
     /// Parse window function (OVER clause).
@@ -881,7 +898,8 @@ impl<'arena> ArenaParser<'arena> {
             frame,
         };
 
-        Ok(Expression::WindowFunction { function, over })
+        let ext = self.arena.alloc(ExtendedExpr::WindowFunction { function, over });
+        Ok(Expression::Extended(ext))
     }
 
     /// Parse comma-separated expression list.

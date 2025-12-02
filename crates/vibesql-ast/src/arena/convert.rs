@@ -22,6 +22,7 @@ use super::{dml as arena_dml, expression as arena_expr, select as arena_select};
 impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
     fn from(expr: &arena_expr::Expression<'arena>) -> Self {
         match expr {
+            // === Inline variants (hot path) ===
             arena_expr::Expression::Literal(v) => Expression::Literal(v.clone()),
             arena_expr::Expression::Placeholder(i) => Expression::Placeholder(*i),
             arena_expr::Expression::NumberedPlaceholder(i) => Expression::NumberedPlaceholder(*i),
@@ -41,7 +42,30 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 op: *op,
                 expr: Box::new(Expression::from(*expr)),
             },
-            arena_expr::Expression::Function {
+            arena_expr::Expression::IsNull { expr, negated } => Expression::IsNull {
+                expr: Box::new(Expression::from(*expr)),
+                negated: *negated,
+            },
+            arena_expr::Expression::Wildcard => Expression::Wildcard,
+            arena_expr::Expression::CurrentDate => Expression::CurrentDate,
+            arena_expr::Expression::CurrentTime { precision } => {
+                Expression::CurrentTime { precision: *precision }
+            }
+            arena_expr::Expression::CurrentTimestamp { precision } => {
+                Expression::CurrentTimestamp { precision: *precision }
+            }
+            arena_expr::Expression::Default => Expression::Default,
+
+            // === Extended variants (cold path) ===
+            arena_expr::Expression::Extended(ext) => Expression::from(*ext),
+        }
+    }
+}
+
+impl<'arena> From<&arena_expr::ExtendedExpr<'arena>> for Expression {
+    fn from(ext: &arena_expr::ExtendedExpr<'arena>) -> Self {
+        match ext {
+            arena_expr::ExtendedExpr::Function {
                 name,
                 args,
                 character_unit,
@@ -50,7 +74,7 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 args: args.iter().map(Expression::from).collect(),
                 character_unit: character_unit.map(|u| u.into()),
             },
-            arena_expr::Expression::AggregateFunction {
+            arena_expr::ExtendedExpr::AggregateFunction {
                 name,
                 distinct,
                 args,
@@ -59,12 +83,7 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 distinct: *distinct,
                 args: args.iter().map(Expression::from).collect(),
             },
-            arena_expr::Expression::IsNull { expr, negated } => Expression::IsNull {
-                expr: Box::new(Expression::from(*expr)),
-                negated: *negated,
-            },
-            arena_expr::Expression::Wildcard => Expression::Wildcard,
-            arena_expr::Expression::Case {
+            arena_expr::ExtendedExpr::Case {
                 operand,
                 when_clauses,
                 else_result,
@@ -73,10 +92,10 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 when_clauses: when_clauses.iter().map(CaseWhen::from).collect(),
                 else_result: else_result.map(|e| Box::new(Expression::from(e))),
             },
-            arena_expr::Expression::ScalarSubquery(subquery) => {
+            arena_expr::ExtendedExpr::ScalarSubquery(subquery) => {
                 Expression::ScalarSubquery(Box::new(SelectStmt::from(*subquery)))
             }
-            arena_expr::Expression::In {
+            arena_expr::ExtendedExpr::In {
                 expr,
                 subquery,
                 negated,
@@ -85,7 +104,7 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 subquery: Box::new(SelectStmt::from(*subquery)),
                 negated: *negated,
             },
-            arena_expr::Expression::InList {
+            arena_expr::ExtendedExpr::InList {
                 expr,
                 values,
                 negated,
@@ -94,7 +113,7 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 values: values.iter().map(Expression::from).collect(),
                 negated: *negated,
             },
-            arena_expr::Expression::Between {
+            arena_expr::ExtendedExpr::Between {
                 expr,
                 low,
                 high,
@@ -107,11 +126,11 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 negated: *negated,
                 symmetric: *symmetric,
             },
-            arena_expr::Expression::Cast { expr, data_type } => Expression::Cast {
+            arena_expr::ExtendedExpr::Cast { expr, data_type } => Expression::Cast {
                 expr: Box::new(Expression::from(*expr)),
                 data_type: data_type.clone(),
             },
-            arena_expr::Expression::Position {
+            arena_expr::ExtendedExpr::Position {
                 substring,
                 string,
                 character_unit,
@@ -120,7 +139,7 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 string: Box::new(Expression::from(*string)),
                 character_unit: character_unit.map(|u| u.into()),
             },
-            arena_expr::Expression::Trim {
+            arena_expr::ExtendedExpr::Trim {
                 position,
                 removal_char,
                 string,
@@ -129,11 +148,11 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 removal_char: removal_char.map(|e| Box::new(Expression::from(e))),
                 string: Box::new(Expression::from(*string)),
             },
-            arena_expr::Expression::Extract { field, expr } => Expression::Extract {
+            arena_expr::ExtendedExpr::Extract { field, expr } => Expression::Extract {
                 field: (*field).into(),
                 expr: Box::new(Expression::from(*expr)),
             },
-            arena_expr::Expression::Like {
+            arena_expr::ExtendedExpr::Like {
                 expr,
                 pattern,
                 negated,
@@ -142,11 +161,11 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 pattern: Box::new(Expression::from(*pattern)),
                 negated: *negated,
             },
-            arena_expr::Expression::Exists { subquery, negated } => Expression::Exists {
+            arena_expr::ExtendedExpr::Exists { subquery, negated } => Expression::Exists {
                 subquery: Box::new(SelectStmt::from(*subquery)),
                 negated: *negated,
             },
-            arena_expr::Expression::QuantifiedComparison {
+            arena_expr::ExtendedExpr::QuantifiedComparison {
                 expr,
                 op,
                 quantifier,
@@ -157,14 +176,7 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 quantifier: (*quantifier).into(),
                 subquery: Box::new(SelectStmt::from(*subquery)),
             },
-            arena_expr::Expression::CurrentDate => Expression::CurrentDate,
-            arena_expr::Expression::CurrentTime { precision } => {
-                Expression::CurrentTime { precision: *precision }
-            }
-            arena_expr::Expression::CurrentTimestamp { precision } => {
-                Expression::CurrentTimestamp { precision: *precision }
-            }
-            arena_expr::Expression::Interval {
+            arena_expr::ExtendedExpr::Interval {
                 value,
                 unit,
                 leading_precision,
@@ -175,20 +187,19 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 leading_precision: *leading_precision,
                 fractional_precision: *fractional_precision,
             },
-            arena_expr::Expression::Default => Expression::Default,
-            arena_expr::Expression::DuplicateKeyValue { column } => Expression::DuplicateKeyValue {
+            arena_expr::ExtendedExpr::DuplicateKeyValue { column } => Expression::DuplicateKeyValue {
                 column: (*column).to_string(),
             },
-            arena_expr::Expression::WindowFunction { function, over } => {
+            arena_expr::ExtendedExpr::WindowFunction { function, over } => {
                 Expression::WindowFunction {
                     function: function.into(),
                     over: over.into(),
                 }
             }
-            arena_expr::Expression::NextValue { sequence_name } => Expression::NextValue {
+            arena_expr::ExtendedExpr::NextValue { sequence_name } => Expression::NextValue {
                 sequence_name: (*sequence_name).to_string(),
             },
-            arena_expr::Expression::MatchAgainst {
+            arena_expr::ExtendedExpr::MatchAgainst {
                 columns,
                 search_modifier,
                 mode,
@@ -197,14 +208,14 @@ impl<'arena> From<&arena_expr::Expression<'arena>> for Expression {
                 search_modifier: Box::new(Expression::from(*search_modifier)),
                 mode: (*mode).into(),
             },
-            arena_expr::Expression::PseudoVariable {
+            arena_expr::ExtendedExpr::PseudoVariable {
                 pseudo_table,
                 column,
             } => Expression::PseudoVariable {
                 pseudo_table: (*pseudo_table).into(),
                 column: (*column).to_string(),
             },
-            arena_expr::Expression::SessionVariable { name } => Expression::SessionVariable {
+            arena_expr::ExtendedExpr::SessionVariable { name } => Expression::SessionVariable {
                 name: (*name).to_string(),
             },
         }

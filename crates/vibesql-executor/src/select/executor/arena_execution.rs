@@ -28,7 +28,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use vibesql_ast::arena::{Expression as ArenaExpression, SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt};
+use vibesql_ast::arena::{Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr, SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -335,15 +335,36 @@ impl SelectExecutor<'_> {
     /// Check if an arena expression contains an aggregate function.
     fn arena_expr_has_aggregate<'arena>(&self, expr: &ArenaExpression<'arena>) -> bool {
         match expr {
-            ArenaExpression::AggregateFunction { .. } => true,
+            // Inline variants (hot path)
             ArenaExpression::BinaryOp { left, right, .. } => {
                 self.arena_expr_has_aggregate(left) || self.arena_expr_has_aggregate(right)
             }
             ArenaExpression::UnaryOp { expr, .. } => self.arena_expr_has_aggregate(expr),
-            ArenaExpression::Function { args, .. } => {
+            ArenaExpression::IsNull { expr, .. } => self.arena_expr_has_aggregate(expr),
+            ArenaExpression::Literal(_)
+            | ArenaExpression::Placeholder(_)
+            | ArenaExpression::NumberedPlaceholder(_)
+            | ArenaExpression::NamedPlaceholder(_)
+            | ArenaExpression::ColumnRef { .. }
+            | ArenaExpression::Wildcard
+            | ArenaExpression::CurrentDate
+            | ArenaExpression::CurrentTime { .. }
+            | ArenaExpression::CurrentTimestamp { .. }
+            | ArenaExpression::Default => false,
+
+            // Extended variants (cold path)
+            ArenaExpression::Extended(ext) => self.arena_extended_has_aggregate(ext),
+        }
+    }
+
+    /// Check if an extended arena expression contains an aggregate function.
+    fn arena_extended_has_aggregate<'arena>(&self, ext: &ArenaExtendedExpr<'arena>) -> bool {
+        match ext {
+            ArenaExtendedExpr::AggregateFunction { .. } => true,
+            ArenaExtendedExpr::Function { args, .. } => {
                 args.iter().any(|a| self.arena_expr_has_aggregate(a))
             }
-            ArenaExpression::Case { operand, when_clauses, else_result, .. } => {
+            ArenaExtendedExpr::Case { operand, when_clauses, else_result, .. } => {
                 operand.as_ref().is_some_and(|o| self.arena_expr_has_aggregate(o))
                     || when_clauses.iter().any(|w| {
                         w.conditions.iter().any(|c| self.arena_expr_has_aggregate(c))
@@ -351,18 +372,33 @@ impl SelectExecutor<'_> {
                     })
                     || else_result.as_ref().is_some_and(|e| self.arena_expr_has_aggregate(e))
             }
-            ArenaExpression::IsNull { expr, .. } => self.arena_expr_has_aggregate(expr),
-            ArenaExpression::Between { expr, low, high, .. } => {
+            ArenaExtendedExpr::Between { expr, low, high, .. } => {
                 self.arena_expr_has_aggregate(expr)
                     || self.arena_expr_has_aggregate(low)
                     || self.arena_expr_has_aggregate(high)
             }
-            ArenaExpression::InList { expr, values, .. } => {
+            ArenaExtendedExpr::InList { expr, values, .. } => {
                 self.arena_expr_has_aggregate(expr)
                     || values.iter().any(|v| self.arena_expr_has_aggregate(v))
             }
-            ArenaExpression::Cast { expr, .. } => self.arena_expr_has_aggregate(expr),
-            _ => false,
+            ArenaExtendedExpr::Cast { expr, .. } => self.arena_expr_has_aggregate(expr),
+            ArenaExtendedExpr::Like { expr, pattern, .. } => {
+                self.arena_expr_has_aggregate(expr) || self.arena_expr_has_aggregate(pattern)
+            }
+            ArenaExtendedExpr::WindowFunction { .. }
+            | ArenaExtendedExpr::ScalarSubquery(_)
+            | ArenaExtendedExpr::In { .. }
+            | ArenaExtendedExpr::Exists { .. }
+            | ArenaExtendedExpr::QuantifiedComparison { .. }
+            | ArenaExtendedExpr::Position { .. }
+            | ArenaExtendedExpr::Trim { .. }
+            | ArenaExtendedExpr::Extract { .. }
+            | ArenaExtendedExpr::Interval { .. }
+            | ArenaExtendedExpr::DuplicateKeyValue { .. }
+            | ArenaExtendedExpr::NextValue { .. }
+            | ArenaExtendedExpr::MatchAgainst { .. }
+            | ArenaExtendedExpr::PseudoVariable { .. }
+            | ArenaExtendedExpr::SessionVariable { .. } => false,
         }
     }
 }

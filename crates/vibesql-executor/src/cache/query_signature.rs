@@ -11,11 +11,11 @@ use std::{
 
 use vibesql_ast::{Expression, Statement};
 use vibesql_ast::arena::{
-    Expression as ArenaExpression, FromClause as ArenaFromClause,
-    GroupByClause as ArenaGroupByClause, GroupingElement as ArenaGroupingElement,
-    GroupingSet as ArenaGroupingSet, MixedGroupingItem as ArenaMixedGroupingItem,
-    SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt,
-    WindowFunctionSpec as ArenaWindowFunctionSpec,
+    Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
+    FromClause as ArenaFromClause, GroupByClause as ArenaGroupByClause,
+    GroupingElement as ArenaGroupingElement, GroupingSet as ArenaGroupingSet,
+    MixedGroupingItem as ArenaMixedGroupingItem, SelectItem as ArenaSelectItem,
+    SelectStmt as ArenaSelectStmt, WindowFunctionSpec as ArenaWindowFunctionSpec,
 };
 
 /// Unique identifier for a query based on its structure
@@ -722,6 +722,8 @@ impl QuerySignature {
     /// Hash an arena-allocated expression, replacing literals with a placeholder marker
     fn hash_arena_expression(expr: &ArenaExpression<'_>, hasher: &mut DefaultHasher) {
         match expr {
+            // === Inline variants (hot path) ===
+
             // All literals and placeholders hash to the same value
             ArenaExpression::Literal(_)
             | ArenaExpression::Placeholder(_)
@@ -733,12 +735,6 @@ impl QuerySignature {
             ArenaExpression::ColumnRef { table, column } => {
                 "COLUMN".hash(hasher);
                 table.hash(hasher);
-                column.hash(hasher);
-            }
-
-            ArenaExpression::PseudoVariable { pseudo_table, column } => {
-                "PSEUDO_VARIABLE".hash(hasher);
-                std::mem::discriminant(pseudo_table).hash(hasher);
                 column.hash(hasher);
             }
 
@@ -755,7 +751,37 @@ impl QuerySignature {
                 Self::hash_arena_expression(expr, hasher);
             }
 
-            ArenaExpression::Function { name, args, character_unit } => {
+            ArenaExpression::IsNull { expr, negated } => {
+                "IS_NULL".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::Wildcard => "WILDCARD".hash(hasher),
+
+            ArenaExpression::CurrentDate => "CURRENT_DATE".hash(hasher),
+
+            ArenaExpression::CurrentTime { precision } => {
+                "CURRENT_TIME".hash(hasher);
+                precision.hash(hasher);
+            }
+
+            ArenaExpression::CurrentTimestamp { precision } => {
+                "CURRENT_TIMESTAMP".hash(hasher);
+                precision.hash(hasher);
+            }
+
+            ArenaExpression::Default => "DEFAULT".hash(hasher),
+
+            // === Extended variants (cold path) ===
+            ArenaExpression::Extended(ext) => Self::hash_arena_extended_expression(ext, hasher),
+        }
+    }
+
+    /// Hash an extended arena expression
+    fn hash_arena_extended_expression(ext: &ArenaExtendedExpr<'_>, hasher: &mut DefaultHasher) {
+        match ext {
+            ArenaExtendedExpr::Function { name, args, character_unit } => {
                 "FUNCTION".hash(hasher);
                 name.to_lowercase().hash(hasher);
                 for arg in args {
@@ -766,7 +792,7 @@ impl QuerySignature {
                 }
             }
 
-            ArenaExpression::AggregateFunction { name, distinct, args } => {
+            ArenaExtendedExpr::AggregateFunction { name, distinct, args } => {
                 "AGGREGATE".hash(hasher);
                 name.to_lowercase().hash(hasher);
                 distinct.hash(hasher);
@@ -775,15 +801,7 @@ impl QuerySignature {
                 }
             }
 
-            ArenaExpression::IsNull { expr, negated } => {
-                "IS_NULL".hash(hasher);
-                Self::hash_arena_expression(expr, hasher);
-                negated.hash(hasher);
-            }
-
-            ArenaExpression::Wildcard => "WILDCARD".hash(hasher),
-
-            ArenaExpression::Case { operand, when_clauses, else_result } => {
+            ArenaExtendedExpr::Case { operand, when_clauses, else_result } => {
                 "CASE".hash(hasher);
                 if let Some(ref op) = operand {
                     Self::hash_arena_expression(op, hasher);
@@ -799,19 +817,19 @@ impl QuerySignature {
                 }
             }
 
-            ArenaExpression::ScalarSubquery(subquery) => {
+            ArenaExtendedExpr::ScalarSubquery(subquery) => {
                 "SCALAR_SUBQUERY".hash(hasher);
                 Self::hash_arena_select(subquery, hasher);
             }
 
-            ArenaExpression::In { expr, subquery, negated } => {
+            ArenaExtendedExpr::In { expr, subquery, negated } => {
                 "IN_SUBQUERY".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 Self::hash_arena_select(subquery, hasher);
                 negated.hash(hasher);
             }
 
-            ArenaExpression::InList { expr, values, negated } => {
+            ArenaExtendedExpr::InList { expr, values, negated } => {
                 "IN_LIST".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 values.len().hash(hasher);
@@ -821,7 +839,7 @@ impl QuerySignature {
                 negated.hash(hasher);
             }
 
-            ArenaExpression::Between { expr, low, high, negated, symmetric } => {
+            ArenaExtendedExpr::Between { expr, low, high, negated, symmetric } => {
                 "BETWEEN".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 Self::hash_arena_expression(low, hasher);
@@ -830,13 +848,13 @@ impl QuerySignature {
                 symmetric.hash(hasher);
             }
 
-            ArenaExpression::Cast { expr, data_type } => {
+            ArenaExtendedExpr::Cast { expr, data_type } => {
                 "CAST".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 std::mem::discriminant(data_type).hash(hasher);
             }
 
-            ArenaExpression::Position { substring, string, character_unit } => {
+            ArenaExtendedExpr::Position { substring, string, character_unit } => {
                 "POSITION".hash(hasher);
                 Self::hash_arena_expression(substring, hasher);
                 Self::hash_arena_expression(string, hasher);
@@ -845,7 +863,7 @@ impl QuerySignature {
                 }
             }
 
-            ArenaExpression::Trim { position, removal_char, string } => {
+            ArenaExtendedExpr::Trim { position, removal_char, string } => {
                 "TRIM".hash(hasher);
                 if let Some(ref pos) = position {
                     std::mem::discriminant(pos).hash(hasher);
@@ -856,26 +874,26 @@ impl QuerySignature {
                 Self::hash_arena_expression(string, hasher);
             }
 
-            ArenaExpression::Extract { field, expr } => {
+            ArenaExtendedExpr::Extract { field, expr } => {
                 "EXTRACT".hash(hasher);
                 std::mem::discriminant(field).hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
             }
 
-            ArenaExpression::Like { expr, pattern, negated } => {
+            ArenaExtendedExpr::Like { expr, pattern, negated } => {
                 "LIKE".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 Self::hash_arena_expression(pattern, hasher);
                 negated.hash(hasher);
             }
 
-            ArenaExpression::Exists { subquery, negated } => {
+            ArenaExtendedExpr::Exists { subquery, negated } => {
                 "EXISTS".hash(hasher);
                 Self::hash_arena_select(subquery, hasher);
                 negated.hash(hasher);
             }
 
-            ArenaExpression::QuantifiedComparison { expr, op, quantifier, subquery } => {
+            ArenaExtendedExpr::QuantifiedComparison { expr, op, quantifier, subquery } => {
                 "QUANTIFIED".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 std::mem::discriminant(op).hash(hasher);
@@ -883,19 +901,7 @@ impl QuerySignature {
                 Self::hash_arena_select(subquery, hasher);
             }
 
-            ArenaExpression::CurrentDate => "CURRENT_DATE".hash(hasher),
-
-            ArenaExpression::CurrentTime { precision } => {
-                "CURRENT_TIME".hash(hasher);
-                precision.hash(hasher);
-            }
-
-            ArenaExpression::CurrentTimestamp { precision } => {
-                "CURRENT_TIMESTAMP".hash(hasher);
-                precision.hash(hasher);
-            }
-
-            ArenaExpression::Interval {
+            ArenaExtendedExpr::Interval {
                 value,
                 unit,
                 leading_precision,
@@ -908,14 +914,12 @@ impl QuerySignature {
                 fractional_precision.hash(hasher);
             }
 
-            ArenaExpression::Default => "DEFAULT".hash(hasher),
-
-            ArenaExpression::DuplicateKeyValue { column } => {
+            ArenaExtendedExpr::DuplicateKeyValue { column } => {
                 "DUPLICATE_KEY_VALUE".hash(hasher);
                 column.hash(hasher);
             }
 
-            ArenaExpression::WindowFunction { function, over } => {
+            ArenaExtendedExpr::WindowFunction { function, over } => {
                 "WINDOW_FUNCTION".hash(hasher);
                 match function {
                     ArenaWindowFunctionSpec::Aggregate { name, args } => {
@@ -961,12 +965,12 @@ impl QuerySignature {
                 }
             }
 
-            ArenaExpression::NextValue { sequence_name } => {
+            ArenaExtendedExpr::NextValue { sequence_name } => {
                 "NEXT_VALUE".hash(hasher);
                 sequence_name.hash(hasher);
             }
 
-            ArenaExpression::MatchAgainst { columns, search_modifier, mode } => {
+            ArenaExtendedExpr::MatchAgainst { columns, search_modifier, mode } => {
                 "MATCH_AGAINST".hash(hasher);
                 for col in columns {
                     col.hash(hasher);
@@ -975,7 +979,13 @@ impl QuerySignature {
                 std::mem::discriminant(mode).hash(hasher);
             }
 
-            ArenaExpression::SessionVariable { name } => {
+            ArenaExtendedExpr::PseudoVariable { pseudo_table, column } => {
+                "PSEUDO_VARIABLE".hash(hasher);
+                std::mem::discriminant(pseudo_table).hash(hasher);
+                column.hash(hasher);
+            }
+
+            ArenaExtendedExpr::SessionVariable { name } => {
                 "SESSION_VARIABLE".hash(hasher);
                 name.hash(hasher);
             }

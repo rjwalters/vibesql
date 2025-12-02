@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
-use vibesql_ast::arena::{self as arena_ast, Expression as ArenaExpression};
+use vibesql_ast::arena::{self as arena_ast, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -129,6 +129,8 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         row: &Row,
     ) -> Result<SqlValue, ExecutorError> {
         match expr {
+            // === Inline variants (hot path) ===
+
             // Literals - direct return without allocation
             ArenaExpression::Literal(val) => Ok(val.clone()),
 
@@ -205,8 +207,36 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             // Wildcard (*)
             ArenaExpression::Wildcard => Ok(SqlValue::Null),
 
+            // Current date/time functions - use scalar function path
+            ArenaExpression::CurrentDate => {
+                super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &self.sql_mode)
+            }
+            ArenaExpression::CurrentTime { .. } => {
+                super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &self.sql_mode)
+            }
+            ArenaExpression::CurrentTimestamp { .. } => {
+                super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &self.sql_mode)
+            }
+
+            // DEFAULT keyword
+            ArenaExpression::Default => Err(ExecutorError::UnsupportedExpression(
+                "DEFAULT keyword is only valid in INSERT VALUES and UPDATE SET clauses".to_string(),
+            )),
+
+            // === Extended variants (cold path) ===
+            ArenaExpression::Extended(ext) => self.eval_extended(ext, row),
+        }
+    }
+
+    /// Evaluate extended expression variants.
+    fn eval_extended(
+        &self,
+        ext: &ArenaExtendedExpr<'arena>,
+        row: &Row,
+    ) -> Result<SqlValue, ExecutorError> {
+        match ext {
             // Function call
-            ArenaExpression::Function { name, args, character_unit } => {
+            ArenaExtendedExpr::Function { name, args, character_unit } => {
                 let evaluated_args: Result<Vec<SqlValue>, _> = args
                     .iter()
                     .map(|arg| self.eval_with_depth(arg, row))
@@ -219,7 +249,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // Aggregate function - should be pre-computed
-            ArenaExpression::AggregateFunction { name, .. } => {
+            ArenaExtendedExpr::AggregateFunction { name, .. } => {
                 Err(ExecutorError::UnsupportedExpression(format!(
                     "Aggregate function '{}' must be pre-computed before arena evaluation",
                     name
@@ -227,14 +257,14 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // CASE expression
-            ArenaExpression::Case {
+            ArenaExtendedExpr::Case {
                 operand,
                 when_clauses,
                 else_result,
             } => self.eval_case(operand.as_deref(), when_clauses, else_result.as_deref(), row),
 
             // BETWEEN predicate
-            ArenaExpression::Between {
+            ArenaExtendedExpr::Between {
                 expr: inner,
                 low,
                 high,
@@ -248,7 +278,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // IN list
-            ArenaExpression::InList {
+            ArenaExtendedExpr::InList {
                 expr: inner,
                 values,
                 negated,
@@ -286,60 +316,44 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // LIKE pattern matching
-            ArenaExpression::Like { expr: inner, pattern, negated } => {
+            ArenaExtendedExpr::Like { expr: inner, pattern, negated } => {
                 let val = self.eval_with_depth(inner, row)?;
                 let pattern_val = self.eval_with_depth(pattern, row)?;
                 self.eval_like(&val, &pattern_val, *negated)
             }
 
             // CAST expression - delegate to casting module
-            ArenaExpression::Cast { expr: inner, data_type } => {
+            ArenaExtendedExpr::Cast { expr: inner, data_type } => {
                 let val = self.eval_with_depth(inner, row)?;
                 super::casting::cast_value(&val, data_type, &self.sql_mode)
             }
 
-            // Current date/time functions - use scalar function path
-            ArenaExpression::CurrentDate => {
-                super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &self.sql_mode)
-            }
-            ArenaExpression::CurrentTime { .. } => {
-                super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &self.sql_mode)
-            }
-            ArenaExpression::CurrentTimestamp { .. } => {
-                super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &self.sql_mode)
-            }
-
-            // DEFAULT keyword
-            ArenaExpression::Default => Err(ExecutorError::UnsupportedExpression(
-                "DEFAULT keyword is only valid in INSERT VALUES and UPDATE SET clauses".to_string(),
-            )),
-
             // Subqueries - not supported without conversion to owned types
-            ArenaExpression::ScalarSubquery(_)
-            | ArenaExpression::In { .. }
-            | ArenaExpression::Exists { .. }
-            | ArenaExpression::QuantifiedComparison { .. } => {
+            ArenaExtendedExpr::ScalarSubquery(_)
+            | ArenaExtendedExpr::In { .. }
+            | ArenaExtendedExpr::Exists { .. }
+            | ArenaExtendedExpr::QuantifiedComparison { .. } => {
                 Err(ExecutorError::UnsupportedExpression(
                     "Subqueries in arena expressions require conversion to owned types".to_string(),
                 ))
             }
 
             // Window function - should be pre-computed
-            ArenaExpression::WindowFunction { .. } => {
+            ArenaExtendedExpr::WindowFunction { .. } => {
                 Err(ExecutorError::UnsupportedExpression(
                     "Window functions must be pre-computed before arena evaluation".to_string(),
                 ))
             }
 
             // POSITION function
-            ArenaExpression::Position { substring, string, .. } => {
+            ArenaExtendedExpr::Position { substring, string, .. } => {
                 let substr = self.eval_with_depth(substring, row)?;
                 let s = self.eval_with_depth(string, row)?;
                 self.eval_position(&substr, &s)
             }
 
             // TRIM function
-            ArenaExpression::Trim { position, removal_char, string } => {
+            ArenaExtendedExpr::Trim { position, removal_char, string } => {
                 let s = self.eval_with_depth(string, row)?;
                 let remove = match removal_char {
                     Some(expr) => Some(self.eval_with_depth(expr, row)?),
@@ -349,23 +363,23 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // EXTRACT function - simplified implementation
-            ArenaExpression::Extract { field, expr: inner } => {
+            ArenaExtendedExpr::Extract { field, expr: inner } => {
                 let val = self.eval_with_depth(inner, row)?;
                 self.eval_extract(*field, &val)
             }
 
             // INTERVAL expression - simplified implementation
-            ArenaExpression::Interval { value, .. } => {
+            ArenaExtendedExpr::Interval { value, .. } => {
                 // For now, just evaluate the value expression
                 self.eval_with_depth(value, row)
             }
 
             // Pseudo-variables, session variables, etc. - not supported
-            ArenaExpression::PseudoVariable { .. }
-            | ArenaExpression::SessionVariable { .. }
-            | ArenaExpression::DuplicateKeyValue { .. }
-            | ArenaExpression::NextValue { .. }
-            | ArenaExpression::MatchAgainst { .. } => {
+            ArenaExtendedExpr::PseudoVariable { .. }
+            | ArenaExtendedExpr::SessionVariable { .. }
+            | ArenaExtendedExpr::DuplicateKeyValue { .. }
+            | ArenaExtendedExpr::NextValue { .. }
+            | ArenaExtendedExpr::MatchAgainst { .. } => {
                 Err(ExecutorError::UnsupportedExpression(
                     "Advanced expression types not supported in arena evaluator".to_string(),
                 ))

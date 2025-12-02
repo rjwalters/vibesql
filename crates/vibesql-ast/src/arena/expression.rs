@@ -1,4 +1,11 @@
 //! Arena-allocated Expression types.
+//!
+//! This module uses a two-tier enum design to minimize Expression size:
+//! - `Expression` contains common, hot-path variants inline (~48 bytes)
+//! - `ExtendedExpr` contains rare, cold-path variants via arena reference
+//!
+//! This reduces Expression from ~160 bytes to ~48 bytes, allowing ~1.3 nodes
+//! per cache line instead of ~0.4, significantly improving traversal performance.
 
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_types::SqlValue;
@@ -6,13 +13,27 @@ use vibesql_types::SqlValue;
 use crate::{BinaryOperator, UnaryOperator};
 use super::SelectStmt;
 
-/// Arena-allocated SQL Expression.
+/// Reference to an arena-allocated Expression.
+pub type ExprRef<'arena> = &'arena Expression<'arena>;
+
+/// Arena-allocated SQL Expression (hot-path variants).
 ///
-/// This is the arena-based version of [`crate::Expression`] where all recursive
-/// references use arena allocation instead of `Box`.
+/// This enum contains the most common expression variants inline for optimal
+/// cache performance. Rare variants are accessed via `Extended(&ExtendedExpr)`.
+///
+/// # Size Optimization
+///
+/// The two-tier design keeps this enum at ~48 bytes (fits in a cache line with
+/// room for another node), compared to ~160 bytes if all variants were inline.
+///
+/// **Hot path (inline)**: Literal, ColumnRef, BinaryOp, UnaryOp, Placeholder, IsNull, Wildcard
+/// **Cold path (Extended)**: WindowFunction, Case, Function, AggregateFunction, subqueries, etc.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'arena> {
+    // === Inline variants (common, hot path) ===
+
     /// Literal value (42, 'hello', TRUE, NULL)
+    /// Most common leaf node in expressions.
     Literal(SqlValue),
 
     /// Parameter placeholder (?) for prepared statements
@@ -25,24 +46,60 @@ pub enum Expression<'arena> {
     NamedPlaceholder(&'arena str),
 
     /// Column reference (id, users.id)
+    /// Second most common expression type.
     ColumnRef {
         table: Option<&'arena str>,
         column: &'arena str,
     },
 
     /// Binary operation (a + b, x = y, p AND q)
+    /// Very common - all comparisons, arithmetic, logical ops.
     BinaryOp {
         op: BinaryOperator,
-        left: &'arena Expression<'arena>,
-        right: &'arena Expression<'arena>,
+        left: ExprRef<'arena>,
+        right: ExprRef<'arena>,
     },
 
     /// Unary operation (NOT x, -5)
     UnaryOp {
         op: UnaryOperator,
-        expr: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
     },
 
+    /// IS NULL / IS NOT NULL
+    /// Common predicate in WHERE clauses.
+    IsNull {
+        expr: ExprRef<'arena>,
+        negated: bool,
+    },
+
+    /// Wildcard (*)
+    Wildcard,
+
+    /// Current date/time functions (no arguments)
+    CurrentDate,
+    CurrentTime { precision: Option<u32> },
+    CurrentTimestamp { precision: Option<u32> },
+
+    /// DEFAULT keyword
+    Default,
+
+    // === Extended variants (rare, cold path) ===
+
+    /// Extended expression variants (arena-allocated separately).
+    /// Access via pattern matching or helper methods.
+    Extended(&'arena ExtendedExpr<'arena>),
+}
+
+/// Extended expression variants (cold path).
+///
+/// These variants are less common and/or larger in size. They are allocated
+/// separately in the arena and referenced via a single pointer from `Expression::Extended`.
+///
+/// This separation keeps the main `Expression` enum small for better cache utilization
+/// during tree traversal, while still supporting the full SQL expression grammar.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExtendedExpr<'arena> {
     /// Function call (UPPER(x), SUBSTRING(x, 1, 3))
     Function {
         name: &'arena str,
@@ -57,20 +114,11 @@ pub enum Expression<'arena> {
         args: BumpVec<'arena, Expression<'arena>>,
     },
 
-    /// IS NULL / IS NOT NULL
-    IsNull {
-        expr: &'arena Expression<'arena>,
-        negated: bool,
-    },
-
-    /// Wildcard (*)
-    Wildcard,
-
     /// CASE expression
     Case {
-        operand: Option<&'arena Expression<'arena>>,
+        operand: Option<ExprRef<'arena>>,
         when_clauses: BumpVec<'arena, CaseWhen<'arena>>,
-        else_result: Option<&'arena Expression<'arena>>,
+        else_result: Option<ExprRef<'arena>>,
     },
 
     /// Scalar subquery
@@ -78,57 +126,57 @@ pub enum Expression<'arena> {
 
     /// IN operator with subquery
     In {
-        expr: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
         subquery: &'arena SelectStmt<'arena>,
         negated: bool,
     },
 
     /// IN operator with value list
     InList {
-        expr: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
         values: BumpVec<'arena, Expression<'arena>>,
         negated: bool,
     },
 
     /// BETWEEN predicate
     Between {
-        expr: &'arena Expression<'arena>,
-        low: &'arena Expression<'arena>,
-        high: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
+        low: ExprRef<'arena>,
+        high: ExprRef<'arena>,
         negated: bool,
         symmetric: bool,
     },
 
     /// CAST expression
     Cast {
-        expr: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
         data_type: vibesql_types::DataType,
     },
 
     /// POSITION expression
     Position {
-        substring: &'arena Expression<'arena>,
-        string: &'arena Expression<'arena>,
+        substring: ExprRef<'arena>,
+        string: ExprRef<'arena>,
         character_unit: Option<CharacterUnit>,
     },
 
     /// TRIM expression
     Trim {
         position: Option<TrimPosition>,
-        removal_char: Option<&'arena Expression<'arena>>,
-        string: &'arena Expression<'arena>,
+        removal_char: Option<ExprRef<'arena>>,
+        string: ExprRef<'arena>,
     },
 
     /// EXTRACT expression
     Extract {
         field: IntervalUnit,
-        expr: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
     },
 
     /// LIKE pattern matching
     Like {
-        expr: &'arena Expression<'arena>,
-        pattern: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
+        pattern: ExprRef<'arena>,
         negated: bool,
     },
 
@@ -140,27 +188,19 @@ pub enum Expression<'arena> {
 
     /// Quantified comparison (ALL, ANY, SOME)
     QuantifiedComparison {
-        expr: &'arena Expression<'arena>,
+        expr: ExprRef<'arena>,
         op: BinaryOperator,
         quantifier: Quantifier,
         subquery: &'arena SelectStmt<'arena>,
     },
 
-    /// Current date/time functions
-    CurrentDate,
-    CurrentTime { precision: Option<u32> },
-    CurrentTimestamp { precision: Option<u32> },
-
     /// INTERVAL expression
     Interval {
-        value: &'arena Expression<'arena>,
+        value: ExprRef<'arena>,
         unit: IntervalUnit,
         leading_precision: Option<u32>,
         fractional_precision: Option<u32>,
     },
-
-    /// DEFAULT keyword
-    Default,
 
     /// VALUES() function for ON DUPLICATE KEY UPDATE
     DuplicateKeyValue { column: &'arena str },
@@ -177,7 +217,7 @@ pub enum Expression<'arena> {
     /// MATCH...AGAINST full-text search
     MatchAgainst {
         columns: BumpVec<'arena, &'arena str>,
-        search_modifier: &'arena Expression<'arena>,
+        search_modifier: ExprRef<'arena>,
         mode: FulltextMode,
     },
 
