@@ -402,13 +402,12 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         vec![col("i_id")],
     ).ok();
 
-    // Note: Reordering to (s_i_id, s_w_id) puts the more selective column first.
-    // This helps the cost-based index selector choose the index for point queries.
+    // Stock PK per TPC-C spec: (s_w_id, s_i_id)
     db.create_index(
         "idx_stock_pk".to_string(),
         "stock".to_string(),
         true,
-        vec![col("s_i_id"), col("s_w_id")],
+        vec![col("s_w_id"), col("s_i_id")],
     ).ok();
 
     // Secondary indexes for queries (on smaller tables)
