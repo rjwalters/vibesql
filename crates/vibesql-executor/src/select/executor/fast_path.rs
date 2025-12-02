@@ -350,12 +350,14 @@ impl SelectExecutor<'_> {
         }
 
         // Fall back to standard fast path with execute_from_clause
+        // Pass LIMIT for early termination optimization (#3253)
         let from_result = crate::select::scan::execute_from_clause(
             stmt.from.as_ref().unwrap(),
             &HashMap::new(), // No CTEs
             self.database,
             stmt.where_clause.as_ref(),
             stmt.order_by.as_deref(),
+            stmt.limit.map(|l| l as usize), // LIMIT pushdown for ORDER BY optimization
             None, // No outer row
             None, // No outer schema
             |_| unreachable!("Fast path doesn't support subqueries"),

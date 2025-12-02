@@ -26,6 +26,17 @@ use crate::select::parallel::parallel_scan_materialize;
 const SIMD_COLUMNAR_THRESHOLD: usize = 500;
 
 /// Execute a table scan (handles CTEs, views, and regular tables)
+///
+/// # Arguments
+/// * `table_name` - Name of the table to scan
+/// * `alias` - Optional table alias
+/// * `cte_results` - CTE context for the query
+/// * `database` - Database reference
+/// * `where_clause` - Optional WHERE clause for filtering
+/// * `order_by` - Optional ORDER BY clause for index selection
+/// * `limit` - Optional LIMIT value for early termination optimization (#3253)
+/// * `outer_row` - Outer row for correlated subqueries
+/// * `outer_schema` - Outer schema for correlated subqueries
 pub(crate) fn execute_table_scan(
     table_name: &str,
     alias: Option<&String>,
@@ -33,6 +44,7 @@ pub(crate) fn execute_table_scan(
     database: &vibesql_storage::Database,
     where_clause: Option<&vibesql_ast::Expression>,
     order_by: Option<&[vibesql_ast::OrderByItem]>,
+    limit: Option<usize>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
 ) -> Result<super::FromResult, ExecutorError> {
@@ -170,7 +182,8 @@ pub(crate) fn execute_table_scan(
         if std::env::var("TABLE_SCAN_DEBUG").is_ok() {
             eprintln!("[TABLE_SCAN] Using index scan: table={}, index={}", table_name, index_name);
         }
-        return super::index_scan::execute_index_scan(table_name, &index_name, alias, where_clause, sorted_columns, database);
+        // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
+        return super::index_scan::execute_index_scan(table_name, &index_name, alias, where_clause, sorted_columns, limit, database);
     }
 
     // Debug: Log when table scan is used instead of index
