@@ -516,163 +516,41 @@ impl<'a> VibesqlTransactionExecutor<'a> {
     /// Per TPC-C spec 2.8, the Stock-Level transaction checks the last 20 orders
     /// for items with stock below the threshold.
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
-        // Use fast path for direct storage API access (bypassing SQL parsing)
-        self.stock_level_fast_path(input)
-    }
-
-    /// Fast-path implementation of Stock-Level transaction
-    ///
-    /// This bypasses SQL parsing and goes directly to storage APIs:
-    /// 1. Direct PK lookup on district table for d_next_o_id
-    /// 2. Prefix scan on order_line PK index for recent orders
-    /// 3. Direct PK lookups on stock table for each item
-    /// 4. Count distinct items below threshold
-    ///
-    /// Performance: ~100-500µs vs ~12ms with SQL path (24-120x faster)
-    fn stock_level_fast_path(&self, input: &StockLevelInput) -> TransactionResult {
-        use std::collections::HashSet;
-        use vibesql_types::SqlValue;
-
         let start = Instant::now();
 
-        // Step 1: Get d_next_o_id from district table using direct PK lookup
-        // District PK: (d_w_id, d_id)
-        let district_pk = vec![
-            SqlValue::Integer(input.w_id as i64),
-            SqlValue::Integer(input.d_id as i64),
-        ];
-
-        let d_next_o_id = match self.db.get_row_by_composite_pk("district", &district_pk) {
-            Ok(Some(row)) => {
-                // d_next_o_id is column 10 in district table schema
-                // Schema: d_id, d_w_id, d_name, d_street_1, d_street_2, d_city, d_state, d_zip, d_tax, d_ytd, d_next_o_id
-                match &row.values[10] {
-                    SqlValue::Integer(id) => *id,
-                    SqlValue::Bigint(id) => *id,
-                    _ => {
-                        return TransactionResult {
-                            success: false,
-                            duration_us: start.elapsed().as_micros() as u64,
-                            error: Some("d_next_o_id has unexpected type".to_string()),
-                        };
-                    }
-                }
-            }
-            Ok(None) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("District not found".to_string()),
-                };
-            }
+        // Get district next order ID
+        let d_query = format!(
+            "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+            input.w_id, input.d_id
+        );
+        let d_next_o_id = match execute_query_for_int(self.db, &d_query) {
+            Ok(id) => id,
             Err(e) => {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("District lookup failed: {}", e)),
+                    error: Some(format!("District query failed: {}", e)),
                 };
             }
         };
 
+        // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
+        // Use subquery approach matching SQLite/DuckDB/MySQL implementations
         let ol_o_id_min = d_next_o_id - 20;
-        let ol_o_id_max = d_next_o_id;
-
-        // Step 2: Get order lines for the last 20 orders using optimized range scan
-        // Order_line PK: (ol_w_id, ol_d_id, ol_o_id, ol_number)
-        // We scan each order ID in the range [ol_o_id_min, ol_o_id_max) using 3-column prefix
-        let order_line_table = match self.db.get_table("order_line") {
-            Some(t) => t,
-            None => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("order_line table not found".to_string()),
-                };
-            }
-        };
-
-        // Use prefix scan on PK index to get order lines for specific order IDs
-        let pk_index_name = "pk_order_line";
-        let pk_index_data = match self.db.get_index_data(pk_index_name) {
-            Some(idx) => idx,
-            None => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("order_line PK index not found".to_string()),
-                };
-            }
-        };
-
-        let all_rows = order_line_table.scan();
-
-        // Collect distinct item IDs from order lines in the range [ol_o_id_min, ol_o_id_max)
-        // Use 3-column prefix scans for each order in the range (more efficient)
-        // Order_line schema: ol_o_id(0), ol_d_id(1), ol_w_id(2), ol_number(3), ol_i_id(4), ...
-        let mut item_ids: HashSet<i64> = HashSet::new();
-
-        for o_id in ol_o_id_min..ol_o_id_max {
-            // Scan all order lines for this specific order
-            let ol_prefix = vec![
-                SqlValue::Integer(input.w_id as i64),
-                SqlValue::Integer(input.d_id as i64),
-                SqlValue::Integer(o_id),
-            ];
-
-            let row_indices = pk_index_data.prefix_scan(&ol_prefix);
-
-            for row_idx in row_indices {
-                if row_idx >= all_rows.len() {
-                    continue;
-                }
-                let row = &all_rows[row_idx];
-
-                // Extract ol_i_id (column 4)
-                let ol_i_id = match &row.values[4] {
-                    SqlValue::Integer(id) => *id,
-                    SqlValue::Bigint(id) => *id,
-                    _ => continue,
-                };
-                item_ids.insert(ol_i_id);
-            }
+        let stock_query = format!(
+            "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
+             WHERE ol_w_id = {} AND ol_d_id = {} \
+             AND ol_o_id >= {} AND ol_o_id < {} \
+             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
+            input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold
+        );
+        if let Err(e) = execute_query(self.db, &stock_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Stock level query failed: {}", e)),
+            };
         }
-
-        // Step 3: For each distinct item, check stock quantity
-        // Stock PK: (s_w_id, s_i_id) - note: s_w_id is first!
-        // Stock schema: s_i_id(0), s_w_id(1), s_quantity(2), ...
-        let mut low_stock_count = 0i64;
-
-        for item_id in item_ids {
-            let stock_pk = vec![
-                SqlValue::Integer(input.w_id as i64),  // s_w_id
-                SqlValue::Integer(item_id),             // s_i_id
-            ];
-
-            match self.db.get_row_by_composite_pk("stock", &stock_pk) {
-                Ok(Some(row)) => {
-                    // s_quantity is column 2
-                    let s_quantity = match &row.values[2] {
-                        SqlValue::Integer(q) => *q,
-                        SqlValue::Bigint(q) => *q,
-                        _ => continue,
-                    };
-
-                    if s_quantity < input.threshold as i64 {
-                        low_stock_count += 1;
-                    }
-                }
-                Ok(None) => {
-                    // Stock entry not found - skip
-                }
-                Err(_) => {
-                    // Error looking up stock - skip
-                }
-            }
-        }
-
-        // Return result (we don't actually need to return the count,
-        // just need to execute the transaction successfully)
-        let _ = low_stock_count;
 
         TransactionResult {
             success: true,
