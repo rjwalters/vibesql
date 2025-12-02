@@ -2,6 +2,35 @@
 
 use indexmap::IndexSet;
 
+/// Estimate the memory size of a result set in bytes
+///
+/// Used for memory limit tracking during query execution.
+/// Samples a subset of rows to avoid O(n) overhead on large result sets.
+pub(super) fn estimate_result_size(rows: &[vibesql_storage::Row]) -> usize {
+    if rows.is_empty() {
+        return 0;
+    }
+
+    // For small result sets, measure exactly
+    if rows.len() <= 100 {
+        return rows.iter().map(|r| r.estimated_size_bytes()).sum();
+    }
+
+    // For large result sets, sample and extrapolate
+    // Sample first 10, middle 10, and last 10 rows
+    let sample_size = 30;
+    let step = rows.len() / sample_size;
+    let sample_total: usize = rows
+        .iter()
+        .step_by(step.max(1))
+        .take(sample_size)
+        .map(|r| r.estimated_size_bytes())
+        .sum();
+
+    let avg_row_size = sample_total / sample_size.min(rows.len());
+    avg_row_size * rows.len()
+}
+
 /// Apply DISTINCT to remove duplicate rows
 ///
 /// Uses an IndexSet to track unique rows while preserving insertion order.

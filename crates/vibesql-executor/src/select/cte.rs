@@ -27,6 +27,27 @@ where
         &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
 {
+    // Use the memory-tracking version with a no-op memory check
+    execute_ctes_with_memory_check(ctes, executor, |_| Ok(()))
+}
+
+/// Execute all CTEs with memory tracking
+///
+/// CTEs are executed in order, allowing later CTEs to reference earlier ones.
+/// After each CTE is materialized, the memory_check callback is called with
+/// the estimated size of the CTE result to enforce memory limits.
+pub(super) fn execute_ctes_with_memory_check<F, M>(
+    ctes: &[vibesql_ast::CommonTableExpr],
+    executor: F,
+    memory_check: M,
+) -> Result<HashMap<String, CteResult>, ExecutorError>
+where
+    F: Fn(
+        &vibesql_ast::SelectStmt,
+        &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
     let mut cte_results = HashMap::new();
 
     // Execute each CTE in order
@@ -35,6 +56,10 @@ where
         // Execute the CTE query with accumulated CTE results so far
         // This allows later CTEs to reference earlier ones
         let rows = executor(&cte.query, &cte_results)?;
+
+        // Track memory for this CTE result before storing
+        let estimated_size = super::helpers::estimate_result_size(&rows);
+        memory_check(estimated_size)?;
 
         //  Determine the schema for this CTE
         let schema = derive_cte_schema(cte, &rows)?;

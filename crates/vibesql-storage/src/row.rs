@@ -27,6 +27,22 @@ impl Row {
         self.values.is_empty()
     }
 
+    /// Estimate the memory size of this row in bytes
+    ///
+    /// Used for memory limit tracking during query execution.
+    /// Provides a reasonable approximation without deep inspection.
+    pub fn estimated_size_bytes(&self) -> usize {
+        use std::mem::size_of;
+
+        // Base overhead: Vec header + Row struct
+        let base_overhead = size_of::<Vec<SqlValue>>() + size_of::<Row>();
+
+        // Estimate size of each value
+        let values_size: usize = self.values.iter().map(|v| v.estimated_size_bytes()).sum();
+
+        base_overhead + values_size
+    }
+
     /// Set value at column index
     pub fn set(&mut self, index: usize, value: SqlValue) -> Result<(), crate::StorageError> {
         if index >= self.values.len() {

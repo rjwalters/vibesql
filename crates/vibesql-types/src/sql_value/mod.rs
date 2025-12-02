@@ -94,4 +94,41 @@ impl SqlValue {
             SqlValue::Null => DataType::Null,
         }
     }
+
+    /// Estimate the memory size of this value in bytes
+    ///
+    /// Used for memory limit tracking during query execution.
+    /// Provides a reasonable approximation including heap allocations.
+    pub fn estimated_size_bytes(&self) -> usize {
+        use std::mem::size_of;
+
+        // Base size of the enum (24 bytes for largest variant discriminant + data)
+        let base_size = size_of::<SqlValue>();
+
+        // Add heap allocation size for variable-length types
+        match self {
+            SqlValue::Character(s) | SqlValue::Varchar(s) => {
+                // String: base + heap capacity
+                base_size + s.capacity()
+            }
+            SqlValue::Interval(i) => {
+                // Interval stores a String internally
+                base_size + i.to_string().len()
+            }
+            // Fixed-size types: just the enum size
+            SqlValue::Integer(_)
+            | SqlValue::Smallint(_)
+            | SqlValue::Bigint(_)
+            | SqlValue::Unsigned(_)
+            | SqlValue::Numeric(_)
+            | SqlValue::Float(_)
+            | SqlValue::Real(_)
+            | SqlValue::Double(_)
+            | SqlValue::Boolean(_)
+            | SqlValue::Date(_)
+            | SqlValue::Time(_)
+            | SqlValue::Timestamp(_)
+            | SqlValue::Null => base_size,
+        }
+    }
 }

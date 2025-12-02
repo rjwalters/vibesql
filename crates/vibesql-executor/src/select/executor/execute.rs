@@ -32,8 +32,8 @@ use crate::{
         PipelineInput,
     },
     select::{
-        cte::{execute_ctes, CteResult},
-        helpers::apply_limit_offset,
+        cte::{execute_ctes, execute_ctes_with_memory_check, CteResult},
+        helpers::{apply_limit_offset, estimate_result_size},
         join::FromResult,
         set_operations::apply_set_operation,
         SelectResult,
@@ -95,8 +95,12 @@ impl SelectExecutor<'_> {
 
         // Execute CTEs if present and merge with outer query's CTE context
         let mut cte_results = if let Some(with_clause) = &optimized_stmt.with_clause {
-            // This query has its own CTEs - execute them
-            execute_ctes(with_clause, |query, cte_ctx| self.execute_with_ctes(query, cte_ctx))?
+            // This query has its own CTEs - execute them with memory tracking
+            execute_ctes_with_memory_check(
+                with_clause,
+                |query, cte_ctx| self.execute_with_ctes(query, cte_ctx),
+                |size| self.track_memory_allocation(size),
+            )?
         } else {
             HashMap::new()
         };
@@ -682,8 +686,16 @@ impl SelectExecutor<'_> {
             self.execute_select_without_from(right_stmt)?
         };
 
+        // Track memory for right result before set operation
+        let right_size = estimate_result_size(&right_results);
+        self.track_memory_allocation(right_size)?;
+
         // Apply the current operation
         left_results = apply_set_operation(left_results, right_results, set_op)?;
+
+        // Track memory for combined result after set operation
+        let combined_size = estimate_result_size(&left_results);
+        self.track_memory_allocation(combined_size)?;
 
         // If the right side has more set operations, continue processing them
         // This creates the left-to-right evaluation: ((A op B) op C) op D
