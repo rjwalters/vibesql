@@ -180,6 +180,10 @@ pub enum AlterTableStmt<'arena> {
     AddConstraint(AddConstraintStmt<'arena>),
     DropConstraint(DropConstraintStmt<'arena>),
     RenameTable(RenameTableStmt<'arena>),
+    /// MySQL-style MODIFY COLUMN (change column definition without renaming)
+    ModifyColumn(ModifyColumnStmt<'arena>),
+    /// MySQL-style CHANGE COLUMN (rename and modify column)
+    ChangeColumn(ChangeColumnStmt<'arena>),
 }
 
 /// ADD COLUMN operation
@@ -238,6 +242,22 @@ pub struct DropConstraintStmt<'arena> {
 pub struct RenameTableStmt<'arena> {
     pub table_name: &'arena str,
     pub new_table_name: &'arena str,
+}
+
+/// MODIFY COLUMN operation (MySQL-style - change column definition without renaming)
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModifyColumnStmt<'arena> {
+    pub table_name: &'arena str,
+    pub column_name: &'arena str,
+    pub new_column_def: ColumnDef<'arena>,
+}
+
+/// CHANGE COLUMN operation (MySQL-style - rename and modify column)
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChangeColumnStmt<'arena> {
+    pub table_name: &'arena str,
+    pub old_column_name: &'arena str,
+    pub new_column_def: ColumnDef<'arena>,
 }
 
 // ============================================================================

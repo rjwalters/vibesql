@@ -31,7 +31,7 @@ mod select;
 mod update;
 
 use bumpalo::Bump;
-use vibesql_ast::arena::{DeleteStmt, Expression, InsertStmt, SelectStmt, Statement, UpdateStmt};
+use vibesql_ast::arena::{AlterTableStmt, DeleteStmt, Expression, InsertStmt, SelectStmt, Statement, UpdateStmt};
 
 use crate::keywords::Keyword;
 use crate::{Lexer, ParseError, Token};
@@ -125,6 +125,10 @@ impl<'arena> ArenaParser<'arena> {
             // DDL statements
             Token::Keyword(Keyword::Create) => self.parse_create_statement(),
             Token::Keyword(Keyword::Drop) => self.parse_drop_statement(),
+            Token::Keyword(Keyword::Alter) => {
+                let stmt = self.parse_alter_table_statement()?;
+                Ok(Statement::AlterTable(stmt.clone()))
+            }
             Token::Keyword(Keyword::Truncate) => {
                 let stmt = self.parse_truncate_table_statement()?;
                 Ok(Statement::TruncateTable(stmt))
@@ -252,6 +256,20 @@ impl<'arena> ArenaParser<'arena> {
         let mut parser = ArenaParser::new(tokens, arena);
         let expr = parser.parse_expression()?;
         Ok(arena.alloc(expr))
+    }
+
+    /// Parse SQL input string into an arena-allocated AlterTableStmt.
+    pub fn parse_alter_table_sql(
+        input: &str,
+        arena: &'arena Bump,
+    ) -> Result<&'arena AlterTableStmt<'arena>, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = ArenaParser::new(tokens, arena);
+        parser.parse_alter_table_statement()
     }
 
     /// Parse an INSERT statement into an arena-allocated InsertStmt.

@@ -927,7 +927,7 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse data type (simplified).
-    fn parse_data_type(&mut self) -> Result<vibesql_types::DataType, ParseError> {
+    pub(crate) fn parse_data_type(&mut self) -> Result<vibesql_types::DataType, ParseError> {
         // Get type name as uppercase string
         let type_upper = match self.peek() {
             Token::Identifier(type_name) => type_name.to_uppercase(),
