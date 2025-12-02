@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -72,6 +72,7 @@ help:
 	@echo "  make test-unit          - Run unit tests only (lib tests)"
 	@echo "  make test-workspace     - Run all workspace tests (unit + integration + sqllogictest)"
 	@echo "  make test-sqllogictest  - Run SQLLogicTest standalone (with JSON output)"
+	@echo "  make test-sqllogictest-halting - Run SQLLogicTest, stop on first failure"
 	@echo ""
 	@echo "Benchmark targets:"
 	@echo "  make benchmark          - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
@@ -161,6 +162,13 @@ test-sqllogictest:
 	@echo "Running SQLLogicTest suite (parallel, auto-detected workers)..."
 	@echo "This runs ~5.9M tests across 628 test files"
 	./scripts/sqllogictest run --parallel
+
+# Run SQLLogicTest suite in fail-fast mode (stop on first failure)
+# Useful for troubleshooting regressions - shows exactly where things break
+test-sqllogictest-halting:
+	@echo "Running SQLLogicTest suite (fail-fast mode)..."
+	@echo "Will stop on first test file failure for easier debugging"
+	./scripts/sqllogictest run --fail-fast
 
 #
 # Benchmark Targets

@@ -179,6 +179,7 @@ cmd_run() {
     local per_file_timeout="500"
     local force=false
     local debug_mode=false
+    local fail_fast=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -197,6 +198,7 @@ Options:
   --timeout N             Per-file timeout in seconds (default: 500)
   --debug                 Use debug build (faster compile, 10-15x slower tests)
   --force                 Repopulate work queue with all test files (bypasses smart filtering)
+  --fail-fast             Stop on first test file failure (useful for debugging regressions)
 
 Examples:
   # Serial run (local development, 5 minutes, release mode)
@@ -216,6 +218,9 @@ Examples:
 
   # Custom timeout for slow tests
   ./scripts/sqllogictest run --parallel --workers 8 --timeout 2000
+
+  # Fail-fast mode for debugging regressions
+  ./scripts/sqllogictest run --fail-fast
 
 Build Modes:
   - Release (default): 10-15x faster tests, ~60s compile time
@@ -264,6 +269,10 @@ EOF
                 force=true
                 shift
                 ;;
+            --fail-fast)
+                fail_fast=true
+                shift
+                ;;
             *)
                 print_error "Unknown option: $1"
                 echo "Run with --help for usage information"
@@ -273,6 +282,13 @@ EOF
     done
 
     check_submodule
+
+    # Fail-fast mode is incompatible with parallel mode
+    if $fail_fast && $parallel; then
+        print_error "--fail-fast is incompatible with --parallel"
+        echo "Fail-fast mode runs tests serially to stop on first failure."
+        exit 1
+    fi
 
     if $parallel; then
         # Parallel execution
@@ -318,6 +334,81 @@ EOF
                 print_warning "Failed to update database (test results still in JSON)"
             fi
         fi
+    elif $fail_fast; then
+        # Fail-fast execution: run tests one by one, stop on first failure
+        print_info "Running fail-fast test suite"
+        echo "Build mode: $(if $debug_mode; then echo 'debug (slow tests!)'; else echo 'release (optimized)'; fi)"
+        echo "Will stop on first test file failure"
+        echo ""
+
+        # Build the test binary first
+        print_info "Building test binary..."
+        local cargo_build_args=("build" "--package" "vibesql" "--test" "sqllogictest_suite")
+        if ! $debug_mode; then
+            cargo_build_args=("${cargo_build_args[@]:0:1}" "--release" "${cargo_build_args[@]:1}")
+        fi
+        cargo "${cargo_build_args[@]}"
+        echo ""
+
+        # Get list of test files
+        local test_dir="third_party/sqllogictest/test"
+        local test_files
+        test_files=$(find "$test_dir" -name "*.test" -type f | sort)
+        local total_files=$(echo "$test_files" | wc -l | tr -d ' ')
+        local passed=0
+        local current=0
+
+        print_info "Running $total_files test files (fail-fast mode)"
+        echo ""
+
+        # Build cargo args for running tests
+        local cargo_args=(
+            "test"
+            "--package" "vibesql"
+            "--test" "sqllogictest_suite"
+            "run_sqllogictest_suite"
+        )
+        if ! $debug_mode; then
+            cargo_args=("${cargo_args[@]:0:1}" "--release" "${cargo_args[@]:1}")
+        fi
+
+        # Run each test file
+        for test_file in $test_files; do
+            current=$((current + 1))
+            # Get relative path from test directory
+            local rel_path="${test_file#$test_dir/}"
+
+            echo "[Worker] Starting: $rel_path"
+
+            # Run the test with a timeout
+            local output_log="/tmp/sqllogictest_failfast_$$.log"
+            if timeout "${per_file_timeout}" env SQLLOGICTEST_FILES="$rel_path" \
+                cargo "${cargo_args[@]}" -- --nocapture > "$output_log" 2>&1; then
+                passed=$((passed + 1))
+                print_success "$rel_path"
+                rm -f "$output_log"
+            else
+                # Test failed - show output and stop
+                echo ""
+                print_error "$rel_path - FAILED"
+                echo ""
+                echo "=== Test Output ==="
+                # Show the failure details (filter for useful info)
+                grep -E "(query result mismatch|SQL\]|Diff\]|expected|actual|at <unknown>:|Error:|FAILED)" "$output_log" 2>/dev/null || cat "$output_log"
+                echo ""
+                echo "=== Summary ==="
+                echo "Stopped at: $rel_path"
+                echo "Progress: $passed/$current passed ($total_files total)"
+                echo ""
+                echo "To debug this specific file:"
+                echo "  ./scripts/sqllogictest test $rel_path"
+                rm -f "$output_log"
+                exit 1
+            fi
+        done
+
+        echo ""
+        print_success "All $passed tests passed!"
     else
         # Serial execution
         print_info "Running serial test suite"
