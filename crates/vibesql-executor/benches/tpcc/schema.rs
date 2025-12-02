@@ -160,7 +160,7 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
     let varchar = || DataType::Varchar { max_length: None };
 
     // WAREHOUSE table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "warehouse".to_string(),
         vec![
             ColumnSchema::new("w_id".to_string(), DataType::Integer, false),
@@ -173,11 +173,12 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("w_tax".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
             ColumnSchema::new("w_ytd".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
         ],
+        vec!["w_id".to_string()],
     ))
     .unwrap();
 
     // DISTRICT table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "district".to_string(),
         vec![
             ColumnSchema::new("d_id".to_string(), DataType::Integer, false),
@@ -192,11 +193,12 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("d_ytd".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
             ColumnSchema::new("d_next_o_id".to_string(), DataType::Integer, false),
         ],
+        vec!["d_w_id".to_string(), "d_id".to_string()],
     ))
     .unwrap();
 
     // CUSTOMER table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "customer".to_string(),
         vec![
             ColumnSchema::new("c_id".to_string(), DataType::Integer, false),
@@ -221,6 +223,7 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("c_delivery_cnt".to_string(), DataType::Integer, false),
             ColumnSchema::new("c_data".to_string(), varchar(), false),
         ],
+        vec!["c_w_id".to_string(), "c_d_id".to_string(), "c_id".to_string()],
     ))
     .unwrap();
 
@@ -241,18 +244,19 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
     .unwrap();
 
     // NEW_ORDER table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "new_order".to_string(),
         vec![
             ColumnSchema::new("no_o_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("no_d_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("no_w_id".to_string(), DataType::Integer, false),
         ],
+        vec!["no_w_id".to_string(), "no_d_id".to_string(), "no_o_id".to_string()],
     ))
     .unwrap();
 
     // ORDERS table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "orders".to_string(),
         vec![
             ColumnSchema::new("o_id".to_string(), DataType::Integer, false),
@@ -264,11 +268,12 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("o_ol_cnt".to_string(), DataType::Integer, false),
             ColumnSchema::new("o_all_local".to_string(), DataType::Integer, false),
         ],
+        vec!["o_w_id".to_string(), "o_d_id".to_string(), "o_id".to_string()],
     ))
     .unwrap();
 
     // ORDER_LINE table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "order_line".to_string(),
         vec![
             ColumnSchema::new("ol_o_id".to_string(), DataType::Integer, false),
@@ -282,11 +287,12 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("ol_amount".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
             ColumnSchema::new("ol_dist_info".to_string(), varchar(), false),
         ],
+        vec!["ol_w_id".to_string(), "ol_d_id".to_string(), "ol_o_id".to_string(), "ol_number".to_string()],
     ))
     .unwrap();
 
     // ITEM table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "item".to_string(),
         vec![
             ColumnSchema::new("i_id".to_string(), DataType::Integer, false),
@@ -295,11 +301,12 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("i_price".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
             ColumnSchema::new("i_data".to_string(), varchar(), false),
         ],
+        vec!["i_id".to_string()],
     ))
     .unwrap();
 
     // STOCK table
-    db.create_table(TableSchema::new(
+    db.create_table(TableSchema::with_primary_key(
         "stock".to_string(),
         vec![
             ColumnSchema::new("s_i_id".to_string(), DataType::Integer, false),
@@ -320,6 +327,7 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("s_remote_cnt".to_string(), DataType::Integer, false),
             ColumnSchema::new("s_data".to_string(), varchar(), false),
         ],
+        vec!["s_w_id".to_string(), "s_i_id".to_string()],
     ))
     .unwrap();
 }
@@ -339,67 +347,9 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         }
     }
 
-    // Primary key indexes (only for tables with < 100k rows to avoid slow disk-backed indexing)
-    db.create_index(
-        "idx_warehouse_pk".to_string(),
-        "warehouse".to_string(),
-        true,
-        vec![col("w_id")],
-    ).ok();
-
-    db.create_index(
-        "idx_district_pk".to_string(),
-        "district".to_string(),
-        true,
-        vec![col("d_w_id"), col("d_id")],
-    ).ok();
-
-    db.create_index(
-        "idx_customer_pk".to_string(),
-        "customer".to_string(),
-        true,
-        vec![col("c_w_id"), col("c_d_id"), col("c_id")],
-    ).ok();
-
-    db.create_index(
-        "idx_orders_pk".to_string(),
-        "orders".to_string(),
-        true,
-        vec![col("o_w_id"), col("o_d_id"), col("o_id")],
-    ).ok();
-
-    db.create_index(
-        "idx_new_order_pk".to_string(),
-        "new_order".to_string(),
-        true,
-        vec![col("no_w_id"), col("no_d_id"), col("no_o_id")],
-    ).ok();
-
-    // CRITICAL: The item and stock indexes are REQUIRED for TPC-C performance.
-    // Without them, each New-Order does 20 full table scans of 100K rows (2M rows/txn!).
-    //
-    // These indexes were previously skipped due to slow disk-backed B+ tree bulk_load.
-    // For the benchmark, we must enable them even if loading is slow.
-    //
-    // See: https://github.com/rjwalters/vibesql/issues/2793 (disk-backed index perf)
-    // See: https://github.com/rjwalters/vibesql/issues/3012 (TPC-C New-Order 670x slower)
-    db.create_index(
-        "idx_item_pk".to_string(),
-        "item".to_string(),
-        true,
-        vec![col("i_id")],
-    ).ok();
-
-    // Note: Reordering to (s_i_id, s_w_id) puts the more selective column first.
-    // This helps the cost-based index selector choose the index for point queries.
-    db.create_index(
-        "idx_stock_pk".to_string(),
-        "stock".to_string(),
-        true,
-        vec![col("s_i_id"), col("s_w_id")],
-    ).ok();
-
-    // Secondary indexes for queries (on smaller tables)
+    // Secondary indexes for queries - these match the indexes created by
+    // SQLite, DuckDB, and MySQL for fair benchmark comparison.
+    // Primary key indexes are now auto-created from PRIMARY KEY constraints (#3202).
     db.create_index(
         "idx_customer_name".to_string(),
         "customer".to_string(),
@@ -422,18 +372,6 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         "order_line".to_string(),
         false,
         vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id")],
-    ).ok();
-
-    // Stock-Level low-quantity index: enables efficient filtering of low-stock items
-    // for the IN subquery in Stock-Level transaction. The query pattern is:
-    //   SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?
-    // This index allows range scan by (s_w_id, s_quantity) and provides s_i_id
-    // as a covering column to avoid table lookups.
-    db.create_index(
-        "idx_stock_low_quantity".to_string(),
-        "stock".to_string(),
-        false,
-        vec![col("s_w_id"), col("s_quantity"), col("s_i_id")],
     ).ok();
 }
 
