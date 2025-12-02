@@ -206,11 +206,15 @@ pub(crate) fn execute_index_scan(
         }
     } else if let Some(ref prefix_range) = prefix_with_range_result {
         // Prefix + range lookup - O(log n + k) where k is matching rows
-        // This is the most efficient path for queries like WHERE s_w_id = 1 AND s_quantity < 10
-        // It avoids scanning all rows with prefix match and only scans up to the upper bound
-        index_data.prefix_bounded_scan(
+        // This is the most efficient path for queries like:
+        // - WHERE s_w_id = 1 AND s_quantity < 10
+        // - WHERE ol_w_id = 1 AND ol_d_id = 1 AND ol_o_id >= 2981 AND ol_o_id < 3001
+        // It uses both lower and upper bounds to minimize rows scanned
+        index_data.prefix_range_scan(
             &prefix_range.prefix_key,
-            &prefix_range.upper_bound,
+            prefix_range.lower_bound.as_ref(),
+            prefix_range.inclusive_lower,
+            prefix_range.upper_bound.as_ref(),
             prefix_range.inclusive_upper,
         )
     } else if let Some(ref prefix) = prefix_result {

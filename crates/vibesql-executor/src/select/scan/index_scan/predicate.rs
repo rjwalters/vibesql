@@ -341,8 +341,12 @@ pub(crate) fn extract_prefix_equality_predicates(
 pub(crate) struct PrefixWithRangeResult {
     /// Prefix key values (equality predicates on first N columns)
     pub prefix_key: Vec<SqlValue>,
-    /// Upper bound value for the (N+1)th column (range predicate)
-    pub upper_bound: SqlValue,
+    /// Lower bound value for the (N+1)th column (range predicate), if any
+    pub lower_bound: Option<SqlValue>,
+    /// Whether the lower bound is inclusive (>=) or exclusive (>)
+    pub inclusive_lower: bool,
+    /// Upper bound value for the (N+1)th column (range predicate), if any
+    pub upper_bound: Option<SqlValue>,
     /// Whether the upper bound is inclusive (<=) or exclusive (<)
     pub inclusive_upper: bool,
     /// Column names covered by this lookup (prefix + range column)
@@ -411,15 +415,17 @@ pub(crate) fn extract_prefix_with_trailing_range(
     let next_col = column_names[prefix_end_idx];
     let range = extract_range_predicate(expr, next_col);
 
-    // We're looking for upper bounds (<, <=) for efficient prefix_bounded_scan
-    // Lower bounds (>, >=) would require different handling
+    // Extract both lower and upper bounds for efficient bounded range scans
+    // This handles queries like: WHERE col1 = 1 AND col2 >= 10 AND col2 < 20
     if let Some(range_pred) = range {
-        // Only handle upper bound cases for now (most common in TPC-C Stock-Level)
-        if let Some(end_val) = range_pred.end {
+        // Need at least one bound to optimize
+        if range_pred.start.is_some() || range_pred.end.is_some() {
             covered_columns.insert(next_col.to_uppercase());
             return Some(PrefixWithRangeResult {
                 prefix_key,
-                upper_bound: end_val,
+                lower_bound: range_pred.start,
+                inclusive_lower: range_pred.inclusive_start,
+                upper_bound: range_pred.end,
                 inclusive_upper: range_pred.inclusive_end,
                 covered_columns,
             });

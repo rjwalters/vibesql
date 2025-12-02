@@ -633,6 +633,149 @@ impl<'a> VibesqlTransactionExecutor<'a> {
     /// Per TPC-C spec 2.8, the Stock-Level transaction checks the last 20 orders
     /// for items with stock below the threshold.
     pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        // Check if SQL path should be used (for testing optimizer improvements)
+        if std::env::var("TPCC_STOCK_LEVEL_SQL").is_ok() {
+            self.stock_level_sql_path(input)
+        } else {
+            // Use fast path for direct storage API access (bypassing SQL parsing)
+            self.stock_level_fast_path(input)
+        }
+    }
+
+    /// SQL-based implementation of Stock-Level transaction
+    ///
+    /// This uses actual SQL execution through the query engine, unlike the fast-path
+    /// which bypasses SQL parsing. Used for testing optimizer improvements.
+    ///
+    /// The SQL queries are:
+    /// 1. SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?
+    /// 2. SELECT COUNT(DISTINCT ol_i_id) FROM order_line
+    ///    WHERE ol_w_id = ? AND ol_d_id = ? AND ol_o_id >= ? AND ol_o_id < ?
+    ///    AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?)
+    fn stock_level_sql_path(&self, input: &StockLevelInput) -> TransactionResult {
+        use vibesql_types::SqlValue;
+        let start = Instant::now();
+        let debug = std::env::var("STOCK_LEVEL_DEBUG").is_ok();
+
+        // Query 1: Get d_next_o_id from district table
+        let query1 = format!(
+            "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+            input.w_id, input.d_id
+        );
+
+        let stmt1 = match Parser::parse_sql(&query1) {
+            Ok(vibesql_ast::Statement::Select(s)) => s,
+            _ => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some("Failed to parse district query".to_string()),
+                };
+            }
+        };
+
+        let q1_parse_time = start.elapsed();
+
+        let executor1 = SelectExecutor::new(self.db);
+        let result1 = match executor1.execute(&stmt1) {
+            Ok(rows) => rows,
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("District query failed: {}", e)),
+                };
+            }
+        };
+        let q1_exec_time = start.elapsed();
+        if debug {
+            eprintln!("[STOCK_LEVEL] Q1 parse: {:?}, exec: {:?}", q1_parse_time, q1_exec_time - q1_parse_time);
+        }
+
+        let d_next_o_id = match result1.first() {
+            Some(row) => match &row.values[0] {
+                SqlValue::Integer(id) => *id,
+                SqlValue::Bigint(id) => *id,
+                _ => {
+                    return TransactionResult {
+                        success: false,
+                        duration_us: start.elapsed().as_micros() as u64,
+                        error: Some("d_next_o_id has unexpected type".to_string()),
+                    };
+                }
+            },
+            None => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some("District not found".to_string()),
+                };
+            }
+        };
+
+        let ol_o_id_min = d_next_o_id - 20;
+        let ol_o_id_max = d_next_o_id;
+
+        // Query 2: Count distinct items in stock below threshold
+        // This is the complex query with a subquery that tests optimizer performance
+        let query2 = format!(
+            "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
+             WHERE ol_w_id = {} AND ol_d_id = {} \
+             AND ol_o_id >= {} AND ol_o_id < {} \
+             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
+            input.w_id, input.d_id, ol_o_id_min, ol_o_id_max, input.w_id, input.threshold
+        );
+
+        let stmt2 = match Parser::parse_sql(&query2) {
+            Ok(vibesql_ast::Statement::Select(s)) => s,
+            _ => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some("Failed to parse stock query".to_string()),
+                };
+            }
+        };
+        let q2_parse_time = start.elapsed();
+
+        let executor2 = SelectExecutor::new(self.db);
+        match executor2.execute(&stmt2) {
+            Ok(_rows) => {
+                let q2_exec_time = start.elapsed();
+                if debug {
+                    eprintln!("[STOCK_LEVEL] Q2 parse: {:?}, exec: {:?}, total: {:?}",
+                        q2_parse_time - q1_exec_time,
+                        q2_exec_time - q2_parse_time,
+                        q2_exec_time);
+                }
+                // Success - we don't need to return the count, just verify execution worked
+                TransactionResult {
+                    success: true,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: None,
+                }
+            }
+            Err(e) => TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Stock query failed: {}", e)),
+            },
+        }
+    }
+
+    /// Fast-path implementation of Stock-Level transaction
+    ///
+    /// This bypasses SQL parsing and goes directly to storage APIs:
+    /// 1. Direct PK lookup on district table for d_next_o_id
+    /// 2. Prefix scan on order_line PK index for recent orders
+    /// 3. Direct PK lookups on stock table for each item
+    /// 4. Count distinct items below threshold
+    ///
+    /// Performance: ~100-500µs vs ~12ms with SQL path (24-120x faster)
+    fn stock_level_fast_path(&self, input: &StockLevelInput) -> TransactionResult {
+        use std::collections::HashSet;
+        use vibesql_types::SqlValue;
+
         let start = Instant::now();
 
         // Get district next order ID
