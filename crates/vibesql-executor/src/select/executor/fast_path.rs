@@ -362,7 +362,7 @@ impl SelectExecutor<'_> {
             self.database,
             stmt.where_clause.as_ref(),
             stmt.order_by.as_deref(),
-            stmt.limit.map(|l| l as usize), // LIMIT pushdown for ORDER BY optimization
+            stmt.limit, // LIMIT pushdown for ORDER BY optimization
             None, // No outer row
             None, // No outer schema
             |_| unreachable!("Fast path doesn't support subqueries"),
@@ -654,7 +654,7 @@ impl SelectExecutor<'_> {
     ) -> Result<Option<Vec<Row>>, ExecutorError> {
         // Only applies when LIMIT is specified
         let limit = match stmt.limit {
-            Some(l) if l > 0 => l as usize,
+            Some(l) if l > 0 => l,
             _ => return Ok(None),
         };
 

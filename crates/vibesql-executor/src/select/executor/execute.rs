@@ -179,7 +179,7 @@ impl SelectExecutor<'_> {
                 &cte_results,
                 stmt.where_clause.as_ref(),
                 stmt.order_by.as_deref(),
-                stmt.limit.map(|l| l as usize),
+                stmt.limit,
             )?)
         } else {
             None
@@ -635,7 +635,7 @@ impl SelectExecutor<'_> {
                 cte_results,
                 stmt.where_clause.as_ref(),
                 stmt.order_by.as_deref(),
-                stmt.limit.map(|l| l as usize),
+                stmt.limit,
             )?;
 
             // Validate column references BEFORE processing rows (issue #2654)

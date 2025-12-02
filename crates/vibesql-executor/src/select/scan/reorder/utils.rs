@@ -322,14 +322,14 @@ fn qualify_columns(expr: &vibesql_ast::Expression, table_name: &str) -> vibesql_
         }
         Expression::BinaryOp { op, left, right } => {
             Expression::BinaryOp {
-                op: op.clone(),
+                op: *op,
                 left: Box::new(qualify_columns(left, table_name)),
                 right: Box::new(qualify_columns(right, table_name)),
             }
         }
         Expression::UnaryOp { op, expr: inner } => {
             Expression::UnaryOp {
-                op: op.clone(),
+                op: *op,
                 expr: Box::new(qualify_columns(inner, table_name)),
             }
         }

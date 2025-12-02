@@ -305,22 +305,23 @@ pub(crate) fn execute_index_scan(
     //          ORDER BY o_id DESC LIMIT 1
     // - Before: Fetch all 30 orders, reverse, take 1
     // - After: Reverse indices, take 1, fetch just 1 row
-    let limit_already_applied = if sorted_columns.is_some() && !need_where_filter && limit.is_some() {
-        let is_desc = sorted_columns.as_ref()
-            .and_then(|cols| cols.first())
-            .is_some_and(|(_, dir)| *dir == vibesql_ast::OrderDirection::Desc);
-
-        let limit_val = limit.unwrap();
-
-        if is_desc {
-            // For DESC: reverse and take first N
-            matching_row_indices.reverse();
-            matching_row_indices.truncate(limit_val);
-            true // We already handled the reverse
+    let limit_already_applied = if let (Some(sorted_cols), Some(limit_val)) = (&sorted_columns, limit) {
+        if need_where_filter {
+            false
         } else {
-            // For ASC: just take first N
-            matching_row_indices.truncate(limit_val);
-            false // ASC doesn't need reverse tracking
+            let is_desc = sorted_cols.first()
+                .is_some_and(|(_, dir)| *dir == vibesql_ast::OrderDirection::Desc);
+
+            if is_desc {
+                // For DESC: reverse and take first N
+                matching_row_indices.reverse();
+                matching_row_indices.truncate(limit_val);
+                true // We already handled the reverse
+            } else {
+                // For ASC: just take first N
+                matching_row_indices.truncate(limit_val);
+                false // ASC doesn't need reverse tracking
+            }
         }
     } else {
         false

@@ -81,13 +81,16 @@ impl ArenaPreparedStatement {
         // Store as raw pointer, erasing the lifetime.
         // SAFETY: The arena is owned by this struct and won't be dropped
         // while the statement exists. The pointer remains valid.
-        let statement_ptr = stmt as *const SelectStmt<'_> as *const SelectStmt<'static>;
+        let statement_ptr = stmt as *const SelectStmt<'_>;
+        // Cast to 'static lifetime - this is safe because the arena owns the data
+        let statement_ptr = statement_ptr.cast::<SelectStmt<'static>>();
 
         // Allocate interner in arena and store pointer
         // SAFETY: Same invariants as statement_ptr
         let interner_in_arena = arena.alloc(interner);
-        let interner_ptr =
-            interner_in_arena as *const ArenaInterner<'_> as *const ArenaInterner<'static>;
+        let interner_ptr = interner_in_arena as *const ArenaInterner<'_>;
+        // Cast to 'static lifetime - this is safe because the arena owns the data
+        let interner_ptr = interner_ptr.cast::<ArenaInterner<'static>>();
 
         Ok(Self {
             sql,
