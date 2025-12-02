@@ -9,9 +9,9 @@ use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSch
 
 use super::predicate::{
     build_residual_where_clause, extract_composite_predicates_with_in, extract_index_predicate,
-    extract_prefix_equality_predicates, generate_composite_keys,
+    extract_prefix_equality_predicates, extract_prefix_with_trailing_range, generate_composite_keys,
     where_clause_fully_satisfied_by_composite_key, CompositePredicateType, IndexPredicate,
-    PrefixPredicateResult,
+    PrefixPredicateResult, PrefixWithRangeResult,
 };
 
 /// Execute an index scan
@@ -85,20 +85,30 @@ pub(crate) fn execute_index_scan(
     // Determine if we can use composite key point lookup
     let use_composite_lookup = composite_keys.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
 
+    // Try prefix + trailing range lookup first (for queries like WHERE s_w_id = 1 AND s_quantity < 10)
+    // This is more efficient than prefix-only lookup because it bounds the scan
+    let prefix_with_range_result: Option<PrefixWithRangeResult> = if !use_composite_lookup && is_multi_column_index {
+        where_clause.and_then(|expr| extract_prefix_with_trailing_range(expr, &index_column_names))
+    } else {
+        None
+    };
+
+    let use_prefix_bounded_lookup = prefix_with_range_result.is_some();
+
     // Try prefix lookup if full composite key not available (for partial prefix matches)
     // This handles queries like: WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100
     // where only c_w_id and c_d_id are in the index
-    let prefix_result: Option<PrefixPredicateResult> = if !use_composite_lookup && is_multi_column_index {
+    let prefix_result: Option<PrefixPredicateResult> = if !use_composite_lookup && !use_prefix_bounded_lookup && is_multi_column_index {
         where_clause.and_then(|expr| extract_prefix_equality_predicates(expr, &index_column_names))
     } else {
         None
     };
 
     // Check if we're using prefix lookup (partial composite key match)
-    let use_prefix_lookup = prefix_result.is_some() && !use_composite_lookup;
+    let use_prefix_lookup = prefix_result.is_some() && !use_composite_lookup && !use_prefix_bounded_lookup;
 
     // Fall back to single-column predicate extraction if neither composite nor prefix available
-    let index_predicate = if use_composite_lookup || use_prefix_lookup {
+    let index_predicate = if use_composite_lookup || use_prefix_lookup || use_prefix_bounded_lookup {
         None // Don't need single-column predicate - using composite/prefix key
     } else {
         where_clause.and_then(|expr| extract_index_predicate(expr, first_indexed_column))
@@ -106,7 +116,14 @@ pub(crate) fn execute_index_scan(
 
     // Build residual WHERE clause for prefix lookups
     // This contains only the predicates NOT covered by the index prefix
-    let residual_where = if let Some(ref prefix) = prefix_result {
+    let residual_where = if let Some(ref prefix_range) = prefix_with_range_result {
+        // Prefix + range lookup - use covered_columns from the prefix+range result
+        if let Some(where_expr) = where_clause {
+            build_residual_where_clause(where_expr, &prefix_range.covered_columns)
+        } else {
+            None
+        }
+    } else if let Some(ref prefix) = prefix_result {
         if let Some(where_expr) = where_clause {
             build_residual_where_clause(where_expr, &prefix.covered_columns)
         } else {
@@ -130,6 +147,12 @@ pub(crate) fn execute_index_scan(
                 }
             }
             None => (false, None),
+        }
+    } else if use_prefix_bounded_lookup {
+        // Prefix + range lookup - apply only residual WHERE clause
+        match &residual_where {
+            Some(residual) => (true, Some(residual.clone())), // Apply residual only
+            None => (false, None), // All predicates covered by prefix+range - skip filtering
         }
     } else if use_prefix_lookup {
         // Prefix lookup - apply only residual WHERE clause
@@ -169,6 +192,15 @@ pub(crate) fn execute_index_scan(
             all_indices.dedup();
             all_indices
         }
+    } else if let Some(ref prefix_range) = prefix_with_range_result {
+        // Prefix + range lookup - O(log n + k) where k is matching rows
+        // This is the most efficient path for queries like WHERE s_w_id = 1 AND s_quantity < 10
+        // It avoids scanning all rows with prefix match and only scans up to the upper bound
+        index_data.prefix_bounded_scan(
+            &prefix_range.prefix_key,
+            &prefix_range.upper_bound,
+            prefix_range.inclusive_upper,
+        )
     } else if let Some(ref prefix) = prefix_result {
         // Prefix key lookup - O(log n + k) where k is matching rows
         // This handles partial composite key matches

@@ -214,12 +214,20 @@ pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool 
     }
 }
 
-/// Check if an expression is a literal value
+/// Check if an expression is a literal value or parameter placeholder
 ///
-/// Index scans can only filter on columns compared to literal values,
+/// Index scans can filter on columns compared to literal values or bound parameters,
 /// not columns compared to other columns (which are equijoin conditions).
+/// Parameter placeholders (?, $1, :name, etc.) are treated as literals for index selection
+/// because they are resolved to concrete values at execution time.
 fn is_literal(expr: &Expression) -> bool {
-    matches!(expr, Expression::Literal(_))
+    matches!(
+        expr,
+        Expression::Literal(_)
+            | Expression::Placeholder(_)
+            | Expression::NumberedPlaceholder(_)
+            | Expression::NamedPlaceholder(_)
+    )
 }
 
 /// Case-insensitive lookup of column statistics
@@ -452,6 +460,12 @@ pub(crate) fn cost_based_index_selection(
             // Count how many leading index columns are pinned by equality predicates
             let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
 
+            // Debug: trace index selection
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}",
+                    table_name, index_name, column_name, can_use_for_where);
+            }
+
             let can_use_for_order = if let Some(order_items) = order_by {
                 // Check if ORDER BY columns match the index columns (after skipping pinned columns)
                 let columns_match = can_use_index_for_order_by_with_pinned(
@@ -474,7 +488,15 @@ pub(crate) fn cost_based_index_selection(
 
             // Skip this index if it can't help with WHERE or ORDER BY
             if !can_use_for_where && !can_use_for_order {
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!("[INDEX_SELECT] skipping {} - can't use for where or order", index_name);
+                }
                 continue;
+            }
+
+            // Debug: continue trace
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] {} passed where/order check, checking stats...", index_name);
             }
 
             // Get column statistics for the indexed column (case-insensitive lookup)
@@ -482,10 +504,17 @@ pub(crate) fn cost_based_index_selection(
             if col_stats.is_none() {
                 // Track that we found an applicable index without column stats
                 // We'll fall back to rule-based selection if cost-based fails
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!("[INDEX_SELECT] {} no column stats for {}, will fallback", index_name, column_name);
+                }
                 has_applicable_index_without_stats = true;
                 continue; // No stats for this column, try next index
             }
             let col_stats = col_stats.unwrap();
+
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] {} has column stats for {}", index_name, column_name);
+            }
 
             // Estimate selectivity based on WHERE clause
             let selectivity = if let Some(where_expr) = where_clause {
@@ -500,6 +529,11 @@ pub(crate) fn cost_based_index_selection(
                 Some(col_stats),
                 selectivity,
             );
+
+            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                eprintln!("[INDEX_SELECT] {} selectivity={:.4}, access_method={:?}, is_index_scan={}",
+                    index_name, selectivity, access_method, access_method.is_index_scan());
+            }
 
             // Build sorted_columns metadata if ORDER BY can be satisfied
             let sorted_columns = if can_use_for_order {
@@ -541,22 +575,41 @@ pub(crate) fn cost_based_index_selection(
                 if is_better {
                     best_index = Some((index_name.clone(), access_method, pinned_columns, sorted_columns));
                 }
+            } else if selectivity < 0.40 && can_use_for_where {
+                // Cost-based chose table scan, but selectivity is good enough for index
+                // The cost model may be too conservative for in-memory/prefix scans
+                // Common fallback values: 0.33 (single predicate), 0.1089 (two predicates)
+                // Fall back to rule-based selection for selective queries
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!("[INDEX_SELECT] {} selectivity={:.4} good, falling back to rule-based",
+                        index_name, selectivity);
+                }
+                return should_use_index_scan(table_name, where_clause, order_by, database);
             }
         }
     }
 
     // Return the best index if we found one
     if let Some((index_name, _, _, sorted_columns)) = best_index {
+        if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+            eprintln!("[INDEX_SELECT] selected best_index={} for table={}", index_name, table_name);
+        }
         return Some((index_name, sorted_columns));
     }
 
     // If we have applicable indexes but no column stats, fall back to rule-based selection
     // This ensures we use indexes even when statistics are incomplete
     if has_applicable_index_without_stats {
+        if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+            eprintln!("[INDEX_SELECT] falling back to rule-based for table={}", table_name);
+        }
         return should_use_index_scan(table_name, where_clause, order_by, database);
     }
 
     // No applicable indexes found
+    if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+        eprintln!("[INDEX_SELECT] no index selected for table={}", table_name);
+    }
     None
 }
 
@@ -574,6 +627,7 @@ pub(crate) fn estimate_selectivity(
             match op {
                 vibesql_ast::BinaryOperator::Equal => {
                     // Check if this is a predicate on our column (case-insensitive)
+                    // For literal values, use actual statistics
                     if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) = (&**left, &**right) {
                         if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
@@ -582,6 +636,20 @@ pub(crate) fn estimate_selectivity(
                     if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) = (&**left, &**right) {
                         if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
+                        }
+                    }
+                    // For placeholder parameters, estimate using 1/n_distinct
+                    // This is more accurate than the generic 0.33 fallback for equality predicates
+                    let left_is_col = is_column_reference(left, column_name);
+                    let right_is_col = is_column_reference(right, column_name);
+                    let left_is_lit = is_literal(left);
+                    let right_is_lit = is_literal(right);
+
+                    if (left_is_col && right_is_lit) || (left_is_lit && right_is_col)
+                    {
+                        // Use 1/n_distinct as selectivity estimate for equality with parameter
+                        if col_stats.n_distinct > 0 {
+                            return 1.0 / col_stats.n_distinct as f64;
                         }
                     }
                     0.33 // Default fallback
@@ -602,6 +670,12 @@ pub(crate) fn estimate_selectivity(
                             };
                             return col_stats.estimate_range_selectivity(value, op_str);
                         }
+                    }
+                    // For placeholder parameters, use a conservative 0.25 (assume filtering ~75% of rows)
+                    if (is_column_reference(left, column_name) && is_literal(right))
+                        || (is_literal(left) && is_column_reference(right, column_name))
+                    {
+                        return 0.25;
                     }
                     0.33 // Default fallback
                 }

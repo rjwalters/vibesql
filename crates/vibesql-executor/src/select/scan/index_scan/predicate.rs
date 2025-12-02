@@ -336,6 +336,99 @@ pub(crate) fn extract_prefix_equality_predicates(
     })
 }
 
+/// Result of prefix + trailing range predicate extraction
+#[derive(Debug)]
+pub(crate) struct PrefixWithRangeResult {
+    /// Prefix key values (equality predicates on first N columns)
+    pub prefix_key: Vec<SqlValue>,
+    /// Upper bound value for the (N+1)th column (range predicate)
+    pub upper_bound: SqlValue,
+    /// Whether the upper bound is inclusive (<=) or exclusive (<)
+    pub inclusive_upper: bool,
+    /// Column names covered by this lookup (prefix + range column)
+    pub covered_columns: std::collections::HashSet<String>,
+}
+
+/// Extract prefix equality predicates + optional trailing range predicate
+///
+/// This is an optimization for queries like `WHERE col1 = 1 AND col2 < 10` on an
+/// index `(col1, col2, col3)`. It extracts the equality prefix (`col1 = 1`) and
+/// the range bound on the next column (`col2 < 10`).
+///
+/// This enables efficient bounded range scans instead of scanning all rows
+/// matching the prefix and then filtering by the range predicate.
+///
+/// # Arguments
+/// * `expr` - The WHERE clause expression
+/// * `column_names` - The index column names in order
+///
+/// # Returns
+/// `Some(PrefixWithRangeResult)` if prefix + trailing range found, `None` otherwise
+///
+/// # Example
+/// ```text
+/// Index: (s_w_id, s_quantity, s_i_id)
+/// WHERE: s_w_id = 1 AND s_quantity < 10
+/// Result: prefix_key=[1], upper_bound=10, inclusive_upper=false
+/// ```
+pub(crate) fn extract_prefix_with_trailing_range(
+    expr: &Expression,
+    column_names: &[&str],
+) -> Option<PrefixWithRangeResult> {
+    if column_names.len() < 2 {
+        // Need at least 2 columns for prefix + range
+        return None;
+    }
+
+    // Collect all equality predicates from the WHERE clause
+    let mut equality_predicates: std::collections::HashMap<String, SqlValue> =
+        std::collections::HashMap::new();
+    collect_equality_predicates(expr, &mut equality_predicates);
+
+    // Build prefix key in index column order, stopping at first missing column
+    let mut prefix_key = Vec::new();
+    let mut covered_columns = std::collections::HashSet::new();
+    let mut prefix_end_idx = 0;
+
+    for (idx, col_name) in column_names.iter().enumerate() {
+        let col_upper = col_name.to_uppercase();
+        if let Some(value) = equality_predicates.get(&col_upper) {
+            prefix_key.push(value.clone());
+            covered_columns.insert(col_upper);
+            prefix_end_idx = idx + 1;
+        } else {
+            // Gap in prefix - stop here
+            break;
+        }
+    }
+
+    if prefix_key.is_empty() || prefix_end_idx >= column_names.len() {
+        // No prefix found or prefix covers all columns (no room for range)
+        return None;
+    }
+
+    // Check if the next column has a range predicate (<, <=, >, >=)
+    let next_col = column_names[prefix_end_idx];
+    let range = extract_range_predicate(expr, next_col);
+
+    // We're looking for upper bounds (<, <=) for efficient prefix_bounded_scan
+    // Lower bounds (>, >=) would require different handling
+    if let Some(range_pred) = range {
+        // Only handle upper bound cases for now (most common in TPC-C Stock-Level)
+        if let Some(end_val) = range_pred.end {
+            covered_columns.insert(next_col.to_uppercase());
+            return Some(PrefixWithRangeResult {
+                prefix_key,
+                upper_bound: end_val,
+                inclusive_upper: range_pred.inclusive_end,
+                covered_columns,
+            });
+        }
+    }
+
+    None
+}
+
 /// Build a residual WHERE clause by removing predicates covered by index lookup
 ///
 /// Given a WHERE clause and a set of covered column names, this removes the
