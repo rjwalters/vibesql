@@ -158,6 +158,37 @@ pub fn evaluate_predicate_string_batch(
                 .map(|(&a, &b)| a && b)
                 .collect()
         }
+
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // For string columns, check if value is in the list
+            let mut result = vec![false; values.len()];
+
+            // Apply null mask first
+            if let Some(null_mask) = nulls {
+                for (i, &is_null) in null_mask.iter().enumerate() {
+                    if is_null {
+                        result[i] = false;
+                    }
+                }
+            }
+
+            // Check each list value
+            for list_val in list_values {
+                let target = match list_val {
+                    SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                    _ => continue, // Skip non-string values
+                };
+                let matches = batch_string_eq(values, nulls, target);
+                for (i, &m) in matches.iter().enumerate() {
+                    result[i] = result[i] || m;
+                }
+            }
+
+            if *negated {
+                result.iter_mut().for_each(|v| *v = !*v);
+            }
+            result
+        }
     };
 
     Ok(result)

@@ -123,6 +123,14 @@ where
         }
     }
 
+    // Extract common single-table predicates from OR branches (e.g., TPC-H Q19)
+    // This handles cases like `l_shipmode IN ('AIR', 'AIR REG')` that appear in all OR branches
+    if let Some(where_expr) = where_clause {
+        for (table, preds) in predicates::extract_common_or_predicates_with_schema(where_expr, &table_set, &column_to_table) {
+            table_local_predicates.entry(table).or_default().extend(preds);
+        }
+    }
+
     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && !table_local_predicates.is_empty() {
         eprintln!("[JOIN_REORDER] Table-local predicates: {:?}",
             table_local_predicates.keys().collect::<Vec<_>>());
@@ -185,9 +193,11 @@ where
 
         // Execute this table with table-local predicates for early filtering
         // Build a combined predicate from table-local predicates for this specific table
+        // Use the actual table name (table_ref.name) for column qualification so that
+        // PredicatePlan can correctly identify the predicates as table-local
         let table_filter = table_local_predicates
             .get(&table_name.to_lowercase())
-            .and_then(|preds| utils::combine_predicates(preds));
+            .and_then(|preds| utils::combine_predicates_with_qualification(preds, &table_ref.name));
 
         let scan_start = std::time::Instant::now();
         let table_result = if table_ref.is_subquery {

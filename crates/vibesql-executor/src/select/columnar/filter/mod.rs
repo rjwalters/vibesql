@@ -100,6 +100,7 @@ where
                 ColumnPredicate::NotEqual { column_idx, .. } => *column_idx,
                 ColumnPredicate::Between { column_idx, .. } => *column_idx,
                 ColumnPredicate::Like { column_idx, .. } => *column_idx,
+                ColumnPredicate::InList { column_idx, .. } => *column_idx,
             };
 
             if let Some(value) = get_value(row_idx, column_idx) {

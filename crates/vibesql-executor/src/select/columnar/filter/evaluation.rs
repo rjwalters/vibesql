@@ -58,7 +58,8 @@ where
                 | ColumnPredicate::Equal { column_idx, .. }
                 | ColumnPredicate::NotEqual { column_idx, .. }
                 | ColumnPredicate::Between { column_idx, .. }
-                | ColumnPredicate::Like { column_idx, .. } => *column_idx,
+                | ColumnPredicate::Like { column_idx, .. }
+                | ColumnPredicate::InList { column_idx, .. } => *column_idx,
             };
 
             if let Some(value) = get_value(column_idx) {
@@ -113,6 +114,14 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             };
 
             let matches = like_match(text, pattern);
+            if *negated { !matches } else { matches }
+        }
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            use std::cmp::Ordering;
+            // Check if value matches any in the list
+            let matches = list_values.iter().any(|list_val| {
+                compare_values(value, list_val).equals(Ordering::Equal)
+            });
             if *negated { !matches } else { matches }
         }
     }

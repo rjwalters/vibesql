@@ -42,6 +42,8 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         }
         // LIKE patterns don't have NULL values in the pattern itself
         ColumnPredicate::Like { .. } => false,
+        // IN list may contain NULL values
+        ColumnPredicate::InList { values, .. } => values.iter().any(|v| matches!(v, SqlValue::Null)),
     }
 }
 
@@ -163,7 +165,8 @@ fn evaluate_predicate_simd_packed(
         | ColumnPredicate::Equal { column_idx, .. }
         | ColumnPredicate::NotEqual { column_idx, .. }
         | ColumnPredicate::Between { column_idx, .. }
-        | ColumnPredicate::Like { column_idx, .. } => *column_idx,
+        | ColumnPredicate::Like { column_idx, .. }
+        | ColumnPredicate::InList { column_idx, .. } => *column_idx,
     };
 
     let column = batch
@@ -221,7 +224,8 @@ fn evaluate_predicate_simd(
         | ColumnPredicate::Equal { column_idx, .. }
         | ColumnPredicate::NotEqual { column_idx, .. }
         | ColumnPredicate::Between { column_idx, .. }
-        | ColumnPredicate::Like { column_idx, .. } => *column_idx,
+        | ColumnPredicate::Like { column_idx, .. }
+        | ColumnPredicate::InList { column_idx, .. } => *column_idx,
     };
 
     let column = batch

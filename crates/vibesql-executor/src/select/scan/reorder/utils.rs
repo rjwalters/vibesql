@@ -293,6 +293,88 @@ pub(super) fn combine_predicates(predicates: &[vibesql_ast::Expression]) -> Opti
     }
 }
 
+/// Combine a list of predicates into a single AND expression, qualifying unqualified columns
+///
+/// This is similar to `combine_predicates` but also adds table qualifiers to any
+/// unqualified column references. This is necessary for predicates extracted from
+/// OR branches where columns may not have table qualifiers.
+pub(super) fn combine_predicates_with_qualification(
+    predicates: &[vibesql_ast::Expression],
+    table_name: &str,
+) -> Option<vibesql_ast::Expression> {
+    match predicates.len() {
+        0 => None,
+        1 => Some(qualify_columns(&predicates[0], table_name)),
+        _ => {
+            let mut result = qualify_columns(&predicates[0], table_name);
+            for pred in &predicates[1..] {
+                result = vibesql_ast::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::And,
+                    left: Box::new(result),
+                    right: Box::new(qualify_columns(pred, table_name)),
+                };
+            }
+            Some(result)
+        }
+    }
+}
+
+/// Add table qualifiers to unqualified column references in an expression
+fn qualify_columns(expr: &vibesql_ast::Expression, table_name: &str) -> vibesql_ast::Expression {
+    use vibesql_ast::Expression;
+
+    // Use lowercase table name for consistency with schema lookups
+    let table_name_lower = table_name.to_lowercase();
+
+    match expr {
+        Expression::ColumnRef { table: None, column } => {
+            // Add table qualifier to unqualified column
+            Expression::ColumnRef {
+                table: Some(table_name_lower.clone()),
+                column: column.clone(),
+            }
+        }
+        Expression::ColumnRef { table: Some(t), column } => {
+            // Already qualified, keep as is
+            Expression::ColumnRef {
+                table: Some(t.clone()),
+                column: column.clone(),
+            }
+        }
+        Expression::BinaryOp { op, left, right } => {
+            Expression::BinaryOp {
+                op: op.clone(),
+                left: Box::new(qualify_columns(left, table_name)),
+                right: Box::new(qualify_columns(right, table_name)),
+            }
+        }
+        Expression::UnaryOp { op, expr: inner } => {
+            Expression::UnaryOp {
+                op: op.clone(),
+                expr: Box::new(qualify_columns(inner, table_name)),
+            }
+        }
+        Expression::InList { expr: inner, values, negated } => {
+            Expression::InList {
+                expr: Box::new(qualify_columns(inner, table_name)),
+                values: values.iter().map(|v| qualify_columns(v, table_name)).collect(),
+                negated: *negated,
+            }
+        }
+        Expression::Between { expr: inner, low, high, negated, symmetric } => {
+            Expression::Between {
+                expr: Box::new(qualify_columns(inner, table_name)),
+                low: Box::new(qualify_columns(low, table_name)),
+                high: Box::new(qualify_columns(high, table_name)),
+                negated: *negated,
+                symmetric: *symmetric,
+            }
+        }
+        // For other expressions (literals, etc.), return as-is
+        _ => expr.clone(),
+    }
+}
+
 /// Resolve an unqualified column to its table using schema-based lookup
 ///
 /// Returns the table name if the column is found in exactly one table,

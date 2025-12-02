@@ -422,6 +422,13 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
                 .unwrap_or(false);
             if *negated { !matches } else { matches }
         }
+        ColumnPredicate::InList { column_idx, values, negated } => {
+            // Check if column value matches any value in the list
+            let matches = row.get(*column_idx)
+                .map(|v| values.iter().any(|list_val| compare_values(v, list_val) == std::cmp::Ordering::Equal))
+                .unwrap_or(false);
+            if *negated { !matches } else { matches }
+        }
     }
 }
 
