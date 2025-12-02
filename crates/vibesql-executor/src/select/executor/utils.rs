@@ -108,7 +108,9 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
         }
 
         // Placeholders don't reference columns (they're parameter markers)
-        vibesql_ast::Expression::Placeholder(_) => false,
+        vibesql_ast::Expression::Placeholder(_)
+        | vibesql_ast::Expression::NumberedPlaceholder(_)
+        | vibesql_ast::Expression::NamedPlaceholder(_) => false,
     }
 }
 

@@ -1,23 +1,43 @@
 use super::{keywords, Lexer, LexerError};
 use crate::token::Token;
 
-impl Lexer {
+impl<'a> Lexer<'a> {
     /// Tokenize an identifier or keyword.
     pub(super) fn tokenize_identifier_or_keyword(&mut self) -> Result<Token, LexerError> {
-        let start = self.position;
+        let start = self.position();
+        let mut needs_uppercase = false;
+
         while !self.is_eof() {
             let ch = self.current_char();
-            if ch.is_alphanumeric() || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                // Track if we have lowercase letters that need conversion
+                if ch.is_ascii_lowercase() {
+                    needs_uppercase = true;
+                }
                 self.advance();
             } else {
                 break;
             }
         }
 
-        let text: String = self.input[start..self.position].iter().collect();
-        let upper_text = text.to_uppercase();
+        // Get the identifier text directly from the input slice
+        let text = self.slice_from(start);
 
-        Ok(keywords::map_keyword(upper_text))
+        // Optimization: only allocate/uppercase if needed
+        if needs_uppercase {
+            let upper_text = text.to_ascii_uppercase();
+            // Use perfect hash map for O(1) keyword lookup
+            match keywords::map_keyword(&upper_text) {
+                Some(keyword) => Ok(Token::Keyword(keyword)),
+                None => Ok(Token::Identifier(upper_text)),
+            }
+        } else {
+            // Text is already uppercase - try keyword lookup on the slice directly
+            match keywords::map_keyword(text) {
+                Some(keyword) => Ok(Token::Keyword(keyword)),
+                None => Ok(Token::Identifier(text.to_string())),
+            }
+        }
     }
 
     /// Tokenize a delimited identifier enclosed in double quotes.
@@ -42,7 +62,7 @@ impl Lexer {
                     if identifier.is_empty() {
                         return Err(LexerError {
                             message: "Empty delimited identifier is not allowed".to_string(),
-                            position: self.position,
+                            position: self.position(),
                         });
                     }
                     return Ok(Token::DelimitedIdentifier(identifier));
@@ -55,7 +75,7 @@ impl Lexer {
 
         Err(LexerError {
             message: "Unterminated delimited identifier".to_string(),
-            position: self.position,
+            position: self.position(),
         })
     }
 
@@ -81,7 +101,7 @@ impl Lexer {
                     if identifier.is_empty() {
                         return Err(LexerError {
                             message: "Empty delimited identifier is not allowed".to_string(),
-                            position: self.position,
+                            position: self.position(),
                         });
                     }
                     return Ok(Token::DelimitedIdentifier(identifier));
@@ -94,7 +114,7 @@ impl Lexer {
 
         Err(LexerError {
             message: "Unterminated delimited identifier".to_string(),
-            position: self.position,
+            position: self.position(),
         })
     }
 }

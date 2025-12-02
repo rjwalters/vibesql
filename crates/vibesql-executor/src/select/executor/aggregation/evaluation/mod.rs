@@ -128,7 +128,9 @@ impl SelectExecutor<'_> {
             }
 
             // Placeholders should have been bound before evaluation
-            vibesql_ast::Expression::Placeholder(_) => {
+            vibesql_ast::Expression::Placeholder(_)
+            | vibesql_ast::Expression::NumberedPlaceholder(_)
+            | vibesql_ast::Expression::NamedPlaceholder(_) => {
                 Err(ExecutorError::UnsupportedExpression(
                     "Unbound placeholder in aggregate context - placeholders must be bound before execution".to_string(),
                 ))

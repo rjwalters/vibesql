@@ -1,12 +1,12 @@
 use super::{Lexer, LexerError};
 use crate::token::Token;
 
-impl Lexer {
+impl<'a> Lexer<'a> {
     /// Tokenize a number literal.
     /// Supports integers, decimals, and scientific notation (E-notation).
     /// Examples: 42, 3.14, 2.5E+10, 1.2E-5, .2E+2
     pub(super) fn tokenize_number(&mut self) -> Result<Token, LexerError> {
-        let start = self.position;
+        let start = self.position();
         let mut has_dot = false;
 
         // Handle leading decimal point (e.g., .5)
@@ -42,23 +42,23 @@ impl Lexer {
                 }
 
                 // Exponent digits (required)
-                let exp_start = self.position;
+                let exp_start = self.position();
                 while !self.is_eof() && self.current_char().is_ascii_digit() {
                     self.advance();
                 }
 
                 // Verify we got at least one exponent digit
-                if self.position == exp_start {
+                if self.position() == exp_start {
                     return Err(LexerError {
                         message: "Invalid scientific notation: expected digits after 'E'"
                             .to_string(),
-                        position: self.position,
+                        position: self.position(),
                     });
                 }
             }
         }
 
-        let number: String = self.input[start..self.position].iter().collect();
+        let number = self.slice_from(start).to_string();
         Ok(Token::Number(number))
     }
 }

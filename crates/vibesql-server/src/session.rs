@@ -44,6 +44,9 @@ pub enum ExecutionResult {
     DropTable,
     DropIndex,
     DropView,
+    Analyze {
+        tables_analyzed: usize,
+    },
     Other {
         message: String,
     },
@@ -63,6 +66,7 @@ impl ExecutionResult {
             ExecutionResult::DropTable => "DROP_TABLE",
             ExecutionResult::DropIndex => "DROP_INDEX",
             ExecutionResult::DropView => "DROP_VIEW",
+            ExecutionResult::Analyze { .. } => "ANALYZE",
             ExecutionResult::Other { .. } => "OTHER",
         }
     }
@@ -248,6 +252,19 @@ impl Session {
                 Ok(ExecutionResult::DropView)
             }
 
+            vibesql_ast::Statement::Analyze(analyze_stmt) => {
+                let message = vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut self.db)?;
+                // Extract table count from message - the executor returns a message like
+                // "ANALYZE completed - N table(s) analyzed"
+                let tables_analyzed = if analyze_stmt.table_name.is_some() {
+                    1
+                } else {
+                    self.db.list_tables().len()
+                };
+                let _ = message; // Message is informational, we track count
+                Ok(ExecutionResult::Analyze { tables_analyzed })
+            }
+
             _ => {
                 // For now, return a generic success for other statements
                 Ok(ExecutionResult::Other { message: "Command completed successfully".to_string() })
@@ -386,5 +403,74 @@ mod tests {
         session.execute("SELECT 1").unwrap();
         let stats = session.cache_stats();
         assert_eq!(stats.hits, 1);
+    }
+
+    #[test]
+    fn test_analyze_single_table() {
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+
+        // Create a table and insert data
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").unwrap();
+        session.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
+        session.execute("INSERT INTO users VALUES (2, 'Bob')").unwrap();
+
+        // Analyze the table
+        let result = session.execute("ANALYZE users").unwrap();
+
+        // Verify we get an Analyze result
+        match result {
+            ExecutionResult::Analyze { tables_analyzed } => {
+                assert_eq!(tables_analyzed, 1);
+            }
+            other => panic!("Expected Analyze result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_analyze_all_tables() {
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+
+        // Create multiple tables
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").unwrap();
+        session.execute("CREATE TABLE products (id INT, price INT)").unwrap();
+        session.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
+        session.execute("INSERT INTO products VALUES (1, 100)").unwrap();
+
+        // Analyze all tables (no table name)
+        let result = session.execute("ANALYZE").unwrap();
+
+        // Verify we get an Analyze result with 2 tables
+        match result {
+            ExecutionResult::Analyze { tables_analyzed } => {
+                assert_eq!(tables_analyzed, 2);
+            }
+            other => panic!("Expected Analyze result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_analyze_with_columns() {
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+
+        // Create a table
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100), age INT)").unwrap();
+        session.execute("INSERT INTO users VALUES (1, 'Alice', 30)").unwrap();
+
+        // Analyze specific columns
+        let result = session.execute("ANALYZE users (id, name)").unwrap();
+
+        // Verify we get an Analyze result
+        match result {
+            ExecutionResult::Analyze { tables_analyzed } => {
+                assert_eq!(tables_analyzed, 1);
+            }
+            other => panic!("Expected Analyze result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_analyze_statement_type() {
+        let result = ExecutionResult::Analyze { tables_analyzed: 1 };
+        assert_eq!(result.statement_type(), "ANALYZE");
     }
 }

@@ -12,5 +12,11 @@ categories = ["database", "parser-implementations"]
 [dependencies]
 vibesql-ast = { version = "0.1.0", path = "../vibesql-ast" }
 vibesql-types = { version = "0.1.0", path = "../vibesql-types" }
+phf = { version = "0.11", features = ["macros"] }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parser_benchmark"
+harness = false

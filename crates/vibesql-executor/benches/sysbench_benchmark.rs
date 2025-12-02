@@ -42,14 +42,14 @@ mod sysbench;
 
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use std::collections::HashSet;
 use std::env;
 use std::time::{Duration, Instant};
 use sysbench::schema::load_vibesql;
 use sysbench::SysbenchData;
-use vibesql_executor::SelectExecutor;
+use vibesql_ast::{Assignment, DeleteStmt, Expression, SelectStmt, UpdateStmt, WhereClause};
+use vibesql_executor::{DeleteExecutor, InsertExecutor, SelectExecutor, UpdateExecutor};
 use vibesql_parser::Parser;
-use vibesql_storage::{Database as VibeDB, Row};
+use vibesql_storage::Database as VibeDB;
 use vibesql_types::SqlValue;
 
 #[cfg(feature = "benchmark-comparison")]
@@ -68,6 +68,201 @@ const DEFAULT_TABLE_SIZE: usize = 10_000;
 
 /// Range size for range queries (sysbench default is 100)
 const RANGE_SIZE: usize = 100;
+
+// =============================================================================
+// Parameter Binding Helpers
+// =============================================================================
+
+/// Bind values to placeholders in an expression
+fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
+    match expr {
+        Expression::Placeholder(idx) => {
+            Expression::Literal(params.get(*idx).cloned().unwrap_or(SqlValue::Null))
+        }
+        Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
+            op: op.clone(),
+            left: Box::new(bind_expression(left, params)),
+            right: Box::new(bind_expression(right, params)),
+        },
+        Expression::UnaryOp { op, expr } => Expression::UnaryOp {
+            op: op.clone(),
+            expr: Box::new(bind_expression(expr, params)),
+        },
+        Expression::Between {
+            expr,
+            low,
+            high,
+            negated,
+            symmetric,
+        } => Expression::Between {
+            expr: Box::new(bind_expression(expr, params)),
+            low: Box::new(bind_expression(low, params)),
+            high: Box::new(bind_expression(high, params)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+        Expression::Function {
+            name,
+            args,
+            character_unit,
+        } => Expression::Function {
+            name: name.clone(),
+            args: args.iter().map(|a| bind_expression(a, params)).collect(),
+            character_unit: character_unit.clone(),
+        },
+        Expression::AggregateFunction {
+            name,
+            distinct,
+            args,
+        } => Expression::AggregateFunction {
+            name: name.clone(),
+            distinct: *distinct,
+            args: args.iter().map(|a| bind_expression(a, params)).collect(),
+        },
+        // Pass through expressions that don't contain placeholders
+        _ => expr.clone(),
+    }
+}
+
+/// Bind values to placeholders in a WHERE clause
+fn bind_where_clause(where_clause: &Option<WhereClause>, params: &[SqlValue]) -> Option<WhereClause> {
+    where_clause.as_ref().map(|wc| match wc {
+        WhereClause::Condition(expr) => WhereClause::Condition(bind_expression(expr, params)),
+        WhereClause::CurrentOf(cursor) => WhereClause::CurrentOf(cursor.clone()),
+    })
+}
+
+/// Bind values to placeholders in a SelectStmt
+fn bind_select(stmt: &SelectStmt, params: &[SqlValue]) -> SelectStmt {
+    SelectStmt {
+        with_clause: stmt.with_clause.clone(),
+        distinct: stmt.distinct,
+        select_list: stmt.select_list.clone(),
+        into_table: stmt.into_table.clone(),
+        into_variables: stmt.into_variables.clone(),
+        from: stmt.from.clone(),
+        where_clause: stmt.where_clause.as_ref().map(|e| bind_expression(e, params)),
+        group_by: stmt.group_by.clone(),
+        having: stmt.having.clone(),
+        order_by: stmt.order_by.clone(),
+        limit: stmt.limit,
+        offset: stmt.offset,
+        set_operation: stmt.set_operation.clone(),
+    }
+}
+
+/// Bind values to placeholders in a DeleteStmt
+fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
+    DeleteStmt {
+        only: stmt.only,
+        table_name: stmt.table_name.clone(),
+        where_clause: bind_where_clause(&stmt.where_clause, params),
+    }
+}
+
+/// Bind values to placeholders in an UpdateStmt
+fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
+    UpdateStmt {
+        table_name: stmt.table_name.clone(),
+        assignments: stmt
+            .assignments
+            .iter()
+            .map(|a| Assignment {
+                column: a.column.clone(),
+                value: bind_expression(&a.value, params),
+            })
+            .collect(),
+        where_clause: bind_where_clause(&stmt.where_clause, params),
+    }
+}
+
+
+// =============================================================================
+// Pre-parsed Query Templates
+// =============================================================================
+
+/// Pre-parsed SQL query templates for sysbench operations
+/// These are parsed once at setup time and reused with parameter binding
+///
+/// Note: INSERT is not included here because INSERT VALUES with placeholders
+/// requires prepared statement infrastructure. For INSERT, we format the SQL
+/// with actual values and parse per-execution (consistent with the short-term
+/// approach in issue #3204).
+struct PreparedQueries {
+    point_select: SelectStmt,
+    update_index: UpdateStmt,
+    update_non_index: UpdateStmt,
+    delete: DeleteStmt,
+    simple_range: SelectStmt,
+    sum_range: SelectStmt,
+    order_range: SelectStmt,
+    distinct_range: SelectStmt,
+}
+
+impl PreparedQueries {
+    fn new() -> Self {
+        // Parse query templates with ? placeholders
+        // Note: Statement::Select wraps SelectStmt in a Box, so we dereference it
+        let point_select = match Parser::parse_sql("SELECT c FROM sbtest1 WHERE id = ?") {
+            Ok(vibesql_ast::Statement::Select(s)) => *s,
+            _ => panic!("Failed to parse point_select template"),
+        };
+
+        let update_index =
+            match Parser::parse_sql("UPDATE sbtest1 SET k = k + 1 WHERE id = ?") {
+                Ok(vibesql_ast::Statement::Update(s)) => s,
+                _ => panic!("Failed to parse update_index template"),
+            };
+
+        let update_non_index =
+            match Parser::parse_sql("UPDATE sbtest1 SET c = ? WHERE id = ?") {
+                Ok(vibesql_ast::Statement::Update(s)) => s,
+                _ => panic!("Failed to parse update_non_index template"),
+            };
+
+        let delete = match Parser::parse_sql("DELETE FROM sbtest1 WHERE id = ?") {
+            Ok(vibesql_ast::Statement::Delete(s)) => s,
+            _ => panic!("Failed to parse delete template"),
+        };
+
+        let simple_range =
+            match Parser::parse_sql("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?") {
+                Ok(vibesql_ast::Statement::Select(s)) => *s,
+                _ => panic!("Failed to parse simple_range template"),
+            };
+
+        let sum_range =
+            match Parser::parse_sql("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?") {
+                Ok(vibesql_ast::Statement::Select(s)) => *s,
+                _ => panic!("Failed to parse sum_range template"),
+            };
+
+        let order_range = match Parser::parse_sql(
+            "SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c",
+        ) {
+            Ok(vibesql_ast::Statement::Select(s)) => *s,
+            _ => panic!("Failed to parse order_range template"),
+        };
+
+        let distinct_range = match Parser::parse_sql(
+            "SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c",
+        ) {
+            Ok(vibesql_ast::Statement::Select(s)) => *s,
+            _ => panic!("Failed to parse distinct_range template"),
+        };
+
+        Self {
+            point_select,
+            update_index,
+            update_non_index,
+            delete,
+            simple_range,
+            sum_range,
+            order_range,
+            distinct_range,
+        }
+    }
+}
 
 /// Workload type enum
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -168,142 +363,109 @@ trait SysbenchExecutor {
     fn name(&self) -> &'static str;
 }
 
-/// VibeSQL executor using direct API (bypasses SQL parsing for fair comparison)
+/// VibeSQL executor using SQL path consistently with pre-parsed query templates
+/// SQL is parsed once at setup time and reused with parameter binding for each execution.
+/// This provides an apples-to-apples comparison with SQLite/DuckDB which use prepare_cached().
 struct VibesqlExecutor<'a> {
     db: &'a mut VibeDB,
+    queries: &'a PreparedQueries,
 }
 
 impl<'a> VibesqlExecutor<'a> {
-    fn new(db: &'a mut VibeDB) -> Self {
-        Self { db }
+    fn new(db: &'a mut VibeDB, queries: &'a PreparedQueries) -> Self {
+        Self { db, queries }
     }
 }
 
 impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
-        // Use direct PK lookup (bypasses SQL parsing)
-        match self.db.get_column_by_pk("SBTEST1", &SqlValue::Integer(id), 2) {
-            Ok(Some(_)) => 1,
-            _ => 0,
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Integer(id)];
+        let bound = bind_select(&self.queries.point_select, &params);
+        let executor = SelectExecutor::new(self.db);
+        match executor.execute(&bound) {
+            Ok(result) => result.len(),
+            Err(_) => 0,
         }
     }
 
     fn insert(&mut self, id: i64, k: i64, c: &str, pad: &str) {
-        let row = Row::new(vec![
-            SqlValue::Integer(id),
-            SqlValue::Integer(k),
-            SqlValue::Varchar(c.to_string()),
-            SqlValue::Varchar(pad.to_string()),
-        ]);
-        let _ = self.db.insert_row("SBTEST1", row);
+        // Use SQL path - format SQL with actual values and parse
+        // Note: INSERT with placeholders requires prepared statement infrastructure
+        // which is not yet available. This approach still uses the SQL executor path
+        // (no direct API bypass) for benchmark fairness.
+        let sql = format!(
+            "INSERT INTO sbtest1 (id, k, c, pad) VALUES ({}, {}, '{}', '{}')",
+            id, k, c, pad
+        );
+        if let Ok(vibesql_ast::Statement::Insert(insert)) = Parser::parse_sql(&sql) {
+            let _ = InsertExecutor::execute(self.db, &insert);
+        }
     }
 
     fn update_index(&mut self, id: i64) {
-        // For k = k + 1, read current value then update
-        let (row_index, current_k, row_clone) = {
-            let table = match self.db.get_table("SBTEST1") {
-                Some(t) => t,
-                None => return,
-            };
-            let pk_index = match table.primary_key_index() {
-                Some(idx) => idx,
-                None => return,
-            };
-
-            if let Some(&idx) = pk_index.get(&vec![SqlValue::Integer(id)]) {
-                let row = &table.scan()[idx];
-                if let SqlValue::Integer(k) = &row.values[1] {
-                    (idx, *k, row.clone())
-                } else {
-                    return;
-                }
-            } else {
-                return;
-            }
-        };
-
-        let new_k = current_k + 1;
-        let table_mut = match self.db.get_table_mut("SBTEST1") {
-            Some(t) => t,
-            None => return,
-        };
-        let mut new_row = row_clone;
-        let _ = new_row.set(1, SqlValue::Integer(new_k));
-        let mut changed = HashSet::new();
-        changed.insert(1);
-        let _ = table_mut.update_row_selective(row_index, new_row, &changed);
-        self.db.invalidate_columnar_cache("SBTEST1");
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Integer(id)];
+        let bound = bind_update(&self.queries.update_index, &params);
+        let _ = UpdateExecutor::execute(&bound, self.db);
     }
 
     fn update_non_index(&mut self, id: i64, c: &str) {
-        let _ = self.db.update_row_by_pk(
-            "SBTEST1",
-            SqlValue::Integer(id),
-            vec![("c", SqlValue::Varchar(c.to_string()))],
-        );
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Varchar(c.to_string()), SqlValue::Integer(id)];
+        let bound = bind_update(&self.queries.update_non_index, &params);
+        let _ = UpdateExecutor::execute(&bound, self.db);
     }
 
     fn delete(&mut self, id: i64) {
-        let sql = format!("DELETE FROM sbtest1 WHERE id = {}", id);
-        if let Ok(vibesql_ast::Statement::Delete(delete)) = Parser::parse_sql(&sql) {
-            let _ = vibesql_executor::DeleteExecutor::execute(&delete, self.db);
-        }
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Integer(id)];
+        let bound = bind_delete(&self.queries.delete, &params);
+        let _ = DeleteExecutor::execute(&bound, self.db);
     }
 
     fn simple_range(&mut self, start: i64, end: i64) -> usize {
-        let sql = format!(
-            "SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {}",
-            start, end
-        );
-        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
-            let executor = SelectExecutor::new(self.db);
-            if let Ok(result) = executor.execute(&select) {
-                return result.len();
-            }
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Integer(start), SqlValue::Integer(end)];
+        let bound = bind_select(&self.queries.simple_range, &params);
+        let executor = SelectExecutor::new(self.db);
+        match executor.execute(&bound) {
+            Ok(result) => result.len(),
+            Err(_) => 0,
         }
-        0
     }
 
     fn sum_range(&mut self, start: i64, end: i64) -> usize {
-        let sql = format!(
-            "SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN {} AND {}",
-            start, end
-        );
-        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
-            let executor = SelectExecutor::new(self.db);
-            if let Ok(result) = executor.execute(&select) {
-                return result.len();
-            }
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Integer(start), SqlValue::Integer(end)];
+        let bound = bind_select(&self.queries.sum_range, &params);
+        let executor = SelectExecutor::new(self.db);
+        match executor.execute(&bound) {
+            Ok(result) => result.len(),
+            Err(_) => 0,
         }
-        0
     }
 
     fn order_range(&mut self, start: i64, end: i64) -> usize {
-        let sql = format!(
-            "SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
-            start, end
-        );
-        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
-            let executor = SelectExecutor::new(self.db);
-            if let Ok(result) = executor.execute(&select) {
-                return result.len();
-            }
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Integer(start), SqlValue::Integer(end)];
+        let bound = bind_select(&self.queries.order_range, &params);
+        let executor = SelectExecutor::new(self.db);
+        match executor.execute(&bound) {
+            Ok(result) => result.len(),
+            Err(_) => 0,
         }
-        0
     }
 
     fn distinct_range(&mut self, start: i64, end: i64) -> usize {
-        let sql = format!(
-            "SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
-            start, end
-        );
-        if let Ok(vibesql_ast::Statement::Select(select)) = Parser::parse_sql(&sql) {
-            let executor = SelectExecutor::new(self.db);
-            if let Ok(result) = executor.execute(&select) {
-                return result.len();
-            }
+        // Use SQL path with pre-parsed template
+        let params = [SqlValue::Integer(start), SqlValue::Integer(end)];
+        let bound = bind_select(&self.queries.distinct_range, &params);
+        let executor = SelectExecutor::new(self.db);
+        match executor.execute(&bound) {
+            Ok(result) => result.len(),
+            Err(_) => 0,
         }
-        0
     }
 
     fn name(&self) -> &'static str {
@@ -1099,6 +1261,10 @@ fn main() {
     // ========================================
     // VibeSQL Benchmark
     // ========================================
+
+    // Pre-parse SQL query templates (parsed once, reused for each execution)
+    let queries = PreparedQueries::new();
+
     eprintln!("\nLoading VibeSQL database ({} rows)...", table_size);
     let load_start = Instant::now();
     let mut vibesql_db = load_vibesql(table_size);
@@ -1106,7 +1272,7 @@ fn main() {
 
     let mut vibesql_results = Vec::new();
     {
-        let mut executor = VibesqlExecutor::new(&mut vibesql_db);
+        let mut executor = VibesqlExecutor::new(&mut vibesql_db, &queries);
 
         match workload_type {
             WorkloadType::PointSelect => {
@@ -1154,7 +1320,7 @@ fn main() {
                     .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
                 // Reload for insert benchmark (needs fresh DB)
                 let mut db2 = load_vibesql(table_size);
-                let mut executor2 = VibesqlExecutor::new(&mut db2);
+                let mut executor2 = VibesqlExecutor::new(&mut db2, &queries);
                 vibesql_results.push(run_insert_benchmark(
                     &mut executor2,
                     table_size,
@@ -1164,7 +1330,7 @@ fn main() {
 
                 // Reload for update benchmarks
                 let mut db3 = load_vibesql(table_size);
-                let mut executor3 = VibesqlExecutor::new(&mut db3);
+                let mut executor3 = VibesqlExecutor::new(&mut db3, &queries);
                 vibesql_results.push(run_update_index_benchmark(
                     &mut executor3,
                     table_size,
@@ -1180,7 +1346,7 @@ fn main() {
 
                 // Reload for delete benchmark
                 let mut db4 = load_vibesql(table_size);
-                let mut executor4 = VibesqlExecutor::new(&mut db4);
+                let mut executor4 = VibesqlExecutor::new(&mut db4, &queries);
                 vibesql_results.push(run_delete_benchmark(
                     &mut executor4,
                     table_size,
@@ -1190,7 +1356,7 @@ fn main() {
 
                 // Reload for range benchmark
                 let mut db5 = load_vibesql(table_size);
-                let mut executor5 = VibesqlExecutor::new(&mut db5);
+                let mut executor5 = VibesqlExecutor::new(&mut db5, &queries);
                 vibesql_results
                     .push(run_range_benchmark(&mut executor5, table_size, duration, warmup));
             }

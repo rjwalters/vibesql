@@ -205,7 +205,9 @@ pub(super) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
         | Expression::MatchAgainst { .. }
         | Expression::PseudoVariable { .. }
         | Expression::SessionVariable { .. }
-        | Expression::Placeholder(_) => false,
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_) => false,
     }
 }
 

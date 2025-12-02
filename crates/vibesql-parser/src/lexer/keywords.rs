@@ -159,6 +159,7 @@ pub(super) fn map_keyword(upper_text: String) -> Token {
         "SPECIFIC" => Token::Keyword(Keyword::Specific),
         "VIEW" => Token::Keyword(Keyword::View),
         "INDEX" => Token::Keyword(Keyword::Index),
+        "ANALYZE" => Token::Keyword(Keyword::Analyze),
         "REINDEX" => Token::Keyword(Keyword::Reindex),
         "ASSERTION" => Token::Keyword(Keyword::Assertion),
         // Trigger-specific keywords

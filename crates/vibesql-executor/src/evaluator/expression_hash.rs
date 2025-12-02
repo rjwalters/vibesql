@@ -141,7 +141,9 @@ impl ExpressionHasher {
             // Session variables can change during execution, so they should not be cached
             // Placeholders should be bound to values before evaluation, so treat them as deterministic
             vibesql_ast::Expression::Literal(_)
-            | vibesql_ast::Expression::Placeholder(_) => true,
+            | vibesql_ast::Expression::Placeholder(_)
+            | vibesql_ast::Expression::NumberedPlaceholder(_)
+            | vibesql_ast::Expression::NamedPlaceholder(_) => true,
             vibesql_ast::Expression::ColumnRef { .. }
             | vibesql_ast::Expression::PseudoVariable { .. }
             | vibesql_ast::Expression::SessionVariable { .. } => false,
@@ -395,8 +397,13 @@ impl ExpressionHasher {
                 name.hash(hasher);
             }
 
-            vibesql_ast::Expression::Placeholder(idx) => {
+            vibesql_ast::Expression::Placeholder(idx)
+            | vibesql_ast::Expression::NumberedPlaceholder(idx) => {
                 idx.hash(hasher);
+            }
+
+            vibesql_ast::Expression::NamedPlaceholder(name) => {
+                name.hash(hasher);
             }
         }
     }

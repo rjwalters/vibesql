@@ -26,6 +26,12 @@ pub enum Token {
     /// Parameter placeholder (?) for prepared statements
     /// The index is assigned during parsing (0-indexed, in order of appearance)
     Placeholder,
+    /// Numbered parameter placeholder ($1, $2, etc.) for prepared statements
+    /// PostgreSQL-style: 1-indexed as written in SQL ($1 = first parameter)
+    NumberedPlaceholder(usize),
+    /// Named parameter placeholder (:name) for prepared statements
+    /// Used by many ORMs and applications for readability
+    NamedPlaceholder(String),
     /// Semicolon (statement terminator)
     Semicolon,
     /// Comma (separator)
@@ -51,6 +57,8 @@ impl fmt::Display for Token {
             Token::SessionVariable(v) => write!(f, "SessionVariable({})", v),
             Token::UserVariable(v) => write!(f, "UserVariable({})", v),
             Token::Placeholder => write!(f, "Placeholder"),
+            Token::NumberedPlaceholder(n) => write!(f, "NumberedPlaceholder(${})", n),
+            Token::NamedPlaceholder(name) => write!(f, "NamedPlaceholder(:{})", name),
             Token::Semicolon => write!(f, "Semicolon"),
             Token::Comma => write!(f, "Comma"),
             Token::LParen => write!(f, "LParen"),
