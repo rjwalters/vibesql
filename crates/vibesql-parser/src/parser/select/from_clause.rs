@@ -74,27 +74,26 @@ impl Parser {
 
                     // Support both SQL:1999 (AS required) and MySQL (AS optional) modes
                     // Parse optional AS keyword
-                    let has_as = if self.peek_keyword(Keyword::As) {
+                    if self.peek_keyword(Keyword::As) {
                         self.consume_keyword(Keyword::As)?;
-                        true
-                    } else {
-                        false
-                    };
+                    }
 
-                    // Parse alias (required for derived tables)
+                    // Parse alias (required for derived tables) - keywords allowed as aliases
                     let alias = match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
                             let alias = id.clone();
                             self.advance();
                             alias
                         }
+                        Token::Keyword(kw) => {
+                            // Allow keywords as alias names for derived tables
+                            let alias = kw.to_string();
+                            self.advance();
+                            alias
+                        }
                         _ => {
                             return Err(ParseError {
-                                message: if has_as {
-                                    "Expected alias after AS keyword".to_string()
-                                } else {
-                                    "Derived table must have an alias".to_string()
-                                }
+                                message: "Derived table must have an alias".to_string()
                             })
                         }
                     };
@@ -127,16 +126,10 @@ impl Parser {
                 let name = self.parse_qualified_identifier()?;
 
                 // Check for optional alias
+                // Parse optional table alias - keywords allowed after AS (e.g., FROM t AS year)
                 let alias = if self.peek_keyword(Keyword::As) {
                     self.consume_keyword(Keyword::As)?;
-                    match self.peek() {
-                        Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                            let alias = id.clone();
-                            self.advance();
-                            Some(alias)
-                        }
-                        _ => None,
-                    }
+                    Some(self.parse_alias_name()?)
                 } else if matches!(
                     self.peek(),
                     Token::Identifier(_) | Token::DelimitedIdentifier(_)

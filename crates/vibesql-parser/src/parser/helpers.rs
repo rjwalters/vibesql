@@ -94,6 +94,28 @@ impl Parser {
         }
     }
 
+    /// Parse an identifier or keyword as an alias name.
+    /// In SQL, keywords can be used as aliases after AS (e.g., `d_year AS year`).
+    /// This is standard SQL behavior supported by most databases.
+    pub(super) fn parse_alias_name(&mut self) -> Result<String, ParseError> {
+        match self.peek() {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                let identifier = name.clone();
+                self.advance();
+                Ok(identifier)
+            }
+            Token::Keyword(kw) => {
+                // Allow keywords as alias names - convert to uppercase string
+                let name = kw.to_string();
+                self.advance();
+                Ok(name)
+            }
+            _ => Err(ParseError {
+                message: format!("Expected alias name, found {:?}", self.peek()),
+            }),
+        }
+    }
+
     /// Try to consume a keyword, returning true if successful.
     pub(super) fn try_consume_keyword(&mut self, keyword: Keyword) -> bool {
         if self.peek_keyword(keyword) {

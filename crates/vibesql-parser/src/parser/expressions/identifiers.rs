@@ -100,32 +100,42 @@ impl Parser {
         }
 
         // Check for qualified column reference (table.column)
+        // Keywords are allowed as column names when qualified (e.g., ss.year)
         if matches!(self.peek(), Token::Symbol('.')) {
             self.advance(); // consume '.'
-            match self.peek() {
+            let column = match self.peek() {
                 Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
                     let column = col.clone();
                     self.advance();
-
-                    // Check for pseudo-variable (OLD.column or NEW.column)
-                    let first_upper = first.to_uppercase();
-                    if first_upper == "OLD" || first_upper == "NEW" {
-                        let pseudo_table = if first_upper == "OLD" {
-                            vibesql_ast::PseudoTable::Old
-                        } else {
-                            vibesql_ast::PseudoTable::New
-                        };
-                        Ok(Some(vibesql_ast::Expression::PseudoVariable {
-                            pseudo_table,
-                            column,
-                        }))
-                    } else {
-                        Ok(Some(vibesql_ast::Expression::ColumnRef { table: Some(first), column }))
-                    }
+                    column
                 }
-                _ => Err(ParseError {
-                    message: "Expected column name after '.'".to_string(),
-                }),
+                Token::Keyword(kw) => {
+                    // Allow keywords as column names when qualified (e.g., table.year)
+                    let column = kw.to_string();
+                    self.advance();
+                    column
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected column name after '.'".to_string(),
+                    });
+                }
+            };
+
+            // Check for pseudo-variable (OLD.column or NEW.column)
+            let first_upper = first.to_uppercase();
+            if first_upper == "OLD" || first_upper == "NEW" {
+                let pseudo_table = if first_upper == "OLD" {
+                    vibesql_ast::PseudoTable::Old
+                } else {
+                    vibesql_ast::PseudoTable::New
+                };
+                Ok(Some(vibesql_ast::Expression::PseudoVariable {
+                    pseudo_table,
+                    column,
+                }))
+            } else {
+                Ok(Some(vibesql_ast::Expression::ColumnRef { table: Some(first), column }))
             }
         } else {
             // Simple column reference

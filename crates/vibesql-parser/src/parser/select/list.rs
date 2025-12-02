@@ -100,18 +100,10 @@ impl Parser {
         let expr = self.parse_expression()?;
 
         // Check for optional AS alias (MySQL allows aliases without AS keyword)
+        // Keywords are allowed as aliases after AS (e.g., d_year AS year)
         let alias = if self.peek_keyword(Keyword::As) {
             self.consume_keyword(Keyword::As)?;
-            match self.peek() {
-                Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                    let alias = id.clone();
-                    self.advance();
-                    Some(alias)
-                }
-                _ => {
-                    return Err(ParseError { message: "Expected identifier after AS".to_string() })
-                }
-            }
+            Some(self.parse_alias_name()?)
         } else if matches!(self.peek(), Token::Identifier(_) | Token::DelimitedIdentifier(_)) {
             // MySQL compatibility: allow aliases without AS keyword
             match self.peek() {
