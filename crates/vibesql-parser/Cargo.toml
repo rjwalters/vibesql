@@ -13,6 +13,7 @@ categories = ["database", "parser-implementations"]
 vibesql-ast = { version = "0.1.0", path = "../vibesql-ast" }
 vibesql-types = { version = "0.1.0", path = "../vibesql-types" }
 phf = { version = "0.11", features = ["macros"] }
+bumpalo = { version = "3.16", features = ["collections"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

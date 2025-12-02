@@ -11,5 +11,6 @@ categories = ["database", "parser-implementations"]
 
 [dependencies]
 vibesql-types = { version = "0.1.0", path = "../vibesql-types" }
+bumpalo = { version = "3.16", features = ["collections"] }
 
 [dev-dependencies]
