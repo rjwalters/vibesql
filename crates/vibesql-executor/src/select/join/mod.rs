@@ -584,6 +584,69 @@ pub(super) fn nested_loop_join(
                 return Ok(result);
             }
         }
+
+        // Phase 3.5: Try arithmetic equijoins from WHERE clause for hash join
+        // For expressions like `col1 = col2 - 53` in WHERE clause with Inner joins
+        // This enables hash join for derived table joins with arithmetic conditions (TPC-DS Q2)
+        for (idx, equijoin) in additional_equijoins.iter().enumerate() {
+            if let Some(arith_info) =
+                join_analyzer::analyze_arithmetic_equi_join(equijoin, &temp_schema, left_col_count)
+            {
+                // Save schemas for NATURAL JOIN processing before moving left/right
+                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                    (Some(left.schema.clone()), Some(right.schema.clone()))
+                } else {
+                    (None, None)
+                };
+
+                // Found an arithmetic equijoin suitable for hash join!
+                let mut result = hash_join_inner_arithmetic(
+                    left,
+                    right,
+                    arith_info.left_col_idx,
+                    arith_info.right_col_idx,
+                    arith_info.offset,
+                )?;
+
+                // Apply remaining equijoins as post-join filters
+                let remaining_conditions: Vec<_> = additional_equijoins
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != idx)
+                    .map(|(_, e)| e.clone())
+                    .collect();
+
+                if !remaining_conditions.is_empty() {
+                    if let Some(filter_expr) = combine_with_and(remaining_conditions) {
+                        result = apply_post_join_filter(result, &filter_expr, database)?;
+                    }
+                }
+
+                // For NATURAL JOIN, remove duplicate columns from the result
+                if natural {
+                    if let (Some(left_schema), Some(right_schema_orig)) =
+                        (left_schema_for_natural, right_schema_for_natural)
+                    {
+                        let right_schema_for_removal = CombinedSchema {
+                            table_schemas: vec![(
+                                right_table_name_for_natural.clone(),
+                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                            )]
+                            .into_iter()
+                            .collect(),
+                            total_columns: right_schema_orig.total_columns,
+                        };
+                        result = remove_duplicate_columns_for_natural_join(
+                            result,
+                            &left_schema,
+                            &right_schema_for_removal,
+                        )?;
+                    }
+                }
+
+                return Ok(result);
+            }
+        }
     }
 
     // Try to use hash join for LEFT OUTER JOINs with equi-join conditions

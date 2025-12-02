@@ -379,13 +379,20 @@ pub(super) fn extract_where_equijoins_with_schema(
                     } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                         eprintln!("[JOIN_REORDER]   ✗ Skipped: lt==rt or table not found");
                     }
-                } else if column_to_table.is_empty() {
-                    // CTE fallback: if schema is unavailable, check if both sides reference columns
+                } else {
+                    // Check for arithmetic equijoins like `col1 = col2 +/- constant`
+                    // This enables hash join optimization for derived tables with arithmetic conditions
                     let left_has_column = expr_has_column(left);
                     let right_has_column = expr_has_column(right);
-                    if left_has_column && right_has_column {
+
+                    // If one side resolved to a table but the other didn't (arithmetic expression),
+                    // check if the other side has a column that references a different table
+                    if (left_table.is_some() && right_table.is_none() && right_has_column)
+                        || (left_table.is_none() && right_table.is_some() && left_has_column)
+                        || (column_to_table.is_empty() && left_has_column && right_has_column)
+                    {
                         if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                            eprintln!("[JOIN_REORDER] CTE fallback: adding arithmetic equijoin {:?}", expr);
+                            eprintln!("[JOIN_REORDER] Adding arithmetic equijoin: {:?}", expr);
                         }
                         equijoins.push(expr.clone());
                     }
