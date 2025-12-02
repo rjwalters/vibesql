@@ -443,12 +443,12 @@ fn walk_window_spec<V: ExpressionVisitor>(visitor: &mut V, spec: &WindowSpec) ->
                 return VisitResult::Stop;
             }
         }
-        if let Some(end) = &frame.end {
-            if let crate::FrameBound::Preceding(expr) | crate::FrameBound::Following(expr) = end {
-                let result = walk_expression(visitor, expr);
-                if result.should_stop() {
-                    return VisitResult::Stop;
-                }
+        if let Some(crate::FrameBound::Preceding(expr) | crate::FrameBound::Following(expr)) =
+            &frame.end
+        {
+            let result = walk_expression(visitor, expr);
+            if result.should_stop() {
+                return VisitResult::Stop;
             }
         }
     }
