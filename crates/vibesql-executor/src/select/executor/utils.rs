@@ -111,6 +111,11 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
         vibesql_ast::Expression::Placeholder(_)
         | vibesql_ast::Expression::NumberedPlaceholder(_)
         | vibesql_ast::Expression::NamedPlaceholder(_) => false,
+
+        // Conjunction and Disjunction - check all children
+        vibesql_ast::Expression::Conjunction(children) | vibesql_ast::Expression::Disjunction(children) => {
+            children.iter().any(expression_references_column)
+        }
     }
 }
 

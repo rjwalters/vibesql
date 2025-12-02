@@ -345,6 +345,40 @@ impl ExpressionEvaluator<'_> {
                     format!("Unbound named placeholder :{} - placeholders must be bound to values before execution", name)
                 ))
             }
+
+            // Conjunction (AND) - evaluate all children with short-circuit
+            vibesql_ast::Expression::Conjunction(children) => {
+                let mut result = SqlValue::Boolean(true);
+                for child in children {
+                    let val = self.eval(child, row)?;
+                    match val {
+                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
+                        SqlValue::Null => result = SqlValue::Null,
+                        SqlValue::Boolean(true) => {}
+                        _ => return Err(ExecutorError::TypeError(
+                            format!("Conjunction requires boolean operands, got {:?}", val)
+                        )),
+                    }
+                }
+                Ok(result)
+            }
+
+            // Disjunction (OR) - evaluate all children with short-circuit
+            vibesql_ast::Expression::Disjunction(children) => {
+                let mut result = SqlValue::Boolean(false);
+                for child in children {
+                    let val = self.eval(child, row)?;
+                    match val {
+                        SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
+                        SqlValue::Null => result = SqlValue::Null,
+                        SqlValue::Boolean(false) => {}
+                        _ => return Err(ExecutorError::TypeError(
+                            format!("Disjunction requires boolean operands, got {:?}", val)
+                        )),
+                    }
+                }
+                Ok(result)
+            }
         }
     }
 

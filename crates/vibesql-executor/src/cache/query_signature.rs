@@ -550,6 +550,12 @@ impl QuerySignature {
                 "SESSION_VARIABLE".hash(hasher);
                 name.hash(hasher);
             }
+
+            Expression::Conjunction(children) | Expression::Disjunction(children) => {
+                for child in children {
+                    Self::hash_expression(child, hasher);
+                }
+            }
         }
     }
 
@@ -978,6 +984,12 @@ impl QuerySignature {
             ArenaExpression::SessionVariable { name } => {
                 "SESSION_VARIABLE".hash(hasher);
                 name.hash(hasher);
+            }
+
+            ArenaExpression::Conjunction(children) | ArenaExpression::Disjunction(children) => {
+                for child in children.iter() {
+                    Self::hash_arena_expression(child, hasher);
+                }
             }
         }
     }

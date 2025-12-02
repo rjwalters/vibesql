@@ -360,6 +360,39 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 self.eval_with_depth(value, row)
             }
 
+            // Conjunction and Disjunction - evaluate children
+            ArenaExpression::Conjunction(children) => {
+                let mut result = SqlValue::Boolean(true);
+                for child in children.iter() {
+                    let val = self.eval_with_depth(child, row)?;
+                    match val {
+                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
+                        SqlValue::Null => result = SqlValue::Null,
+                        SqlValue::Boolean(true) => {}
+                        _ => return Err(ExecutorError::TypeError(
+                            format!("Conjunction requires boolean operands, got {:?}", val)
+                        )),
+                    }
+                }
+                Ok(result)
+            }
+
+            ArenaExpression::Disjunction(children) => {
+                let mut result = SqlValue::Boolean(false);
+                for child in children.iter() {
+                    let val = self.eval_with_depth(child, row)?;
+                    match val {
+                        SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
+                        SqlValue::Null => result = SqlValue::Null,
+                        SqlValue::Boolean(false) => {}
+                        _ => return Err(ExecutorError::TypeError(
+                            format!("Disjunction requires boolean operands, got {:?}", val)
+                        )),
+                    }
+                }
+                Ok(result)
+            }
+
             // Pseudo-variables, session variables, etc. - not supported
             ArenaExpression::PseudoVariable { .. }
             | ArenaExpression::SessionVariable { .. }

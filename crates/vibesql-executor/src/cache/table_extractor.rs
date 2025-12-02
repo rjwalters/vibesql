@@ -163,6 +163,12 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
             let subquery_tables = extract_tables_from_select(subquery);
             tables.extend(subquery_tables);
         }
+        vibesql_ast::Expression::Conjunction(children) | vibesql_ast::Expression::Disjunction(children) => {
+            for child in children {
+                extract_from_expression(child, tables);
+            }
+        }
+
         // Leaf expressions - no tables to extract
         vibesql_ast::Expression::Literal(_)
         | vibesql_ast::Expression::Placeholder(_)

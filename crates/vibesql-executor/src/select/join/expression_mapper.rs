@@ -282,6 +282,11 @@ impl ExpressionMapper {
             | Expression::NamedPlaceholder(_) => {
                 // Placeholders don't reference columns
             }
+            Expression::Conjunction(children) | Expression::Disjunction(children) => {
+                for child in children {
+                    self.walk_expression(child, tables, columns, resolvable);
+                }
+            }
         }
     }
 }
