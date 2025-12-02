@@ -1,5 +1,6 @@
 //! ORDER BY sorting logic
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 #[cfg(feature = "parallel")]
@@ -22,6 +23,7 @@ pub(super) type RowWithSortKeys =
 /// ORDER BY can reference:
 /// - Columns from the FROM clause
 /// - Aliases from the SELECT list
+/// - Original column names that have been aliased in SELECT
 /// - Arbitrary expressions
 pub(super) fn apply_order_by(
     mut rows: Vec<RowWithSortKeys>,
@@ -37,10 +39,10 @@ pub(super) fn apply_order_by(
 
         let mut keys = Vec::new();
         for order_item in order_by {
-            // Check if ORDER BY expression is a SELECT list alias
+            // Check if ORDER BY expression is a SELECT list alias or matches an aliased column
             // Evaluator handles window functions via window_mapping if present
             let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list);
-            let key_value = evaluator.eval(expr_to_eval, row)?;
+            let key_value = evaluator.eval(expr_to_eval.as_ref(), row)?;
             keys.push((key_value, order_item.direction.clone()));
         }
         *sort_keys = Some(keys);
@@ -94,42 +96,145 @@ pub(super) fn apply_order_by(
     Ok(rows)
 }
 
-/// Resolve ORDER BY expression that might be a SELECT list alias or column position
+/// Resolve ORDER BY expression for aggregate results to result schema column names
 ///
-/// Handles three cases:
-/// 1. Numeric literal (e.g., ORDER BY 1, 2, 3) - returns the expression from that position in SELECT list
-/// 2. Simple column reference that matches a SELECT list alias - returns the SELECT list expression
-/// 3. Otherwise - returns the original ORDER BY expression
-fn resolve_order_by_alias<'a>(
-    order_expr: &'a vibesql_ast::Expression,
-    select_list: &'a [vibesql_ast::SelectItem],
-) -> &'a vibesql_ast::Expression {
+/// For aggregate queries, the result schema has columns named by their aliases.
+/// This function maps ORDER BY expressions to ColumnRef expressions that can be
+/// evaluated against the result schema.
+///
+/// Handles cases:
+/// 1. Numeric position (ORDER BY 1) - returns ColumnRef to the alias/column at that position
+/// 2. Alias name (ORDER BY alias) - returns ColumnRef to that alias
+/// 3. Original column name (ORDER BY col where col is aliased to alias) - returns ColumnRef to alias
+/// 4. Otherwise - returns the original expression (for expressions not matching aliases)
+pub(crate) fn resolve_order_by_for_aggregates(
+    order_expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+) -> vibesql_ast::Expression {
     // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
         if *pos > 0 && (*pos as usize) <= select_list.len() {
-            // Valid column position, return the expression at that position
             let idx = (*pos as usize) - 1;
-            if let vibesql_ast::SelectItem::Expression { expr, .. } = &select_list[idx] {
-                return expr;
+            if let vibesql_ast::SelectItem::Expression { expr, alias } = &select_list[idx] {
+                // Return a ColumnRef to the alias name (or derive from expression)
+                let col_name = if let Some(alias_name) = alias {
+                    alias_name.clone()
+                } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
+                    column.clone()
+                } else {
+                    format!("col{}", idx + 1)
+                };
+                return vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: col_name,
+                };
             }
         }
     }
 
     // Check if ORDER BY expression is a simple column reference (no table qualifier)
     if let vibesql_ast::Expression::ColumnRef { table: None, column } = order_expr {
-        // Search for matching alias in SELECT list
+        // First, check if column matches an alias name - return ColumnRef to that alias
+        for item in select_list {
+            if let vibesql_ast::SelectItem::Expression { alias: Some(alias_name), .. } = item {
+                if alias_name.eq_ignore_ascii_case(column) {
+                    // ORDER BY uses alias name, return ColumnRef to that alias
+                    return vibesql_ast::Expression::ColumnRef {
+                        table: None,
+                        column: alias_name.clone(),
+                    };
+                }
+            }
+        }
+
+        // Second, check if column matches an original column name that has an alias
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
-                if alias_name == column {
+                if let vibesql_ast::Expression::ColumnRef { column: select_col, .. } = expr {
+                    if select_col.eq_ignore_ascii_case(column) {
+                        // ORDER BY uses original column name, return ColumnRef to the alias
+                        return vibesql_ast::Expression::ColumnRef {
+                            table: None,
+                            column: alias_name.clone(),
+                        };
+                    }
+                }
+            }
+        }
+
+        // Third, check if column matches a SELECT list column without alias
+        for item in select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, alias: None } = item {
+                if let vibesql_ast::Expression::ColumnRef { column: select_col, .. } = expr {
+                    if select_col.eq_ignore_ascii_case(column) {
+                        // Found matching non-aliased column, return as-is
+                        return order_expr.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    // Not an alias or column position, return the original expression
+    order_expr.clone()
+}
+
+/// Resolve ORDER BY expression that might be a SELECT list alias or column position
+///
+/// Handles four cases:
+/// 1. Numeric literal (e.g., ORDER BY 1, 2, 3) - returns the expression from that position in SELECT list
+/// 2. Simple column reference that matches a SELECT list alias - returns the SELECT list expression
+/// 3. Simple column reference that matches an aliased column's original name - returns a ColumnRef to the alias
+/// 4. Otherwise - returns the original ORDER BY expression
+pub(crate) fn resolve_order_by_alias<'a>(
+    order_expr: &'a vibesql_ast::Expression,
+    select_list: &'a [vibesql_ast::SelectItem],
+) -> Cow<'a, vibesql_ast::Expression> {
+    // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
+    if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
+        if *pos > 0 && (*pos as usize) <= select_list.len() {
+            // Valid column position, return the expression at that position
+            let idx = (*pos as usize) - 1;
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = &select_list[idx] {
+                return Cow::Borrowed(expr);
+            }
+        }
+    }
+
+    // Check if ORDER BY expression is a simple column reference (no table qualifier)
+    if let vibesql_ast::Expression::ColumnRef { table: None, column } = order_expr {
+        // First, search for matching alias in SELECT list (ORDER BY using alias name)
+        for item in select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
+                if alias_name.eq_ignore_ascii_case(column) {
                     // Found matching alias, use the SELECT list expression
-                    return expr;
+                    return Cow::Borrowed(expr);
+                }
+            }
+        }
+
+        // Second, check if column matches a SELECT list expression that has an alias
+        // This handles: SELECT col AS alias ... ORDER BY col
+        // In this case, we need to reference by the alias since that's what the result schema uses
+        for item in select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
+                // Check if the SELECT expression is a column reference to the same column
+                if let vibesql_ast::Expression::ColumnRef { table: _, column: select_col } = expr {
+                    if select_col.eq_ignore_ascii_case(column) {
+                        // The ORDER BY column matches the original column, but it's aliased
+                        // Return a new ColumnRef using the alias name
+                        return Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                            table: None,
+                            column: alias_name.clone(),
+                        });
+                    }
                 }
             }
         }
     }
 
     // Not an alias or column position, use the original expression
-    order_expr
+    Cow::Borrowed(order_expr)
 }
 
 #[cfg(test)]
