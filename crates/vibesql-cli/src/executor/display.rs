@@ -141,7 +141,7 @@ pub fn truncate_for_display(s: &str, max_len: usize) -> String {
 }
 
 /// Format DataType for table description output (PostgreSQL-style)
-fn format_data_type(data_type: &vibesql_types::DataType) -> String {
+pub fn format_data_type(data_type: &vibesql_types::DataType) -> String {
     match data_type {
         vibesql_types::DataType::Integer => "integer".to_string(),
         vibesql_types::DataType::Smallint => "smallint".to_string(),
