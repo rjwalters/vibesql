@@ -6,7 +6,7 @@
 use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
-use vibesql_parser::arena_parser::ArenaParser;
+use vibesql_parser::arena_parser::{parse_select_to_owned, ArenaParser};
 use vibesql_parser::{Lexer, Parser};
 
 /// Simple SELECT query - baseline for minimal parsing overhead
@@ -267,6 +267,42 @@ fn bench_parser_comparison(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark arena parsing with conversion to owned types
+/// This measures the end-to-end performance of:
+/// 1. Arena parsing (fast)
+/// 2. Conversion to standard AST (additional allocation)
+fn bench_arena_with_conversion(c: &mut Criterion) {
+    let mut group = c.benchmark_group("arena_conversion");
+
+    let queries = [
+        ("simple_select", SIMPLE_SELECT),
+        ("point_lookup", POINT_LOOKUP),
+        ("multi_column", MULTI_COLUMN),
+        ("complex_join", COMPLEX_JOIN),
+    ];
+
+    for (name, sql) in queries {
+        group.throughput(Throughput::Bytes(sql.len() as u64));
+
+        // Standard parser (baseline)
+        group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
+            b.iter(|| {
+                black_box(Parser::parse_sql(black_box(sql)).unwrap())
+            });
+        });
+
+        // Arena parser with conversion to owned
+        // This is the recommended approach for Phase 3 integration
+        group.bench_with_input(BenchmarkId::new("arena_to_owned", name), sql, |b, sql| {
+            b.iter(|| {
+                black_box(parse_select_to_owned(black_box(sql)).unwrap())
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_lexer,
@@ -275,5 +311,6 @@ criterion_group!(
     bench_identifiers,
     bench_arena_parser,
     bench_parser_comparison,
+    bench_arena_with_conversion,
 );
 criterion_main!(benches);
