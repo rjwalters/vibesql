@@ -144,6 +144,159 @@ fn test_multi_column_select_order() {
     assert_eq!(result.rows[0][1], "Integer(50)", "Second column should be 50");
 }
 
+// ============================================================================
+// SHOW Statement Tests
+// ============================================================================
+
+#[test]
+fn test_show_tables_empty() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("SHOW TABLES").unwrap();
+    assert_eq!(result.columns, vec!["Tables_in_database"]);
+    assert_eq!(result.row_count, 0);
+}
+
+#[test]
+fn test_show_tables_with_tables() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY)").unwrap();
+    executor.execute("CREATE TABLE products (id INT PRIMARY KEY)").unwrap();
+
+    let result = executor.execute("SHOW TABLES").unwrap();
+    assert_eq!(result.columns, vec!["Tables_in_database"]);
+    assert_eq!(result.row_count, 2);
+}
+
+#[test]
+fn test_show_tables_like_pattern() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY)").unwrap();
+    executor.execute("CREATE TABLE user_roles (id INT PRIMARY KEY)").unwrap();
+    executor.execute("CREATE TABLE products (id INT PRIMARY KEY)").unwrap();
+
+    let result = executor.execute("SHOW TABLES LIKE 'USER%'").unwrap();
+    // Should match USERS and USER_ROLES
+    assert_eq!(result.row_count, 2);
+}
+
+#[test]
+fn test_show_databases() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("SHOW DATABASES").unwrap();
+    assert_eq!(result.columns, vec!["Database"]);
+    // Should have at least the default public schema
+    assert!(result.row_count >= 1);
+}
+
+#[test]
+fn test_show_columns() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), active BOOLEAN NOT NULL)").unwrap();
+
+    let result = executor.execute("SHOW COLUMNS FROM users").unwrap();
+    assert_eq!(result.columns[0], "Field");
+    assert_eq!(result.columns[1], "Type");
+    assert_eq!(result.row_count, 3); // id, name, active
+}
+
+#[test]
+fn test_show_full_columns() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
+
+    let result = executor.execute("SHOW FULL COLUMNS FROM users").unwrap();
+    // SHOW FULL COLUMNS has more columns
+    assert!(result.columns.contains(&"Collation".to_string()));
+    assert!(result.columns.contains(&"Privileges".to_string()));
+    assert!(result.columns.contains(&"Comment".to_string()));
+}
+
+#[test]
+fn test_show_columns_like_pattern() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), nickname VARCHAR(50))").unwrap();
+
+    let result = executor.execute("SHOW COLUMNS FROM users LIKE 'N%'").unwrap();
+    // Should match NAME and NICKNAME
+    assert_eq!(result.row_count, 2);
+}
+
+#[test]
+fn test_show_columns_nonexistent_table() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("SHOW COLUMNS FROM nonexistent");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("does not exist"));
+}
+
+#[test]
+fn test_show_index() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, email VARCHAR(100))").unwrap();
+
+    let result = executor.execute("SHOW INDEX FROM users").unwrap();
+    assert_eq!(result.columns[0], "Table");
+    assert_eq!(result.columns[2], "Key_name");
+    // Primary key creates an index
+    assert!(result.row_count >= 1);
+}
+
+#[test]
+fn test_show_index_nonexistent_table() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("SHOW INDEX FROM nonexistent");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("does not exist"));
+}
+
+#[test]
+fn test_show_create_table() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
+
+    let result = executor.execute("SHOW CREATE TABLE users").unwrap();
+    assert_eq!(result.columns, vec!["Table", "Create Table"]);
+    assert_eq!(result.row_count, 1);
+
+    // The CREATE TABLE statement should be in the second column
+    let create_stmt = &result.rows[0][1];
+    assert!(create_stmt.contains("CREATE TABLE"));
+    assert!(create_stmt.contains("USERS")); // Table name is normalized to uppercase
+}
+
+#[test]
+fn test_show_create_table_nonexistent() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("SHOW CREATE TABLE nonexistent");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("does not exist"));
+}
+
+#[test]
+fn test_describe_statement() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
+
+    let result = executor.execute("DESCRIBE users").unwrap();
+    // DESCRIBE is equivalent to SHOW COLUMNS
+    assert_eq!(result.columns[0], "Field");
+    assert_eq!(result.row_count, 2);
+}
+
+#[test]
+fn test_describe_with_column_pattern() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), email VARCHAR(200))").unwrap();
+
+    let result = executor.execute("DESCRIBE users 'N%'").unwrap();
+    // Should only show NAME column (matching N%)
+    assert_eq!(result.row_count, 1);
+}
+
+// ============================================================================
+// Index, ALTER TABLE, and Transaction Tests
+// ============================================================================
+
 #[test]
 fn test_create_index() {
     // Regression test for issue #3340

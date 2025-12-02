@@ -249,10 +249,21 @@ Meta-commands:
   \\h, \\help      - Show this help
   \\q, \\quit      - Exit
 
+SQL Introspection:
+  SHOW TABLES                  - List all tables
+  SHOW DATABASES               - List all schemas/databases
+  SHOW COLUMNS FROM <table>    - Show table columns
+  SHOW INDEX FROM <table>      - Show table indexes
+  SHOW CREATE TABLE <table>    - Show CREATE TABLE statement
+  DESCRIBE <table>             - Alias for SHOW COLUMNS
+
 Examples:
   CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100));
   INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
   SELECT * FROM users;
+  SHOW TABLES;
+  SHOW COLUMNS FROM users;
+  DESCRIBE users;
   \\f json
   \\f markdown
   \\copy users TO '/tmp/users.csv'
