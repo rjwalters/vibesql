@@ -215,6 +215,116 @@ impl IndexData {
         }
     }
 
+    /// Bounded prefix scan - look up rows matching a prefix with an optional upper bound
+    /// on the next column
+    ///
+    /// This method is designed for queries like `WHERE col1 = 1 AND col2 < 10` on a
+    /// composite index `(col1, col2, col3)`. It's more efficient than `prefix_scan`
+    /// because it avoids scanning all rows with `col1 = 1` and only scans up to the bound.
+    ///
+    /// # Arguments
+    /// * `prefix` - Prefix values for the first N index columns (equality predicates)
+    /// * `upper_bound` - Upper bound for the (N+1)th column (exclusive)
+    ///
+    /// # Returns
+    /// Vector of row indices matching the prefix and bound
+    ///
+    /// # Performance
+    /// Uses BTreeMap's efficient range() method with computed bounds for O(log n + k)
+    /// complexity, where n is the number of unique keys and k is matching keys.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Index on (s_w_id, s_quantity, s_i_id)
+    /// // Find all rows where s_w_id = 1 AND s_quantity < 10
+    /// let rows = index_data.prefix_bounded_scan(
+    ///     &[SqlValue::Integer(1)],         // prefix: s_w_id = 1
+    ///     &SqlValue::Integer(10),           // upper_bound: s_quantity < 10
+    ///     false,                            // exclusive upper bound
+    /// );
+    /// ```
+    pub fn prefix_bounded_scan(
+        &self,
+        prefix: &[SqlValue],
+        upper_bound: &SqlValue,
+        inclusive_upper: bool,
+    ) -> Vec<usize> {
+        if prefix.is_empty() {
+            // Empty prefix with upper bound is not well-defined - fall back to full scan
+            return self.values().flatten().collect();
+        }
+
+        // Normalize values for consistent comparison
+        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_bound = normalize_for_comparison(upper_bound);
+
+        match self {
+            IndexData::InMemory { data } => {
+                use std::ops::Bound;
+
+                // Start bound: [prefix] (inclusive)
+                let start_key = normalized_prefix.clone();
+                let start_bound: Bound<Vec<SqlValue>> = Bound::Included(start_key);
+
+                // End bound: [prefix, upper_bound] (exclusive or inclusive depending on flag)
+                let mut end_key = normalized_prefix.clone();
+                end_key.push(normalized_bound);
+                let end_bound: Bound<Vec<SqlValue>> = if inclusive_upper {
+                    // For inclusive upper bound, we need to find the next value
+                    // to make it effectively inclusive
+                    let last_idx = end_key.len() - 1;
+                    match try_increment_sqlvalue(&end_key[last_idx]) {
+                        Some(next_val) => {
+                            end_key[last_idx] = next_val;
+                            Bound::Excluded(end_key)
+                        }
+                        None => {
+                            // Can't increment, use included bound
+                            Bound::Included(end_key)
+                        }
+                    }
+                } else {
+                    Bound::Excluded(end_key)
+                };
+
+                let mut matching_row_indices = Vec::new();
+
+                for (key_values, row_indices) in data.range((start_bound, end_bound)) {
+                    // Verify prefix match (needed for safety)
+                    if key_values.len() >= normalized_prefix.len()
+                        && key_values[..normalized_prefix.len()] == normalized_prefix[..]
+                    {
+                        matching_row_indices.extend(row_indices);
+                    }
+                }
+
+                matching_row_indices
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // For disk-backed indexes, construct start and end keys
+                let start_key = normalized_prefix.clone();
+
+                let mut end_key = normalized_prefix.clone();
+                end_key.push(normalized_bound);
+
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => guard
+                        .range_scan(
+                            Some(&start_key),
+                            Some(&end_key),
+                            true,            // Inclusive start
+                            inclusive_upper, // Inclusive/exclusive end
+                        )
+                        .unwrap_or_else(|_| vec![]),
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in prefix_bounded_scan: {}", e);
+                        vec![]
+                    }
+                }
+            }
+        }
+    }
+
     /// Batch prefix scan - look up multiple prefixes in a single call
     ///
     /// This method is optimized for batch prefix lookups where you need to retrieve
