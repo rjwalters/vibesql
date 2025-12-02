@@ -359,9 +359,32 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         }
     }
 
+    // Primary key indexes for core tables - TPC-C uses storage layer directly
+    // so we need to manually create these (normally auto-created by executor in #3202)
+    // The pk_new_order index enables prefix_scan_first optimization for Delivery (#3242)
+    db.create_index(
+        "pk_new_order".to_string(),
+        "new_order".to_string(),
+        true,
+        vec![col("no_w_id"), col("no_d_id"), col("no_o_id")],
+    ).ok();
+
+    db.create_index(
+        "pk_orders".to_string(),
+        "orders".to_string(),
+        true,
+        vec![col("o_w_id"), col("o_d_id"), col("o_id")],
+    ).ok();
+
+    db.create_index(
+        "pk_order_line".to_string(),
+        "order_line".to_string(),
+        true,
+        vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id"), col("ol_number")],
+    ).ok();
+
     // Secondary indexes for queries - these match the indexes created by
     // SQLite, DuckDB, and MySQL for fair benchmark comparison.
-    // Primary key indexes are now auto-created from PRIMARY KEY constraints (#3202).
     db.create_index(
         "idx_customer_name".to_string(),
         "customer".to_string(),
