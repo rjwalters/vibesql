@@ -555,9 +555,10 @@ impl SelectExecutor<'_> {
         }
 
         // Verify we have equality values for the first N-1 columns (in order)
+        // Use lowercase for lookup to match how extract_pk_values stores keys
         let mut prefix_key = Vec::with_capacity(prefix_len);
         for col in pk_columns.iter().take(prefix_len) {
-            match equality_values.get(*col) {
+            match equality_values.get(&col.to_ascii_lowercase()) {
                 Some(val) => prefix_key.push(val.clone()),
                 None => return Ok(None), // Missing a prefix column
             }
