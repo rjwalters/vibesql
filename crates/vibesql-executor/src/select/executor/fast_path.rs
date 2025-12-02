@@ -433,9 +433,9 @@ impl SelectExecutor<'_> {
             return Ok(None); // Can't use PK lookup
         }
 
-        // Build PK values in column order
+        // Build PK values in column order (use lowercase for lookup to match insert)
         let pk_key: Vec<vibesql_types::SqlValue> = pk_columns.iter()
-            .filter_map(|col| pk_values.get(*col).cloned())
+            .filter_map(|col| pk_values.get(&col.to_ascii_lowercase()).cloned())
             .collect();
 
         if pk_key.len() != pk_columns.len() {
@@ -524,9 +524,9 @@ impl SelectExecutor<'_> {
                 continue; // Try next index
             }
 
-            // Build key values in column order
+            // Build key values in column order (use lowercase for lookup to match insert)
             let key_values: Vec<SqlValue> = index_columns.iter()
-                .filter_map(|col| index_values.get(*col).cloned())
+                .filter_map(|col| index_values.get(&col.to_ascii_lowercase()).cloned())
                 .collect();
 
             if key_values.len() != index_columns.len() {
@@ -606,8 +606,10 @@ impl SelectExecutor<'_> {
                 vibesql_ast::BinaryOperator::Equal => {
                     // Check for column = literal pattern
                     if let Some((col_name, value)) = self.extract_column_literal_pair(left, right) {
-                        if pk_columns.contains(&col_name.as_str()) {
-                            values.insert(col_name, value);
+                        // Case-insensitive comparison for SQL identifiers
+                        if pk_columns.iter().any(|pk| pk.eq_ignore_ascii_case(&col_name)) {
+                            // Store with lowercase key for consistent lookup
+                            values.insert(col_name.to_ascii_lowercase(), value);
                         }
                     }
                 }
