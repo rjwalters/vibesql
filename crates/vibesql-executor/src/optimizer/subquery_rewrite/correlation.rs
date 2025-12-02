@@ -86,7 +86,7 @@ pub(crate) fn is_correlated(subquery: &SelectStmt) -> bool {
 /// detect this without schema information.
 ///
 /// TODO: Implement full symbol table analysis for more accurate correlation detection
-pub(super) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt) -> bool {
+pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt) -> bool {
     match expr {
         Expression::ColumnRef { table: Some(table), .. } => {
             // If column is qualified, check if table is in subquery's FROM clause
