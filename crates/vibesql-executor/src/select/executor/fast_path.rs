@@ -344,6 +344,11 @@ impl SelectExecutor<'_> {
             return Ok(result);
         }
 
+        // Try secondary index prefix lookup with ORDER BY + LIMIT (TPC-C Order-Status optimization)
+        if let Some(result) = self.try_secondary_index_prefix_with_limit_fast(table_name, alias, stmt)? {
+            return Ok(result);
+        }
+
         // Try secondary index lookup path next
         if let Some(result) = self.try_secondary_index_lookup_fast(table_name, alias, stmt)? {
             return Ok(result);
@@ -495,18 +500,19 @@ impl SelectExecutor<'_> {
     ///
     /// This optimization handles queries like TPC-C Delivery:
     /// `SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id LIMIT 1`
+    /// `SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id DESC LIMIT 1`
     ///
     /// For tables with composite PK (no_w_id, no_d_id, no_o_id), this query:
     /// 1. Filters by prefix of PK (no_w_id, no_d_id)
-    /// 2. Orders by the remaining PK column (no_o_id)
+    /// 2. Orders by the remaining PK column (no_o_id) - ASC or DESC
     /// 3. Uses LIMIT 1
     ///
-    /// The optimization uses prefix_scan_first to return just the first matching row,
-    /// avoiding the overhead of fetching all matching rows and sorting.
+    /// The optimization uses prefix_scan_first (ASC) or prefix_scan_reverse_limit (DESC)
+    /// to return just the first/last matching row, avoiding fetching all matching rows.
     ///
     /// # Performance
     /// - Before: O(log n + k) to fetch all k matching rows, then sort, then take 1
-    /// - After: O(log n) to fetch just the first matching row (already sorted in index)
+    /// - After: O(log n) to fetch just the first/last matching row (already sorted in index)
     fn try_pk_prefix_with_limit_fast(
         &self,
         table_name: &str,
@@ -577,11 +583,7 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // For ASC order, prefix_scan_first gives us the minimum
-        // For DESC order, we would need prefix_scan_last (not implemented yet)
-        if order_by[0].direction != vibesql_ast::OrderDirection::Asc {
-            return Ok(None);
-        }
+        let is_desc = order_by[0].direction == vibesql_ast::OrderDirection::Desc;
 
         // Get PK index from database's index infrastructure (pk_{table_name})
         let pk_index_name = format!("pk_{}", table_name);
@@ -590,12 +592,19 @@ impl SelectExecutor<'_> {
             None => return Ok(None),
         };
 
-        // Use prefix_scan_first to get just the first matching row
-        let row_idx = match pk_index_data.prefix_scan_first(&prefix_key) {
-            Some(idx) => idx,
-            None => {
-                // No matching rows - return empty result
-                return Ok(Some(vec![]));
+        // Use prefix_scan_first for ASC, prefix_scan_reverse_limit for DESC
+        let row_idx = if is_desc {
+            // For DESC order, get the last matching row using reverse scan
+            let results = pk_index_data.prefix_scan_reverse_limit(&prefix_key, 1);
+            match results.first() {
+                Some(&idx) => idx,
+                None => return Ok(Some(vec![])),
+            }
+        } else {
+            // For ASC order, prefix_scan_first gives us the minimum
+            match pk_index_data.prefix_scan_first(&prefix_key) {
+                Some(idx) => idx,
+                None => return Ok(Some(vec![])),
             }
         };
 
@@ -620,6 +629,167 @@ impl SelectExecutor<'_> {
 
         let projected = self.apply_projection_fast(&stmt.select_list, vec![row], &schema)?;
         Ok(Some(projected))
+    }
+
+    /// Try secondary index prefix lookup with ORDER BY and LIMIT optimization
+    ///
+    /// Returns Some(rows) if we can use the optimized path, None if we need standard path.
+    /// This handles queries like:
+    /// `SELECT o_id FROM orders WHERE o_w_id = 1 AND o_d_id = 2 AND o_c_id = 3 ORDER BY o_id DESC LIMIT 1`
+    /// when there's a secondary index on (o_w_id, o_d_id, o_c_id, o_id).
+    ///
+    /// The optimization detects when:
+    /// 1. WHERE has equality predicates for first N columns of an index
+    /// 2. ORDER BY is on the (N+1)th column of the index
+    /// 3. LIMIT is specified (optimized for LIMIT 1)
+    ///
+    /// # Performance
+    /// For `ORDER BY col DESC LIMIT 1`, uses `prefix_scan_reverse_limit` which is O(log n)
+    /// instead of O(log n + k) where k is matching rows.
+    fn try_secondary_index_prefix_with_limit_fast(
+        &self,
+        table_name: &str,
+        alias: Option<&String>,
+        stmt: &SelectStmt,
+    ) -> Result<Option<Vec<Row>>, ExecutorError> {
+        // Only applies when LIMIT is specified
+        let limit = match stmt.limit {
+            Some(l) if l > 0 => l as usize,
+            _ => return Ok(None),
+        };
+
+        // Must have an ORDER BY clause
+        let order_by = match &stmt.order_by {
+            Some(ob) if !ob.is_empty() => ob,
+            _ => return Ok(None),
+        };
+
+        // Must have a WHERE clause
+        let where_clause = match &stmt.where_clause {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        // Get the table
+        let table = match self.database.get_table(table_name) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Get all secondary indexes for this table
+        let index_names = self.database.list_indexes_for_table(table_name);
+        if index_names.is_empty() {
+            return Ok(None);
+        }
+
+        // Get the ORDER BY column
+        let order_col = match &order_by[0].expr {
+            Expression::ColumnRef { column, .. } => column.as_str(),
+            _ => return Ok(None),
+        };
+        let is_desc = order_by[0].direction == vibesql_ast::OrderDirection::Desc;
+
+        // Try each index to find one that matches the pattern
+        for index_name in &index_names {
+            // Get index metadata
+            let metadata = match self.database.get_index(index_name) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            // Get index column names in order
+            let index_columns: Vec<&str> = metadata.columns.iter()
+                .map(|c| c.column_name.as_str())
+                .collect();
+
+            // Need at least 2 columns for prefix + ORDER BY pattern
+            if index_columns.len() < 2 {
+                continue;
+            }
+
+            // Try to extract equality values from WHERE clause for index columns
+            let index_values = self.extract_pk_values(where_clause, &index_columns);
+
+            // Build prefix key - equality predicates for first N columns
+            let mut prefix_key: Vec<SqlValue> = Vec::new();
+            for col in &index_columns {
+                let col_lower = col.to_ascii_lowercase();
+                if let Some(val) = index_values.get(&col_lower) {
+                    prefix_key.push(val.clone());
+                } else {
+                    break; // Stop at first missing column
+                }
+            }
+
+            // Need at least one prefix column
+            if prefix_key.is_empty() {
+                continue;
+            }
+
+            // Check if ORDER BY column is the next column after prefix
+            let prefix_len = prefix_key.len();
+            if prefix_len >= index_columns.len() {
+                continue; // No room for ORDER BY column
+            }
+
+            let next_index_col = index_columns[prefix_len];
+            if !next_index_col.eq_ignore_ascii_case(order_col) {
+                continue; // ORDER BY column doesn't match next index column
+            }
+
+            // Get index data for prefix scan
+            let index_data = match self.database.get_index_data(index_name) {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            // Perform the optimized prefix scan
+            let row_indices = if is_desc {
+                // Use reverse prefix scan for DESC ORDER BY
+                index_data.prefix_scan_reverse_limit(&prefix_key, limit)
+            } else {
+                // Use forward prefix scan for ASC ORDER BY
+                // For LIMIT 1, prefix_scan_first is more efficient
+                if limit == 1 {
+                    match index_data.prefix_scan_first(&prefix_key) {
+                        Some(idx) => vec![idx],
+                        None => vec![],
+                    }
+                } else {
+                    // For larger limits, use prefix_scan with manual limit
+                    let all_indices = index_data.prefix_scan(&prefix_key);
+                    all_indices.into_iter().take(limit).collect()
+                }
+            };
+
+            if row_indices.is_empty() {
+                return Ok(Some(vec![]));
+            }
+
+            // Fetch the rows
+            let all_rows = table.scan();
+            let rows: Vec<Row> = row_indices.iter()
+                .filter_map(|&idx| all_rows.get(idx).cloned())
+                .collect();
+
+            // Build schema for projection
+            let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+            let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+
+            // Apply projection
+            let is_select_star = stmt.select_list.len() == 1
+                && matches!(&stmt.select_list[0], SelectItem::Wildcard { .. });
+
+            if is_select_star {
+                return Ok(Some(rows));
+            }
+
+            let projected = self.apply_projection_fast(&stmt.select_list, rows, &schema)?;
+            return Ok(Some(projected));
+        }
+
+        // No suitable index found
+        Ok(None)
     }
 
     /// Try secondary index lookup path for queries with composite key patterns
