@@ -197,6 +197,87 @@ impl SqlExecutor {
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
             }
+            vibesql_ast::Statement::CreateIndex(index_stmt) => {
+                match vibesql_executor::CreateIndexExecutor::execute(&index_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0; // DDL doesn't return rows
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::DropIndex(drop_stmt) => {
+                match vibesql_executor::DropIndexExecutor::execute(&drop_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0; // DDL doesn't return rows
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::AlterTable(alter_stmt) => {
+                match vibesql_executor::AlterTableExecutor::execute(&alter_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0; // DDL doesn't return rows
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::BeginTransaction(begin_stmt) => {
+                match vibesql_executor::BeginTransactionExecutor::execute(&begin_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::Commit(commit_stmt) => {
+                match vibesql_executor::CommitExecutor::execute(&commit_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::Rollback(rollback_stmt) => {
+                match vibesql_executor::RollbackExecutor::execute(&rollback_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::Savepoint(savepoint_stmt) => {
+                match vibesql_executor::SavepointExecutor::execute(&savepoint_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::RollbackToSavepoint(rollback_stmt) => {
+                match vibesql_executor::RollbackToSavepointExecutor::execute(&rollback_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::ReleaseSavepoint(release_stmt) => {
+                match vibesql_executor::ReleaseSavepointExecutor::execute(&release_stmt, &mut self.db) {
+                    Ok(msg) => {
+                        println!("{}", msg);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
             _ => {
                 return Err(anyhow::anyhow!("Statement type not yet supported in CLI"));
             }
