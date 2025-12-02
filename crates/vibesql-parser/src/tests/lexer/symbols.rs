@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::token::MultiCharOperator;
 
 // ============================================================================
 
@@ -47,10 +48,10 @@ fn test_tokenize_comparison_symbols() {
 fn test_tokenize_multi_char_operators() {
     let mut lexer = Lexer::new("<= >= != <>");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Operator("<=".to_string()));
-    assert_eq!(tokens[1], Token::Operator(">=".to_string()));
-    assert_eq!(tokens[2], Token::Operator("!=".to_string()));
-    assert_eq!(tokens[3], Token::Operator("<>".to_string()));
+    assert_eq!(tokens[0], Token::Operator(MultiCharOperator::LessEqual));
+    assert_eq!(tokens[1], Token::Operator(MultiCharOperator::GreaterEqual));
+    assert_eq!(tokens[2], Token::Operator(MultiCharOperator::NotEqual));
+    assert_eq!(tokens[3], Token::Operator(MultiCharOperator::NotEqualAlt));
 }
 
 #[test]
@@ -59,7 +60,7 @@ fn test_tokenize_operators_without_spaces() {
     let mut lexer = Lexer::new("age>=18");
     let tokens = lexer.tokenize().unwrap();
     assert_eq!(tokens[0], Token::Identifier("AGE".to_string()));
-    assert_eq!(tokens[1], Token::Operator(">=".to_string()));
+    assert_eq!(tokens[1], Token::Operator(MultiCharOperator::GreaterEqual));
     assert_eq!(tokens[2], Token::Number("18".to_string()));
 }
 
@@ -74,7 +75,7 @@ fn test_tokenize_single_vs_multi_char() {
     // But >= is one token when adjacent
     let mut lexer2 = Lexer::new(">=");
     let tokens2 = lexer2.tokenize().unwrap();
-    assert_eq!(tokens2[0], Token::Operator(">=".to_string()));
+    assert_eq!(tokens2[0], Token::Operator(MultiCharOperator::GreaterEqual));
 }
 
 #[test]

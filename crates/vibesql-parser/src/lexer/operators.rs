@@ -1,5 +1,5 @@
 use super::{Lexer, LexerError};
-use crate::token::Token;
+use crate::token::{MultiCharOperator, Token};
 
 impl<'a> Lexer<'a> {
     /// Tokenize comparison and logical operators.
@@ -13,19 +13,19 @@ impl<'a> Lexer<'a> {
                     match (ch, next_ch) {
                         ('<', '=') => {
                             self.advance();
-                            Ok(Token::Operator("<=".to_string()))
+                            Ok(Token::Operator(MultiCharOperator::LessEqual))
                         }
                         ('>', '=') => {
                             self.advance();
-                            Ok(Token::Operator(">=".to_string()))
+                            Ok(Token::Operator(MultiCharOperator::GreaterEqual))
                         }
                         ('!', '=') => {
                             self.advance();
-                            Ok(Token::Operator("!=".to_string()))
+                            Ok(Token::Operator(MultiCharOperator::NotEqual))
                         }
                         ('<', '>') => {
                             self.advance();
-                            Ok(Token::Operator("<>".to_string()))
+                            Ok(Token::Operator(MultiCharOperator::NotEqualAlt))
                         }
                         _ => Ok(Token::Symbol(ch)),
                     }
@@ -37,7 +37,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 if !self.is_eof() && self.current_char() == '|' {
                     self.advance();
-                    Ok(Token::Operator("||".to_string()))
+                    Ok(Token::Operator(MultiCharOperator::Concat))
                 } else {
                     Err(LexerError {
                         message: "Unexpected character: '|' (did you mean '||'?)".to_string(),
