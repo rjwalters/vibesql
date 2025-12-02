@@ -95,7 +95,7 @@ pub(super) fn try_convert_exists_to_join(
 /// Convert a simple single-table EXISTS subquery to a semi/anti join
 fn try_convert_simple_exists_to_join(
     from: &FromClause,
-    subquery: &SelectStmt,
+    _subquery: &SelectStmt,
     negated: bool,
     table_name: String,
     table_alias: Option<String>,
