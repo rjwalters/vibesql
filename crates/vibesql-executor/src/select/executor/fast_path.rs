@@ -863,6 +863,17 @@ impl SelectExecutor<'_> {
                 continue;
             }
 
+            // Check for contradictions (e.g., col = 70 AND col IN (74, 69, 10))
+            // If equality value is not in the IN list, return empty result immediately
+            for (col_name, eq_value) in &index_values {
+                if let Some(in_values) = self.extract_in_values(where_clause, col_name) {
+                    if !in_values.contains(eq_value) {
+                        // Contradiction: equality value not in IN list - no rows can match
+                        return Ok(Some(vec![]));
+                    }
+                }
+            }
+
             // Build key values for the prefix of columns we have equality predicates for
             // This supports partial index usage (e.g., 3-column prefix of 4-column index)
             // Use case-insensitive lookup since schema may have different case than parser output
@@ -1061,6 +1072,40 @@ impl SelectExecutor<'_> {
             }
             // Any other expression type is not satisfied by the index lookup
             _ => false,
+        }
+    }
+
+    /// Extract IN list values for a column from WHERE clause
+    /// Returns None if no IN predicate found for the column
+    fn extract_in_values(&self, expr: &Expression, column_name: &str) -> Option<Vec<SqlValue>> {
+        match expr {
+            Expression::InList { expr: col_expr, values, negated } => {
+                if *negated {
+                    return None; // NOT IN is not a contradiction detector
+                }
+                // Check if the IN expression is for our target column
+                if let Expression::ColumnRef { column, .. } = col_expr.as_ref() {
+                    if column.eq_ignore_ascii_case(column_name) {
+                        // Extract all literal values from the IN list
+                        let mut result = Vec::new();
+                        for v in values {
+                            if let Expression::Literal(val) = v {
+                                result.push(val.clone());
+                            }
+                        }
+                        if !result.is_empty() {
+                            return Some(result);
+                        }
+                    }
+                }
+                None
+            }
+            Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+                // Recursively search both sides of AND
+                self.extract_in_values(left, column_name)
+                    .or_else(|| self.extract_in_values(right, column_name))
+            }
+            _ => None,
         }
     }
 
