@@ -190,7 +190,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
                             manager.unsubscribe(id);
                         }
                     }
-                    2 | _ => {
+                    _ => {
                         // Lookup affected
                         let affected = manager.find_affected_subscriptions("users");
                         black_box(affected.len());
