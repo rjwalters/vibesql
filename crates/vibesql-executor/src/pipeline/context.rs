@@ -21,7 +21,7 @@ use crate::{
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let ctx = ExecutionContext::new(schema, database)
 ///     .with_cte_context(cte_results)
 ///     .with_outer_context(outer_row, outer_schema);

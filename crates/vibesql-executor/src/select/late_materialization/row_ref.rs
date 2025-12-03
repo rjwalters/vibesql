@@ -23,7 +23,7 @@ use vibesql_types::SqlValue;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // Create references instead of copying rows
 /// let refs: Vec<RowReference> = qualifying_indices
 ///     .iter()

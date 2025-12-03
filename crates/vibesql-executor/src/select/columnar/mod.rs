@@ -86,7 +86,7 @@ use log;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // Compute SUM(col0), AVG(col1) WHERE col2 < 100
 /// let predicates = vec![
 ///     ColumnPredicate::LessThan {

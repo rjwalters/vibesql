@@ -20,7 +20,7 @@ use std::ops::Range;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // Create from filter bitmap
 /// let selection = SelectionVector::from_bitmap(&[true, false, true, true, false]);
 /// assert_eq!(selection.len(), 3);
@@ -73,7 +73,7 @@ impl SelectionVector {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let bitmap = vec![true, false, true, true, false];
     /// let selection = SelectionVector::from_bitmap(&bitmap);
     /// assert_eq!(selection.indices(), &[0, 2, 3]);

@@ -26,7 +26,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use vibesql_executor::pipeline::{ExecutionPipeline, ExecutionContext};
 //!
 //! let ctx = ExecutionContext::new(schema, database, ...);

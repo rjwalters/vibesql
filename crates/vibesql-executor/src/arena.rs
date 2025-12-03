@@ -11,7 +11,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! let arena = QueryArena::new();
 //!
 //! // Allocate temporary buffers
@@ -46,7 +46,7 @@ use bumpalo::Bump;
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// // Create arena at query start
 /// let arena = QueryArena::new();
 ///
@@ -100,7 +100,7 @@ impl QueryArena {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let bitmap = arena.alloc_bitmap(1000);
     /// for i in 0..1000 {
     ///     bitmap[i] = row_passes_filter(i);
@@ -117,7 +117,7 @@ impl QueryArena {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// // All rows pass by default, then mark failures
     /// let bitmap = arena.alloc_bitmap_filled(1000, true);
     /// for i in failing_rows {
@@ -135,7 +135,7 @@ impl QueryArena {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let temps: &mut [f64] = arena.alloc_slice(1000);
     /// for i in 0..1000 {
     ///     temps[i] = calculate(i);
@@ -167,7 +167,7 @@ impl QueryArena {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let mut results = arena.alloc_vec();
     /// for row in rows {
     ///     if predicate(row) {
@@ -198,7 +198,7 @@ impl QueryArena {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let arena = QueryArena::new();
     ///
     /// for query in queries {

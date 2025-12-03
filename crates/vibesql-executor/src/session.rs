@@ -13,7 +13,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use vibesql_executor::Session;
 //! use vibesql_storage::Database;
 //! use vibesql_types::SqlValue;
@@ -187,7 +187,7 @@ impl<'a> Session<'a> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
     /// assert_eq!(stmt.param_count(), 1);
     /// ```
@@ -212,7 +212,7 @@ impl<'a> Session<'a> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let stmt = session.prepare_arena("SELECT * FROM users WHERE id = ?")?;
     /// assert_eq!(stmt.param_count(), 1);
     /// ```
@@ -230,7 +230,7 @@ impl<'a> Session<'a> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
     /// let result = session.execute_prepared(&stmt, &[SqlValue::Integer(42)])?;
     /// ```

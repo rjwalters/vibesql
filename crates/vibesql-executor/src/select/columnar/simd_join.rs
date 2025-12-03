@@ -378,7 +378,7 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // Join two batches on their first columns
 /// let result = columnar_hash_join_inner(&left_batch, &right_batch, 0, 0)?;
 /// ```

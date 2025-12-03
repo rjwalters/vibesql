@@ -10,7 +10,7 @@ use vibesql_types::SqlValue;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let scan = ColumnarScan::new(&rows);
 /// let prices: Vec<&SqlValue> = scan.column(2).collect();
 /// let quantities: Vec<&SqlValue> = scan.column(4).collect();

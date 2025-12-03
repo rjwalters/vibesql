@@ -18,7 +18,7 @@ use super::RowIterator;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let scan = TableScanIterator::new(schema.clone(), rows);
 /// let predicate = Expression::Binary {
 ///     left: Box::new(Expression::ColumnRef { column: "age".to_string() }),

@@ -45,7 +45,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! // Create selection vector from filter
 //! let selection = SelectionVector::from_bitmap(&filter_result);
 //!

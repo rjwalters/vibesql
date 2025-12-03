@@ -86,7 +86,7 @@ impl SourceData {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // Create a lazy batch from source data
 /// let source = SourceData::Rows(Arc::new(rows));
 /// let lazy_batch = LazyMaterializedBatch::new(source);

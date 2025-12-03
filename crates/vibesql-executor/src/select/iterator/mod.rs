@@ -19,7 +19,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```text
 //! // Create a table scan iterator
 //! let scan_iter = TableScanIterator::new(schema, rows);
 //!
@@ -175,7 +175,7 @@ impl<'a> RowIterator for Box<dyn RowIterator + 'a> {
 ///
 /// # Example Usage
 ///
-/// ```rust,ignore
+/// ```text
 /// // Build iterator for: SELECT name, age FROM users WHERE age > 18 LIMIT 10
 /// let iterator = build_simple_query_iterator(
 ///     users_schema,

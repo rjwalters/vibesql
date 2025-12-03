@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! let params = &[SqlValue::Integer(42), SqlValue::Varchar("hello".to_string())];
 //! let evaluator = ArenaExpressionEvaluator::new(schema, params);
 //! let result = evaluator.eval(&arena_expr, &row)?;

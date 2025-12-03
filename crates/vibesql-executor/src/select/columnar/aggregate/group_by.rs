@@ -379,7 +379,7 @@ fn compute_group_aggregate_indexed(
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // SELECT l_returnflag, SUM(l_extendedprice)
 /// // FROM lineitem
 /// // GROUP BY l_returnflag

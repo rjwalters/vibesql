@@ -12,7 +12,7 @@ use super::RowIterator;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let rows = vec![row1, row2, row3];
 /// let scan = TableScanIterator::new(schema, rows);
 /// for row in scan {

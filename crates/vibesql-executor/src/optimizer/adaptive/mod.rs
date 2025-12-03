@@ -30,7 +30,7 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```text
 //! use vibesql_executor::optimizer::adaptive::{ExecutionModel, choose_execution_model};
 //! use vibesql_ast::SelectStmt;
 //!
@@ -96,7 +96,7 @@ pub enum ExecutionModel {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // Analytical query → Columnar
 /// let query = parse("SELECT SUM(price * quantity) FROM orders GROUP BY region");
 /// assert_eq!(choose_execution_model(&query), ExecutionModel::Columnar);

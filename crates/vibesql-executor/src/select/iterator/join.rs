@@ -33,7 +33,7 @@ use super::RowIterator;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let left_iter = TableScanIterator::new(left_schema, left_rows);
 /// let right_rows = vec![/* right side rows */];
 ///

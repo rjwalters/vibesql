@@ -19,7 +19,7 @@ use vibesql_types::SqlValue;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // Convert rows to columnar batch
 /// let batch = ColumnarBatch::from_rows(&rows, &schema)?;
 ///

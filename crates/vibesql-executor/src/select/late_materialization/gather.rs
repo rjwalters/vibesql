@@ -28,7 +28,7 @@ use crate::select::columnar::{ColumnArray, ColumnarBatch};
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// // From 10 columns, only materialize columns 0 and 3
 /// let result = gather_columns(&batch, &selection, &[0, 3])?;
 /// ```

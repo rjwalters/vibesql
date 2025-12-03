@@ -204,7 +204,7 @@ impl<'a> StrategyContext<'a> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let ctx = StrategyContext::new(&stmt, &cte_results, true);
 /// let strategy = choose_execution_strategy(&ctx);
 ///

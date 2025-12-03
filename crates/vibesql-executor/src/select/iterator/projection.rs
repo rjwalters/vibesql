@@ -14,7 +14,7 @@ use super::RowIterator;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let scan = TableScanIterator::new(schema, rows);
 ///
 /// // Project to select only certain columns

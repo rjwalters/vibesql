@@ -33,7 +33,7 @@ use vibesql_storage::Row;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_executor::pipeline::{PipelineInput, PipelineOutput};
 ///
 /// // Row-based input (borrowed)
@@ -222,7 +222,7 @@ impl<'a> PipelineInput<'a> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_executor::pipeline::PipelineOutput;
 ///
 /// // Row-based output
