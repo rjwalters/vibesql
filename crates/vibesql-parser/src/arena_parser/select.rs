@@ -370,7 +370,10 @@ impl<'arena> ArenaParser<'arena> {
                 });
             };
 
-            return Ok(FromClause::Subquery { query, alias });
+            // Parse optional column aliases: (col1, col2, ...)
+            let column_aliases = self.parse_column_alias_list()?;
+
+            return Ok(FromClause::Subquery { query, alias, column_aliases });
         }
 
         // Regular table reference
@@ -416,7 +419,14 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        Ok(FromClause::Table { name, alias })
+        // Parse optional column aliases: (col1, col2, ...)
+        let column_aliases = if alias.is_some() {
+            self.parse_column_alias_list()?
+        } else {
+            None
+        };
+
+        Ok(FromClause::Table { name, alias, column_aliases })
     }
 
     /// Parse GROUP BY clause.

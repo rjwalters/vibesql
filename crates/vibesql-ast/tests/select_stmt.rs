@@ -96,7 +96,7 @@ fn test_select_from_table() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -120,7 +120,7 @@ fn test_select_with_where() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
@@ -145,7 +145,7 @@ fn test_select_with_order_by() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -177,7 +177,7 @@ fn test_select_distinct() {
         }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -204,7 +204,7 @@ fn test_select_with_group_by() {
         }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "orders".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
             table: None,
@@ -227,7 +227,7 @@ fn test_select_with_having() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "sales".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef { table: None, column: "region".to_string() }])),
         having: Some(Expression::BinaryOp {
@@ -255,7 +255,7 @@ fn test_select_with_limit() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "products".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -275,7 +275,7 @@ fn test_select_with_offset() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "items".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "items".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -295,7 +295,7 @@ fn test_order_by_desc() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "posts".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "posts".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -317,8 +317,8 @@ fn test_order_by_desc() {
 #[test]
 fn test_inner_join() {
     let from = FromClause::Join {
-        left: Box::new(FromClause::Table { name: "users".to_string(), alias: None }),
-        right: Box::new(FromClause::Table { name: "orders".to_string(), alias: None }),
+        left: Box::new(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+        right: Box::new(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
         join_type: JoinType::Inner,
         condition: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
@@ -342,8 +342,8 @@ fn test_inner_join() {
 #[test]
 fn test_left_outer_join() {
     let from = FromClause::Join {
-        left: Box::new(FromClause::Table { name: "customers".to_string(), alias: None }),
-        right: Box::new(FromClause::Table { name: "orders".to_string(), alias: None }),
+        left: Box::new(FromClause::Table { name: "customers".to_string(), alias: None, column_aliases: None }),
+        right: Box::new(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
         join_type: JoinType::LeftOuter,
         condition: None,
         natural: false,
@@ -357,8 +357,8 @@ fn test_left_outer_join() {
 #[test]
 fn test_right_outer_join() {
     let from = FromClause::Join {
-        left: Box::new(FromClause::Table { name: "products".to_string(), alias: None }),
-        right: Box::new(FromClause::Table { name: "categories".to_string(), alias: None }),
+        left: Box::new(FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
+        right: Box::new(FromClause::Table { name: "categories".to_string(), alias: None, column_aliases: None }),
         join_type: JoinType::RightOuter,
         condition: None,
         natural: false,
@@ -372,8 +372,8 @@ fn test_right_outer_join() {
 #[test]
 fn test_full_outer_join() {
     let from = FromClause::Join {
-        left: Box::new(FromClause::Table { name: "table1".to_string(), alias: None }),
-        right: Box::new(FromClause::Table { name: "table2".to_string(), alias: None }),
+        left: Box::new(FromClause::Table { name: "table1".to_string(), alias: None, column_aliases: None }),
+        right: Box::new(FromClause::Table { name: "table2".to_string(), alias: None, column_aliases: None }),
         join_type: JoinType::FullOuter,
         condition: None,
         natural: false,
@@ -387,8 +387,8 @@ fn test_full_outer_join() {
 #[test]
 fn test_cross_join() {
     let from = FromClause::Join {
-        left: Box::new(FromClause::Table { name: "colors".to_string(), alias: None }),
-        right: Box::new(FromClause::Table { name: "sizes".to_string(), alias: None }),
+        left: Box::new(FromClause::Table { name: "colors".to_string(), alias: None, column_aliases: None }),
+        right: Box::new(FromClause::Table { name: "sizes".to_string(), alias: None, column_aliases: None }),
         join_type: JoinType::Cross,
         condition: None,
         natural: false,
@@ -412,7 +412,7 @@ fn test_from_subquery() {
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "active".to_string() }),
@@ -426,7 +426,7 @@ fn test_from_subquery() {
     };
 
     let from =
-        FromClause::Subquery { query: Box::new(subquery), alias: "active_users".to_string() };
+        FromClause::Subquery { query: Box::new(subquery), alias: "active_users".to_string(), column_aliases: None };
     match from {
         FromClause::Subquery { alias, .. } if alias == "active_users" => {} // Success
         _ => panic!("Expected subquery in FROM clause"),
@@ -435,7 +435,7 @@ fn test_from_subquery() {
 
 #[test]
 fn test_table_with_alias() {
-    let from = FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()) };
+    let from = FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()), column_aliases: None };
     match from {
         FromClause::Table { alias: Some(a), .. } if a == "e" => {} // Success
         _ => panic!("Expected table with alias"),

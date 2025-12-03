@@ -349,10 +349,7 @@ mod tests {
             select_list: vec![SelectItem::Wildcard { alias: None }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: table.to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: table.to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -387,10 +384,7 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: table.to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: table.to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,

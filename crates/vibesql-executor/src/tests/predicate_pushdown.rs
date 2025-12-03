@@ -48,10 +48,7 @@ fn test_table_local_predicate_applied_at_scan() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -118,22 +115,13 @@ fn test_multi_table_with_local_predicates() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Join {
-                left: Box::new(vibesql_ast::FromClause::Table {
-                    name: "t1".to_string(),
-                    alias: None,
-                }),
-                right: Box::new(vibesql_ast::FromClause::Table {
-                    name: "t2".to_string(),
-                    alias: None,
-                }),
+                left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+                right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
                 join_type: vibesql_ast::JoinType::Inner,
                 condition: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
-                name: "t3".to_string(),
-                alias: None,
-            }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: false,
@@ -235,14 +223,8 @@ fn test_table_local_predicate_with_explicit_join() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
-                name: "orders".to_string(),
-                alias: None,
-            }),
-            right: Box::new(vibesql_ast::FromClause::Table {
-                name: "customers".to_string(),
-                alias: None,
-            }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "customers".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -324,10 +306,7 @@ fn test_table_local_predicate_with_multiple_conditions() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "products".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {

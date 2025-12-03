@@ -9,7 +9,7 @@ use vibesql_ast::{Expression, FromClause};
 /// Extract all table names from a FROM clause (for self-join detection)
 pub(super) fn collect_table_names(from: &FromClause, names: &mut Vec<String>) {
     match from {
-        FromClause::Table { name, alias } => {
+        FromClause::Table { name, alias, .. } => {
             // Use alias if present, otherwise table name
             names.push(alias.clone().unwrap_or_else(|| name.clone()));
             names.push(name.clone()); // Also add original name for matching
@@ -40,7 +40,7 @@ pub(super) fn is_self_join(from: &FromClause, table_name: &str, table_alias: &Op
 /// Returns the effective name (alias if present, otherwise table name)
 pub(super) fn get_primary_table_name(from: &FromClause) -> Option<String> {
     match from {
-        FromClause::Table { name, alias } => {
+        FromClause::Table { name, alias, .. } => {
             Some(alias.clone().unwrap_or_else(|| name.clone()))
         }
         FromClause::Join { left, .. } => {

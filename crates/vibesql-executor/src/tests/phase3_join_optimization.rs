@@ -69,8 +69,8 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None, // NO ON clause - equijoin is in WHERE
             natural: false,
@@ -158,8 +158,8 @@ fn test_hash_join_multiple_equijoins_in_where() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: false,
@@ -260,18 +260,18 @@ fn test_cascading_joins_with_where_equijoins() {
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Join {
                 left: Box::new(vibesql_ast::FromClause::Join {
-                    left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
-                    right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None }),
+                    left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+                    right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
                     join_type: vibesql_ast::JoinType::Inner,
                     condition: None,
                     natural: false,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table { name: "t3".to_string(), alias: None }),
+                right: Box::new(vibesql_ast::FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
                 join_type: vibesql_ast::JoinType::Inner,
                 condition: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t4".to_string(), alias: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "t4".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: false,
@@ -381,8 +381,8 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -492,8 +492,8 @@ fn test_multi_column_hash_join_composite_keys() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "inventory".to_string(), alias: None }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "inventory".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             // ON clause with composite key
             condition: Some(vibesql_ast::Expression::BinaryOp {
@@ -629,37 +629,28 @@ fn test_star_join_select5_pattern() {
                 left: Box::new(vibesql_ast::FromClause::Join {
                     left: Box::new(vibesql_ast::FromClause::Join {
                         left: Box::new(vibesql_ast::FromClause::Join {
-                            left: Box::new(vibesql_ast::FromClause::Table {
-                                name: "t1".to_string(),
-                                alias: None,
-                            }),
-                            right: Box::new(vibesql_ast::FromClause::Table {
-                                name: "t2".to_string(),
-                                alias: None,
-                            }),
+                            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+                            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
                             join_type: vibesql_ast::JoinType::Inner,
                             condition: None, // Star join: conditions in WHERE
                             natural: false,
                         }),
-                        right: Box::new(vibesql_ast::FromClause::Table {
-                            name: "t3".to_string(),
-                            alias: None,
-                        }),
+                        right: Box::new(vibesql_ast::FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
                         join_type: vibesql_ast::JoinType::Inner,
                         condition: None,
                         natural: false,
                     }),
-                    right: Box::new(vibesql_ast::FromClause::Table { name: "t4".to_string(), alias: None }),
+                    right: Box::new(vibesql_ast::FromClause::Table { name: "t4".to_string(), alias: None, column_aliases: None }),
                     join_type: vibesql_ast::JoinType::Inner,
                     condition: None,
                     natural: false,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table { name: "t5".to_string(), alias: None }),
+                right: Box::new(vibesql_ast::FromClause::Table { name: "t5".to_string(), alias: None, column_aliases: None }),
                 join_type: vibesql_ast::JoinType::Inner,
                 condition: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t6".to_string(), alias: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "t6".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: false,

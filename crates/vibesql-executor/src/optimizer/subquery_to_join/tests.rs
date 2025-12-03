@@ -4,10 +4,7 @@ use super::*;
 use vibesql_ast::{BinaryOperator, GroupByClause, JoinType, SelectItem};
 
 fn simple_table_from(name: &str) -> FromClause {
-    FromClause::Table {
-        name: name.to_string(),
-        alias: None,
-    }
+    FromClause::Table { name: name.to_string(), alias: None, column_aliases: None }
 }
 
 fn column_ref(column: &str) -> Expression {
@@ -273,10 +270,7 @@ fn test_nested_in_subquery_self_join_column_qualification() {
 }
 
 fn table_from_with_alias(name: &str, alias: &str) -> FromClause {
-    FromClause::Table {
-        name: name.to_string(),
-        alias: Some(alias.to_string()),
-    }
+    FromClause::Table { name: name.to_string(), alias: Some(alias.to_string()), column_aliases: None }
 }
 
 fn qualified_column_ref(table: &str, column: &str) -> Expression {
@@ -374,7 +368,7 @@ fn test_exists_self_join_column_qualification() {
             // Check that the right side has the rewritten alias for self-join
             // Self-joins get a unique alias like "__subquery_l2" to avoid conflicts
             match right.as_ref() {
-                FromClause::Table { name, alias } => {
+                FromClause::Table { name, alias, .. } => {
                     assert_eq!(name, "lineitem", "Table name should be lineitem");
                     assert_eq!(
                         alias.as_deref(),
@@ -499,7 +493,7 @@ fn test_not_exists_self_join_column_qualification() {
             // Check that the right side has the rewritten alias for self-join
             // Self-joins get a unique alias like "__subquery_l3" to avoid conflicts
             match right.as_ref() {
-                FromClause::Table { name, alias } => {
+                FromClause::Table { name, alias, .. } => {
                     assert_eq!(name, "lineitem", "Table name should be lineitem");
                     assert_eq!(
                         alias.as_deref(),

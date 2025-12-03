@@ -79,7 +79,7 @@ fn extract_table_names_from_from_clause(from: Option<&vibesql_ast::FromClause>) 
 /// Recursively extract table names from a FROM clause
 fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Vec<String>) {
     match from {
-        vibesql_ast::FromClause::Table { name, alias } => {
+        vibesql_ast::FromClause::Table { name, alias, .. } => {
             tables.push(alias.clone().unwrap_or_else(|| name.clone()));
         }
         vibesql_ast::FromClause::Join { left, right, .. } => {

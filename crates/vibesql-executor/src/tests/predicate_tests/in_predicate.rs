@@ -28,7 +28,7 @@ fn test_in_list_basic() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             values: vec![
@@ -70,7 +70,7 @@ fn test_not_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             values: vec![
@@ -112,7 +112,7 @@ fn test_in_list_with_null_value() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             values: vec![
@@ -154,7 +154,7 @@ fn test_in_list_with_null_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             values: vec![
@@ -196,7 +196,7 @@ fn test_empty_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             values: vec![],
@@ -234,7 +234,7 @@ fn test_empty_not_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             values: vec![],
@@ -280,10 +280,7 @@ fn test_null_in_empty_subquery() {
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table {
-                        name: "empty_table".to_string(),
-                        alias: None,
-                    }),
+                    from: Some(vibesql_ast::FromClause::Table { name: "empty_table".to_string(), alias: None, column_aliases: None }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -339,10 +336,7 @@ fn test_null_not_in_empty_subquery() {
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table {
-                        name: "empty_table".to_string(),
-                        alias: None,
-                    }),
+                    from: Some(vibesql_ast::FromClause::Table { name: "empty_table".to_string(), alias: None, column_aliases: None }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -397,10 +391,7 @@ fn test_value_in_empty_subquery() {
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table {
-                        name: "empty_table".to_string(),
-                        alias: None,
-                    }),
+                    from: Some(vibesql_ast::FromClause::Table { name: "empty_table".to_string(), alias: None, column_aliases: None }),
                     where_clause: None,
                     group_by: None,
                     having: None,

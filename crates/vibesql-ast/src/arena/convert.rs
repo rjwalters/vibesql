@@ -406,9 +406,12 @@ impl<'a, 'arena> Converter<'a, 'arena> {
 
     fn convert_from_clause(&self, from: &arena_select::FromClause<'arena>) -> FromClause {
         match from {
-            arena_select::FromClause::Table { name, alias } => FromClause::Table {
+            arena_select::FromClause::Table { name, alias, column_aliases } => FromClause::Table {
                 name: self.resolve(*name),
                 alias: self.resolve_opt(*alias),
+                column_aliases: column_aliases.as_ref().map(|cols|
+                    cols.iter().map(|s| self.resolve(*s)).collect()
+                ),
             },
             arena_select::FromClause::Join {
                 left,
@@ -423,9 +426,12 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 condition: condition.as_ref().map(|e| self.convert_expression(e)),
                 natural: *natural,
             },
-            arena_select::FromClause::Subquery { query, alias } => FromClause::Subquery {
+            arena_select::FromClause::Subquery { query, alias, column_aliases } => FromClause::Subquery {
                 query: Box::new(self.convert_select(query)),
                 alias: self.resolve(*alias),
+                column_aliases: column_aliases.as_ref().map(|cols|
+                    cols.iter().map(|s| self.resolve(*s)).collect()
+                ),
             },
         }
     }

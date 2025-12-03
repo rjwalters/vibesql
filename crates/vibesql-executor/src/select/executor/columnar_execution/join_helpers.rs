@@ -49,7 +49,7 @@ pub(super) type SimpleTableRef = (String, Option<String>, bool);
 /// Flatten a join tree into a list of simple table references
 pub(super) fn flatten_join_tree_simple(from: &FromClause, tables: &mut Vec<SimpleTableRef>) {
     match from {
-        FromClause::Table { name, alias } => {
+        FromClause::Table { name, alias, .. } => {
             tables.push((name.clone(), alias.clone(), false));
         }
         FromClause::Subquery { alias, .. } => {

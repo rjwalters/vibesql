@@ -203,7 +203,7 @@ impl ExplainExecutor {
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
         match from {
-            vibesql_ast::FromClause::Table { name, alias } => {
+            vibesql_ast::FromClause::Table { name, alias, .. } => {
                 Self::explain_table_scan(name, alias.as_deref(), where_clause, order_by, database)
             }
             vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => {
@@ -237,7 +237,7 @@ impl ExplainExecutor {
 
                 Ok(join_node)
             }
-            vibesql_ast::FromClause::Subquery { query, alias } => {
+            vibesql_ast::FromClause::Subquery { query, alias, .. } => {
                 let mut subquery_node = PlanNode::new("Subquery");
                 subquery_node.object = Some(format!("AS {}", alias));
 

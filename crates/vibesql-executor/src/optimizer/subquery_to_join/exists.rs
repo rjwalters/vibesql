@@ -80,7 +80,7 @@ pub(super) fn try_convert_exists_to_join(
 
     // Check for simple single-table subquery vs complex multi-table subquery
     match &subquery.from {
-        Some(FromClause::Table { name, alias }) => {
+        Some(FromClause::Table { name, alias, .. }) => {
             // Simple single-table case: use existing logic
             try_convert_simple_exists_to_join(from, subquery, negated, name.clone(), alias.clone(), where_clause)
         }
@@ -132,10 +132,7 @@ fn try_convert_simple_exists_to_join(
     };
 
     // Create the right side of the join
-    let right_from = FromClause::Table {
-        name: table_name,
-        alias: effective_alias,
-    };
+    let right_from = FromClause::Table { name: table_name, alias: effective_alias, column_aliases: None };
 
     // Create SEMI or ANTI join based on negation
     let join_type = if negated {
@@ -240,10 +237,7 @@ fn try_convert_complex_exists_to_join(
     };
 
     // Create the derived table as FromClause::Subquery
-    let right_from = FromClause::Subquery {
-        query: Box::new(derived_select),
-        alias: alias.clone(),
-    };
+    let right_from = FromClause::Subquery { query: Box::new(derived_select), alias: alias.clone(), column_aliases: None };
 
     // Rewrite the join condition to reference the derived table alias
     let rewritten_join_condition = rewrite_join_condition_for_derived_table(&join_condition, &subquery_columns, &alias);

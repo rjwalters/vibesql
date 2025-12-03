@@ -85,7 +85,7 @@ where
 
     // Fall back to standard execution (recursive left-deep joins)
     match from {
-        vibesql_ast::FromClause::Table { name, alias } => {
+        vibesql_ast::FromClause::Table { name, alias, .. } => {
             table::execute_table_scan(name, alias.as_ref(), cte_results, database, where_clause, order_by, limit, outer_row, outer_schema)
         }
         vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => join_scan::execute_join(
@@ -101,8 +101,8 @@ where
             outer_schema,
             execute_subquery,
         ),
-        vibesql_ast::FromClause::Subquery { query, alias } => {
-            derived::execute_derived_table(query, alias, execute_subquery)
+        vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
+            derived::execute_derived_table(query, alias, column_aliases.as_ref(), execute_subquery)
         }
     }
 }

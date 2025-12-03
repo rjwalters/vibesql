@@ -59,10 +59,7 @@ fn test_all_greater_than_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t2".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -84,10 +81,7 @@ fn test_all_greater_than_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -161,10 +155,7 @@ fn test_any_less_than_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t2".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -186,10 +177,7 @@ fn test_any_less_than_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -264,10 +252,7 @@ fn test_some_equals_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t2".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -289,10 +274,7 @@ fn test_some_equals_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -358,10 +340,7 @@ fn test_all_with_empty_subquery() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t2".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -383,10 +362,7 @@ fn test_all_with_empty_subquery() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -452,10 +428,7 @@ fn test_any_with_empty_subquery() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t2".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -477,10 +450,7 @@ fn test_any_with_empty_subquery() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -551,10 +521,7 @@ fn test_all_with_null_in_subquery() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t2".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -576,10 +543,7 @@ fn test_all_with_null_in_subquery() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -645,10 +609,7 @@ fn test_all_with_null_left_value() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t2".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -670,10 +631,7 @@ fn test_all_with_null_left_value() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,

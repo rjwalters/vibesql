@@ -14,6 +14,8 @@ pub(super) struct TableRef {
     pub(super) is_cte: bool,
     pub(super) is_subquery: bool,
     pub(super) subquery: Option<Box<vibesql_ast::SelectStmt>>,
+    /// SQL:1999 E051-09: Optional column aliases for derived tables
+    pub(super) column_aliases: Option<Vec<String>>,
 }
 
 /// Join condition with its associated join type
@@ -26,22 +28,24 @@ pub(super) struct JoinConditionWithType {
 /// Flatten a nested join tree into a list of table references
 pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
     match from {
-        FromClause::Table { name, alias } => {
+        FromClause::Table { name, alias, column_aliases } => {
             tables.push(TableRef {
                 name: name.clone(),
                 alias: alias.clone(),
                 is_cte: false,
                 is_subquery: false,
                 subquery: None,
+                column_aliases: column_aliases.clone(),
             });
         }
-        FromClause::Subquery { query, alias } => {
+        FromClause::Subquery { query, alias, column_aliases } => {
             tables.push(TableRef {
                 name: alias.clone(),
                 alias: Some(alias.clone()),
                 is_cte: false,
                 is_subquery: true,
                 subquery: Some(query.clone()),
+                column_aliases: column_aliases.clone(),
             });
         }
         FromClause::Join { left, right, .. } => {

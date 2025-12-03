@@ -75,8 +75,8 @@ fn test_natural_join_single_common_column() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: true,  // NATURAL JOIN

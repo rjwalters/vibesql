@@ -134,10 +134,7 @@ mod tests {
             select_list: vec![SelectItem::Wildcard { alias: None }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "users".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
             where_clause: Some(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
                     table: None,
@@ -194,10 +191,7 @@ mod tests {
             ],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "orders".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
                 table: None,
@@ -241,10 +235,7 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "orders".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -270,30 +261,18 @@ mod tests {
             from: Some(FromClause::Join {
                 left: Box::new(FromClause::Join {
                     left: Box::new(FromClause::Join {
-                        left: Box::new(FromClause::Table {
-                            name: "t1".to_string(),
-                            alias: None,
-                        }),
-                        right: Box::new(FromClause::Table {
-                            name: "t2".to_string(),
-                            alias: None,
-                        }),
+                        left: Box::new(FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+                        right: Box::new(FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
                         join_type: JoinType::Inner,
                         condition: None,
                         natural: false,
                     }),
-                    right: Box::new(FromClause::Table {
-                        name: "t3".to_string(),
-                        alias: None,
-                    }),
+                    right: Box::new(FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
                     join_type: JoinType::Inner,
                     condition: None,
                     natural: false,
                 }),
-                right: Box::new(FromClause::Table {
-                    name: "t4".to_string(),
-                    alias: None,
-                }),
+                right: Box::new(FromClause::Table { name: "t4".to_string(), alias: None, column_aliases: None }),
                 join_type: JoinType::Inner,
                 condition: None,
                 natural: false,
@@ -326,10 +305,7 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "orders".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -363,10 +339,7 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "orders".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -403,10 +376,7 @@ mod tests {
             ],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "users".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -425,10 +395,7 @@ mod tests {
             select_list: vec![SelectItem::Wildcard { alias: None }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "users".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,

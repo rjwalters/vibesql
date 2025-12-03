@@ -202,7 +202,7 @@ where
         let scan_start = std::time::Instant::now();
         let table_result = if table_ref.is_subquery {
             if let Some(subquery) = &table_ref.subquery {
-                execute_derived_table(subquery, table_name, execute_subquery)?
+                execute_derived_table(subquery, table_name, table_ref.column_aliases.as_ref(), execute_subquery)?
             } else {
                 return Err(ExecutorError::UnsupportedFeature(
                     "Subquery reference missing query".to_string(),

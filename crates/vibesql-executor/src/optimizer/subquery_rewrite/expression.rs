@@ -285,10 +285,7 @@ pub(super) fn rewrite_from_clause(
     rewrite_subquery_fn: &impl Fn(&SelectStmt) -> SelectStmt,
 ) -> vibesql_ast::FromClause {
     match from {
-        vibesql_ast::FromClause::Table { name, alias } => vibesql_ast::FromClause::Table {
-            name: name.clone(),
-            alias: alias.clone(),
-        },
+        vibesql_ast::FromClause::Table { name, alias, .. } => vibesql_ast::FromClause::Table { name: name.clone(), alias: alias.clone(), column_aliases: None },
         vibesql_ast::FromClause::Join {
             left,
             right,
@@ -302,9 +299,6 @@ pub(super) fn rewrite_from_clause(
             condition: condition.as_ref().map(|c| rewrite_expression(c, rewrite_subquery_fn)),
             natural: *natural,
         },
-        vibesql_ast::FromClause::Subquery { query, alias } => vibesql_ast::FromClause::Subquery {
-            query: Box::new(rewrite_subquery_fn(query)),
-            alias: alias.clone(),
-        },
+        vibesql_ast::FromClause::Subquery { query, alias, .. } => vibesql_ast::FromClause::Subquery { query: Box::new(rewrite_subquery_fn(query)), alias: alias.clone(), column_aliases: None },
     }
 }

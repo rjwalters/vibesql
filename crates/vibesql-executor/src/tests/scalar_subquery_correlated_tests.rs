@@ -94,7 +94,7 @@ fn test_correlated_subquery_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -129,10 +129,7 @@ fn test_correlated_subquery_basic() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "employees".to_string(),
-            alias: Some("e".to_string()),
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()), column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,

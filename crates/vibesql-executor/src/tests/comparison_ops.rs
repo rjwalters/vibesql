@@ -22,7 +22,7 @@ fn test_greater_than_comparison() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             op: vibesql_ast::BinaryOperator::GreaterThan,
@@ -58,7 +58,7 @@ fn test_less_than_comparison() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             op: vibesql_ast::BinaryOperator::LessThan,
@@ -95,7 +95,7 @@ fn test_not_equal_comparison() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             op: vibesql_ast::BinaryOperator::NotEqual,
@@ -133,7 +133,7 @@ fn test_less_than_or_equal_comparison() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "nums".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
             op: vibesql_ast::BinaryOperator::LessThanOrEqual,

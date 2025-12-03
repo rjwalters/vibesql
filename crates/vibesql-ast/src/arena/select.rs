@@ -93,6 +93,8 @@ pub enum FromClause<'arena> {
     Table {
         name: Symbol,
         alias: Option<Symbol>,
+        /// SQL:1999 Feature E051-09: Optional column renaming in table alias
+        column_aliases: Option<BumpVec<'arena, Symbol>>,
     },
     Join {
         left: &'arena FromClause<'arena>,
@@ -104,6 +106,8 @@ pub enum FromClause<'arena> {
     Subquery {
         query: &'arena SelectStmt<'arena>,
         alias: Symbol,
+        /// SQL:1999 Feature E051-09: Optional column renaming for derived tables
+        column_aliases: Option<BumpVec<'arena, Symbol>>,
     },
 }
 

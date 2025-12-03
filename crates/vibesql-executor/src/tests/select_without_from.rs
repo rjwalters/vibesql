@@ -457,10 +457,7 @@ fn test_hex_literal_in_subquery_without_from() {
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table {
-                        name: "t1".to_string(),
-                        alias: None,
-                    }),
+                    from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -544,10 +541,7 @@ fn test_binary_literal_in_subquery_without_from() {
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table {
-                        name: "t1".to_string(),
-                        alias: None,
-                    }),
+                    from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -606,10 +600,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
@@ -617,10 +608,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
                 set_operation: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                from: Some(vibesql_ast::FromClause::Table {
-                    name: "t1".to_string(),
-                    alias: None,
-                }),
+                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,

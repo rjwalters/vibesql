@@ -44,7 +44,7 @@ fn extract_table_names_from_from_clause(from: Option<&FromClause>) -> Vec<String
 /// Recursively extract table names from a FROM clause
 fn extract_table_names_recursive(from: &FromClause, tables: &mut Vec<String>) {
     match from {
-        FromClause::Table { name, alias } => {
+        FromClause::Table { name, alias, .. } => {
             // Use alias if present, otherwise use table name
             tables.push(alias.clone().unwrap_or_else(|| name.clone()));
         }
@@ -467,10 +467,7 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table {
-                name: "tab0".to_string(),
-                alias: None,
-            }),
+            from: Some(FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef {

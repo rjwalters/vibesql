@@ -62,10 +62,7 @@ fn test_mysql_null_in_empty_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "test".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -83,10 +80,7 @@ fn test_mysql_null_in_empty_subquery() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
-                    name: "empty".to_string(),
-                    alias: None,
-                }),
+                from: Some(vibesql_ast::FromClause::Table { name: "empty".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -149,10 +143,7 @@ fn test_mysql_null_not_in_empty_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "test".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -170,10 +161,7 @@ fn test_mysql_null_not_in_empty_subquery() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
-                    name: "empty".to_string(),
-                    alias: None,
-                }),
+                from: Some(vibesql_ast::FromClause::Table { name: "empty".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -242,10 +230,7 @@ fn test_mysql_null_in_non_empty_without_null() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "test".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -263,10 +248,7 @@ fn test_mysql_null_in_non_empty_without_null() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
-                    name: "values".to_string(),
-                    alias: None,
-                }),
+                from: Some(vibesql_ast::FromClause::Table { name: "values".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -362,10 +344,7 @@ fn test_mysql_triple_nested_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "t1".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -384,10 +363,7 @@ fn test_mysql_triple_nested_subquery() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
-                    name: "t2".to_string(),
-                    alias: None,
-                }),
+                from: Some(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
                 where_clause: Some(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
                         table: None,
@@ -412,10 +388,7 @@ fn test_mysql_triple_nested_subquery() {
                         }],
                         into_table: None,
                         into_variables: None,
-                        from: Some(vibesql_ast::FromClause::Table {
-                            name: "t3".to_string(),
-                            alias: None,
-                        }),
+                        from: Some(vibesql_ast::FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
                         where_clause: None,
                         group_by: None,
                         having: None,
@@ -506,10 +479,7 @@ fn test_mysql_exists_short_circuit() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "customers".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "customers".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Exists {
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
@@ -520,10 +490,7 @@ fn test_mysql_exists_short_circuit() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
-                    name: "orders".to_string(),
-                    alias: None,
-                }),
+                from: Some(vibesql_ast::FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
                 where_clause: Some(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
                         table: None,
@@ -614,10 +581,7 @@ fn test_mysql_scalar_within_exists() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "products".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Exists {
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
@@ -628,10 +592,7 @@ fn test_mysql_scalar_within_exists() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
-                    name: "products".to_string(),
-                    alias: Some("p".to_string()),
-                }),
+                from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: Some("p".to_string()), column_aliases: None }),
                 where_clause: Some(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
                         table: Some("p".to_string()),
@@ -650,10 +611,7 @@ fn test_mysql_scalar_within_exists() {
                         }],
                         into_table: None,
                         into_variables: None,
-                        from: Some(vibesql_ast::FromClause::Table {
-                            name: "average_price".to_string(),
-                            alias: None,
-                        }),
+                        from: Some(vibesql_ast::FromClause::Table { name: "average_price".to_string(), alias: None, column_aliases: None }),
                         where_clause: None,
                         group_by: None,
                         having: None,

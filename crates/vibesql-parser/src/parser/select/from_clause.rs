@@ -98,7 +98,11 @@ impl Parser {
                         }
                     };
 
-                    vibesql_ast::FromClause::Subquery { query, alias }
+                    // Parse optional column aliases: AS alias (col1, col2, ...)
+                    // SQL:1999 Feature E051-09
+                    let column_aliases = self.parse_column_alias_list()?;
+
+                    vibesql_ast::FromClause::Subquery { query, alias, column_aliases }
                 } else {
                     // Parenthesized table reference or JOIN expression
                     // Parse as a FROM clause (which handles JOINs)
@@ -148,7 +152,16 @@ impl Parser {
                     None
                 };
 
-                Ok(vibesql_ast::FromClause::Table { name, alias })
+                // Parse optional column aliases: AS alias (col1, col2, ...)
+                // SQL:1999 Feature E051-09
+                // Note: column_aliases requires an alias to be present
+                let column_aliases = if alias.is_some() {
+                    self.parse_column_alias_list()?
+                } else {
+                    None
+                };
+
+                Ok(vibesql_ast::FromClause::Table { name, alias, column_aliases })
             }
             _ => Err(ParseError {
                 message: "Expected table name or subquery in FROM clause".to_string(),

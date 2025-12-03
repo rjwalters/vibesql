@@ -190,7 +190,7 @@ impl QuerySignature {
     /// Hash a FROM clause structure
     fn hash_from_clause(from: &vibesql_ast::FromClause, hasher: &mut DefaultHasher) {
         match from {
-            vibesql_ast::FromClause::Table { name, alias } => {
+            vibesql_ast::FromClause::Table { name, alias, .. } => {
                 "TABLE".hash(hasher);
                 name.hash(hasher);
                 alias.hash(hasher);
@@ -204,7 +204,7 @@ impl QuerySignature {
                     Self::hash_expression(expr, hasher);
                 }
             }
-            vibesql_ast::FromClause::Subquery { query, alias } => {
+            vibesql_ast::FromClause::Subquery { query, alias, .. } => {
                 "SUBQUERY".hash(hasher);
                 Self::hash_select(query, hasher);
                 alias.hash(hasher);
@@ -619,7 +619,7 @@ impl QuerySignature {
     /// Hash an arena-allocated FROM clause structure
     fn hash_arena_from_clause(from: &ArenaFromClause<'_>, hasher: &mut DefaultHasher) {
         match from {
-            ArenaFromClause::Table { name, alias } => {
+            ArenaFromClause::Table { name, alias, .. } => {
                 "TABLE".hash(hasher);
                 name.hash(hasher);
                 alias.hash(hasher);
@@ -639,7 +639,7 @@ impl QuerySignature {
                     Self::hash_arena_expression(expr, hasher);
                 }
             }
-            ArenaFromClause::Subquery { query, alias } => {
+            ArenaFromClause::Subquery { query, alias, .. } => {
                 "SUBQUERY".hash(hasher);
                 Self::hash_arena_select(query, hasher);
                 alias.hash(hasher);
@@ -1059,7 +1059,7 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None }),
+            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
@@ -1082,7 +1082,7 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None }),
+            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
@@ -1117,7 +1117,7 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None }),
+            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
@@ -1140,7 +1140,7 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None }),
+            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::LessThan, // Different operator!
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),

@@ -150,7 +150,7 @@ fn has_exists_subqueries(stmt: &SelectStmt) -> bool {
 fn extract_table_names(from: &Option<vibesql_ast::FromClause>) -> Vec<String> {
     fn collect_tables(from: &vibesql_ast::FromClause, tables: &mut Vec<String>) {
         match from {
-            vibesql_ast::FromClause::Table { name, alias } => {
+            vibesql_ast::FromClause::Table { name, alias, .. } => {
                 // Use alias if present, otherwise use table name
                 tables.push(alias.clone().unwrap_or_else(|| name.clone()));
                 tables.push(name.clone()); // Also add original name
@@ -192,10 +192,7 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(vibesql_ast::FromClause::Table {
-                name: table.to_string(),
-                alias: None,
-            }),
+            from: Some(vibesql_ast::FromClause::Table { name: table.to_string(), alias: None, column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -586,10 +583,7 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(vibesql_ast::FromClause::Table {
-                name: table.to_string(),
-                alias: Some(alias.to_string()),
-            }),
+            from: Some(vibesql_ast::FromClause::Table { name: table.to_string(), alias: Some(alias.to_string()), column_aliases: None }),
             where_clause: None,
             group_by: None,
             having: None,

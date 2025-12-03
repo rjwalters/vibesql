@@ -10,7 +10,7 @@ fn make_pagination_stmt(limit: Option<usize>, offset: Option<usize>) -> vibesql_
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,

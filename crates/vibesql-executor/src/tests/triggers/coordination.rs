@@ -171,10 +171,7 @@ fn test_before_trigger_executes_first() {
         }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "COUNTER".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "COUNTER".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -195,10 +192,7 @@ fn test_before_trigger_executes_first() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
-            name: "USERS".to_string(),
-            alias: None,
-        }),
+        from: Some(vibesql_ast::FromClause::Table { name: "USERS".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,

@@ -35,7 +35,7 @@ fn test_like_wildcard_percent() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -82,7 +82,7 @@ fn test_like_wildcard_underscore() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -129,7 +129,7 @@ fn test_not_like() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -173,7 +173,7 @@ fn test_like_null_pattern() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
@@ -215,7 +215,7 @@ fn test_like_null_value() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(

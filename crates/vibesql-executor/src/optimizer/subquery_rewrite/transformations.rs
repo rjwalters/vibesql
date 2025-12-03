@@ -99,7 +99,7 @@ pub(super) fn rewrite_exists_to_in(
     // Only handle simple single-table subqueries for now
     // Capture both table name and alias for proper column matching
     let (inner_table, inner_alias) = match &subquery.from {
-        Some(vibesql_ast::FromClause::Table { name, alias }) => {
+        Some(vibesql_ast::FromClause::Table { name, alias, .. }) => {
             (name.clone(), alias.clone())
         }
         _ => return None,

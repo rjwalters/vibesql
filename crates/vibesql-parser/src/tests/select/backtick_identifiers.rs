@@ -41,7 +41,7 @@ fn test_parse_select_with_backtick_table_name() {
         vibesql_ast::Statement::Select(select) => {
             assert!(select.from.is_some());
             match &select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Table { name, alias } => {
+                vibesql_ast::FromClause::Table { name, alias, .. } => {
                     // Backtick identifiers preserve case
                     assert_eq!(name, "user_table");
                     assert!(alias.is_none());
