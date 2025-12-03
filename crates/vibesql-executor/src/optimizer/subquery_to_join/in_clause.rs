@@ -26,7 +26,7 @@
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
 use super::helpers::{
-    get_primary_table_name, is_self_join, qualify_outer_column_refs, rewrite_column_refs_with_alias,
+    is_self_join, qualify_outer_column_refs, rewrite_column_refs_with_alias,
 };
 
 /// Result of converting an IN subquery to a join
@@ -85,9 +85,15 @@ pub(super) fn try_convert_in_to_join(
             eprintln!("[SUBQUERY_TRANSFORM] Self-join detected: table={}, new_alias={}", table_name, new_alias);
         }
 
-        // Get the outer table name to qualify outer column references
-        let outer_table_name = get_primary_table_name(from)
-            .unwrap_or_else(|| table_name.clone()); // Fallback to table_name if not found
+        // In a self-join scenario, the outer expression references the same table
+        // as the subquery (that's why it's a self-join). So we should qualify
+        // the outer column with the subquery's table name/alias, not with the
+        // first table in the outer FROM clause (which might be a different table).
+        //
+        // For example, with:
+        //   FROM store_sales, item WHERE i_item_id IN (SELECT i_item_id FROM item WHERE ...)
+        // The outer i_item_id is from ITEM, not STORE_SALES. So we qualify it as ITEM.i_item_id.
+        let outer_table_name = table_alias.as_ref().unwrap_or(&table_name).clone();
 
         // Qualify outer expression columns with the outer table name
         // This prevents ambiguity when both tables have the same column names
