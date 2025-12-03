@@ -772,19 +772,40 @@ impl SelectExecutor<'_> {
                 .filter_map(|&idx| all_rows.get(idx).cloned())
                 .collect();
 
-            // Build schema for projection
+            // Build schema for projection and filtering
             let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
             let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+
+            // Check if WHERE clause has predicates not covered by the index lookup.
+            // The index lookup covers:
+            // - Equality predicates on prefix columns (prefix_key)
+            // - The ORDER BY column (next_index_col) is used for ordering, not filtering
+            // Any other predicates need to be applied as a filter.
+            let covered_columns: std::collections::HashSet<String> = index_columns
+                .iter()
+                .take(prefix_key.len())
+                .map(|c| c.to_ascii_lowercase())
+                .collect();
+
+            // Check if WHERE clause is fully satisfied by the index lookup
+            let needs_where_filter = !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
+
+            // Apply residual WHERE filter if needed
+            let filtered_rows = if needs_where_filter && !rows.is_empty() {
+                self.apply_where_filter_fast(where_clause, rows, &schema)?
+            } else {
+                rows
+            };
 
             // Apply projection
             let is_select_star = stmt.select_list.len() == 1
                 && matches!(&stmt.select_list[0], SelectItem::Wildcard { .. });
 
             if is_select_star {
-                return Ok(Some(rows));
+                return Ok(Some(filtered_rows));
             }
 
-            let projected = self.apply_projection_fast(&stmt.select_list, rows, &schema)?;
+            let projected = self.apply_projection_fast(&stmt.select_list, filtered_rows, &schema)?;
             return Ok(Some(projected));
         }
 
@@ -876,15 +897,37 @@ impl SelectExecutor<'_> {
                     .into_iter().cloned().collect::<Vec<_>>()
             };
 
+            // Check if WHERE clause has predicates not covered by the index lookup.
+            // If so, we need to apply the full WHERE clause as a filter.
+            // Build set of columns covered by index lookup (those with equality predicates)
+            let covered_columns: std::collections::HashSet<String> = index_columns
+                .iter()
+                .take(key_values.len())
+                .map(|c| c.to_ascii_lowercase())
+                .collect();
+
+            // Check if WHERE clause is fully satisfied by the index lookup
+            let needs_where_filter = !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
+
+            // Apply residual WHERE filter if needed
+            let filtered_rows = if needs_where_filter && !rows.is_empty() {
+                // Build schema for filtering
+                let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+                let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+                self.apply_where_filter_fast(where_clause, rows, &schema)?
+            } else {
+                rows
+            };
+
             // Apply ORDER BY if needed (requires schema for column lookup)
             let sorted_rows = if let Some(order_by) = &stmt.order_by {
                 // Only build schema if we need ORDER BY
                 let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
                 let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
                 // Index lookup doesn't guarantee order, so always sort
-                self.apply_order_by_fast(order_by, rows, &schema)?
+                self.apply_order_by_fast(order_by, filtered_rows, &schema)?
             } else {
-                rows
+                filtered_rows
             };
 
             // Apply LIMIT/OFFSET
@@ -986,6 +1029,38 @@ impl SelectExecutor<'_> {
         match expr {
             Expression::Literal(val) => Some(val.clone()),
             _ => None,
+        }
+    }
+
+    /// Check if a WHERE clause is fully satisfied by equality predicates on the given columns.
+    ///
+    /// Returns true ONLY if the WHERE clause contains ONLY equality predicates
+    /// on the specified columns (connected by AND). Any other predicates (non-equality
+    /// comparisons, predicates on other columns, OR, etc.) will cause this to return false.
+    ///
+    /// This is used to determine if additional filtering is needed after an index lookup.
+    fn where_fully_satisfied_by_equality_columns(
+        &self,
+        expr: &Expression,
+        covered_columns: &std::collections::HashSet<String>,
+    ) -> bool {
+        match expr {
+            // Equality predicate: col = literal
+            Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::Equal, right } => {
+                // Check if this is an equality on a covered column
+                if let Some((col_name, _)) = self.extract_column_literal_pair(left, right) {
+                    covered_columns.contains(&col_name.to_ascii_lowercase())
+                } else {
+                    false // Not a simple column = literal pattern
+                }
+            }
+            // AND: both sides must be fully satisfied
+            Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+                self.where_fully_satisfied_by_equality_columns(left, covered_columns)
+                    && self.where_fully_satisfied_by_equality_columns(right, covered_columns)
+            }
+            // Any other expression type is not satisfied by the index lookup
+            _ => false,
         }
     }
 
