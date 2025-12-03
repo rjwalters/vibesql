@@ -125,6 +125,9 @@ fn test_disk_backed_index_creation_with_bulk_load() {
     use vibesql_types::DataType;
     use crate::Row;
 
+    // Use unique temp directory to avoid conflicts with other tests
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+
     // Create a table schema with one integer column
     let columns = vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)];
     let table_schema = TableSchema::new("test_table".to_string(), columns);
@@ -138,6 +141,7 @@ fn test_disk_backed_index_creation_with_bulk_load() {
         .collect();
 
     let mut index_manager = IndexManager::new();
+    index_manager.set_database_path(temp_dir.path().to_path_buf());
 
     // Create index - will be InMemory in test builds, DiskBacked in production
     let result = index_manager.create_index(
@@ -222,6 +226,9 @@ fn test_budget_enforcement_with_spill_policy() {
     use vibesql_types::DataType;
     use crate::Row;
 
+    // Use unique temp directory to avoid conflicts with other tests
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+
     let columns = vec![ColumnSchema::new("value".to_string(), DataType::Integer, false)];
     let table_schema = TableSchema::new("test_table".to_string(), columns);
 
@@ -233,6 +240,7 @@ fn test_budget_enforcement_with_spill_policy() {
         .collect();
 
     let mut index_manager = IndexManager::new();
+    index_manager.set_database_path(temp_dir.path().to_path_buf());
 
     // Set a very small memory budget to force eviction
     let config = DatabaseConfig {
@@ -291,6 +299,9 @@ fn test_lru_eviction_order() {
     use std::thread;
     use instant::Duration;
 
+    // Use unique temp directory to avoid conflicts with other tests
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+
     let columns = vec![ColumnSchema::new("value".to_string(), DataType::Integer, false)];
     let table_schema = TableSchema::new("test_table".to_string(), columns);
 
@@ -301,6 +312,7 @@ fn test_lru_eviction_order() {
         .collect();
 
     let mut index_manager = IndexManager::new();
+    index_manager.set_database_path(temp_dir.path().to_path_buf());
 
     // Small budget to trigger eviction
     let config = DatabaseConfig {
