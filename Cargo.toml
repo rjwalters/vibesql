@@ -159,6 +159,10 @@ path = "tests/executor/subquery_without_from.rs"
 name = "window_functions"
 path = "tests/executor/window_functions.rs"
 
+[[test]]
+name = "advanced_object_execution"
+path = "tests/executor/advanced_object_execution.rs"
+
 # Functions tests - Built-in SQL functions
 [[test]]
 name = "assertions"
