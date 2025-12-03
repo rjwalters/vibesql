@@ -415,26 +415,160 @@ pub fn execute_sql(
                 .map_err(|e| TestError::Execution(format!("Transaction error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(0))
         }
-        // Unimplemented statements return success for now
+        // EXPLAIN - Query plan analysis (HIGH priority)
+        vibesql_ast::Statement::Explain(explain_stmt) => {
+            // Commit any pending implicit transaction before EXPLAIN
+            batching_manager.commit_if_needed(db)?;
+
+            let result = vibesql_executor::ExplainExecutor::execute(&explain_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+
+            // Format the explain output as rows
+            let plan_text = match result.format {
+                vibesql_ast::ExplainFormat::Text => result.to_text(),
+                vibesql_ast::ExplainFormat::Json => result.to_json(),
+            };
+
+            // Return as single-column text output
+            let rows: Vec<Vec<String>> = plan_text
+                .lines()
+                .map(|line| vec![line.to_string()])
+                .collect();
+
+            Ok(DBOutput::Rows {
+                types: vec![DefaultColumnType::Text],
+                rows,
+            })
+        }
+
+        // Sequence statements (HIGH priority)
+        vibesql_ast::Statement::CreateSequence(create_seq_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_create_sequence(&create_seq_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::AlterSequence(alter_seq_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_alter_sequence(&alter_seq_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::DropSequence(drop_seq_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_drop_sequence(&drop_seq_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+
+        // Procedure/Function statements (MEDIUM priority)
+        vibesql_ast::Statement::CreateProcedure(create_proc_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_create_procedure(&create_proc_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::DropProcedure(drop_proc_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_drop_procedure(&drop_proc_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::CreateFunction(create_func_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_create_function(&create_func_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::DropFunction(drop_func_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_drop_function(&drop_func_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::Call(call_stmt) => {
+            // Commit any pending implicit transaction before CALL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_call(&call_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+
+        // Collation statements (LOW priority)
+        vibesql_ast::Statement::CreateCollation(create_coll_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_create_collation(&create_coll_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::DropCollation(drop_coll_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_drop_collation(&drop_coll_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+
+        // Character set statements (LOW priority)
+        vibesql_ast::Statement::CreateCharacterSet(create_charset_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_create_character_set(&create_charset_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::DropCharacterSet(drop_charset_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_drop_character_set(&drop_charset_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+
+        // Translation statements (LOW priority)
+        vibesql_ast::Statement::CreateTranslation(create_trans_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_create_translation(&create_trans_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+        vibesql_ast::Statement::DropTranslation(drop_trans_stmt) => {
+            // Commit any pending implicit transaction before DDL
+            batching_manager.commit_if_needed(db)?;
+
+            vibesql_executor::advanced_objects::execute_drop_translation(&drop_trans_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
+
+        // Still unimplemented statements (cursor operations, SHOW commands, etc.)
         vibesql_ast::Statement::SetTransaction(_)
-        | vibesql_ast::Statement::CreateSequence(_)
-        | vibesql_ast::Statement::DropSequence(_)
-        | vibesql_ast::Statement::AlterSequence(_)
-        | vibesql_ast::Statement::CreateCollation(_)
-        | vibesql_ast::Statement::DropCollation(_)
-        | vibesql_ast::Statement::CreateCharacterSet(_)
-        | vibesql_ast::Statement::DropCharacterSet(_)
-        | vibesql_ast::Statement::CreateTranslation(_)
-        | vibesql_ast::Statement::DropTranslation(_)
         | vibesql_ast::Statement::DeclareCursor(_)
         | vibesql_ast::Statement::OpenCursor(_)
         | vibesql_ast::Statement::Fetch(_)
         | vibesql_ast::Statement::CloseCursor(_)
-        | vibesql_ast::Statement::CreateProcedure(_)
-        | vibesql_ast::Statement::DropProcedure(_)
-        | vibesql_ast::Statement::CreateFunction(_)
-        | vibesql_ast::Statement::DropFunction(_)
-        | vibesql_ast::Statement::Call(_)
         | vibesql_ast::Statement::TruncateTable(_)
         | vibesql_ast::Statement::ShowTables(_)
         | vibesql_ast::Statement::ShowDatabases(_)
@@ -445,8 +579,7 @@ pub fn execute_sql(
         | vibesql_ast::Statement::AlterTrigger(_)
         | vibesql_ast::Statement::Prepare(_)
         | vibesql_ast::Statement::Execute(_)
-        | vibesql_ast::Statement::Deallocate(_)
-        | vibesql_ast::Statement::Explain(_) => Ok(DBOutput::StatementComplete(0)),
+        | vibesql_ast::Statement::Deallocate(_) => Ok(DBOutput::StatementComplete(0)),
     }
 }
 
