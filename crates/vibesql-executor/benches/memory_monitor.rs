@@ -87,7 +87,8 @@ mod macos_memory {
             host_info: *mut VmStatistics64,
             count: *mut u32,
         ) -> KernReturn;
-        fn vm_page_size() -> u64;
+        // vm_page_size is a global variable, not a function
+        static vm_page_size: usize;
     }
 
     /// Get available memory on macOS using Mach APIs
@@ -95,7 +96,7 @@ mod macos_memory {
     pub fn get_available_memory() -> Option<(u64, u64)> {
         unsafe {
             let host = mach_host_self();
-            let page_size = vm_page_size();
+            let page_size = vm_page_size as u64;
 
             let mut vm_stats = MaybeUninit::<VmStatistics64>::zeroed();
             let mut count = HOST_VM_INFO64_COUNT;
@@ -131,8 +132,9 @@ mod macos_memory {
                 + stats.compressor_page_count
                 + stats.speculative_count;
 
-            let available_bytes = available_pages * page_size;
-            let total_bytes = total_pages * page_size;
+            // Use saturating multiplication to avoid overflow in debug mode
+            let available_bytes = available_pages.saturating_mul(page_size);
+            let total_bytes = total_pages.saturating_mul(page_size);
 
             Some((total_bytes, available_bytes))
         }
