@@ -1,0 +1,49 @@
+{
+  "name": "@vibesql/client",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for VibeSQL with real-time subscription support",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.js",
+      "types": "./dist/react/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "lint": "eslint src --ext .ts,.tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^0.34.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "peerDependenciesOptional": {
+    "react": "*",
+    "react-dom": "*"
+  },
+  "keywords": [
+    "vibesql",
+    "sql",
+    "real-time",
+    "subscriptions",
+    "reactive",
+    "typescript"
+  ],
+  "license": "MIT OR Apache-2.0"
+}
