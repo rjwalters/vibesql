@@ -64,6 +64,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
     use vibesql_server::config::Config;
     use vibesql_server::connection::ConnectionHandler;
     use vibesql_server::observability::ObservabilityProvider;
+    use vibesql_server::SubscriptionManager;
 
     let addr = format!("127.0.0.1:{}", port);
     let listener = match TokioTcpListener::bind(&addr).await {
@@ -83,6 +84,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
     );
 
     let active_connections = Arc::new(AtomicUsize::new(0));
+    let subscription_manager = Arc::new(SubscriptionManager::new());
 
     loop {
         tokio::select! {
@@ -95,6 +97,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                         let config = Arc::clone(&config);
                         let observability = Arc::clone(&observability);
                         let active_connections = Arc::clone(&active_connections);
+                        let subscription_manager = Arc::clone(&subscription_manager);
 
                         tokio::spawn(async move {
                             let mut handler = ConnectionHandler::new(
@@ -104,6 +107,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                                 observability,
                                 None,
                                 active_connections,
+                                subscription_manager,
                             );
                             let _ = handler.handle().await;
                         });
