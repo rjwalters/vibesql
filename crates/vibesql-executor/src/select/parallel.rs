@@ -171,7 +171,7 @@ use vibesql_storage::Row;
 /// Vector of rows that satisfy the predicate
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// // Filter rows where column 0 > 100
 /// let filtered = parallel_scan_filter(rows, |row| {
 ///     matches!(row.values[0], SqlValue::Integer(x) if x > 100)
@@ -213,7 +213,7 @@ where
 /// Vector of transformed rows
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// // Project first two columns only
 /// let projected = parallel_scan_map(rows, |row| {
 ///     Row {
@@ -254,7 +254,7 @@ where
 /// Vector of transformed rows (where function returned Some)
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// // Filter AND project in one pass
 /// let result = parallel_scan_filter_map(rows, |row| {
 ///     if matches!(row.values[0], SqlValue::Integer(x) if x > 100) {

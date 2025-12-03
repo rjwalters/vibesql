@@ -12,7 +12,7 @@
 //!
 //! ## Usage
 //!
-//! ```ignore
+//! ```text
 //! // Clone once, then mutate in-place
 //! let mut stmt = prepared_stmt.statement.clone();
 //! bind_statement_mut(&mut stmt, &params);

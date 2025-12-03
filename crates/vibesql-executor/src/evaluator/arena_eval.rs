@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```text
 //! let evaluator = ArenaExpressionEvaluator::new(schema, &params, interner);
 //! let result = evaluator.eval(expr, row)?;
 //! ```

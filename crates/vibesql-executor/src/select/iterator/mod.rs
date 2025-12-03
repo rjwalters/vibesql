@@ -123,7 +123,7 @@ impl<'a> RowIterator for Box<dyn RowIterator + 'a> {
 //
 // ### Step 1: Add Iterator Execution Path (nonagg.rs)
 //
-// ```ignore
+// ```text
 // pub(super) fn execute_without_aggregation(...) -> Result<Vec<Row>, ExecutorError> {
 //     // Decision point: simple queries use iterators
 //     if Self::can_use_iterator_execution(stmt) {

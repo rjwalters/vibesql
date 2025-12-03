@@ -13,7 +13,7 @@
 //!
 //! ## Usage Pattern
 //!
-//! ```ignore
+//! ```text
 //! // Create from executor
 //! let timeout_ctx = TimeoutContext::from_executor(executor);
 //!

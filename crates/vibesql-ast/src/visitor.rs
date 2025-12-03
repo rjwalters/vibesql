@@ -26,7 +26,7 @@
 //!
 //! ## Collecting column references
 //!
-//! ```ignore
+//! ```text
 //! struct ColumnCollector {
 //!     columns: Vec<(Option<String>, String)>,
 //! }
@@ -44,7 +44,7 @@
 //!
 //! ## Constant folding transformer
 //!
-//! ```ignore
+//! ```text
 //! struct ConstantFolder;
 //!
 //! impl ExpressionMutVisitor for ConstantFolder {
@@ -1215,7 +1215,7 @@ pub fn transform_statement<V: ExpressionMutVisitor>(visitor: &mut V, stmt: State
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// use vibesql_ast::visitor::visit_expressions;
 ///
 /// let mut count = 0;

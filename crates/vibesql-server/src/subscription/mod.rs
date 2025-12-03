@@ -45,6 +45,8 @@
 mod dependencies;
 mod manager;
 mod router;
+pub mod session;
+mod table_dependencies;
 mod table_extract;
 
 use std::collections::HashSet;
@@ -55,6 +57,7 @@ use tokio::sync::mpsc;
 pub use dependencies::extract_table_dependencies;
 pub use manager::SubscriptionManager;
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
+pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager};
 pub use table_extract::extract_table_refs;
 
 // ============================================================================
