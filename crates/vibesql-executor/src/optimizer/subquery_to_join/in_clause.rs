@@ -85,19 +85,16 @@ pub(super) fn try_convert_in_to_join(
             eprintln!("[SUBQUERY_TRANSFORM] Self-join detected: table={}, new_alias={}", table_name, new_alias);
         }
 
-        // In a self-join scenario, the outer expression references the same table
-        // as the subquery (that's why it's a self-join). So we should qualify
-        // the outer column with the subquery's table name/alias, not with the
-        // first table in the outer FROM clause (which might be a different table).
-        //
-        // For example, with:
-        //   FROM store_sales, item WHERE i_item_id IN (SELECT i_item_id FROM item WHERE ...)
-        // The outer i_item_id is from ITEM, not STORE_SALES. So we qualify it as ITEM.i_item_id.
-        let outer_table_name = table_alias.as_ref().unwrap_or(&table_name).clone();
+        // For a self-join, we need to qualify the outer expression columns with the
+        // original table name (not the leftmost table in the FROM clause).
+        // Example: `i_item_id IN (SELECT i_item_id FROM item WHERE ...)`
+        // The outer `i_item_id` refers to the outer `item` table, so we qualify it
+        // as `item.i_item_id`, and the subquery columns get rewritten to `__subquery_item.i_item_id`
+        let outer_table_name = table_alias.as_ref().unwrap_or(&table_name);
 
         // Qualify outer expression columns with the outer table name
         // This prevents ambiguity when both tables have the same column names
-        let qualified_expr = qualify_outer_column_refs(expr, &outer_table_name);
+        let qualified_expr = qualify_outer_column_refs(expr, outer_table_name);
 
         // Use the table alias (if present) for matching column references, not just the table name
         // This is critical for Q21 where the subquery uses an alias like "l2" or "l3"
