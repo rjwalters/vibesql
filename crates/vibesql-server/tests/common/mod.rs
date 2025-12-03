@@ -320,6 +320,16 @@ impl TestClient {
             Err(_) => false, // Other error, assume closed
         }
     }
+
+    /// Write all bytes to the stream directly
+    pub async fn stream_write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.stream.write_all(buf).await
+    }
+
+    /// Flush the stream
+    pub async fn stream_flush(&mut self) -> std::io::Result<()> {
+        self.stream.flush().await
+    }
 }
 
 /// Helper to put a null-terminated C string
