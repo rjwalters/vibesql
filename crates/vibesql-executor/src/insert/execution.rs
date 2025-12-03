@@ -106,6 +106,11 @@ fn execute_insert_internal(
         vec![Vec::new(); schema.get_unique_constraint_indices().len()]
     }; // Track UNIQUE values for each constraint
 
+    // Track the first auto-generated ID for LAST_INSERT_ROWID() support
+    // Per MySQL semantics, for multi-row inserts, LAST_INSERT_ID() returns
+    // the first auto-generated value, not the last
+    let mut first_generated_id: Option<i64> = None;
+
     for value_exprs in &rows_to_insert {
         // Build a complete row with values for all columns
         // Start with NULL for all columns, then fill in provided values
@@ -128,7 +133,13 @@ fn execute_insert_internal(
         }
 
         // Apply DEFAULT values for unspecified columns
-        super::defaults::apply_default_values(&schema, &mut full_row_values, db)?;
+        // This returns the first generated sequence value (if any)
+        let generated_id = super::defaults::apply_default_values(&schema, &mut full_row_values, db)?;
+
+        // Track the first generated ID across all rows
+        if first_generated_id.is_none() {
+            first_generated_id = generated_id;
+        }
 
         // Validate all constraints in a single pass and extract index keys
         // Skip PK/UNIQUE duplicate checks if using REPLACE conflict clause or ON DUPLICATE KEY UPDATE
@@ -301,6 +312,11 @@ fn execute_insert_internal(
             &stmt.table_name,
             vibesql_ast::TriggerEvent::Insert,
         )?;
+    }
+
+    // Update LAST_INSERT_ROWID if any auto-generated values were produced
+    if let Some(id) = first_generated_id {
+        db.set_last_insert_rowid(id);
     }
 
     Ok(rows_inserted)

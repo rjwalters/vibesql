@@ -4,6 +4,11 @@
 //! - VERSION() - Database version information
 //! - DATABASE() / SCHEMA() - Current database name
 //! - USER() / CURRENT_USER() - Current user information
+//! - LAST_INSERT_ROWID() / LAST_INSERT_ID() - Last auto-generated ID
+//!
+//! Note: LAST_INSERT_ROWID() and LAST_INSERT_ID() are handled specially in the
+//! expression evaluator because they require database context. They are not
+//! called through eval_scalar_function().
 
 use crate::errors::ExecutorError;
 

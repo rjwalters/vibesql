@@ -151,6 +151,21 @@ impl CombinedExpressionEvaluator<'_> {
         match name.to_uppercase().as_str() {
             "COALESCE" => return self.eval_coalesce_lazy(args, row),
             "NULLIF" => return self.eval_nullif_lazy(args, row),
+            // Handle LAST_INSERT_ROWID() and LAST_INSERT_ID() - require database access
+            "LAST_INSERT_ROWID" | "LAST_INSERT_ID" => {
+                if !args.is_empty() {
+                    return Err(ExecutorError::UnsupportedFeature(format!(
+                        "{}() takes no arguments",
+                        name.to_uppercase()
+                    )));
+                }
+                if let Some(db) = self.database {
+                    return Ok(vibesql_types::SqlValue::Integer(db.last_insert_rowid()));
+                } else {
+                    // No database context available, return 0
+                    return Ok(vibesql_types::SqlValue::Integer(0));
+                }
+            }
             _ => {}
         }
 
