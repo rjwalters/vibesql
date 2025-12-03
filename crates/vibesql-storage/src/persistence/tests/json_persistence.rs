@@ -945,6 +945,7 @@ fn test_json_view_preservation() {
         from: Some(FromClause::Table {
             name: "users".to_string(),
             alias: None,
+            column_aliases: None,
         }),
         where_clause: Some(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
@@ -1027,6 +1028,7 @@ fn test_json_view_preservation_without_sql_definition() {
         from: Some(FromClause::Table {
             name: "products".to_string(),
             alias: None,
+            column_aliases: None,
         }),
         where_clause: None,
         group_by: None,
