@@ -44,7 +44,7 @@ thread_local! {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// use vibesql_executor::clear_in_subquery_cache;
 ///
 /// // Run a batch of queries...

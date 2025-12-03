@@ -23,7 +23,7 @@ use vibesql_storage::Database;
 /// component, providing a clean separation between index planning and execution.
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// let planner = IndexPlanner::new(&database);
 /// if let Some(plan) = planner.plan_index_usage("users", where_clause, order_by) {
 ///     // Use the index plan for execution

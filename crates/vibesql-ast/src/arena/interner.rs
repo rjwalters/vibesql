@@ -6,9 +6,9 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```text
 //! use bumpalo::Bump;
-//! use vibesql_ast::arena::interner::{ArenaInterner, Symbol};
+//! use vibesql_ast::arena::{ArenaInterner, Symbol};
 //!
 //! let arena = Bump::new();
 //! let mut interner = ArenaInterner::new(&arena);

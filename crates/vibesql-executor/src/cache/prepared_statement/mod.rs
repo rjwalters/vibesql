@@ -13,7 +13,7 @@
 //! literal values directly in the AST, avoiding re-parsing entirely.
 //!
 //! Example:
-//! ```ignore
+//! ```text
 //! let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
 //! // First execution - fast (no re-parsing)
 //! let result1 = session.execute_prepared(&stmt, &[SqlValue::Integer(1)])?;

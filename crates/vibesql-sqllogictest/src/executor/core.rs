@@ -288,7 +288,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// test coverage.
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// let mut tester = Runner::new(make_conn);
     /// tester.enable_auto_switch_dialect();
     ///

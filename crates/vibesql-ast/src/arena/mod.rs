@@ -10,7 +10,7 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```text
 //! use bumpalo::Bump;
 //! use vibesql_ast::arena::Expression;
 //!

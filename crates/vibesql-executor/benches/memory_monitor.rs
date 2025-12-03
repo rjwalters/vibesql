@@ -6,7 +6,7 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```text
 //! use memory_monitor::MemoryMonitor;
 //!
 //! let monitor = MemoryMonitor::new();
