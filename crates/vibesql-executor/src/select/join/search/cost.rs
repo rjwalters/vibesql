@@ -91,6 +91,12 @@ impl JoinOrderContext {
     ///
     /// For equijoin A.x = B.y, selectivity = 1 / max(NDV(A.x), NDV(B.y))
     ///
+    /// **FK Detection Enhancement**: When a join involves a primary key column (NDV == row_count)
+    /// joining to a foreign key column (NDV < row_count), we use improved selectivity estimation
+    /// based on the FK cardinality ratio. This handles star schema patterns better:
+    /// - `customer.c_custkey (PK) = orders.o_custkey (FK)`: ~15 orders per customer
+    /// - Selectivity accounts for the FK multiplicity rather than assuming uniform distribution
+    ///
     /// **Important**: For composite join keys (multiple edges between same table pair),
     /// this function multiplies all individual selectivities together. This prevents
     /// memory explosions in queries like TPC-H Q9 where partsupp has TWO join conditions:
@@ -123,12 +129,18 @@ impl JoinOrderContext {
                 .cloned()
                 .unwrap_or_else(|| edge.right_table.clone());
 
-            // Get NDV for left column (using actual table name)
-            let left_ndv = database
+            // Get table statistics for FK detection
+            let left_stats = database
                 .get_table(&actual_left_table)
-                .and_then(|t| t.get_statistics())
-                .and_then(|stats| {
-                    // Try exact match, uppercase, lowercase
+                .and_then(|t| Some((t.row_count(), t.get_statistics()?)));
+            let right_stats = database
+                .get_table(&actual_right_table)
+                .and_then(|t| Some((t.row_count(), t.get_statistics()?)));
+
+            // Get NDV for left column (using actual table name)
+            let left_ndv = left_stats
+                .as_ref()
+                .and_then(|(_, stats)| {
                     stats.columns.get(&edge.left_column)
                         .or_else(|| stats.columns.get(&edge.left_column.to_uppercase()))
                         .or_else(|| stats.columns.get(&edge.left_column.to_lowercase()))
@@ -137,10 +149,9 @@ impl JoinOrderContext {
                 .unwrap_or(1000); // Fallback
 
             // Get NDV for right column (using actual table name)
-            let right_ndv = database
-                .get_table(&actual_right_table)
-                .and_then(|t| t.get_statistics())
-                .and_then(|stats| {
+            let right_ndv = right_stats
+                .as_ref()
+                .and_then(|(_, stats)| {
                     stats.columns.get(&edge.right_column)
                         .or_else(|| stats.columns.get(&edge.right_column.to_uppercase()))
                         .or_else(|| stats.columns.get(&edge.right_column.to_lowercase()))
@@ -148,17 +159,40 @@ impl JoinOrderContext {
                 .map(|cs| cs.n_distinct)
                 .unwrap_or(1000); // Fallback
 
-            // Join selectivity = 1 / max(NDV_left, NDV_right)
-            let max_ndv = std::cmp::max(left_ndv, right_ndv).max(1);
-            let selectivity = 1.0 / max_ndv as f64;
+            // Get row counts for FK detection
+            let left_row_count = left_stats.as_ref().map(|(rc, _)| *rc).unwrap_or(10000);
+            let right_row_count = right_stats.as_ref().map(|(rc, _)| *rc).unwrap_or(10000);
+
+            // Detect PK-FK relationships for improved selectivity estimation
+            // A column is likely a PK if NDV == row_count (all unique values)
+            let left_is_pk = is_likely_primary_key(left_ndv, left_row_count);
+            let right_is_pk = is_likely_primary_key(right_ndv, right_row_count);
+
+            let selectivity = compute_pk_fk_selectivity(
+                left_ndv, right_ndv,
+                left_row_count, right_row_count,
+                left_is_pk, right_is_pk,
+            );
 
             // Debug logging
             if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                let pk_fk_info = if left_is_pk && !right_is_pk {
+                    format!(" [PK-FK: left is PK, ratio={:.1}]", right_row_count as f64 / right_ndv.max(1) as f64)
+                } else if right_is_pk && !left_is_pk {
+                    format!(" [PK-FK: right is PK, ratio={:.1}]", left_row_count as f64 / left_ndv.max(1) as f64)
+                } else if left_is_pk && right_is_pk {
+                    " [PK-PK join]".to_string()
+                } else {
+                    String::new()
+                };
                 eprintln!(
-                    "[JOIN_REORDER] Edge {}.{} = {}.{}: NDV({}, {}) -> selectivity {:.6}",
+                    "[JOIN_REORDER] Edge {}.{} = {}.{}: NDV({}, {}), rows({}, {}) -> selectivity {:.6}{}",
                     edge.left_table, edge.left_column,
                     edge.right_table, edge.right_column,
-                    left_ndv, right_ndv, selectivity
+                    left_ndv, right_ndv,
+                    left_row_count, right_row_count,
+                    selectivity,
+                    pk_fk_info
                 );
             }
 
@@ -436,5 +470,157 @@ fn estimate_predicate_selectivity_heuristic(pred: &vibesql_ast::Expression) -> f
 
         // Complex expressions: conservative estimate
         _ => 0.50,
+    }
+}
+
+/// Detect if a column is likely a primary key based on statistics
+///
+/// A column is considered a likely primary key if:
+/// - NDV (number of distinct values) equals row count (all values unique)
+/// - Or NDV is very close to row count (allowing for sampling variance)
+///
+/// This heuristic works well for:
+/// - Auto-increment IDs
+/// - UUID columns
+/// - Composite keys (when NDV is computed on the combined key)
+fn is_likely_primary_key(ndv: usize, row_count: usize) -> bool {
+    if row_count == 0 {
+        return false;
+    }
+
+    // Allow 1% tolerance for sampling variance
+    // For small tables, require exact match
+    if row_count < 100 {
+        ndv >= row_count
+    } else {
+        let ratio = ndv as f64 / row_count as f64;
+        ratio >= 0.99
+    }
+}
+
+/// Compute selectivity for a join considering PK-FK relationships
+///
+/// For PK-FK joins (dimension table to fact table), the selectivity model is:
+/// - Each FK value matches exactly one PK value
+/// - The FK side may have multiple rows per distinct FK value (cardinality ratio)
+///
+/// Formula for PK-FK join where left is PK:
+///   selectivity = 1 / left_ndv (each FK row finds exactly one match)
+///
+/// For FK-PK join where right is PK:
+///   selectivity = 1 / right_ndv
+///
+/// For non-PK-FK joins (both sides have duplicates):
+///   selectivity = 1 / max(left_ndv, right_ndv) (traditional formula)
+///
+/// For PK-PK joins (1:1 relationship):
+///   selectivity = 1 / max(left_ndv, right_ndv)
+fn compute_pk_fk_selectivity(
+    left_ndv: usize,
+    right_ndv: usize,
+    _left_row_count: usize,
+    _right_row_count: usize,
+    left_is_pk: bool,
+    right_is_pk: bool,
+) -> f64 {
+    // Ensure at least 1 to avoid division by zero
+    let left_ndv = left_ndv.max(1);
+    let right_ndv = right_ndv.max(1);
+
+    match (left_is_pk, right_is_pk) {
+        // PK-FK join: left is PK (dimension), right is FK (fact)
+        // Each FK value matches at most one PK value
+        // Selectivity based on PK uniqueness
+        (true, false) => {
+            1.0 / left_ndv as f64
+        }
+
+        // FK-PK join: left is FK (fact), right is PK (dimension)
+        // Each FK value matches at most one PK value
+        (false, true) => {
+            1.0 / right_ndv as f64
+        }
+
+        // PK-PK join (1:1 relationship) or non-PK join
+        // Use traditional formula: 1 / max(NDV)
+        _ => {
+            let max_ndv = std::cmp::max(left_ndv, right_ndv);
+            1.0 / max_ndv as f64
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_likely_primary_key() {
+        // Exact match - definitely PK
+        assert!(is_likely_primary_key(1000, 1000));
+
+        // Small table - require exact match
+        assert!(is_likely_primary_key(50, 50));
+        assert!(!is_likely_primary_key(49, 50));
+
+        // Large table - allow 1% variance
+        assert!(is_likely_primary_key(990, 1000)); // 99% unique
+        assert!(!is_likely_primary_key(980, 1000)); // 98% unique
+
+        // Edge cases
+        assert!(!is_likely_primary_key(0, 0));
+        assert!(!is_likely_primary_key(100, 0));
+    }
+
+    #[test]
+    fn test_compute_pk_fk_selectivity() {
+        // PK-FK: left is PK (customer), right is FK (orders)
+        // customer.c_custkey (PK, 150K unique) = orders.o_custkey (FK, 100K unique out of 1.5M rows)
+        let selectivity = compute_pk_fk_selectivity(
+            150_000,  // left_ndv (customer PK)
+            100_000,  // right_ndv (orders FK)
+            150_000,  // left_row_count (customer)
+            1_500_000, // right_row_count (orders)
+            true,      // left is PK
+            false,     // right is FK
+        );
+        // Should be 1/150K based on PK uniqueness
+        assert!((selectivity - 1.0 / 150_000.0).abs() < 1e-10);
+
+        // FK-PK: left is FK (orders), right is PK (customer)
+        let selectivity = compute_pk_fk_selectivity(
+            100_000,  // left_ndv (orders FK)
+            150_000,  // right_ndv (customer PK)
+            1_500_000, // left_row_count (orders)
+            150_000,  // right_row_count (customer)
+            false,     // left is FK
+            true,      // right is PK
+        );
+        // Should be 1/150K based on PK uniqueness
+        assert!((selectivity - 1.0 / 150_000.0).abs() < 1e-10);
+
+        // Non-PK join: both sides have duplicates
+        let selectivity = compute_pk_fk_selectivity(
+            1000,  // left_ndv
+            2000,  // right_ndv
+            5000,  // left_row_count
+            8000,  // right_row_count
+            false, // not PK
+            false, // not PK
+        );
+        // Should be 1/max(1000, 2000) = 1/2000
+        assert!((selectivity - 1.0 / 2000.0).abs() < 1e-10);
+
+        // PK-PK join: 1:1 relationship
+        let selectivity = compute_pk_fk_selectivity(
+            1000, // left_ndv
+            1000, // right_ndv
+            1000, // left_row_count
+            1000, // right_row_count
+            true, // both PK
+            true, // both PK
+        );
+        // Should be 1/max(1000, 1000) = 1/1000
+        assert!((selectivity - 1.0 / 1000.0).abs() < 1e-10);
     }
 }
