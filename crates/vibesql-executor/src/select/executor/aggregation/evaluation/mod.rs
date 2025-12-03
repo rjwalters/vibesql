@@ -242,6 +242,9 @@ impl SelectExecutor<'_> {
     ///
     /// This is used for ROLLUP/CUBE/GROUPING SETS to support the GROUPING() function
     /// and to return NULL for columns that are rolled up in the current grouping set.
+    ///
+    /// This function handles all expression types recursively to ensure GROUPING() calls
+    /// nested within binary operations, CASE expressions, etc. are properly evaluated.
     #[allow(clippy::only_used_in_recursion)]
     pub(in crate::select::executor) fn evaluate_with_aggregates_and_grouping(
         &self,
@@ -251,43 +254,203 @@ impl SelectExecutor<'_> {
         evaluator: &CombinedExpressionEvaluator,
         grouping_context: &GroupingContext,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-        // Check for GROUPING() or GROUPING_ID() function call
-        if let vibesql_ast::Expression::Function { name, args, .. } = expr {
-            if name.eq_ignore_ascii_case("GROUPING") {
-                // GROUPING() function - returns 1 if the column is rolled up, 0 otherwise
-                if args.len() != 1 {
-                    return Err(ExecutorError::UnsupportedExpression(format!(
-                        "GROUPING() requires exactly 1 argument, got {}",
-                        args.len()
-                    )));
+        match expr {
+            // Check for GROUPING() or GROUPING_ID() function call
+            vibesql_ast::Expression::Function { name, args, .. } => {
+                if name.eq_ignore_ascii_case("GROUPING") {
+                    // GROUPING() function - returns 1 if the column is rolled up, 0 otherwise
+                    if args.len() != 1 {
+                        return Err(ExecutorError::UnsupportedExpression(format!(
+                            "GROUPING() requires exactly 1 argument, got {}",
+                            args.len()
+                        )));
+                    }
+                    let result = grouping_context.is_rolled_up(&args[0]);
+                    return Ok(vibesql_types::SqlValue::Integer(result as i64));
                 }
-                let result = grouping_context.is_rolled_up(&args[0]);
-                return Ok(vibesql_types::SqlValue::Integer(result as i64));
-            }
 
-            if name.eq_ignore_ascii_case("GROUPING_ID") {
-                // GROUPING_ID() function - returns a bitmap for multiple columns
-                // Formula: GROUPING(c1) * 2^(n-1) + GROUPING(c2) * 2^(n-2) + ... + GROUPING(cn)
-                if args.is_empty() {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        "GROUPING_ID() requires at least 1 argument".to_string(),
-                    ));
+                if name.eq_ignore_ascii_case("GROUPING_ID") {
+                    // GROUPING_ID() function - returns a bitmap for multiple columns
+                    // Formula: GROUPING(c1) * 2^(n-1) + GROUPING(c2) * 2^(n-2) + ... + GROUPING(cn)
+                    if args.is_empty() {
+                        return Err(ExecutorError::UnsupportedExpression(
+                            "GROUPING_ID() requires at least 1 argument".to_string(),
+                        ));
+                    }
+                    let result = grouping_context.grouping_id(args);
+                    return Ok(vibesql_types::SqlValue::Integer(result));
                 }
-                let result = grouping_context.grouping_id(args);
-                return Ok(vibesql_types::SqlValue::Integer(result));
-            }
-        }
 
-        // For column references, check if the column is rolled up
-        // If rolled up, return NULL instead of the actual value
-        if let vibesql_ast::Expression::ColumnRef { .. } = expr {
-            if grouping_context.is_rolled_up(expr) == 1 {
-                return Ok(vibesql_types::SqlValue::Null);
+                // For other functions (including aggregates like COUNT, SUM, etc.),
+                // delegate to the function evaluator which handles Wildcard and other
+                // special arguments appropriately
+                function::evaluate(self, expr, group_rows, group_key, evaluator)
             }
-        }
 
-        // For other expressions, delegate to the existing evaluation
-        self.evaluate_with_aggregates(expr, group_rows, group_key, evaluator)
+            // Binary operation - recursively evaluate both sides with grouping context
+            vibesql_ast::Expression::BinaryOp { left, op, right } => {
+                let left_val = self.evaluate_with_aggregates_and_grouping(
+                    left,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                    grouping_context,
+                )?;
+                let right_val = self.evaluate_with_aggregates_and_grouping(
+                    right,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                    grouping_context,
+                )?;
+                crate::evaluator::ExpressionEvaluator::eval_binary_op_static(
+                    &left_val,
+                    op,
+                    &right_val,
+                    vibesql_types::SqlMode::default(),
+                )
+            }
+
+            // Unary operations - recursively evaluate inner expression with grouping context
+            vibesql_ast::Expression::UnaryOp { op, expr: inner_expr } => {
+                let inner_val = self.evaluate_with_aggregates_and_grouping(
+                    inner_expr,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                    grouping_context,
+                )?;
+                crate::evaluator::eval_unary_op(op, &inner_val)
+            }
+
+            // CASE expression - evaluate with grouping context
+            // Need to handle both simple CASE (CASE x WHEN v THEN ...) and searched CASE (CASE WHEN cond THEN ...)
+            vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
+                match operand {
+                    // Simple CASE: CASE operand WHEN value THEN result ...
+                    Some(operand_expr) => {
+                        let operand_value = self.evaluate_with_aggregates_and_grouping(
+                            operand_expr,
+                            group_rows,
+                            group_key,
+                            evaluator,
+                            grouping_context,
+                        )?;
+
+                        for when_clause in when_clauses {
+                            // Check if ANY condition matches (OR logic)
+                            for condition_expr in &when_clause.conditions {
+                                let when_value = self.evaluate_with_aggregates_and_grouping(
+                                    condition_expr,
+                                    group_rows,
+                                    group_key,
+                                    evaluator,
+                                    grouping_context,
+                                )?;
+
+                                if crate::evaluator::ExpressionEvaluator::values_are_equal(&operand_value, &when_value) {
+                                    return self.evaluate_with_aggregates_and_grouping(
+                                        &when_clause.result,
+                                        group_rows,
+                                        group_key,
+                                        evaluator,
+                                        grouping_context,
+                                    );
+                                }
+                            }
+                        }
+
+                        if let Some(else_expr) = else_result {
+                            self.evaluate_with_aggregates_and_grouping(else_expr, group_rows, group_key, evaluator, grouping_context)
+                        } else {
+                            Ok(vibesql_types::SqlValue::Null)
+                        }
+                    }
+
+                    // Searched CASE: CASE WHEN condition THEN result ...
+                    None => {
+                        for when_clause in when_clauses {
+                            for condition_expr in &when_clause.conditions {
+                                let condition_value = self.evaluate_with_aggregates_and_grouping(
+                                    condition_expr,
+                                    group_rows,
+                                    group_key,
+                                    evaluator,
+                                    grouping_context,
+                                )?;
+
+                                let is_true = match condition_value {
+                                    vibesql_types::SqlValue::Boolean(true) => true,
+                                    vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
+                                    vibesql_types::SqlValue::Integer(0) => false,
+                                    vibesql_types::SqlValue::Integer(_) => true,
+                                    _ => false,
+                                };
+
+                                if is_true {
+                                    return self.evaluate_with_aggregates_and_grouping(
+                                        &when_clause.result,
+                                        group_rows,
+                                        group_key,
+                                        evaluator,
+                                        grouping_context,
+                                    );
+                                }
+                            }
+                        }
+
+                        if let Some(else_expr) = else_result {
+                            self.evaluate_with_aggregates_and_grouping(else_expr, group_rows, group_key, evaluator, grouping_context)
+                        } else {
+                            Ok(vibesql_types::SqlValue::Null)
+                        }
+                    }
+                }
+            }
+
+            // Column references - check if the column is rolled up
+            vibesql_ast::Expression::ColumnRef { .. } => {
+                if grouping_context.is_rolled_up(expr) == 1 {
+                    return Ok(vibesql_types::SqlValue::Null);
+                }
+                // Not rolled up, evaluate normally
+                simple::evaluate_no_aggregates(expr, group_rows, evaluator)
+            }
+
+            // Aggregate functions - delegate to aggregate handler
+            vibesql_ast::Expression::AggregateFunction { .. } => {
+                aggregate_function::evaluate(self, expr, group_rows, evaluator)
+            }
+
+            // Cast - evaluate inner expression with grouping context
+            vibesql_ast::Expression::Cast { expr: inner, data_type } => {
+                let inner_val = self.evaluate_with_aggregates_and_grouping(
+                    inner,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                    grouping_context,
+                )?;
+                crate::evaluator::casting::cast_value(&inner_val, data_type, &vibesql_types::SqlMode::default())
+            }
+
+            // IsNull - evaluate inner expression with grouping context
+            vibesql_ast::Expression::IsNull { expr: inner, negated } => {
+                let inner_val = self.evaluate_with_aggregates_and_grouping(
+                    inner,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                    grouping_context,
+                )?;
+                let is_null = matches!(inner_val, vibesql_types::SqlValue::Null);
+                Ok(vibesql_types::SqlValue::Boolean(if *negated { !is_null } else { is_null }))
+            }
+
+            // For all other expressions, delegate to existing evaluation
+            // These don't typically contain GROUPING() calls
+            _ => self.evaluate_with_aggregates(expr, group_rows, group_key, evaluator),
+        }
     }
 
     /// Check if a SQL value is truthy (for HAVING clause evaluation)
