@@ -553,10 +553,10 @@ mod tests {
         let mut content = BytesMut::new();
         content.put_slice(b"SELECT * FROM users\0");
         content.put_i16(0); // No params
-
+    
         buf.put_i32((4 + content.len()) as i32);
         buf.extend(content);
-
+    
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
