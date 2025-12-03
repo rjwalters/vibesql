@@ -44,6 +44,14 @@ impl JoinOrderSearch {
         let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
 
         let num_tables = analyzer.tables().len();
+
+        // Extract base cardinalities (before filters) for cascading filter tracking
+        let table_base_cardinalities = JoinOrderContext::extract_base_cardinalities(
+            analyzer,
+            database,
+            alias_to_table,
+        );
+
         let context = JoinOrderContext {
             all_tables: analyzer.tables().clone(),
             edges,
@@ -53,6 +61,7 @@ impl JoinOrderSearch {
                 table_local_predicates,
                 alias_to_table,
             ),
+            table_base_cardinalities,
             edge_selectivities,
             config: ParallelSearchConfig::with_table_count(num_tables),
             aggregate_analysis: None,
@@ -80,6 +89,14 @@ impl JoinOrderSearch {
         let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
 
         let num_tables = analyzer.tables().len();
+
+        // Extract base cardinalities (before filters) for cascading filter tracking
+        let table_base_cardinalities = JoinOrderContext::extract_base_cardinalities(
+            analyzer,
+            database,
+            alias_to_table,
+        );
+
         let context = JoinOrderContext {
             all_tables: analyzer.tables().clone(),
             edges,
@@ -89,6 +106,7 @@ impl JoinOrderSearch {
                 table_local_predicates,
                 alias_to_table,
             ),
+            table_base_cardinalities,
             edge_selectivities,
             config: ParallelSearchConfig::with_table_count(num_tables),
             aggregate_analysis: Some(aggregate_analysis),

@@ -9,9 +9,42 @@
 use std::collections::{BTreeSet, HashMap};
 
 use super::context::JoinOrderContext;
-use super::state::JoinCost;
+use super::state::{CascadingFilterState, JoinCost};
 
 impl JoinOrderContext {
+    /// Extract base table cardinalities (before any filters applied)
+    ///
+    /// This is used for cascading filter awareness - we need to know both
+    /// the original table size and the filtered size to compute filter selectivity.
+    ///
+    /// # Parameters
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation")
+    pub(super) fn extract_base_cardinalities(
+        analyzer: &crate::select::join::reorder::JoinOrderAnalyzer,
+        database: &vibesql_storage::Database,
+        alias_to_table: &HashMap<String, String>,
+    ) -> std::collections::HashMap<String, usize> {
+        let mut cardinalities = std::collections::HashMap::new();
+
+        for table_name in analyzer.tables() {
+            // Resolve alias to actual table name for database lookup
+            let actual_table_name = alias_to_table
+                .get(&table_name.to_lowercase())
+                .cloned()
+                .unwrap_or_else(|| table_name.clone());
+
+            // Get actual table row count from database using the resolved table name
+            let base_rows = database
+                .get_table(&actual_table_name)
+                .map(|t| t.row_count())
+                .unwrap_or(10000); // Fallback for CTEs/subqueries
+
+            cardinalities.insert(table_name.clone(), base_rows);
+        }
+
+        cardinalities
+    }
+
     /// Extract table cardinalities from actual table statistics, adjusted by WHERE clause selectivity
     ///
     /// Uses real row counts from database tables and applies selectivity estimation
@@ -194,10 +227,14 @@ impl JoinOrderContext {
 
     /// Estimate cost of joining next_table to already-joined tables
     ///
+    /// NOTE: This function is kept for reference/debugging but is superseded by
+    /// `estimate_join_cost_with_filters` which accounts for cascading filter correlation.
+    ///
     /// # Parameters
     /// - `current_cardinality`: Size of intermediate result after all previous joins
     /// - `joined_tables`: Set of tables already joined (used to check for join edges)
     /// - `next_table`: Table being added to the join
+    #[allow(dead_code)]
     pub(super) fn estimate_join_cost(
         &self,
         current_cardinality: usize,
@@ -285,6 +322,134 @@ impl JoinOrderContext {
                 operations,
                 selectivity,
                 join_type
+            );
+        }
+
+        JoinCost::new(output_cardinality, operations)
+    }
+
+    /// Estimate cost of joining next_table to already-joined tables with cascading filter awareness
+    ///
+    /// This version accounts for filter correlation - when tables have local predicates applied,
+    /// the rows that survive the filter are not randomly distributed. Joins through filtered
+    /// tables produce fewer rows than independent selectivity would suggest.
+    ///
+    /// # Parameters
+    /// - `current_cardinality`: Size of intermediate result after all previous joins
+    /// - `joined_tables`: Set of tables already joined (used to check for join edges)
+    /// - `next_table`: Table being added to the join
+    /// - `filter_state`: Tracks which tables have been filtered and their correlation factor
+    pub(super) fn estimate_join_cost_with_filters(
+        &self,
+        current_cardinality: usize,
+        joined_tables: &BTreeSet<String>,
+        next_table: &str,
+        filter_state: &CascadingFilterState,
+    ) -> JoinCost {
+        if joined_tables.is_empty() {
+            // First table: just a scan with selectivity
+            let cardinality = self.table_cardinalities.get(next_table).copied().unwrap_or(10000);
+            return JoinCost::new(cardinality, 0);
+        }
+
+        // Use current intermediate result size as left side of join
+        let left_cardinality = current_cardinality;
+
+        let right_cardinality = self.table_cardinalities.get(next_table).copied().unwrap_or(10000);
+
+        // Get selectivity from pre-computed edge selectivities (NDV-based)
+        // Find the best (most selective) edge connecting joined_tables to next_table
+        let next_table_lower = next_table.to_lowercase();
+        let selectivity = self.get_edge_selectivity(joined_tables, &next_table_lower);
+
+        // Get join type to determine cardinality calculation
+        let join_type = self.get_join_type(joined_tables, &next_table_lower);
+
+        // Apply cascading filter correlation adjustment
+        //
+        // Key insight: When joining through filtered tables, the intermediate result
+        // is "tighter" than independent selectivity would suggest. For example:
+        //
+        // Q3: customer (filtered by c_mktsegment) -> orders (filtered by o_orderdate)
+        //
+        // Independent selectivity would predict:
+        //   customer: 150K * 0.2 = 30K (20% match segment)
+        //   orders: 1.5M * 0.5 = 750K (50% match date filter)
+        //   join: 30K * 750K * (1/150K) = 150K rows
+        //
+        // But in reality, customers matching the segment filter may have DIFFERENT
+        // order patterns than the general population. The join selectivity is correlated
+        // with the filter predicates.
+        //
+        // We apply a correlation factor that reduces the estimated cardinality
+        // when joining through filtered tables.
+        let correlation_adjustment = filter_state.correlation_factor;
+
+        // Check if the next table has a filter applied - if so, that filter
+        // further reduces the correlation factor for this specific join
+        let next_table_selectivity = filter_state.get_table_selectivity(&next_table_lower);
+        let effective_correlation = if next_table_selectivity < 1.0 {
+            // The next table is also filtered, apply additional correlation reduction
+            // This captures the compound effect of multiple filters in the join chain
+            correlation_adjustment * 0.9 // Additional 10% reduction per filtered table
+        } else {
+            correlation_adjustment
+        };
+
+        // Estimate output cardinality based on join type with correlation adjustment
+        let output_cardinality = match join_type {
+            vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti => {
+                // SEMI/ANTI joins: output is at most left_cardinality (existence check)
+                let base_estimate = (left_cardinality as f64 * selectivity) as usize;
+                std::cmp::max(
+                    1,
+                    std::cmp::min(
+                        left_cardinality,
+                        (base_estimate as f64 * effective_correlation) as usize
+                    )
+                )
+            }
+            _ => {
+                // INNER/LEFT/etc: use cross-product × selectivity × correlation
+                let base_estimate = left_cardinality as f64 * right_cardinality as f64 * selectivity;
+                let correlated_estimate = base_estimate * effective_correlation;
+                std::cmp::max(1, correlated_estimate as usize)
+            }
+        };
+
+        // Estimate operations (same as before - correlation doesn't affect operation count)
+        let operations = if self.has_join_edge(joined_tables, next_table) {
+            // Hash join: build cost (2x) + probe cost (1x)
+            let build_cost = (left_cardinality as u64) * 2;
+            let probe_cost = right_cardinality as u64;
+            build_cost + probe_cost
+        } else {
+            // Cross join: quadratic cost (nested loop)
+            (left_cardinality as u64) * (right_cardinality as u64)
+        };
+
+        // Verbose logging for debugging join order decisions with filter info
+        if self.config.verbose {
+            let left_desc = format!(
+                "{{{}}}({} rows)",
+                joined_tables.iter().cloned().collect::<Vec<_>>().join(","),
+                left_cardinality
+            );
+            let right_desc = format!("{}({} rows)", next_table, right_cardinality);
+            let filter_info = if effective_correlation < 1.0 {
+                format!(", corr_factor={:.4}", effective_correlation)
+            } else {
+                String::new()
+            };
+            eprintln!(
+                "[JOIN_COST_FILTERED] {} + {} -> output={}, ops={}, selectivity={:.6}, type={:?}{}",
+                left_desc,
+                right_desc,
+                output_cardinality,
+                operations,
+                selectivity,
+                join_type,
+                filter_info
             );
         }
 
