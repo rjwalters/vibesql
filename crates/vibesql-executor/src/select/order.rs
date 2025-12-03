@@ -106,7 +106,8 @@ pub(super) fn apply_order_by(
 /// 1. Numeric position (ORDER BY 1) - returns ColumnRef to the alias/column at that position
 /// 2. Alias name (ORDER BY alias) - returns ColumnRef to that alias
 /// 3. Original column name (ORDER BY col where col is aliased to alias) - returns ColumnRef to alias
-/// 4. Otherwise - returns the original expression (for expressions not matching aliases)
+/// 4. Complex expressions containing GROUPING() - recursively resolves sub-expressions
+/// 5. Otherwise - returns the original expression (for expressions not matching aliases)
 pub(crate) fn resolve_order_by_for_aggregates(
     order_expr: &vibesql_ast::Expression,
     select_list: &[vibesql_ast::SelectItem],
@@ -179,8 +180,132 @@ pub(crate) fn resolve_order_by_for_aggregates(
         }
     }
 
+    // IMPORTANT: Check if the ENTIRE expression matches any SELECT list expression FIRST
+    // This handles cases like GROUPING(a) + GROUPING(b) matching an alias like "lochierarchy"
+    // before we try to recursively decompose the expression
+    if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
+        return vibesql_ast::Expression::ColumnRef {
+            table: None,
+            column: alias,
+        };
+    }
+
+    // Handle CASE expressions by recursively resolving sub-expressions
+    if let vibesql_ast::Expression::Case { operand, when_clauses, else_result } = order_expr {
+        let resolved_operand = operand.as_ref().map(|op| {
+            Box::new(resolve_order_by_for_aggregates(op, select_list))
+        });
+
+        let resolved_when_clauses: Vec<vibesql_ast::CaseWhen> = when_clauses
+            .iter()
+            .map(|clause| {
+                vibesql_ast::CaseWhen {
+                    conditions: clause
+                        .conditions
+                        .iter()
+                        .map(|cond| resolve_order_by_for_aggregates(cond, select_list))
+                        .collect(),
+                    result: resolve_order_by_for_aggregates(&clause.result, select_list),
+                }
+            })
+            .collect();
+
+        let resolved_else = else_result.as_ref().map(|e| {
+            Box::new(resolve_order_by_for_aggregates(e, select_list))
+        });
+
+        return vibesql_ast::Expression::Case {
+            operand: resolved_operand,
+            when_clauses: resolved_when_clauses,
+            else_result: resolved_else,
+        };
+    }
+
+    // Handle BinaryOp expressions by recursively resolving sub-expressions
+    // Try to match the entire binary expression first (already done above with find_matching_select_expression)
+    // If no match, try matching each side separately
+    if let vibesql_ast::Expression::BinaryOp { left, op, right } = order_expr {
+        let resolved_left = resolve_order_by_for_aggregates(left, select_list);
+        let resolved_right = resolve_order_by_for_aggregates(right, select_list);
+
+        return vibesql_ast::Expression::BinaryOp {
+            left: Box::new(resolved_left),
+            op: op.clone(),
+            right: Box::new(resolved_right),
+        };
+    }
+
+    // Handle Function calls (including GROUPING) by checking if they match a SELECT expression
+    // This is already handled by find_matching_select_expression above, but keep as fallback
+    if let vibesql_ast::Expression::Function { name, .. } = order_expr {
+        if name.eq_ignore_ascii_case("GROUPING") || name.eq_ignore_ascii_case("GROUPING_ID") {
+            // Try to find a matching GROUPING expression in the SELECT list
+            if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
+                return vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: alias,
+                };
+            }
+        }
+    }
+
     // Not an alias or column position, return the original expression
     order_expr.clone()
+}
+
+/// Find a matching expression in the SELECT list and return its alias or generated column name
+fn find_matching_select_expression(
+    expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+) -> Option<String> {
+    for (idx, item) in select_list.iter().enumerate() {
+        if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias } = item {
+            if expressions_equal(expr, select_expr) {
+                // Found matching expression
+                return Some(if let Some(alias_name) = alias {
+                    alias_name.clone()
+                } else if let vibesql_ast::Expression::ColumnRef { column, .. } = select_expr {
+                    column.clone()
+                } else {
+                    format!("col{}", idx + 1)
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Check if two expressions are structurally equal (for matching ORDER BY expressions to SELECT list)
+fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -> bool {
+    match (a, b) {
+        (
+            vibesql_ast::Expression::ColumnRef { table: t1, column: c1 },
+            vibesql_ast::Expression::ColumnRef { table: t2, column: c2 },
+        ) => t1 == t2 && c1.eq_ignore_ascii_case(c2),
+
+        (
+            vibesql_ast::Expression::Literal(v1),
+            vibesql_ast::Expression::Literal(v2),
+        ) => v1 == v2,
+
+        (
+            vibesql_ast::Expression::BinaryOp { left: l1, op: o1, right: r1 },
+            vibesql_ast::Expression::BinaryOp { left: l2, op: o2, right: r2 },
+        ) => o1 == o2 && expressions_equal(l1, l2) && expressions_equal(r1, r2),
+
+        (
+            vibesql_ast::Expression::Function { name: n1, args: a1, .. },
+            vibesql_ast::Expression::Function { name: n2, args: a2, .. },
+        ) => {
+            n1.eq_ignore_ascii_case(n2)
+                && a1.len() == a2.len()
+                && a1.iter().zip(a2.iter()).all(|(x, y)| expressions_equal(x, y))
+        }
+
+        // For other expression types, use debug representation comparison as fallback
+        // This is not perfect but handles most common cases
+        _ => format!("{:?}", a) == format!("{:?}", b),
+    }
 }
 
 /// Resolve ORDER BY expression that might be a SELECT list alias or column position

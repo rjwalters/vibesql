@@ -511,3 +511,32 @@ fn test_grouping_id_subset_of_groupby_columns() {
     assert!(grand_total.is_some());
     assert_eq!(get_i64(&grand_total.unwrap().values[3]), 3);
 }
+
+#[test]
+fn test_grouping_in_order_by_tpcds_q70_pattern() {
+    // This test replicates the TPC-DS Q70 pattern that was failing:
+    // ORDER BY with a CASE expression containing GROUPING() in the condition
+    let db = setup_db();
+
+    // Q70-style query: GROUPING() sum in SELECT list, CASE with GROUPING() in ORDER BY
+    let rows = execute_query(
+        &db,
+        "SELECT
+            SUM(amount) AS total,
+            year,
+            quarter,
+            GROUPING(year) + GROUPING(quarter) AS lochierarchy
+         FROM sales
+         GROUP BY ROLLUP(year, quarter)
+         ORDER BY
+            lochierarchy DESC,
+            CASE WHEN GROUPING(year) + GROUPING(quarter) = 0 THEN year END
+         LIMIT 10",
+    );
+
+    // Should have at least 1 row
+    assert!(!rows.is_empty(), "Expected at least one row");
+
+    // Verify grand total row is first (lochierarchy = 2)
+    assert_eq!(get_i64(&rows[0].values[3]), 2, "First row should be grand total (lochierarchy=2)");
+}
