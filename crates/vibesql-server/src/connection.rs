@@ -1,8 +1,11 @@
 use crate::auth::PasswordStore;
 use crate::config::Config;
 use crate::observability::ObservabilityProvider;
-use crate::protocol::{BackendMessage, FieldDescription, FrontendMessage, TransactionStatus};
+use crate::protocol::{
+    BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
+};
 use crate::session::{ExecutionResult, Session};
+use crate::subscription::SessionSubscriptionManager;
 use anyhow::Result;
 use bytes::BytesMut;
 use std::collections::HashMap;
@@ -13,6 +16,7 @@ use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{debug, error, info, warn};
+use vibesql_executor::cache::table_extractor;
 
 /// Connection handler for a single client
 pub struct ConnectionHandler {
@@ -26,6 +30,8 @@ pub struct ConnectionHandler {
     session: Option<Session>,
     connection_start: Instant,
     active_connections: Arc<AtomicUsize>,
+    /// Session-level subscription manager for real-time query subscriptions
+    subscription_manager: SessionSubscriptionManager,
 }
 
 impl ConnectionHandler {
@@ -49,6 +55,7 @@ impl ConnectionHandler {
             session: None,
             connection_start: Instant::now(),
             active_connections,
+            subscription_manager: SessionSubscriptionManager::new(),
         }
     }
 
@@ -250,6 +257,17 @@ impl ConnectionHandler {
                     self.execute_query(&query).await?;
                 }
 
+                Some(FrontendMessage::Subscribe { query, params }) => {
+                    debug!("Subscribe: {}", query);
+                    self.handle_subscribe(&query, params).await?;
+                }
+
+                Some(FrontendMessage::Unsubscribe { subscription_id }) => {
+                    debug!("Unsubscribe: {:?}", subscription_id);
+                    self.subscription_manager.unsubscribe(&subscription_id);
+                    // No response needed per protocol spec
+                }
+
                 Some(FrontendMessage::Terminate) => {
                     debug!("Client requested termination");
                     break;
@@ -265,6 +283,9 @@ impl ConnectionHandler {
                 }
             }
         }
+
+        // Clean up subscriptions when connection closes
+        self.subscription_manager.clear();
 
         Ok(())
     }
@@ -313,6 +334,79 @@ impl ConnectionHandler {
                 Ok(())
             }
         }
+    }
+
+    /// Handle a subscription request
+    ///
+    /// Parses the query, extracts table dependencies, executes the query,
+    /// registers the subscription, and sends the initial data to the client.
+    async fn handle_subscribe(
+        &mut self,
+        query: &str,
+        params: Vec<Option<Vec<u8>>>,
+    ) -> Result<()> {
+        let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
+
+        // Parse the query to extract table dependencies
+        let parsed = match vibesql_parser::Parser::parse_sql(query) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                // Send subscription error with a dummy subscription ID (query failed before registration)
+                let error_id = [0u8; 16];
+                self.send_subscription_error(&error_id, &format!("Parse error: {}", e))
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        // Extract table dependencies from the query
+        let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
+
+        // Register the subscription first (to get the ID)
+        let subscription_id =
+            self.subscription_manager
+                .subscribe(query.to_string(), params, table_dependencies);
+
+        // Execute the query to get initial data
+        match session.execute(query) {
+            Ok(ExecutionResult::Select { rows, .. }) => {
+                // Convert rows to wire format
+                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
+                    .iter()
+                    .map(|row| {
+                        row.values
+                            .iter()
+                            .map(|v| Some(v.to_string().as_bytes().to_vec()))
+                            .collect()
+                    })
+                    .collect();
+
+                // Send initial subscription data
+                self.send_subscription_data(
+                    &subscription_id,
+                    SubscriptionUpdateType::Full,
+                    wire_rows,
+                )
+                .await?;
+            }
+            Ok(_) => {
+                // Non-SELECT query - send error and remove subscription
+                self.subscription_manager.unsubscribe(&subscription_id);
+                self.send_subscription_error(
+                    &subscription_id,
+                    "Only SELECT queries can be subscribed to",
+                )
+                .await?;
+            }
+            Err(e) => {
+                // Query execution failed - remove subscription and send error
+                self.subscription_manager.unsubscribe(&subscription_id);
+                self.send_subscription_error(&subscription_id, &format!("Execution error: {}", e))
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Send query result to client
@@ -513,6 +607,36 @@ impl ConnectionHandler {
 
     async fn send_empty_query_response(&mut self) -> Result<()> {
         BackendMessage::EmptyQueryResponse.encode(&mut self.write_buf);
+        self.flush_write_buffer().await
+    }
+
+    /// Send subscription data message (initial results or updates)
+    async fn send_subscription_data(
+        &mut self,
+        subscription_id: &[u8; 16],
+        update_type: SubscriptionUpdateType,
+        rows: Vec<Vec<Option<Vec<u8>>>>,
+    ) -> Result<()> {
+        BackendMessage::SubscriptionData {
+            subscription_id: *subscription_id,
+            update_type,
+            rows,
+        }
+        .encode(&mut self.write_buf);
+        self.flush_write_buffer().await
+    }
+
+    /// Send subscription error message
+    async fn send_subscription_error(
+        &mut self,
+        subscription_id: &[u8; 16],
+        message: &str,
+    ) -> Result<()> {
+        BackendMessage::SubscriptionError {
+            subscription_id: *subscription_id,
+            message: message.to_string(),
+        }
+        .encode(&mut self.write_buf);
         self.flush_write_buffer().await
     }
 
