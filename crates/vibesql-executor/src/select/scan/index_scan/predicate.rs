@@ -861,14 +861,15 @@ pub(crate) fn extract_index_predicate(expr: &Expression, column_name: &str) -> O
         collect_column_predicates(expr, column_name, &mut equality_values, &mut in_values, &mut range_pred);
 
         // Check for equality + IN contradiction
-        if !equality_values.is_empty() && in_values.is_some() {
-            let in_vals = in_values.as_ref().unwrap();
-            // If any equality value is NOT in the IN list, we have a contradiction
-            for eq_val in &equality_values {
-                if !in_vals.contains(eq_val) {
-                    // Contradiction: equality value not in IN list - no rows can match
-                    // Return empty IN predicate to signal impossible query
-                    return Some(IndexPredicate::In(vec![]));
+        if let Some(in_vals) = &in_values {
+            if !equality_values.is_empty() {
+                // If any equality value is NOT in the IN list, we have a contradiction
+                for eq_val in &equality_values {
+                    if !in_vals.contains(eq_val) {
+                        // Contradiction: equality value not in IN list - no rows can match
+                        // Return empty IN predicate to signal impossible query
+                        return Some(IndexPredicate::In(vec![]));
+                    }
                 }
             }
         }

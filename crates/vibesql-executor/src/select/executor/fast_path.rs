@@ -905,7 +905,7 @@ impl SelectExecutor<'_> {
             // Check for contradictions (e.g., col = 70 AND col IN (74, 69, 10))
             // If equality value is not in the IN list, return empty result immediately
             for (col_name, eq_value) in &index_values {
-                if let Some(in_values) = self.extract_in_values(where_clause, col_name) {
+                if let Some(in_values) = Self::extract_in_values(where_clause, col_name) {
                     if !in_values.contains(eq_value) {
                         // Contradiction: equality value not in IN list - no rows can match
                         return Ok(Some(vec![]));
@@ -1141,7 +1141,7 @@ impl SelectExecutor<'_> {
 
     /// Extract IN list values for a column from WHERE clause
     /// Returns None if no IN predicate found for the column
-    fn extract_in_values(&self, expr: &Expression, column_name: &str) -> Option<Vec<SqlValue>> {
+    fn extract_in_values(expr: &Expression, column_name: &str) -> Option<Vec<SqlValue>> {
         match expr {
             Expression::InList { expr: col_expr, values, negated } => {
                 if *negated {
@@ -1166,8 +1166,8 @@ impl SelectExecutor<'_> {
             }
             Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
                 // Recursively search both sides of AND
-                self.extract_in_values(left, column_name)
-                    .or_else(|| self.extract_in_values(right, column_name))
+                Self::extract_in_values(left, column_name)
+                    .or_else(|| Self::extract_in_values(right, column_name))
             }
             _ => None,
         }

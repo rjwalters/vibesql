@@ -20,6 +20,7 @@ use vibesql_parser::Parser;
 
 /// Detailed timing breakdown for query execution
 #[derive(Default, Debug)]
+#[allow(dead_code)]
 struct TimingBreakdown {
     parse_time: Duration,
     executor_creation: Duration,

@@ -33,6 +33,7 @@ pub struct ConnectionHandler {
     /// Session-level subscription manager for real-time query subscriptions
     subscription_manager: SessionSubscriptionManager,
     /// Global subscription manager for processing storage change events
+    #[allow(dead_code)]
     global_subscription_manager: Arc<SubscriptionManager>,
 }
 

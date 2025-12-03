@@ -20,7 +20,7 @@ use vibesql_server::subscription::{SubscriptionId, SubscriptionManager, Subscrip
 fn setup_manager_with_subscriptions(
     count: usize,
 ) -> (SubscriptionManager, Vec<mpsc::Receiver<SubscriptionUpdate>>) {
-    let manager = SubscriptionManager::new(None);
+    let manager = SubscriptionManager::new();
     let mut receivers = Vec::with_capacity(count);
 
     for _ in 0..count {
@@ -67,7 +67,7 @@ fn bench_subscribe(c: &mut Criterion) {
         group.throughput(Throughput::Elements(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let manager = SubscriptionManager::new(None);
+                let manager = SubscriptionManager::new();
                 for _ in 0..size {
                     let (tx, _rx) = mpsc::channel(1);
                     let id = manager.subscribe("SELECT * FROM users".to_string(), tx);
@@ -91,7 +91,7 @@ fn bench_unsubscribe(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     // Setup: create manager with subscriptions
-                    let manager = SubscriptionManager::new(None);
+                    let manager = SubscriptionManager::new();
                     let mut ids = Vec::with_capacity(size);
                     for _ in 0..size {
                         let (tx, _rx) = mpsc::channel(1);
@@ -132,7 +132,7 @@ fn bench_table_index_lookup(c: &mut Criterion) {
             BenchmarkId::from_parameter(total_subscriptions),
             total_subscriptions,
             |b, &total| {
-                let manager = SubscriptionManager::new(None);
+                let manager = SubscriptionManager::new();
                 let subs_per_table = total / tables.len();
 
                 // Distribute subscriptions across tables
@@ -164,7 +164,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
     // while handling continuous subscribe/unsubscribe/lookup operations
     group.bench_function("1000_active_ops", |b| {
         b.to_async(&rt).iter(|| async {
-            let manager = SubscriptionManager::new(None);
+            let manager = SubscriptionManager::new();
             let mut ids: Vec<SubscriptionId> = Vec::with_capacity(1000);
 
             // Initial setup: 1000 subscriptions

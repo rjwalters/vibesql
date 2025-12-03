@@ -745,7 +745,7 @@ impl Table {
         sorted_indices.sort_unstable();
 
         // Validate all indices before modifying
-        if sorted_indices.last().map_or(false, |&max| max >= self.rows.len()) {
+        if sorted_indices.last().is_some_and(|&max| max >= self.rows.len()) {
             return 0; // Invalid index, return early
         }
 

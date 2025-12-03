@@ -552,19 +552,15 @@ fn bind_update_named_mut(stmt: &mut UpdateStmt, params: &HashMap<String, SqlValu
         bind_expression_named_mut(&mut assignment.value, params);
     }
 
-    if let Some(where_clause) = &mut stmt.where_clause {
-        if let WhereClause::Condition(expr) = where_clause {
-            bind_expression_named_mut(expr, params);
-        }
+    if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
+        bind_expression_named_mut(expr, params);
     }
 }
 
 #[cfg(test)]
 fn bind_delete_named_mut(stmt: &mut DeleteStmt, params: &HashMap<String, SqlValue>) {
-    if let Some(where_clause) = &mut stmt.where_clause {
-        if let WhereClause::Condition(expr) = where_clause {
-            bind_expression_named_mut(expr, params);
-        }
+    if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
+        bind_expression_named_mut(expr, params);
     }
 }
 

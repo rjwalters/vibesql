@@ -159,10 +159,8 @@ pub fn simd_min_f64_masked(values: &[f64], mask: &[bool]) -> Option<f64> {
     }
 
     // Check if any value was actually found
-    if result == f64::INFINITY {
-        if !mask.iter().any(|&b| b) {
-            return None;
-        }
+    if result == f64::INFINITY && !mask.iter().any(|&b| b) {
+        return None;
     }
     Some(result)
 }
@@ -197,10 +195,8 @@ pub fn simd_max_i64_masked(values: &[i64], mask: &[bool]) -> Option<i64> {
     }
 
     // Check if any value was actually found
-    if result == i64::MIN {
-        if !mask.iter().any(|&b| b) {
-            return None;
-        }
+    if result == i64::MIN && !mask.iter().any(|&b| b) {
+        return None;
     }
     Some(result)
 }
@@ -240,10 +236,8 @@ pub fn simd_max_f64_masked(values: &[f64], mask: &[bool]) -> Option<f64> {
     }
 
     // Check if any value was actually found
-    if result == f64::NEG_INFINITY {
-        if !mask.iter().any(|&b| b) {
-            return None;
-        }
+    if result == f64::NEG_INFINITY && !mask.iter().any(|&b| b) {
+        return None;
     }
     Some(result)
 }

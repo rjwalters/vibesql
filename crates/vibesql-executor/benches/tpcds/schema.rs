@@ -5506,9 +5506,9 @@ fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let am_pm = if hour < 12 { "AM" } else { "PM" };
         let shift = if hour < 8 { "third" } else if hour < 16 { "first" } else { "second" };
         let sub_shift = if hour % 8 < 4 { "night" } else { "day" };
-        let meal_time = if hour >= 7 && hour < 9 { "breakfast" }
-            else if hour >= 12 && hour < 14 { "lunch" }
-            else if hour >= 18 && hour < 20 { "dinner" }
+        let meal_time = if (7..9).contains(&hour) { "breakfast" }
+            else if (12..14).contains(&hour) { "lunch" }
+            else if (18..20).contains(&hour) { "dinner" }
             else { "" };
 
         stmt.execute(rusqlite::params![
@@ -6344,9 +6344,9 @@ fn load_time_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
         let am_pm = if hour < 12 { "AM" } else { "PM" };
         let shift = if hour < 8 { "third" } else if hour < 16 { "first" } else { "second" };
         let sub_shift = if hour % 8 < 4 { "night" } else { "day" };
-        let meal_time = if hour >= 7 && hour < 9 { "breakfast" }
-            else if hour >= 12 && hour < 14 { "lunch" }
-            else if hour >= 18 && hour < 20 { "dinner" }
+        let meal_time = if (7..9).contains(&hour) { "breakfast" }
+            else if (12..14).contains(&hour) { "lunch" }
+            else if (18..20).contains(&hour) { "dinner" }
             else { "" };
 
         stmt.execute(duckdb::params![

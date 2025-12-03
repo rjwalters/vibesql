@@ -73,67 +73,67 @@ impl ExplainResult {
     /// Format the plan as text output
     pub fn to_text(&self) -> String {
         let mut output = String::new();
-        self.format_node_text(&self.plan, 0, &mut output);
+        format_node_text(&self.plan, 0, &mut output);
         output
-    }
-
-    fn format_node_text(&self, node: &PlanNode, depth: usize, output: &mut String) {
-        let indent = "  ".repeat(depth);
-        let arrow = if depth > 0 { "-> " } else { "" };
-
-        // Format the main operation line
-        let mut line = format!("{}{}{}", indent, arrow, node.operation);
-
-        if let Some(ref obj) = node.object {
-            write!(line, " on {}", obj).unwrap();
-        }
-
-        if let Some(rows) = node.estimated_rows {
-            write!(line, "  (rows={:.0})", rows).unwrap();
-        }
-
-        writeln!(output, "{}", line).unwrap();
-
-        // Format details
-        for detail in &node.details {
-            writeln!(output, "{}      {}", indent, detail).unwrap();
-        }
-
-        // Format children
-        for child in &node.children {
-            self.format_node_text(child, depth + 1, output);
-        }
     }
 
     /// Format the plan as JSON output
     pub fn to_json(&self) -> String {
-        self.format_node_json(&self.plan)
+        format_node_json(&self.plan)
+    }
+}
+
+fn format_node_text(node: &PlanNode, depth: usize, output: &mut String) {
+    let indent = "  ".repeat(depth);
+    let arrow = if depth > 0 { "-> " } else { "" };
+
+    // Format the main operation line
+    let mut line = format!("{}{}{}", indent, arrow, node.operation);
+
+    if let Some(ref obj) = node.object {
+        write!(line, " on {}", obj).unwrap();
     }
 
-    fn format_node_json(&self, node: &PlanNode) -> String {
-        let mut parts = vec![format!("\"operation\": \"{}\"", node.operation)];
-
-        if let Some(ref obj) = node.object {
-            parts.push(format!("\"object\": \"{}\"", obj));
-        }
-
-        if !node.details.is_empty() {
-            let details: Vec<String> = node.details.iter().map(|d| format!("\"{}\"", d)).collect();
-            parts.push(format!("\"details\": [{}]", details.join(", ")));
-        }
-
-        if let Some(rows) = node.estimated_rows {
-            parts.push(format!("\"estimated_rows\": {:.0}", rows));
-        }
-
-        if !node.children.is_empty() {
-            let children: Vec<String> =
-                node.children.iter().map(|c| self.format_node_json(c)).collect();
-            parts.push(format!("\"children\": [{}]", children.join(", ")));
-        }
-
-        format!("{{{}}}", parts.join(", "))
+    if let Some(rows) = node.estimated_rows {
+        write!(line, "  (rows={:.0})", rows).unwrap();
     }
+
+    writeln!(output, "{}", line).unwrap();
+
+    // Format details
+    for detail in &node.details {
+        writeln!(output, "{}      {}", indent, detail).unwrap();
+    }
+
+    // Format children
+    for child in &node.children {
+        format_node_text(child, depth + 1, output);
+    }
+}
+
+fn format_node_json(node: &PlanNode) -> String {
+    let mut parts = vec![format!("\"operation\": \"{}\"", node.operation)];
+
+    if let Some(ref obj) = node.object {
+        parts.push(format!("\"object\": \"{}\"", obj));
+    }
+
+    if !node.details.is_empty() {
+        let details: Vec<String> = node.details.iter().map(|d| format!("\"{}\"", d)).collect();
+        parts.push(format!("\"details\": [{}]", details.join(", ")));
+    }
+
+    if let Some(rows) = node.estimated_rows {
+        parts.push(format!("\"estimated_rows\": {:.0}", rows));
+    }
+
+    if !node.children.is_empty() {
+        let children: Vec<String> =
+            node.children.iter().map(format_node_json).collect();
+        parts.push(format!("\"children\": [{}]", children.join(", ")));
+    }
+
+    format!("{{{}}}", parts.join(", "))
 }
 
 /// Executor for EXPLAIN statements

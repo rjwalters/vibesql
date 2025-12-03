@@ -57,7 +57,7 @@ impl<'a> IntrospectionExecutor<'a> {
         let column_name = format!("Tables_in_{}", schema_name);
         let rows: Vec<Row> = filtered_tables
             .into_iter()
-            .map(|name| Row::new(vec![SqlValue::Varchar(name.into())]))
+            .map(|name| Row::new(vec![SqlValue::Varchar(name)]))
             .collect();
 
         Ok(SelectResult {
@@ -82,7 +82,7 @@ impl<'a> IntrospectionExecutor<'a> {
 
         let rows: Vec<Row> = filtered_schemas
             .into_iter()
-            .map(|name| Row::new(vec![SqlValue::Varchar(name.into())]))
+            .map(|name| Row::new(vec![SqlValue::Varchar(name)]))
             .collect();
 
         Ok(SelectResult {
@@ -129,11 +129,11 @@ impl<'a> IntrospectionExecutor<'a> {
             }
 
             // Field: column name
-            let field = SqlValue::Varchar(col.name.clone().into());
+            let field = SqlValue::Varchar(col.name.clone());
 
             // Type: data type as string
             let type_str = format_data_type(&col.data_type);
-            let col_type = SqlValue::Varchar(type_str.into());
+            let col_type = SqlValue::Varchar(type_str);
 
             // Null: YES or NO
             let nullable = SqlValue::Varchar(if col.nullable { "YES" } else { "NO" }.into());
@@ -150,7 +150,7 @@ impl<'a> IntrospectionExecutor<'a> {
             // Default: default value or NULL
             let default = col.default_value
                 .as_ref()
-                .map(|expr| SqlValue::Varchar(format!("{:?}", expr).into()))
+                .map(|expr| SqlValue::Varchar(format!("{:?}", expr)))
                 .unwrap_or(SqlValue::Null);
 
             // Extra: auto_increment, etc. (we don't have auto_increment info yet)
@@ -234,11 +234,11 @@ impl<'a> IntrospectionExecutor<'a> {
         if let Some(ref pk_cols) = table.primary_key {
             for (seq, col_name) in pk_cols.iter().enumerate() {
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(stmt.table_name.clone().into()), // Table
+                    SqlValue::Varchar(stmt.table_name.clone()), // Table
                     SqlValue::Integer(0), // Non_unique (0 = unique)
                     SqlValue::Varchar("PRIMARY".into()), // Key_name
                     SqlValue::Integer((seq + 1) as i64), // Seq_in_index
-                    SqlValue::Varchar(col_name.clone().into()), // Column_name
+                    SqlValue::Varchar(col_name.clone()), // Column_name
                     SqlValue::Varchar("A".into()), // Collation (A = ascending)
                     SqlValue::Null, // Cardinality
                     SqlValue::Null, // Sub_part
@@ -269,11 +269,11 @@ impl<'a> IntrospectionExecutor<'a> {
                 };
 
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(stmt.table_name.clone().into()), // Table
+                    SqlValue::Varchar(stmt.table_name.clone()), // Table
                     SqlValue::Integer(non_unique), // Non_unique
-                    SqlValue::Varchar(index.name.clone().into()), // Key_name
+                    SqlValue::Varchar(index.name.clone()), // Key_name
                     SqlValue::Integer((seq + 1) as i64), // Seq_in_index
-                    SqlValue::Varchar(col.column_name.clone().into()), // Column_name
+                    SqlValue::Varchar(col.column_name.clone()), // Column_name
                     SqlValue::Varchar(collation.into()), // Collation
                     SqlValue::Null, // Cardinality
                     col.prefix_length.map(|l| SqlValue::Integer(l as i64)).unwrap_or(SqlValue::Null), // Sub_part
@@ -371,8 +371,8 @@ impl<'a> IntrospectionExecutor<'a> {
         sql.push_str("\n)");
 
         let rows = vec![Row::new(vec![
-            SqlValue::Varchar(table.name.clone().into()),
-            SqlValue::Varchar(sql.into()),
+            SqlValue::Varchar(table.name.clone()),
+            SqlValue::Varchar(sql),
         ])];
 
         Ok(SelectResult {

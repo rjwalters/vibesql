@@ -1,3 +1,6 @@
+// The drop() calls below are deliberate to release borrowed connections before acquiring new ones
+#![allow(dropping_copy_types, clippy::drop_non_drop)]
+
 //! Sysbench OLTP Benchmark Runner
 //!
 //! A standalone benchmark runner for Sysbench OLTP workloads, comparing
@@ -80,12 +83,12 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
             Expression::Literal(params.get(*idx).cloned().unwrap_or(SqlValue::Null))
         }
         Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
-            op: op.clone(),
+            op: *op,
             left: Box::new(bind_expression(left, params)),
             right: Box::new(bind_expression(right, params)),
         },
         Expression::UnaryOp { op, expr } => Expression::UnaryOp {
-            op: op.clone(),
+            op: *op,
             expr: Box::new(bind_expression(expr, params)),
         },
         Expression::Between {

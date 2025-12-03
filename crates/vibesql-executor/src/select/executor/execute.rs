@@ -74,7 +74,7 @@ impl SelectExecutor<'_> {
         }
 
         #[cfg(feature = "profile-q6")]
-        let setup_time = execute_start.elapsed();
+        let _setup_time = execute_start.elapsed();
 
         // Apply subquery rewriting optimizations (Phase 2 of IN subquery optimization)
         // - Rewrites correlated IN → EXISTS with LIMIT 1 for early termination
@@ -86,7 +86,7 @@ impl SelectExecutor<'_> {
         let optimized_stmt = crate::optimizer::rewrite_subquery_optimizations(stmt);
 
         #[cfg(feature = "profile-q6")]
-        let optimizer_time = optimizer_start.elapsed();
+        let _optimizer_time = optimizer_start.elapsed();
 
         // Transform decorrelated IN/EXISTS subqueries to semi/anti-joins (#2424)
         // This enables hash-based join execution instead of row-by-row subquery evaluation
@@ -114,14 +114,14 @@ impl SelectExecutor<'_> {
         }
 
         #[cfg(feature = "profile-q6")]
-        let pre_execute_time = execute_start.elapsed();
+        let _pre_execute_time = execute_start.elapsed();
 
         // Execute the main query with CTE context
         let result = self.execute_with_ctes(&optimized_stmt, &cte_results)?;
 
         #[cfg(feature = "profile-q6")]
         {
-            let total_execute = execute_start.elapsed();
+            let _total_execute = execute_start.elapsed();
         }
 
         Ok(result)
@@ -222,7 +222,7 @@ impl SelectExecutor<'_> {
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         #[cfg(feature = "profile-q6")]
-        let execute_ctes_start = std::time::Instant::now();
+        let _execute_ctes_start = std::time::Instant::now();
 
         // Check if native columnar is enabled via feature flag or env var
         let native_columnar_enabled =

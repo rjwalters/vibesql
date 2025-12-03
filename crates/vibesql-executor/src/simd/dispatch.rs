@@ -156,8 +156,8 @@ pub mod dispatched {
         }
 
         let mut sum = s0 + s1 + s2 + s3;
-        for i in (chunks * 4)..values.len() {
-            sum += values[i];
+        for value in &values[(chunks * 4)..] {
+            sum += value;
         }
         sum
     }

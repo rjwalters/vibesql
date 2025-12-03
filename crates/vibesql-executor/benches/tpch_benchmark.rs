@@ -17,21 +17,18 @@
 //!   SF 0.1 (100MB) - Realistic testing
 //!   SF 1.0 (1GB) - Full benchmark
 
+// Allow single-element loops for benchmark configuration flexibility
+#![allow(clippy::single_element_loop)]
+
 mod tpch;
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-use vibesql_storage::Database as VibeDB;
 
 #[cfg(feature = "benchmark-comparison")]
-use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "benchmark-comparison")]
-use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "benchmark-comparison")]
 use mysql::prelude::*;
-#[cfg(feature = "benchmark-comparison")]
-use mysql::PooledConn;
 
 use std::time::Duration;
 use tpch::queries::*;

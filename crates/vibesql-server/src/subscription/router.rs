@@ -51,7 +51,7 @@ impl ChangeRouter {
     pub fn register_subscription(&mut self, table: String, subscription_id: SubscriptionId) {
         self.table_subscriptions
             .entry(table)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(subscription_id);
     }
 

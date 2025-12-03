@@ -230,7 +230,7 @@ pub(crate) fn resolve_order_by_for_aggregates(
 
         return vibesql_ast::Expression::BinaryOp {
             left: Box::new(resolved_left),
-            op: op.clone(),
+            op: *op,
             right: Box::new(resolved_right),
         };
     }

@@ -257,11 +257,11 @@ fn test_arena_parse_delete_with_placeholder() {
 
     let (stmt, _interner) = result.unwrap();
     assert!(stmt.where_clause.is_some());
-    if let Some(vibesql_ast::arena::WhereClause::Condition(expr)) = &stmt.where_clause {
+    if let Some(vibesql_ast::arena::WhereClause::Condition(
+        vibesql_ast::arena::Expression::BinaryOp { right, .. }
+    )) = &stmt.where_clause {
         // The right side should be a placeholder
-        if let vibesql_ast::arena::Expression::BinaryOp { right, .. } = expr {
-            assert!(matches!(right, vibesql_ast::arena::Expression::Placeholder(_)));
-        }
+        assert!(matches!(right, vibesql_ast::arena::Expression::Placeholder(_)));
     }
 }
 

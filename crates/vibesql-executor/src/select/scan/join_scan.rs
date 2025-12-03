@@ -781,17 +781,17 @@ fn build_residual_filter(
             {
                 // Check if it's col = literal or literal = col
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = left.as_ref() {
-                    if pk_upper.contains(&column.to_uppercase()) {
-                        if matches!(right.as_ref(), vibesql_ast::Expression::Literal(_)) {
-                            return false; // Filter out, covered by PK lookup
-                        }
+                    if pk_upper.contains(&column.to_uppercase())
+                        && matches!(right.as_ref(), vibesql_ast::Expression::Literal(_))
+                    {
+                        return false; // Filter out, covered by PK lookup
                     }
                 }
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = right.as_ref() {
-                    if pk_upper.contains(&column.to_uppercase()) {
-                        if matches!(left.as_ref(), vibesql_ast::Expression::Literal(_)) {
-                            return false; // Filter out, covered by PK lookup
-                        }
+                    if pk_upper.contains(&column.to_uppercase())
+                        && matches!(left.as_ref(), vibesql_ast::Expression::Literal(_))
+                    {
+                        return false; // Filter out, covered by PK lookup
                     }
                 }
             }
@@ -807,7 +807,7 @@ fn find_column_index(schema: &CombinedSchema, col_name: &str) -> Option<usize> {
     let col_upper = col_name.to_uppercase();
     let mut offset = 0;
 
-    for (_, (_, table_schema)) in &schema.table_schemas {
+    for (_, table_schema) in schema.table_schemas.values() {
         for (idx, col) in table_schema.columns.iter().enumerate() {
             if col.name.to_uppercase() == col_upper {
                 return Some(offset + idx);

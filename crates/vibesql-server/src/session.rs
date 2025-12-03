@@ -395,7 +395,7 @@ impl Session {
 
         // Evaluate parameter expressions to get values
         let params: Vec<SqlValue> = execute_stmt.params.iter()
-            .map(|expr| self.evaluate_expression(expr))
+            .map(evaluate_expression)
             .collect::<Result<Vec<_>>>()?;
 
         // Execute the prepared statement with parameters
@@ -423,34 +423,6 @@ impl Session {
         }
     }
 
-    /// Evaluate an expression to a SqlValue (for EXECUTE parameters)
-    fn evaluate_expression(&self, expr: &vibesql_ast::Expression) -> Result<SqlValue> {
-        use vibesql_ast::Expression;
-
-        match expr {
-            // Expression::Literal wraps SqlValue directly
-            Expression::Literal(val) => Ok(val.clone()),
-            Expression::UnaryOp { op, expr: operand } => {
-                // Handle negative numbers
-                if let vibesql_ast::UnaryOperator::Minus = op {
-                    let val = self.evaluate_expression(operand)?;
-                    match val {
-                        SqlValue::Integer(n) => Ok(SqlValue::Integer(-n)),
-                        SqlValue::Bigint(n) => Ok(SqlValue::Bigint(-n)),
-                        SqlValue::Float(n) => Ok(SqlValue::Float(-n)),
-                        SqlValue::Double(n) => Ok(SqlValue::Double(-n)),
-                        SqlValue::Numeric(n) => Ok(SqlValue::Numeric(-n)),
-                        _ => Err(anyhow::anyhow!("Cannot negate non-numeric value")),
-                    }
-                } else {
-                    Err(anyhow::anyhow!("Unsupported unary operator in EXECUTE parameter"))
-                }
-            }
-            _ => Err(anyhow::anyhow!(
-                "Unsupported expression type in EXECUTE parameters. Only literals are currently supported."
-            )),
-        }
-    }
 
     /// Get prepared statement cache statistics
     #[allow(dead_code)]
@@ -548,6 +520,35 @@ impl Session {
         Ok(ExecutionResult::CloseCursor {
             cursor_name: stmt.cursor_name.clone(),
         })
+    }
+}
+
+/// Evaluate an expression to a SqlValue (for EXECUTE parameters)
+fn evaluate_expression(expr: &vibesql_ast::Expression) -> Result<SqlValue> {
+    use vibesql_ast::Expression;
+
+    match expr {
+        // Expression::Literal wraps SqlValue directly
+        Expression::Literal(val) => Ok(val.clone()),
+        Expression::UnaryOp { op, expr: operand } => {
+            // Handle negative numbers
+            if let vibesql_ast::UnaryOperator::Minus = op {
+                let val = evaluate_expression(operand)?;
+                match val {
+                    SqlValue::Integer(n) => Ok(SqlValue::Integer(-n)),
+                    SqlValue::Bigint(n) => Ok(SqlValue::Bigint(-n)),
+                    SqlValue::Float(n) => Ok(SqlValue::Float(-n)),
+                    SqlValue::Double(n) => Ok(SqlValue::Double(-n)),
+                    SqlValue::Numeric(n) => Ok(SqlValue::Numeric(-n)),
+                    _ => Err(anyhow::anyhow!("Cannot negate non-numeric value")),
+                }
+            } else {
+                Err(anyhow::anyhow!("Unsupported unary operator in EXECUTE parameter"))
+            }
+        }
+        _ => Err(anyhow::anyhow!(
+            "Unsupported expression type in EXECUTE parameters. Only literals are currently supported."
+        )),
     }
 }
 
