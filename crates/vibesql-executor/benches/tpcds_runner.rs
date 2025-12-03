@@ -51,8 +51,7 @@ use tpcds::schema::load_duckdb;
 /// Queries known to be extremely slow or memory-intensive
 /// These can be skipped with SKIP_SLOW=1 environment variable
 const SLOW_QUERIES: &[&str] = &[
-    "Q4",  // Complex CTE with 6-way self-join
-    "Q11", // Customer web vs store sales growth (complex)
+    // Q4, Q11 fixed by PR #3393 (case-insensitive predicate plan lookups for CTE aliases)
     "Q69", // EXISTS/NOT EXISTS correlated subqueries - 3+ GB memory spike
     // Q17, Q24, Q29 were fixed by PR #3347 (hash join for derived tables)
 ];
