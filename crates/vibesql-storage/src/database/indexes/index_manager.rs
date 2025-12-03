@@ -275,6 +275,9 @@ impl IndexManager {
     pub fn enforce_memory_budget(&mut self) -> Result<(), StorageError> {
         use crate::database::SpillPolicy;
 
+        // Track previous memory to detect lack of progress (avoid infinite loop)
+        let mut last_memory_used = self.resource_tracker.memory_used();
+
         while self.resource_tracker.memory_used() > self.config.memory_budget {
             match self.config.spill_policy {
                 SpillPolicy::Reject => {
@@ -284,12 +287,22 @@ impl IndexManager {
                     });
                 }
                 SpillPolicy::SpillToDisk => {
-                    // Find coldest index and spill it
+                    // Find coldest in-memory index and spill it
                     let coldest = self.resource_tracker
                         .find_coldest_in_memory_index()
                         .ok_or(StorageError::NoIndexToEvict)?;
 
                     self.spill_index_to_disk(&coldest.0)?;
+
+                    // Check if we made progress - if memory didn't decrease, break to avoid infinite loop
+                    let current_memory = self.resource_tracker.memory_used();
+                    if current_memory >= last_memory_used {
+                        // No progress made (index was already disk-backed or spill failed)
+                        // This can happen if the only remaining in-memory index is the one
+                        // we just created and it's already been spilled
+                        break;
+                    }
+                    last_memory_used = current_memory;
                 }
                 SpillPolicy::BestEffort => {
                     // Try to spill, but don't fail if we can't
@@ -299,6 +312,13 @@ impl IndexManager {
                         // No more indexes to evict, give up
                         break;
                     }
+
+                    // Check for progress in BestEffort mode too
+                    let current_memory = self.resource_tracker.memory_used();
+                    if current_memory >= last_memory_used {
+                        break;
+                    }
+                    last_memory_used = current_memory;
                 }
             }
         }

@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg everything logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
+.PHONY: all all-fg everything logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -71,6 +71,7 @@ help:
 	@echo "  make test               - Run all tests (workspace includes sqllogictest suite)"
 	@echo "  make test-unit          - Run unit tests only (lib tests)"
 	@echo "  make test-workspace     - Run all workspace tests (unit + integration + sqllogictest)"
+	@echo "  make test-ignored       - Run only ignored/slow tests (disk-backed indexes, etc.)"
 	@echo "  make test-sqllogictest  - Run SQLLogicTest standalone (with JSON output)"
 	@echo "  make test-sqllogictest-halting - Run SQLLogicTest, stop on first failure"
 	@echo ""
@@ -157,6 +158,12 @@ test-workspace:
 	@echo "Running workspace tests (unit + integration)..."
 	@echo "This includes 2,991 unit tests + 739 sqltest conformance tests"
 	cargo test --release --workspace
+
+# Run only ignored/slow tests (disk-backed indexes, unimplemented features, etc.)
+test-ignored:
+	@echo "Running ignored tests only..."
+	@echo "These are slow tests that are skipped during normal test runs"
+	cargo test --release --workspace -- --ignored
 
 # Run everything: build, ALL tests (including ignored/slow), and benchmarks
 everything: build-all
