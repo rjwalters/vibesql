@@ -76,9 +76,10 @@ impl JoinOrderContext {
                 // Update current cardinality to the result of this join
                 current_cardinality = best_cost.cardinality;
             } else {
-                // No connected tables remain - this indicates a disconnected join graph
-                // In well-formed SQL queries, this shouldn't happen
-                // Fall back to adding smallest remaining table to handle edge cases
+                // No connected tables remain - this is a disconnected join graph
+                // This is common in SQLLogicTest where queries have multiple table-local
+                // predicates but no join conditions (Cartesian products)
+                // Pick smallest remaining table to minimize intermediate result size
                 if let Some(table) = remaining_tables
                     .iter()
                     .min_by_key(|t| self.table_cardinalities.get(*t).copied().unwrap_or(10000))
