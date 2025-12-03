@@ -43,9 +43,17 @@ pub use connection::Database;
 pub use cursor::Cursor;
 use pyo3::{exceptions::PyException, prelude::*};
 
-pyo3::create_exception!(vibesql, DatabaseError, PyException);
+// Exception hierarchy following PEP 249
+pyo3::create_exception!(vibesql, Warning, PyException);
+pyo3::create_exception!(vibesql, Error, PyException);
+pyo3::create_exception!(vibesql, InterfaceError, Error);
+pyo3::create_exception!(vibesql, DatabaseError, Error);
+pyo3::create_exception!(vibesql, DataError, DatabaseError);
 pyo3::create_exception!(vibesql, OperationalError, DatabaseError);
+pyo3::create_exception!(vibesql, IntegrityError, DatabaseError);
+pyo3::create_exception!(vibesql, InternalError, DatabaseError);
 pyo3::create_exception!(vibesql, ProgrammingError, DatabaseError);
+pyo3::create_exception!(vibesql, NotSupportedError, DatabaseError);
 
 /// Factory function to create a database connection
 ///
@@ -89,13 +97,28 @@ fn disable_profiling() {
 /// Registers all public types and functions with the Python module.
 #[pymodule]
 fn vibesql(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // DB-API 2.0 module-level attributes
+    m.add("apilevel", "2.0")?;
+    m.add("threadsafety", 1)?;
+    m.add("paramstyle", "qmark")?;
+
     m.add_function(wrap_pyfunction!(connect, m)?)?;
     m.add_function(wrap_pyfunction!(enable_profiling, m)?)?;
     m.add_function(wrap_pyfunction!(disable_profiling, m)?)?;
     m.add_class::<Database>()?;
     m.add_class::<Cursor>()?;
+
+    // DB-API 2.0 exception hierarchy
+    m.add("Warning", m.py().get_type::<Warning>())?;
+    m.add("Error", m.py().get_type::<Error>())?;
+    m.add("InterfaceError", m.py().get_type::<InterfaceError>())?;
     m.add("DatabaseError", m.py().get_type::<DatabaseError>())?;
+    m.add("DataError", m.py().get_type::<DataError>())?;
     m.add("OperationalError", m.py().get_type::<OperationalError>())?;
+    m.add("IntegrityError", m.py().get_type::<IntegrityError>())?;
+    m.add("InternalError", m.py().get_type::<InternalError>())?;
     m.add("ProgrammingError", m.py().get_type::<ProgrammingError>())?;
+    m.add("NotSupportedError", m.py().get_type::<NotSupportedError>())?;
+    
     Ok(())
 }

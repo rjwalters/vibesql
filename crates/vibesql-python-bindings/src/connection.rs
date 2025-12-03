@@ -53,6 +53,15 @@ impl Database {
         Ok(())
     }
 
+    /// Commit the current transaction
+    ///
+    /// For in-memory databases without transaction support, this is a no-op
+    /// but provided for DB-API 2.0 compatibility.
+    fn commit(&self) -> PyResult<()> {
+        // In-memory database, no transaction needed
+        Ok(())
+    }
+
     /// Get version string
     ///
     /// # Returns

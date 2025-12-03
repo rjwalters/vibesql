@@ -24,7 +24,6 @@ use crate::{
 enum QueryResultData {
     /// SELECT query result with columns and rows
     Select {
-        #[allow(dead_code)]
         columns: Vec<String>,
         rows: Vec<vibesql_storage::Row>,
     },
@@ -415,6 +414,38 @@ impl Cursor {
         }
     }
 
+    /// Get description of the columns in the last SELECT result
+    ///
+    /// # Returns
+    /// A sequence of 7-item sequences describing each column: 
+    /// (name, type_code, display_size, internal_size, precision, scale, null_ok)
+    /// Returns None if the last result was not a SELECT query.
+    #[getter]
+    fn description(&self, py: Python) -> PyResult<Py<PyAny>> {
+        match &self.last_result {
+            Some(QueryResultData::Select { columns, .. }) => {
+                let desc_list = PyList::empty(py);
+                for col_name in columns {
+                    // Each column is a 7-tuple: (name, type_code, None, None, None, None, None)
+                    let col_str = col_name.as_str().into_pyobject(py)?.into_any().unbind();
+                    let col_tuple = PyTuple::new(py, [
+                        col_str,
+                        py.None(), // type_code - we don't have detailed type info
+                        py.None(), // display_size
+                        py.None(), // internal_size
+                        py.None(), // precision
+                        py.None(), // scale
+                        py.None(), // null_ok
+                    ])?;
+                    desc_list.append(col_tuple)?;
+                }
+                Ok(desc_list.into())
+            }
+            Some(QueryResultData::Execute { .. }) => Ok(py.None()),
+            None => Ok(py.None()),
+        }
+    }
+
     /// Get schema cache statistics
     ///
     /// # Returns
@@ -456,6 +487,71 @@ impl Cursor {
     /// For now, this is a no-op but provided for DB-API 2.0 compatibility.
     fn close(&self) -> PyResult<()> {
         // No cleanup needed
+        Ok(())
+    }
+
+    /// Execute a SQL statement multiple times with different parameter sets
+    ///
+    /// # Arguments
+    /// * `sql` - The SQL statement to execute (may contain ? placeholders)
+    /// * `seq_of_params` - A sequence of parameter sequences (list of tuples)
+    ///
+    /// # Returns
+    /// None
+    ///
+    /// # Errors
+    /// Returns ProgrammingError for SQL parse errors or OperationalError for execution errors.
+    fn executemany(
+        &mut self,
+        py: Python,
+        sql: &str,
+        seq_of_params: &Bound<'_, PyList>,
+    ) -> PyResult<()> {
+        let mut total_rows_affected = 0;
+        
+        for item in seq_of_params.iter() {
+            let params_tuple = item.cast::<PyTuple>()?;
+            // Bind parameters for this iteration
+            let processed_sql = Self::bind_parameters(py, sql, params_tuple)?;
+            
+            // Parse the SQL
+            let stmt = vibesql_parser::Parser::parse_sql(&processed_sql)
+                .map_err(|e| ProgrammingError::new_err(format!("Parse error: {:?}", e)))?;
+            
+            // Execute the statement
+            match stmt {
+                vibesql_ast::Statement::Insert(insert_stmt) => {
+                    let mut db = self.db.lock();
+                    let row_count = vibesql_executor::InsertExecutor::execute(&mut db, &insert_stmt)
+                        .map_err(|e| OperationalError::new_err(format!("Execution error: {:?}", e)))?;
+                    total_rows_affected += row_count;
+                }
+                vibesql_ast::Statement::Update(update_stmt) => {
+                    let mut db = self.db.lock();
+                    let row_count = vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut db)
+                        .map_err(|e| OperationalError::new_err(format!("Execution error: {:?}", e)))?;
+                    total_rows_affected += row_count;
+                }
+                vibesql_ast::Statement::Delete(delete_stmt) => {
+                    let mut db = self.db.lock();
+                    let row_count = vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut db)
+                        .map_err(|e| OperationalError::new_err(format!("Execution error: {:?}", e)))?;
+                    total_rows_affected += row_count;
+                }
+                _ => {
+                    return Err(ProgrammingError::new_err(
+                        "executemany only supports INSERT, UPDATE, and DELETE statements".to_string()
+                    ))
+                }
+            }
+        }
+        
+        // Set the final result to the total rows affected
+        self.last_result = Some(QueryResultData::Execute {
+            rows_affected: total_rows_affected,
+            message: format!("{} rows affected", total_rows_affected),
+        });
+        
         Ok(())
     }
 }
