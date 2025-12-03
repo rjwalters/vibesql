@@ -176,8 +176,8 @@ impl BTreeIndex {
         })
     }
 
-    /// Save metadata to page 0
-    pub(super) fn save_metadata(&self) -> Result<(), StorageError> {
+    /// Serialize metadata to a page (without writing to disk)
+    fn serialize_metadata(&self) -> Result<crate::page::Page, StorageError> {
         let mut metadata_page = self.page_manager.read_page(0)?;
         let mut offset = 0;
 
@@ -208,8 +208,22 @@ impl BTreeIndex {
         }
 
         metadata_page.mark_dirty();
-        self.page_manager.write_page(&mut metadata_page)?;
+        Ok(metadata_page)
+    }
 
+    /// Save metadata to page 0 with immediate sync
+    pub(super) fn save_metadata(&self) -> Result<(), StorageError> {
+        let mut page = self.serialize_metadata()?;
+        self.page_manager.write_page(&mut page)?;
+        Ok(())
+    }
+
+    /// Save metadata to page 0 without syncing
+    ///
+    /// Use this for bulk operations. Call `page_manager.sync()` after all writes.
+    pub(super) fn save_metadata_no_sync(&self) -> Result<(), StorageError> {
+        let mut page = self.serialize_metadata()?;
+        self.page_manager.write_page_no_sync(&mut page)?;
         Ok(())
     }
 

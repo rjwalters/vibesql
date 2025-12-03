@@ -66,12 +66,8 @@ fn read_varint(cursor: &mut Cursor<&[u8]>) -> Result<usize, StorageError> {
     Ok(value)
 }
 
-/// Write an internal node to disk
-pub fn write_internal_node(
-    page_manager: &Arc<PageManager>,
-    node: &InternalNode,
-    _degree: usize,
-) -> Result<(), StorageError> {
+/// Serialize an internal node to a page (without writing to disk)
+fn serialize_internal_node(node: &InternalNode) -> Result<Page, StorageError> {
     let mut page = Page::new(node.page_id);
     let mut cursor = Cursor::new(&mut page.data[..]);
 
@@ -117,8 +113,30 @@ pub fn write_internal_node(
     }
 
     page.mark_dirty();
-    page_manager.write_page(&mut page)?;
+    Ok(page)
+}
 
+/// Write an internal node to disk with immediate sync
+pub fn write_internal_node(
+    page_manager: &Arc<PageManager>,
+    node: &InternalNode,
+    _degree: usize,
+) -> Result<(), StorageError> {
+    let mut page = serialize_internal_node(node)?;
+    page_manager.write_page(&mut page)?;
+    Ok(())
+}
+
+/// Write an internal node to disk without syncing
+///
+/// Use this for bulk operations. Call `page_manager.sync()` after all writes.
+pub fn write_internal_node_no_sync(
+    page_manager: &Arc<PageManager>,
+    node: &InternalNode,
+    _degree: usize,
+) -> Result<(), StorageError> {
+    let mut page = serialize_internal_node(node)?;
+    page_manager.write_page_no_sync(&mut page)?;
     Ok(())
 }
 
@@ -179,12 +197,8 @@ pub fn read_internal_node(
     Ok(node)
 }
 
-/// Write a leaf node to disk
-pub fn write_leaf_node(
-    page_manager: &Arc<PageManager>,
-    node: &LeafNode,
-    _degree: usize,
-) -> Result<(), StorageError> {
+/// Serialize a leaf node to a page (without writing to disk)
+fn serialize_leaf_node(node: &LeafNode) -> Result<Page, StorageError> {
     let mut page = Page::new(node.page_id);
     let mut cursor = Cursor::new(&mut page.data[..]);
 
@@ -243,8 +257,30 @@ pub fn write_leaf_node(
     }
 
     page.mark_dirty();
-    page_manager.write_page(&mut page)?;
+    Ok(page)
+}
 
+/// Write a leaf node to disk with immediate sync
+pub fn write_leaf_node(
+    page_manager: &Arc<PageManager>,
+    node: &LeafNode,
+    _degree: usize,
+) -> Result<(), StorageError> {
+    let mut page = serialize_leaf_node(node)?;
+    page_manager.write_page(&mut page)?;
+    Ok(())
+}
+
+/// Write a leaf node to disk without syncing
+///
+/// Use this for bulk operations. Call `page_manager.sync()` after all writes.
+pub fn write_leaf_node_no_sync(
+    page_manager: &Arc<PageManager>,
+    node: &LeafNode,
+    _degree: usize,
+) -> Result<(), StorageError> {
+    let mut page = serialize_leaf_node(node)?;
+    page_manager.write_page_no_sync(&mut page)?;
     Ok(())
 }
 
