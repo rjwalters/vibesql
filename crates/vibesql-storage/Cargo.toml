@@ -61,3 +61,7 @@ wasm-bindgen-test = "0.3"
 [[bench]]
 name = "storage_bench"
 harness = false
+
+[[bench]]
+name = "change_event_bench"
+harness = false
