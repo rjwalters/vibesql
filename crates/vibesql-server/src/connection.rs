@@ -5,7 +5,7 @@ use crate::protocol::{
     BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
 };
 use crate::session::{ExecutionResult, Session};
-use crate::subscription::SessionSubscriptionManager;
+use crate::subscription::{SessionSubscriptionManager, SubscriptionManager};
 use anyhow::Result;
 use bytes::BytesMut;
 use std::collections::HashMap;
@@ -32,6 +32,8 @@ pub struct ConnectionHandler {
     active_connections: Arc<AtomicUsize>,
     /// Session-level subscription manager for real-time query subscriptions
     subscription_manager: SessionSubscriptionManager,
+    /// Global subscription manager for processing storage change events
+    global_subscription_manager: Arc<SubscriptionManager>,
 }
 
 impl ConnectionHandler {
@@ -43,6 +45,7 @@ impl ConnectionHandler {
         observability: Arc<ObservabilityProvider>,
         password_store: Option<Arc<PasswordStore>>,
         active_connections: Arc<AtomicUsize>,
+        global_subscription_manager: Arc<SubscriptionManager>,
     ) -> Self {
         Self {
             stream,
@@ -56,6 +59,7 @@ impl ConnectionHandler {
             connection_start: Instant::now(),
             active_connections,
             subscription_manager: SessionSubscriptionManager::new(),
+            global_subscription_manager,
         }
     }
 

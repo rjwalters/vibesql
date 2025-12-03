@@ -12,6 +12,7 @@ use vibesql_server::auth::PasswordStore;
 use vibesql_server::config::{AuthConfig, Config, LoggingConfig, ServerConfig};
 use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
+use vibesql_server::SubscriptionManager;
 
 /// Test server handle - holds the shutdown channel and address
 pub struct TestServer {
@@ -77,6 +78,9 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
     // Track active connections
     let active_connections = Arc::new(AtomicUsize::new(0));
 
+    // Create shared subscription manager for tests
+    let subscription_manager = Arc::new(SubscriptionManager::new());
+
     // Spawn server task
     tokio::spawn(async move {
         loop {
@@ -88,6 +92,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                             let observability = Arc::clone(&observability);
                             let password_store = password_store.clone();
                             let active_connections = Arc::clone(&active_connections);
+                            let subscription_manager = Arc::clone(&subscription_manager);
 
                             tokio::spawn(async move {
                                 let mut handler = ConnectionHandler::new(
@@ -97,6 +102,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                                     observability,
                                     password_store,
                                     active_connections,
+                                    subscription_manager,
                                 );
                                 let _ = handler.handle().await;
                             });
