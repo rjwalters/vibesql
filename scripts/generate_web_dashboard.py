@@ -2,8 +2,10 @@
 """
 Generate unified dashboard.json file for the web demo performance dashboard.
 
-This script reads benchmark data from the SQLite database and generates a
+This script reads benchmark data from the VibeSQL database and generates a
 single JSON file that powers the web demo's performance dashboard.
+
+NOTE: This script dogfoods VibeSQL - we use our own database to store results!
 """
 
 import argparse
@@ -11,7 +13,6 @@ import json
 import math
 import os
 import platform
-import sqlite3
 import subprocess
 import sys
 import urllib.request
@@ -19,6 +20,9 @@ import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# Import our VibeSQL helper module
+from vibesql_db import get_connection, get_db_path
 
 
 # Schema version for the dashboard.json format
@@ -58,9 +62,7 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
 
-def get_db_path() -> Path:
-    """Get the path to the benchmark results database (SQLite)."""
-    return Path.home() / ".vibesql" / "test_results" / "benchmark_results.db"
+# get_db_path() is imported from vibesql_db
 
 
 def get_machine_info() -> Dict[str, str]:
@@ -145,13 +147,13 @@ def fetch_previous_dashboard(url: str, verbose: bool = False) -> Optional[Dict]:
         return None
 
 
-def query_tpch_results(conn: sqlite3.Connection) -> Dict[str, Any]:
+def query_tpch_results(cursor: Any) -> Dict[str, Any]:
     """Query TPC-H benchmark results from the database."""
-    cursor = conn.cursor()
 
     # Get latest TPC-H run
+    # Note: Using run_timestamp column (timestamp is reserved in VibeSQL)
     cursor.execute("""
-        SELECT run_id, timestamp, git_commit, git_branch, passed_queries, total_queries
+        SELECT run_id, run_timestamp, git_commit, git_branch, passed_queries, total_queries
         FROM benchmark_runs
         WHERE benchmark_suite = 'tpch'
         ORDER BY run_id DESC
@@ -165,12 +167,13 @@ def query_tpch_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     run_id, timestamp, commit, branch, passed, total = run
 
     # Get individual query results
-    cursor.execute("""
+    # Note: Using string formatting since VibeSQL doesn't support parameterized queries yet
+    cursor.execute(f"""
         SELECT query_name, status, execution_time_ms, total_time_ms, error_message
         FROM benchmark_results
-        WHERE run_id = ?
+        WHERE run_id = {run_id}
         ORDER BY query_name
-    """, (run_id,))
+    """)
 
     queries = {}
     passing_times = []
@@ -197,17 +200,18 @@ def query_tpch_results(conn: sqlite3.Connection) -> Dict[str, Any]:
             passing_times.append(exec_time)
 
     # Get historical data for each query
+    # Note: Using string formatting since VibeSQL doesn't support parameterized queries yet
     for query_name in queries:
-        cursor.execute("""
-            SELECT br.timestamp, res.execution_time_ms
+        cursor.execute(f"""
+            SELECT br.run_timestamp, res.execution_time_ms
             FROM benchmark_results res
             JOIN benchmark_runs br ON res.run_id = br.run_id
             WHERE br.benchmark_suite = 'tpch'
-              AND res.query_name = ?
+              AND res.query_name = '{query_name}'
               AND res.status = 'passed'
-            ORDER BY br.timestamp DESC
+            ORDER BY br.run_timestamp DESC
             LIMIT 30
-        """, (query_name,))
+        """)
 
         history = []
         times = []
@@ -250,13 +254,13 @@ def query_tpch_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
-def query_tpcds_results(conn: sqlite3.Connection) -> Dict[str, Any]:
+def query_tpcds_results(cursor: Any) -> Dict[str, Any]:
     """Query TPC-DS benchmark results from the database."""
-    cursor = conn.cursor()
 
     # Get latest TPC-DS run
+    # Note: Using run_timestamp column (timestamp is reserved in VibeSQL)
     cursor.execute("""
-        SELECT run_id, timestamp, git_commit, passed_queries, total_queries
+        SELECT run_id, run_timestamp, git_commit, passed_queries, total_queries
         FROM benchmark_runs
         WHERE benchmark_suite = 'tpcds'
         ORDER BY run_id DESC
@@ -270,12 +274,13 @@ def query_tpcds_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     run_id, timestamp, commit, passed, total = run
 
     # Get individual query results
-    cursor.execute("""
+    # Note: Using string formatting since VibeSQL doesn't support parameterized queries yet
+    cursor.execute(f"""
         SELECT query_name, status, execution_time_ms, error_message
         FROM benchmark_results
-        WHERE run_id = ?
+        WHERE run_id = {run_id}
         ORDER BY query_name
-    """, (run_id,))
+    """)
 
     queries = {}
     passing_times = []
@@ -310,13 +315,13 @@ def query_tpcds_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
-def query_tpcc_results(conn: sqlite3.Connection) -> Dict[str, Any]:
+def query_tpcc_results(cursor: Any) -> Dict[str, Any]:
     """Query TPC-C benchmark results from the database."""
-    cursor = conn.cursor()
 
     # Get latest TPC-C run
+    # Note: Using run_timestamp column (timestamp is reserved in VibeSQL)
     cursor.execute("""
-        SELECT run_id, timestamp, git_commit
+        SELECT run_id, run_timestamp, git_commit
         FROM benchmark_runs
         WHERE benchmark_suite = 'tpcc'
         ORDER BY run_id DESC
@@ -330,11 +335,12 @@ def query_tpcc_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     run_id, timestamp, commit = run
 
     # Get TPC-C results for all engines
-    cursor.execute("""
+    # Note: Using string formatting since VibeSQL doesn't support parameterized queries yet
+    cursor.execute(f"""
         SELECT database_engine, transaction_type, transactions_per_second, avg_latency_us
         FROM tpcc_results
-        WHERE run_id = ?
-    """, (run_id,))
+        WHERE run_id = {run_id}
+    """)
 
     results = {}
     for row in cursor.fetchall():
@@ -364,13 +370,13 @@ def query_tpcc_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
-def query_sysbench_results(conn: sqlite3.Connection) -> Dict[str, Any]:
+def query_sysbench_results(cursor: Any) -> Dict[str, Any]:
     """Query Sysbench benchmark results from the database."""
-    cursor = conn.cursor()
 
     # Get latest Sysbench run
+    # Note: Using run_timestamp column (timestamp is reserved in VibeSQL)
     cursor.execute("""
-        SELECT run_id, timestamp, git_commit
+        SELECT run_id, run_timestamp, git_commit
         FROM benchmark_runs
         WHERE benchmark_suite = 'sysbench'
         ORDER BY run_id DESC
@@ -384,11 +390,12 @@ def query_sysbench_results(conn: sqlite3.Connection) -> Dict[str, Any]:
     run_id, timestamp, commit = run
 
     # Get Sysbench results
-    cursor.execute("""
+    # Note: Using string formatting since VibeSQL doesn't support parameterized queries yet
+    cursor.execute(f"""
         SELECT database_engine, test_name, table_size, mean_time_ns, std_dev_ns
         FROM sysbench_results
-        WHERE run_id = ?
-    """, (run_id,))
+        WHERE run_id = {run_id}
+    """)
 
     tests = {}
     for row in cursor.fetchall():
@@ -424,7 +431,7 @@ def get_conformance_json_paths() -> List[Path]:
     ]
 
 
-def query_conformance_results(conn: sqlite3.Connection) -> Dict[str, Any]:
+def query_conformance_results(cursor: Any) -> Dict[str, Any]:
     """Query SQLLogicTest conformance results from JSON files or database."""
     # First try to load from JSON files (preferred source)
     conformance_data = load_conformance_from_json()
@@ -432,14 +439,14 @@ def query_conformance_results(conn: sqlite3.Connection) -> Dict[str, Any]:
         return conformance_data
 
     # Fall back to database query if JSON not available
-    cursor = conn.cursor()
-
-    # Check if test_results table exists
-    cursor.execute("""
-        SELECT name FROM sqlite_master
-        WHERE type='table' AND name='test_results'
-    """)
-    if not cursor.fetchone():
+    # Note: VibeSQL doesn't have sqlite_master, so we try the query directly
+    # and catch any errors if the table doesn't exist
+    try:
+        cursor.execute("SELECT COUNT(*) FROM test_results")
+        count_result = cursor.fetchone()
+        if not count_result:
+            return {}
+    except:
         return {}
 
     # Get total tests and pass rate
@@ -822,22 +829,20 @@ def generate_dashboard(
     if verbose:
         print(f"Reading from database: {db_path}")
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        # Query all benchmark suites
-        tpch = query_tpch_results(conn)
-        tpcds = query_tpcds_results(conn)
-        tpcc = query_tpcc_results(conn)
-        sysbench = query_sysbench_results(conn)
-        conformance = query_conformance_results(conn)
+    # Use VibeSQL connection via helper module
+    db, cursor = get_connection()
 
-        if verbose:
-            print(f"  TPC-H: {tpch.get('queries_passing', 0)}/{tpch.get('queries_total', 0)} queries passing")
-            print(f"  TPC-DS: {tpcds.get('queries_passing', 0)}/{tpcds.get('queries_total', 0)} queries passing")
-            print(f"  Conformance: {conformance.get('summary', {}).get('pass_rate', 0):.2f}% pass rate")
+    # Query all benchmark suites
+    tpch = query_tpch_results(cursor)
+    tpcds = query_tpcds_results(cursor)
+    tpcc = query_tpcc_results(cursor)
+    sysbench = query_sysbench_results(cursor)
+    conformance = query_conformance_results(cursor)
 
-    finally:
-        conn.close()
+    if verbose:
+        print(f"  TPC-H: {tpch.get('queries_passing', 0)}/{tpch.get('queries_total', 0)} queries passing")
+        print(f"  TPC-DS: {tpcds.get('queries_passing', 0)}/{tpcds.get('queries_total', 0)} queries passing")
+        print(f"  Conformance: {conformance.get('summary', {}).get('pass_rate', 0):.2f}% pass rate")
 
     # Build the dashboard structure
     dashboard: Dict[str, Any] = {
