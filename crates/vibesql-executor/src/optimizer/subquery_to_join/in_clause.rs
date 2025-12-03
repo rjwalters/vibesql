@@ -26,7 +26,7 @@
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
 use super::helpers::{
-    get_primary_table_name, is_self_join, qualify_outer_column_refs, rewrite_column_refs_with_alias,
+    is_self_join, qualify_outer_column_refs, rewrite_column_refs_with_alias,
 };
 
 /// Result of converting an IN subquery to a join
@@ -85,13 +85,16 @@ pub(super) fn try_convert_in_to_join(
             eprintln!("[SUBQUERY_TRANSFORM] Self-join detected: table={}, new_alias={}", table_name, new_alias);
         }
 
-        // Get the outer table name to qualify outer column references
-        let outer_table_name = get_primary_table_name(from)
-            .unwrap_or_else(|| table_name.clone()); // Fallback to table_name if not found
+        // For a self-join, we need to qualify the outer expression columns with the
+        // original table name (not the leftmost table in the FROM clause).
+        // Example: `i_item_id IN (SELECT i_item_id FROM item WHERE ...)`
+        // The outer `i_item_id` refers to the outer `item` table, so we qualify it
+        // as `item.i_item_id`, and the subquery columns get rewritten to `__subquery_item.i_item_id`
+        let outer_table_name = table_alias.as_ref().unwrap_or(&table_name);
 
         // Qualify outer expression columns with the outer table name
         // This prevents ambiguity when both tables have the same column names
-        let qualified_expr = qualify_outer_column_refs(expr, &outer_table_name);
+        let qualified_expr = qualify_outer_column_refs(expr, outer_table_name);
 
         // Use the table alias (if present) for matching column references, not just the table name
         // This is critical for Q21 where the subquery uses an alias like "l2" or "l3"

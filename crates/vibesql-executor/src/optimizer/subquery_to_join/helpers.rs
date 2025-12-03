@@ -36,22 +36,6 @@ pub(super) fn is_self_join(from: &FromClause, table_name: &str, table_alias: &Op
     existing_names.iter().any(|n| n.eq_ignore_ascii_case(effective_name) || n.eq_ignore_ascii_case(table_name))
 }
 
-/// Get the primary (leftmost) table name from a FROM clause
-/// Returns the effective name (alias if present, otherwise table name)
-pub(super) fn get_primary_table_name(from: &FromClause) -> Option<String> {
-    match from {
-        FromClause::Table { name, alias, .. } => {
-            Some(alias.clone().unwrap_or_else(|| name.clone()))
-        }
-        FromClause::Join { left, .. } => {
-            get_primary_table_name(left)
-        }
-        FromClause::Subquery { alias, .. } => {
-            Some(alias.clone())
-        }
-    }
-}
-
 /// Qualify an unqualified column reference with a table name
 /// Only rewrites unqualified columns, leaves qualified ones unchanged
 pub(super) fn qualify_outer_column_refs(expr: &Expression, outer_table: &str) -> Expression {
