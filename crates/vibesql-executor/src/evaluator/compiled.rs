@@ -475,6 +475,42 @@ impl CompiledPredicate {
             (SqlValue::Bigint(x), SqlValue::Smallint(y)) => *x == i64::from(*y),
             (SqlValue::Smallint(x), SqlValue::Bigint(y)) => i64::from(*x) == *y,
 
+            // Floating point equality (same type)
+            (SqlValue::Float(x), SqlValue::Float(y)) => x == y,
+            (SqlValue::Double(x), SqlValue::Double(y)) => x == y,
+            (SqlValue::Real(x), SqlValue::Real(y)) => x == y,
+            (SqlValue::Numeric(x), SqlValue::Numeric(y)) => x == y,
+
+            // Cross-type floating point equality - promote to f64 for comparison
+            // Float <-> Numeric
+            (SqlValue::Float(x), SqlValue::Numeric(y)) => f64::from(*x) == *y,
+            (SqlValue::Numeric(x), SqlValue::Float(y)) => *x == f64::from(*y),
+            // Float <-> Double
+            (SqlValue::Float(x), SqlValue::Double(y)) => f64::from(*x) == *y,
+            (SqlValue::Double(x), SqlValue::Float(y)) => *x == f64::from(*y),
+            // Float <-> Real (both f32)
+            (SqlValue::Float(x), SqlValue::Real(y)) => x == y,
+            (SqlValue::Real(x), SqlValue::Float(y)) => x == y,
+            // Double <-> Numeric (both f64)
+            (SqlValue::Double(x), SqlValue::Numeric(y)) => x == y,
+            (SqlValue::Numeric(x), SqlValue::Double(y)) => x == y,
+            // Double <-> Real
+            (SqlValue::Double(x), SqlValue::Real(y)) => *x == f64::from(*y),
+            (SqlValue::Real(x), SqlValue::Double(y)) => f64::from(*x) == *y,
+            // Real <-> Numeric
+            (SqlValue::Real(x), SqlValue::Numeric(y)) => f64::from(*x) == *y,
+            (SqlValue::Numeric(x), SqlValue::Real(y)) => *x == f64::from(*y),
+
+            // Integer <-> Floating point equality (promote integers to f64)
+            (SqlValue::Integer(x), SqlValue::Float(y)) => (*x as f64) == f64::from(*y),
+            (SqlValue::Float(x), SqlValue::Integer(y)) => f64::from(*x) == (*y as f64),
+            (SqlValue::Integer(x), SqlValue::Double(y)) => (*x as f64) == *y,
+            (SqlValue::Double(x), SqlValue::Integer(y)) => *x == (*y as f64),
+            (SqlValue::Integer(x), SqlValue::Numeric(y)) => (*x as f64) == *y,
+            (SqlValue::Numeric(x), SqlValue::Integer(y)) => *x == (*y as f64),
+            (SqlValue::Integer(x), SqlValue::Real(y)) => (*x as f64) == f64::from(*y),
+            (SqlValue::Real(x), SqlValue::Integer(y)) => f64::from(*x) == (*y as f64),
+
             // Fallback to PartialEq
             _ => a == b,
         }
@@ -524,9 +560,73 @@ impl CompiledPredicate {
                 Some(Self::apply_range_op(x.as_str(), op, y.as_str()))
             }
 
-            // Floating point comparisons
+            // Floating point comparisons (same type)
             (SqlValue::Float(x), SqlValue::Float(y)) => Some(Self::apply_range_op(*x, op, *y)),
             (SqlValue::Double(x), SqlValue::Double(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            (SqlValue::Real(x), SqlValue::Real(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            (SqlValue::Numeric(x), SqlValue::Numeric(y)) => Some(Self::apply_range_op(*x, op, *y)),
+
+            // Cross-type floating point comparisons - promote to f64 for accurate comparison
+            // Float <-> Numeric
+            (SqlValue::Float(x), SqlValue::Numeric(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y))
+            }
+            (SqlValue::Numeric(x), SqlValue::Float(y)) => {
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))
+            }
+            // Float <-> Double
+            (SqlValue::Float(x), SqlValue::Double(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y))
+            }
+            (SqlValue::Double(x), SqlValue::Float(y)) => {
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))
+            }
+            // Float <-> Real (both f32)
+            (SqlValue::Float(x), SqlValue::Real(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            (SqlValue::Real(x), SqlValue::Float(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            // Double <-> Numeric (both f64)
+            (SqlValue::Double(x), SqlValue::Numeric(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            (SqlValue::Numeric(x), SqlValue::Double(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            // Double <-> Real
+            (SqlValue::Double(x), SqlValue::Real(y)) => {
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))
+            }
+            (SqlValue::Real(x), SqlValue::Double(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y))
+            }
+            // Real <-> Numeric
+            (SqlValue::Real(x), SqlValue::Numeric(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y))
+            }
+            (SqlValue::Numeric(x), SqlValue::Real(y)) => {
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))
+            }
+
+            // Integer <-> Floating point comparisons (promote integers to f64)
+            (SqlValue::Integer(x), SqlValue::Float(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, f64::from(*y)))
+            }
+            (SqlValue::Float(x), SqlValue::Integer(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y as f64))
+            }
+            (SqlValue::Integer(x), SqlValue::Double(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, *y))
+            }
+            (SqlValue::Double(x), SqlValue::Integer(y)) => {
+                Some(Self::apply_range_op(*x, op, *y as f64))
+            }
+            (SqlValue::Integer(x), SqlValue::Numeric(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, *y))
+            }
+            (SqlValue::Numeric(x), SqlValue::Integer(y)) => {
+                Some(Self::apply_range_op(*x, op, *y as f64))
+            }
+            (SqlValue::Integer(x), SqlValue::Real(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, f64::from(*y)))
+            }
+            (SqlValue::Real(x), SqlValue::Integer(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y as f64))
+            }
 
             // Type mismatch - fall back to None (needs full evaluation)
             _ => None,
