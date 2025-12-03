@@ -3,34 +3,22 @@
 Query benchmark results from the dogfooding database.
 
 This script provides various views of TPC-H benchmark performance over time.
+
+NOTE: This script dogfoods VibeSQL - we use our own database to store results!
 """
 
 import argparse
-import sqlite3
 import sys
-from pathlib import Path
-from typing import List, Tuple
+from typing import Any, List, Optional, Tuple
+
+# Import our VibeSQL helper module
+from vibesql_db import get_connection, get_db_path
 
 
-def get_db_path() -> Path:
-    """Get the path to the benchmark results database."""
-    return Path.home() / ".vibesql" / "test_results" / "benchmark_results.db"
-
-
-def execute_query(db_path: Path, query: str) -> List[Tuple]:
+def execute_query(cursor: Any, query: str) -> List[Tuple]:
     """Execute a query and return results."""
-    if not db_path.exists():
-        print(f"❌ Database not found: {db_path}")
-        print("Run benchmarks first: make benchmark-tpch")
-        sys.exit(1)
-
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cursor = conn.cursor()
-        cursor.execute(query)
-        return cursor.fetchall()
-    finally:
-        conn.close()
+    cursor.execute(query)
+    return cursor.fetchall()
 
 
 def format_table(headers: List[str], rows: List[Tuple]):
@@ -58,232 +46,374 @@ def format_table(headers: List[str], rows: List[Tuple]):
         print(row_line)
 
 
-def query_latest(db_path: Path):
+def query_latest(cursor: Any):
     """Show latest benchmark run summary."""
     print("=== Latest Benchmark Run ===\n")
 
-    query = "SELECT * FROM latest_benchmark_summary"
-    results = execute_query(db_path, query)
+    # Direct query instead of view (VibeSQL doesn't support views)
+    # Note: Using run_timestamp column (timestamp is reserved)
+    query = """
+        SELECT run_id, run_timestamp, benchmark_suite, git_commit, git_branch,
+               total_queries, passed_queries, failed_queries, timeout_queries, notes
+        FROM benchmark_runs
+        ORDER BY run_id DESC
+        LIMIT 1
+    """
+    results = execute_query(cursor, query)
 
     if results:
+        # Calculate pass rate manually
+        formatted_results = []
+        for row in results:
+            run_id, ts, suite, commit, branch, total, passed, failed, timeout, notes = row
+            pass_rate = round(passed * 100.0 / total, 1) if total and total > 0 else 0
+            formatted_results.append((run_id, ts, suite, commit, branch, total, passed, failed, timeout, pass_rate, notes))
+
         headers = ["Run ID", "Timestamp", "Suite", "Commit", "Branch", "Total", "Passed", "Failed", "Timeout", "Pass Rate", "Notes"]
-        format_table(headers, results)
+        format_table(headers, formatted_results)
 
 
-def query_trend(db_path: Path, query_name: str = None):
+def query_trend(cursor: Any, query_name: Optional[str] = None):
     """Show performance trend for queries."""
     print("=== Performance Trend ===\n")
 
+    # Direct query without views
     if query_name:
         query = f"""
-            SELECT query_name, timestamp, total_time_ms, execution_time_ms,
-                   prev_total_time_ms, pct_change, status
-            FROM query_performance_trend
-            WHERE query_name = '{query_name}'
-            ORDER BY timestamp DESC
+            SELECT br.query_name, r.run_timestamp, br.total_time_ms, br.execution_time_ms, br.status
+            FROM benchmark_results br
+            JOIN benchmark_runs r ON br.run_id = r.run_id
+            WHERE br.query_name = '{query_name}'
+            ORDER BY r.run_timestamp DESC
             LIMIT 10
         """
-        headers = ["Query", "Timestamp", "Total (ms)", "Exec (ms)", "Prev Total (ms)", "% Change", "Status"]
+        headers = ["Query", "Timestamp", "Total (ms)", "Exec (ms)", "Status"]
     else:
         query = """
-            SELECT query_name, timestamp, total_time_ms, execution_time_ms, pct_change
-            FROM query_performance_trend
-            WHERE pct_change IS NOT NULL
-            ORDER BY timestamp DESC, query_name
+            SELECT br.query_name, r.run_timestamp, br.total_time_ms, br.execution_time_ms, br.status
+            FROM benchmark_results br
+            JOIN benchmark_runs r ON br.run_id = r.run_id
+            WHERE r.benchmark_suite = 'tpch'
+            ORDER BY r.run_timestamp DESC, br.query_name
             LIMIT 20
         """
-        headers = ["Query", "Timestamp", "Total (ms)", "Exec (ms)", "% Change"]
+        headers = ["Query", "Timestamp", "Total (ms)", "Exec (ms)", "Status"]
 
-    results = execute_query(db_path, query)
+    results = execute_query(cursor, query)
     format_table(headers, results)
 
 
-def query_regressions(db_path: Path):
+def query_regressions(cursor: Any):
     """Show performance regressions (queries that got slower)."""
     print("=== Performance Regressions (>10% slower) ===\n")
+    print("(Note: Regression detection requires historical comparison - showing recent results instead)")
 
+    # Show recent failed or slow queries
     query = """
-        SELECT query_name, timestamp, current_time_ms, prev_execution_time_ms,
-               pct_change, severity
-        FROM performance_regressions
-        ORDER BY pct_change DESC
+        SELECT br.query_name, r.run_timestamp, br.execution_time_ms, br.status, br.error_message
+        FROM benchmark_results br
+        JOIN benchmark_runs r ON br.run_id = r.run_id
+        WHERE br.status != 'passed' OR br.execution_time_ms > 1000
+        ORDER BY r.run_timestamp DESC
         LIMIT 10
     """
-    results = execute_query(db_path, query)
+    results = execute_query(cursor, query)
 
-    headers = ["Query", "Timestamp", "Current (ms)", "Previous (ms)", "% Change", "Severity"]
+    headers = ["Query", "Timestamp", "Exec (ms)", "Status", "Error"]
     format_table(headers, results)
 
 
-def query_improvements(db_path: Path):
+def query_improvements(cursor: Any):
     """Show performance improvements (queries that got faster)."""
-    print("=== Performance Improvements (>10% faster) ===\n")
+    print("=== Performance Improvements ===\n")
+    print("(Note: Improvement detection requires historical comparison - showing fastest queries instead)")
 
+    # Show fastest passing queries
     query = """
-        SELECT query_name, timestamp, current_time_ms, prev_execution_time_ms,
-               pct_improvement
-        FROM performance_improvements
-        ORDER BY pct_improvement DESC
+        SELECT br.query_name, r.run_timestamp, br.execution_time_ms, br.total_time_ms
+        FROM benchmark_results br
+        JOIN benchmark_runs r ON br.run_id = r.run_id
+        WHERE br.status = 'passed' AND br.execution_time_ms IS NOT NULL
+        ORDER BY br.execution_time_ms ASC
         LIMIT 10
     """
-    results = execute_query(db_path, query)
+    results = execute_query(cursor, query)
 
-    headers = ["Query", "Timestamp", "Current (ms)", "Previous (ms)", "% Improvement"]
+    headers = ["Query", "Timestamp", "Exec (ms)", "Total (ms)"]
     format_table(headers, results)
 
 
-def query_stats(db_path: Path):
+def query_stats(cursor: Any):
     """Show statistics for each TPC-H query across all runs."""
     print("=== TPC-H Query Statistics (All Runs) ===\n")
 
+    # Calculate stats per query (VibeSQL supports basic aggregates)
     query = """
-        SELECT query_name, total_runs, passed_runs, timeout_runs, failed_runs,
-               avg_execution_ms, min_execution_ms, max_execution_ms, variability_pct
-        FROM tpch_query_stats
-        ORDER BY query_name
+        SELECT br.query_name,
+               COUNT(*) as total_runs,
+               SUM(CASE WHEN br.status = 'passed' THEN 1 ELSE 0 END) as passed_runs,
+               SUM(CASE WHEN br.status = 'timeout' THEN 1 ELSE 0 END) as timeout_runs,
+               SUM(CASE WHEN br.status = 'error' THEN 1 ELSE 0 END) as failed_runs,
+               AVG(br.execution_time_ms) as avg_execution_ms,
+               MIN(br.execution_time_ms) as min_execution_ms,
+               MAX(br.execution_time_ms) as max_execution_ms
+        FROM benchmark_results br
+        JOIN benchmark_runs r ON br.run_id = r.run_id
+        WHERE r.benchmark_suite = 'tpch'
+        GROUP BY br.query_name
+        ORDER BY br.query_name
     """
-    results = execute_query(db_path, query)
+    results = execute_query(cursor, query)
+
+    # Calculate variability manually
+    formatted_results = []
+    for row in results:
+        query_name, total, passed, timeout, failed, avg_ms, min_ms, max_ms = row
+        # Variability = (max - min) / avg * 100
+        if avg_ms and avg_ms > 0 and max_ms and min_ms:
+            variability = round((max_ms - min_ms) / avg_ms * 100, 1)
+        else:
+            variability = None
+        formatted_results.append((
+            query_name, total, passed, timeout, failed,
+            round(avg_ms, 2) if avg_ms else None,
+            round(min_ms, 2) if min_ms else None,
+            round(max_ms, 2) if max_ms else None,
+            variability
+        ))
 
     headers = ["Query", "Runs", "Passed", "Timeout", "Failed", "Avg (ms)", "Min (ms)", "Max (ms)", "Var %"]
-    format_table(headers, results)
+    format_table(headers, formatted_results)
 
 
-def query_comparison(db_path: Path):
+def query_comparison(cursor: Any):
     """Compare latest run to baseline (first run)."""
-    print("=== Benchmark Comparison (Latest vs Baseline) ===\n")
+    print("=== Benchmark Comparison (Latest vs First Run) ===\n")
 
-    query = """
-        SELECT query_name, baseline_time_ms, current_time_ms, pct_change, trend
-        FROM benchmark_comparison
-        ORDER BY pct_change DESC
+    # Get first run results
+    query_first = """
+        SELECT br.query_name, br.execution_time_ms
+        FROM benchmark_results br
+        JOIN benchmark_runs r ON br.run_id = r.run_id
+        WHERE r.benchmark_suite = 'tpch' AND br.status = 'passed'
+        ORDER BY r.run_id ASC
+        LIMIT 22
     """
-    results = execute_query(db_path, query)
+    first_results = execute_query(cursor, query_first)
+    baseline = {row[0]: row[1] for row in first_results}
+
+    # Get latest run results
+    query_latest = """
+        SELECT br.query_name, br.execution_time_ms
+        FROM benchmark_results br
+        JOIN benchmark_runs r ON br.run_id = r.run_id
+        WHERE r.benchmark_suite = 'tpch' AND br.status = 'passed'
+        ORDER BY r.run_id DESC
+        LIMIT 22
+    """
+    latest_results = execute_query(cursor, query_latest)
+    current = {row[0]: row[1] for row in latest_results}
+
+    # Calculate comparison
+    formatted_results = []
+    for query_name in sorted(set(baseline.keys()) | set(current.keys())):
+        baseline_ms = baseline.get(query_name)
+        current_ms = current.get(query_name)
+
+        if baseline_ms and current_ms and baseline_ms > 0:
+            pct_change = round((current_ms - baseline_ms) / baseline_ms * 100, 1)
+            if pct_change < -10:
+                trend = "faster"
+            elif pct_change > 10:
+                trend = "slower"
+            else:
+                trend = "stable"
+        else:
+            pct_change = None
+            trend = "N/A"
+
+        formatted_results.append((
+            query_name,
+            round(baseline_ms, 2) if baseline_ms else None,
+            round(current_ms, 2) if current_ms else None,
+            pct_change,
+            trend
+        ))
 
     headers = ["Query", "Baseline (ms)", "Current (ms)", "% Change", "Trend"]
-    format_table(headers, results)
+    format_table(headers, formatted_results)
 
 
-def query_history(db_path: Path):
+def query_history(cursor: Any):
     """Show all benchmark runs."""
     print("=== Benchmark Run History ===\n")
 
+    # Note: Using run_timestamp column (timestamp is reserved in VibeSQL)
     query = """
-        SELECT run_id, timestamp, benchmark_suite, git_commit, git_branch,
-               total_queries, passed_queries, failed_queries, timeout_queries,
-               ROUND(passed_queries * 100.0 / NULLIF(total_queries, 0), 1) as pass_rate
+        SELECT run_id, run_timestamp, benchmark_suite, git_commit, git_branch,
+               total_queries, passed_queries, failed_queries, timeout_queries
         FROM benchmark_runs
         ORDER BY run_id DESC
         LIMIT 20
     """
-    results = execute_query(db_path, query)
+    results = execute_query(cursor, query)
+
+    # Calculate pass rate manually
+    formatted_results = []
+    for row in results:
+        run_id, ts, suite, commit, branch, total, passed, failed, timeout = row
+        pass_rate = round(passed * 100.0 / total, 1) if total and total > 0 else 0
+        formatted_results.append((run_id, ts, suite, commit, branch, total, passed, failed, timeout, pass_rate))
 
     headers = ["Run ID", "Timestamp", "Suite", "Commit", "Branch", "Total", "Passed", "Failed", "Timeout", "Pass %"]
-    format_table(headers, results)
+    format_table(headers, formatted_results)
 
 
-def query_tpcc(db_path: Path):
+def query_tpcc(cursor: Any):
     """Show latest TPC-C benchmark results."""
     print("=== Latest TPC-C Benchmark Results ===\n")
 
+    # Get latest TPC-C run
     query = """
-        SELECT database_engine, transaction_type, transaction_count,
-               ROUND(transactions_per_second, 2) as tps,
-               ROUND(avg_latency_us, 2) as avg_latency_us,
-               successful_transactions, failed_transactions
-        FROM latest_tpcc_summary
+        SELECT tc.database_engine, tc.transaction_type, tc.transaction_count,
+               tc.transactions_per_second, tc.avg_latency_us,
+               tc.successful_transactions, tc.failed_transactions
+        FROM tpcc_results tc
+        JOIN benchmark_runs r ON tc.run_id = r.run_id
+        WHERE r.benchmark_suite = 'tpcc'
+        ORDER BY r.run_id DESC
+        LIMIT 20
     """
     try:
-        results = execute_query(db_path, query)
+        results = execute_query(cursor, query)
+        if not results:
+            print("No TPC-C results found. Run 'make benchmark-tpcc' first.")
+            return
+
+        # Format results
+        formatted_results = []
+        for row in results:
+            engine, txn_type, count, tps, latency, success, failed = row
+            formatted_results.append((
+                engine, txn_type, count,
+                round(tps, 2) if tps else None,
+                round(latency, 2) if latency else None,
+                success, failed
+            ))
+
         headers = ["Engine", "Txn Type", "Count", "TPS", "Avg Latency (us)", "Success", "Failed"]
-        format_table(headers, results)
-    except:
-        print("No TPC-C results found. Run 'make benchmark-tpcc' first.")
-        return
-
-    print("\n=== TPC-C Engine Comparison ===\n")
-    query = """
-        SELECT transaction_type,
-               ROUND(vibesql_tps, 2) as vibesql_tps,
-               ROUND(sqlite_tps, 2) as sqlite_tps,
-               ROUND(duckdb_tps, 2) as duckdb_tps,
-               ROUND(vibesql_latency_us, 2) as vibesql_us,
-               ROUND(sqlite_latency_us, 2) as sqlite_us,
-               ROUND(duckdb_latency_us, 2) as duckdb_us
-        FROM tpcc_engine_comparison
-    """
-    try:
-        results = execute_query(db_path, query)
-        headers = ["Txn Type", "VibeSQL TPS", "SQLite TPS", "DuckDB TPS", "VibeSQL us", "SQLite us", "DuckDB us"]
-        format_table(headers, results)
-    except:
-        pass
+        format_table(headers, formatted_results)
+    except Exception as e:
+        print(f"No TPC-C results found. Run 'make benchmark-tpcc' first. ({e})")
 
 
-def query_sysbench(db_path: Path):
+def query_sysbench(cursor: Any):
     """Show latest Sysbench OLTP benchmark results."""
     print("=== Latest Sysbench OLTP Results ===\n")
 
     query = """
-        SELECT database_engine, test_name, table_size,
-               mean_time_us, std_dev_us, iterations
-        FROM latest_sysbench_summary
+        SELECT sb.database_engine, sb.test_name, sb.table_size,
+               sb.mean_time_ns, sb.std_dev_ns, sb.iterations
+        FROM sysbench_results sb
+        JOIN benchmark_runs r ON sb.run_id = r.run_id
+        WHERE r.benchmark_suite = 'sysbench'
+        ORDER BY r.run_id DESC
+        LIMIT 20
     """
     try:
-        results = execute_query(db_path, query)
+        results = execute_query(cursor, query)
+        if not results:
+            print("No Sysbench results found. Run 'make benchmark-sysbench' first.")
+            return
+
+        # Convert ns to us for display
+        formatted_results = []
+        for row in results:
+            engine, test, table_size, mean_ns, std_ns, iterations = row
+            formatted_results.append((
+                engine, test, table_size,
+                round(mean_ns / 1000, 2) if mean_ns else None,
+                round(std_ns / 1000, 2) if std_ns else None,
+                iterations
+            ))
+
         headers = ["Engine", "Test", "Table Size", "Mean (us)", "Std Dev (us)", "Iterations"]
-        format_table(headers, results)
-    except:
-        print("No Sysbench results found. Run 'make benchmark-sysbench' first.")
-        return
-
-    print("\n=== Sysbench Engine Comparison ===\n")
-    query = """
-        SELECT test_name, table_size,
-               ROUND(vibesql_us, 2) as vibesql_us,
-               ROUND(sqlite_us, 2) as sqlite_us,
-               ROUND(duckdb_us, 2) as duckdb_us,
-               vibesql_vs_sqlite
-        FROM sysbench_engine_comparison
-    """
-    try:
-        results = execute_query(db_path, query)
-        headers = ["Test", "Table Size", "VibeSQL (us)", "SQLite (us)", "DuckDB (us)", "VibeSQL/SQLite"]
-        format_table(headers, results)
-    except:
-        pass
+        format_table(headers, formatted_results)
+    except Exception as e:
+        print(f"No Sysbench results found. Run 'make benchmark-sysbench' first. ({e})")
 
 
-def query_tpcds(db_path: Path):
+def query_tpcds(cursor: Any):
     """Show latest TPC-DS benchmark results."""
     print("=== Latest TPC-DS Benchmark Results ===\n")
 
+    # Get latest TPC-DS run results
     query = """
-        SELECT query_name, status, execution_time_ms, total_time_ms
-        FROM latest_tpcds_summary
+        SELECT br.query_name, br.status, br.execution_time_ms, br.total_time_ms
+        FROM benchmark_results br
+        JOIN benchmark_runs r ON br.run_id = r.run_id
+        WHERE r.benchmark_suite = 'tpcds'
+        ORDER BY r.run_id DESC, br.query_name
+        LIMIT 99
     """
     try:
-        results = execute_query(db_path, query)
+        results = execute_query(cursor, query)
         if not results:
             print("No TPC-DS results found. Run 'make benchmark-tpcds' first.")
             return
+
+        # Format results
+        formatted_results = []
+        for row in results:
+            query_name, status, exec_ms, total_ms = row
+            formatted_results.append((
+                query_name, status,
+                round(exec_ms, 2) if exec_ms else None,
+                round(total_ms, 2) if total_ms else None
+            ))
+
         headers = ["Query", "Status", "Exec (ms)", "Total (ms)"]
-        format_table(headers, results)
-    except:
-        print("No TPC-DS results found. Run 'make benchmark-tpcds' first.")
-        return
+        format_table(headers, formatted_results)
+    except Exception as e:
+        print(f"No TPC-DS results found. Run 'make benchmark-tpcds' first. ({e})")
 
     print("\n=== TPC-DS Query Statistics (All Runs) ===\n")
     query = """
-        SELECT query_name, total_runs, passed_runs, timeout_runs, failed_runs,
-               avg_execution_ms, min_execution_ms, max_execution_ms, variability_pct
-        FROM tpcds_query_stats
-        ORDER BY query_name
+        SELECT br.query_name,
+               COUNT(*) as total_runs,
+               SUM(CASE WHEN br.status = 'passed' THEN 1 ELSE 0 END) as passed_runs,
+               SUM(CASE WHEN br.status = 'timeout' THEN 1 ELSE 0 END) as timeout_runs,
+               SUM(CASE WHEN br.status = 'error' THEN 1 ELSE 0 END) as failed_runs,
+               AVG(br.execution_time_ms) as avg_execution_ms,
+               MIN(br.execution_time_ms) as min_execution_ms,
+               MAX(br.execution_time_ms) as max_execution_ms
+        FROM benchmark_results br
+        JOIN benchmark_runs r ON br.run_id = r.run_id
+        WHERE r.benchmark_suite = 'tpcds'
+        GROUP BY br.query_name
+        ORDER BY br.query_name
     """
     try:
-        results = execute_query(db_path, query)
+        results = execute_query(cursor, query)
         if results:
+            # Calculate variability manually
+            formatted_results = []
+            for row in results:
+                query_name, total, passed, timeout, failed, avg_ms, min_ms, max_ms = row
+                if avg_ms and avg_ms > 0 and max_ms and min_ms:
+                    variability = round((max_ms - min_ms) / avg_ms * 100, 1)
+                else:
+                    variability = None
+                formatted_results.append((
+                    query_name, total, passed, timeout, failed,
+                    round(avg_ms, 2) if avg_ms else None,
+                    round(min_ms, 2) if min_ms else None,
+                    round(max_ms, 2) if max_ms else None,
+                    variability
+                ))
+
             headers = ["Query", "Runs", "Passed", "Timeout", "Failed", "Avg (ms)", "Min (ms)", "Max (ms)", "Var %"]
-            format_table(headers, results)
+            format_table(headers, formatted_results)
     except:
         pass
 
@@ -347,36 +477,42 @@ def main():
 
     args = parser.parse_args()
 
-    # Get database path
+    # Get database connection
     db_path = get_db_path()
+    if not db_path.exists():
+        print(f"Database not found: {db_path}")
+        print("Run benchmarks first: make benchmark-tpch")
+        sys.exit(1)
+
+    db, cursor = get_connection()
 
     # Execute requested query
     if args.latest:
-        query_latest(db_path)
+        query_latest(cursor)
     elif args.trend is not None:
         query_name = args.trend if isinstance(args.trend, str) else None
-        query_trend(db_path, query_name)
+        query_trend(cursor, query_name)
     elif args.regressions:
-        query_regressions(db_path)
+        query_regressions(cursor)
     elif args.improvements:
-        query_improvements(db_path)
+        query_improvements(cursor)
     elif args.stats:
-        query_stats(db_path)
+        query_stats(cursor)
     elif args.comparison:
-        query_comparison(db_path)
+        query_comparison(cursor)
     elif args.history:
-        query_history(db_path)
+        query_history(cursor)
     elif args.tpcc:
-        query_tpcc(db_path)
+        query_tpcc(cursor)
     elif args.sysbench:
-        query_sysbench(db_path)
+        query_sysbench(cursor)
     elif args.tpcds:
-        query_tpcds(db_path)
+        query_tpcds(cursor)
     else:
         # Default: show latest TPC-H
-        query_latest(db_path)
+        query_latest(cursor)
         print("\n")
-        query_stats(db_path)
+        query_stats(cursor)
 
 
 if __name__ == "__main__":

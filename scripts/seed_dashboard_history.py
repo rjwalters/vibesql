@@ -11,13 +11,14 @@ import json
 import math
 import os
 import platform
-import sqlite3
 import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from vibesql_db import get_connection, save_connection, get_db_path as get_vibesql_db_path
 
 
 # Schema version for the dashboard.json format
@@ -54,8 +55,8 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
 
 
 def get_db_path() -> Path:
-    """Get the path to the dogfooding database."""
-    return Path.home() / ".vibesql" / "test_results" / "sqllogictest_results.vbsql"
+    """Get the path to the dogfooding database (VibeSQL format)."""
+    return get_vibesql_db_path()
 
 
 def get_machine_info() -> Dict[str, str]:
@@ -131,26 +132,25 @@ def parse_timestamp(ts: str) -> datetime:
         return datetime.now()
 
 
-def query_all_benchmark_runs(conn: sqlite3.Connection, days: Optional[int] = None) -> List[Dict]:
+def query_all_benchmark_runs(cursor: Any, days: Optional[int] = None) -> List[Dict]:
     """Query all benchmark runs from the database."""
-    cursor = conn.cursor()
-
+    # Note: Using run_timestamp column (timestamp is reserved in VibeSQL)
     # Build the query with optional date filter
     query = """
-        SELECT run_id, timestamp, git_commit, git_branch, benchmark_suite,
+        SELECT run_id, run_timestamp, git_commit, git_branch, benchmark_suite,
                scale_factor, total_queries, passed_queries, failed_queries, timeout_queries
         FROM benchmark_runs
-        ORDER BY timestamp ASC
+        ORDER BY run_timestamp ASC
     """
 
     if days:
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         query = f"""
-            SELECT run_id, timestamp, git_commit, git_branch, benchmark_suite,
+            SELECT run_id, run_timestamp, git_commit, git_branch, benchmark_suite,
                    scale_factor, total_queries, passed_queries, failed_queries, timeout_queries
             FROM benchmark_runs
-            WHERE timestamp >= '{cutoff}'
-            ORDER BY timestamp ASC
+            WHERE run_timestamp >= '{cutoff}'
+            ORDER BY run_timestamp ASC
         """
 
     cursor.execute(query)
@@ -171,16 +171,14 @@ def query_all_benchmark_runs(conn: sqlite3.Connection, days: Optional[int] = Non
     return runs
 
 
-def query_tpch_results_for_run(conn: sqlite3.Connection, run_id: int) -> Dict[str, Any]:
+def query_tpch_results_for_run(cursor: Any, run_id: int) -> Dict[str, Any]:
     """Query TPC-H results for a specific run."""
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT query_name, status, execution_time_ms, total_time_ms, error_message
         FROM benchmark_results
-        WHERE run_id = ?
+        WHERE run_id = {run_id}
         ORDER BY query_name
-    """, (run_id,))
+    """)
 
     queries = {}
     passing_times = []
@@ -203,15 +201,13 @@ def query_tpch_results_for_run(conn: sqlite3.Connection, run_id: int) -> Dict[st
     }
 
 
-def query_tpcc_results_for_run(conn: sqlite3.Connection, run_id: int) -> Dict[str, Any]:
+def query_tpcc_results_for_run(cursor: Any, run_id: int) -> Dict[str, Any]:
     """Query TPC-C results for a specific run."""
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT database_engine, transaction_type, transactions_per_second, avg_latency_us
         FROM tpcc_results
-        WHERE run_id = ?
-    """, (run_id,))
+        WHERE run_id = {run_id}
+    """)
 
     results = {}
     vibesql_tps = None
@@ -233,15 +229,13 @@ def query_tpcc_results_for_run(conn: sqlite3.Connection, run_id: int) -> Dict[st
     }
 
 
-def query_sysbench_results_for_run(conn: sqlite3.Connection, run_id: int) -> Dict[str, Any]:
+def query_sysbench_results_for_run(cursor: Any, run_id: int) -> Dict[str, Any]:
     """Query Sysbench results for a specific run."""
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT database_engine, test_name, table_size, mean_time_ns, std_dev_ns
         FROM sysbench_results
-        WHERE run_id = ?
-    """, (run_id,))
+        WHERE run_id = {run_id}
+    """)
 
     tests = {}
     for row in cursor.fetchall():
@@ -257,16 +251,15 @@ def query_sysbench_results_for_run(conn: sqlite3.Connection, run_id: int) -> Dic
     return {"tests": tests}
 
 
-def query_conformance_results(conn: sqlite3.Connection) -> Dict[str, Any]:
+def query_conformance_results(cursor: Any) -> Dict[str, Any]:
     """Query SQLLogicTest conformance results from the database."""
-    cursor = conn.cursor()
-
-    # Check if test_results table exists
-    cursor.execute("""
-        SELECT name FROM sqlite_master
-        WHERE type='table' AND name='test_results'
-    """)
-    if not cursor.fetchone():
+    # Check if test_results table exists by trying to query it
+    try:
+        cursor.execute("SELECT COUNT(*) FROM test_results")
+        count_result = cursor.fetchone()
+        if not count_result:
+            return {}
+    except:
         return {}
 
     # Get total tests and pass rate
@@ -325,7 +318,7 @@ def group_runs_by_date(runs: List[Dict]) -> Dict[str, List[Dict]]:
 
 
 def build_timeline_from_history(
-    conn: sqlite3.Connection,
+    cursor: Any,
     runs: List[Dict],
     verbose: bool = False
 ) -> List[Dict]:
@@ -356,7 +349,7 @@ def build_timeline_from_history(
             tpch_passing = latest_tpch["passed_queries"]
 
             # Get detailed results to calculate geo mean
-            tpch_data = query_tpch_results_for_run(conn, latest_tpch["run_id"])
+            tpch_data = query_tpch_results_for_run(cursor, latest_tpch["run_id"])
             tpch_geo_mean = tpch_data.get("geo_mean_ms")
 
         # Get the latest TPC-C run for this day
@@ -368,7 +361,7 @@ def build_timeline_from_history(
             if not commit:
                 commit = latest_tpcc["git_commit"]
 
-            tpcc_data = query_tpcc_results_for_run(conn, latest_tpcc["run_id"])
+            tpcc_data = query_tpcc_results_for_run(cursor, latest_tpcc["run_id"])
             tpcc_tps = tpcc_data.get("vibesql_tps")
 
         # Use first available commit if we have none
@@ -396,7 +389,7 @@ def build_timeline_from_history(
     return timeline
 
 
-def build_tpch_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dict[str, Any]:
+def build_tpch_benchmark_data(cursor: Any, runs: List[Dict]) -> Dict[str, Any]:
     """Build TPC-H benchmark data from all historical runs."""
     tpch_runs = [r for r in runs if r["benchmark_suite"] == "tpch"]
 
@@ -405,13 +398,13 @@ def build_tpch_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dic
 
     # Get latest run
     latest = max(tpch_runs, key=lambda x: x["timestamp"])
-    latest_data = query_tpch_results_for_run(conn, latest["run_id"])
+    latest_data = query_tpch_results_for_run(cursor, latest["run_id"])
 
     # Build query data with history
     all_query_history = defaultdict(list)
 
     for run in sorted(tpch_runs, key=lambda x: x["timestamp"], reverse=True):
-        run_data = query_tpch_results_for_run(conn, run["run_id"])
+        run_data = query_tpch_results_for_run(cursor, run["run_id"])
         date = run["timestamp"][:10]
 
         for query_name, query_info in run_data.get("queries", {}).items():
@@ -470,7 +463,7 @@ def build_tpch_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dic
     }
 
 
-def build_tpcds_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dict[str, Any]:
+def build_tpcds_benchmark_data(cursor: Any, runs: List[Dict]) -> Dict[str, Any]:
     """Build TPC-DS benchmark data from historical runs."""
     tpcds_runs = [r for r in runs if r["benchmark_suite"] == "tpcds"]
 
@@ -480,13 +473,12 @@ def build_tpcds_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Di
     # Get latest run
     latest = max(tpcds_runs, key=lambda x: x["timestamp"])
 
-    cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT query_name, status, execution_time_ms, error_message
         FROM benchmark_results
-        WHERE run_id = ?
+        WHERE run_id = {latest["run_id"]}
         ORDER BY query_name
-    """, (latest["run_id"],))
+    """)
 
     queries = {}
     passing_times = []
@@ -514,7 +506,7 @@ def build_tpcds_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Di
     }
 
 
-def build_tpcc_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dict[str, Any]:
+def build_tpcc_benchmark_data(cursor: Any, runs: List[Dict]) -> Dict[str, Any]:
     """Build TPC-C benchmark data from historical runs."""
     tpcc_runs = [r for r in runs if r["benchmark_suite"] == "tpcc"]
 
@@ -523,12 +515,12 @@ def build_tpcc_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dic
 
     # Get latest run
     latest = max(tpcc_runs, key=lambda x: x["timestamp"])
-    latest_data = query_tpcc_results_for_run(conn, latest["run_id"])
+    latest_data = query_tpcc_results_for_run(cursor, latest["run_id"])
 
     # Build history from all runs
     history = []
     for run in sorted(tpcc_runs, key=lambda x: x["timestamp"], reverse=True):
-        run_data = query_tpcc_results_for_run(conn, run["run_id"])
+        run_data = query_tpcc_results_for_run(cursor, run["run_id"])
         if run_data.get("vibesql_tps"):
             history.append({
                 "date": run["timestamp"][:10],
@@ -548,7 +540,7 @@ def build_tpcc_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dic
     }
 
 
-def build_sysbench_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) -> Dict[str, Any]:
+def build_sysbench_benchmark_data(cursor: Any, runs: List[Dict]) -> Dict[str, Any]:
     """Build Sysbench benchmark data from historical runs."""
     sysbench_runs = [r for r in runs if r["benchmark_suite"] == "sysbench"]
 
@@ -557,7 +549,7 @@ def build_sysbench_benchmark_data(conn: sqlite3.Connection, runs: List[Dict]) ->
 
     # Get latest run
     latest = max(sysbench_runs, key=lambda x: x["timestamp"])
-    latest_data = query_sysbench_results_for_run(conn, latest["run_id"])
+    latest_data = query_sysbench_results_for_run(cursor, latest["run_id"])
 
     return {
         "description": "Sysbench OLTP - Point operations",
@@ -644,42 +636,40 @@ def generate_seeded_dashboard(
         if days:
             print(f"Limiting to last {days} days")
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        # Query all historical runs
-        runs = query_all_benchmark_runs(conn, days)
+    # Use VibeSQL Python bindings instead of sqlite3
+    db, cursor = get_connection()
 
-        if verbose:
-            print(f"Found {len(runs)} benchmark runs")
-            by_suite = defaultdict(int)
-            for r in runs:
-                by_suite[r["benchmark_suite"]] += 1
-            for suite, count in by_suite.items():
-                print(f"  {suite}: {count} runs")
+    # Query all historical runs
+    runs = query_all_benchmark_runs(cursor, days)
 
-        # Build timeline from history
-        timeline = build_timeline_from_history(conn, runs, verbose)
+    if verbose:
+        print(f"Found {len(runs)} benchmark runs")
+        by_suite = defaultdict(int)
+        for r in runs:
+            by_suite[r["benchmark_suite"]] += 1
+        for suite, count in by_suite.items():
+            print(f"  {suite}: {count} runs")
 
-        if verbose:
-            print(f"Generated {len(timeline)} timeline entries")
+    # Build timeline from history
+    timeline = build_timeline_from_history(cursor, runs, verbose)
 
-        # Build benchmark data
-        tpch = build_tpch_benchmark_data(conn, runs)
-        tpcds = build_tpcds_benchmark_data(conn, runs)
-        tpcc = build_tpcc_benchmark_data(conn, runs)
-        sysbench = build_sysbench_benchmark_data(conn, runs)
+    if verbose:
+        print(f"Generated {len(timeline)} timeline entries")
 
-        # Get conformance data (current snapshot)
-        conformance = query_conformance_results(conn)
+    # Build benchmark data
+    tpch = build_tpch_benchmark_data(cursor, runs)
+    tpcds = build_tpcds_benchmark_data(cursor, runs)
+    tpcc = build_tpcc_benchmark_data(cursor, runs)
+    sysbench = build_sysbench_benchmark_data(cursor, runs)
 
-        # Detect historical changes
-        changes = detect_historical_changes(timeline)
+    # Get conformance data (current snapshot)
+    conformance = query_conformance_results(cursor)
 
-        if verbose:
-            print(f"Detected {len(changes)} significant changes")
+    # Detect historical changes
+    changes = detect_historical_changes(timeline)
 
-    finally:
-        conn.close()
+    if verbose:
+        print(f"Detected {len(changes)} significant changes")
 
     # Calculate 7-day trend from timeline
     trend_7d_pct = None
