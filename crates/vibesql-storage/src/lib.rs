@@ -8,6 +8,7 @@
 pub mod backend;
 pub mod btree;
 pub mod buffer;
+pub mod change_events;
 pub mod columnar;
 pub mod columnar_cache;
 pub mod database;
@@ -22,6 +23,10 @@ pub mod table;
 
 pub use backend::{StorageBackend, StorageFile};
 pub use buffer::{BufferPool, BufferPoolStats};
+pub use change_events::{
+    channel as change_event_channel, ChangeEvent, ChangeEventReceiver, ChangeEventSender,
+    RecvError as ChangeEventRecvError, DEFAULT_CHANNEL_CAPACITY,
+};
 pub use columnar::{ColumnData, ColumnarTable};
 pub use columnar_cache::{CacheStats, ColumnarCache};
 pub use database::{
