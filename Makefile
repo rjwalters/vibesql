@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
+.PHONY: all all-fg everything logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -109,6 +109,7 @@ help:
 	@echo "  make website            - Regenerate web dashboard data from benchmark database"
 	@echo "  make all                - Build, test, benchmark (runs in BACKGROUND by default)"
 	@echo "  make all-fg             - Run 'make all' in foreground (blocking)"
+	@echo "  make everything         - Build, ALL tests (including ignored/slow), benchmarks"
 	@echo "  make logs               - Tail the background make output"
 	@echo "  make status             - Check if background make is running and show recent output"
 	@echo "  make help               - Show this help message"
@@ -156,6 +157,14 @@ test-workspace:
 	@echo "Running workspace tests (unit + integration)..."
 	@echo "This includes 2,991 unit tests + 739 sqltest conformance tests"
 	cargo test --release --workspace
+
+# Run everything: build, ALL tests (including ignored/slow), and benchmarks
+everything: build-all
+	@echo "Running ALL workspace tests (including ignored/slow tests)..."
+	@echo "This includes slow disk-backed index tests and full verification suites"
+	cargo test --release --workspace -- --include-ignored
+	@$(MAKE) benchmark
+	@$(MAKE) analyze
 
 # Run SQLLogicTest suite (parallel mode recommended)
 test-sqllogictest:
