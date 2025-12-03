@@ -307,7 +307,7 @@ impl SelectExecutor<'_> {
                     &left_val,
                     op,
                     &right_val,
-                    vibesql_types::SqlMode::default(),
+                    self.database.sql_mode(),
                 )
             }
 
@@ -431,7 +431,7 @@ impl SelectExecutor<'_> {
                     evaluator,
                     grouping_context,
                 )?;
-                crate::evaluator::casting::cast_value(&inner_val, data_type, &vibesql_types::SqlMode::default())
+                crate::evaluator::casting::cast_value(&inner_val, data_type, &self.database.sql_mode())
             }
 
             // IsNull - evaluate inner expression with grouping context
