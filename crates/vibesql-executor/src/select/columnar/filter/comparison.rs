@@ -135,3 +135,70 @@ pub(crate) fn parse_date_string(s: &str) -> Option<Date> {
     let day: u8 = parts[2].parse().ok()?;
     Date::new(year, month, day).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test for issue #3360: Float column vs Integer literal comparison
+    /// in the columnar filter path
+    #[test]
+    fn test_float_vs_integer_comparison() {
+        let col_value = SqlValue::Float(678.28);
+        let pred_value = SqlValue::Integer(85);
+
+        let result = compare_values(&col_value, &pred_value);
+        assert_eq!(result, CompareResult::Ordering(std::cmp::Ordering::Greater),
+            "Float(678.28) should be > Integer(85)");
+    }
+
+    #[test]
+    fn test_float_vs_integer_less_than() {
+        let col_value = SqlValue::Float(50.0);
+        let pred_value = SqlValue::Integer(85);
+
+        let result = compare_values(&col_value, &pred_value);
+        assert_eq!(result, CompareResult::Ordering(std::cmp::Ordering::Less),
+            "Float(50.0) should be < Integer(85)");
+    }
+
+    /// Integration test for issue #3360: Full columnar filter path with Float column
+    #[test]
+    fn test_issue_3360_filter_float_column() {
+        use super::super::{ColumnPredicate, create_filter_bitmap, evaluate_predicate, apply_columnar_filter};
+        use vibesql_storage::Row;
+
+        // Reproduce the exact issue: FLOAT column with integer predicate
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(0), SqlValue::Float(678.28)]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Float(235.64)]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Float(465.9)]),
+        ];
+
+        // Predicate: col4 > 85 (column_idx=1, which is the Float column)
+        let predicates = vec![
+            ColumnPredicate::GreaterThan {
+                column_idx: 1,
+                value: SqlValue::Integer(85),
+            },
+        ];
+
+        // Test direct evaluation
+        for (i, row) in rows.iter().enumerate() {
+            let value = row.get(1).unwrap();
+            let result = evaluate_predicate(&predicates[0], value);
+            assert!(result, "Row {} with value {:?} should pass > 85", i, value);
+        }
+
+        // Test bitmap creation
+        let bitmap = create_filter_bitmap(rows.len(), &predicates, |row_idx, col_idx| {
+            rows.get(row_idx).and_then(|row| row.get(col_idx))
+        }).unwrap();
+
+        assert_eq!(bitmap, vec![true, true, true], "All rows should pass filter");
+
+        // Test apply_columnar_filter (the actual function used in execution)
+        let indices = apply_columnar_filter(&rows, &predicates).unwrap();
+        assert_eq!(indices.len(), 3, "All 3 rows should pass filter");
+    }
+}

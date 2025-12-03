@@ -602,30 +602,83 @@ impl CompiledPredicate {
                 Some(Self::apply_range_op(*x, op, f64::from(*y)))
             }
 
-            // Integer <-> Floating point comparisons (promote integers to f64)
+            // Cross-type Float/Double/Real vs Integer comparisons - promote to f64
+            // This fixes issue #3360: Float(678.28) > Integer(85) was returning None
+            (SqlValue::Float(x), SqlValue::Integer(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y as f64))
+            }
             (SqlValue::Integer(x), SqlValue::Float(y)) => {
                 Some(Self::apply_range_op(*x as f64, op, f64::from(*y)))
             }
-            (SqlValue::Float(x), SqlValue::Integer(y)) => {
-                Some(Self::apply_range_op(f64::from(*x), op, *y as f64))
+            (SqlValue::Double(x), SqlValue::Integer(y)) => {
+                Some(Self::apply_range_op(*x, op, *y as f64))
             }
             (SqlValue::Integer(x), SqlValue::Double(y)) => {
                 Some(Self::apply_range_op(*x as f64, op, *y))
             }
-            (SqlValue::Double(x), SqlValue::Integer(y)) => {
+            (SqlValue::Real(x), SqlValue::Integer(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y as f64))
+            }
+            (SqlValue::Integer(x), SqlValue::Real(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, f64::from(*y)))
+            }
+            (SqlValue::Numeric(x), SqlValue::Integer(y)) => {
                 Some(Self::apply_range_op(*x, op, *y as f64))
             }
             (SqlValue::Integer(x), SqlValue::Numeric(y)) => {
                 Some(Self::apply_range_op(*x as f64, op, *y))
             }
-            (SqlValue::Numeric(x), SqlValue::Integer(y)) => {
-                Some(Self::apply_range_op(*x, op, *y as f64))
+
+            // Float/Double/Real/Numeric vs Bigint comparisons
+            (SqlValue::Float(x), SqlValue::Bigint(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y as f64))
             }
-            (SqlValue::Integer(x), SqlValue::Real(y)) => {
+            (SqlValue::Bigint(x), SqlValue::Float(y)) => {
                 Some(Self::apply_range_op(*x as f64, op, f64::from(*y)))
             }
-            (SqlValue::Real(x), SqlValue::Integer(y)) => {
+            (SqlValue::Double(x), SqlValue::Bigint(y)) => {
+                Some(Self::apply_range_op(*x, op, *y as f64))
+            }
+            (SqlValue::Bigint(x), SqlValue::Double(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, *y))
+            }
+            (SqlValue::Real(x), SqlValue::Bigint(y)) => {
                 Some(Self::apply_range_op(f64::from(*x), op, *y as f64))
+            }
+            (SqlValue::Bigint(x), SqlValue::Real(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, f64::from(*y)))
+            }
+            (SqlValue::Numeric(x), SqlValue::Bigint(y)) => {
+                Some(Self::apply_range_op(*x, op, *y as f64))
+            }
+            (SqlValue::Bigint(x), SqlValue::Numeric(y)) => {
+                Some(Self::apply_range_op(*x as f64, op, *y))
+            }
+
+            // Float/Double/Real/Numeric vs Smallint comparisons
+            (SqlValue::Float(x), SqlValue::Smallint(y)) => {
+                Some(Self::apply_range_op(*x, op, f32::from(*y)))
+            }
+            (SqlValue::Smallint(x), SqlValue::Float(y)) => {
+                Some(Self::apply_range_op(f32::from(*x), op, *y))
+            }
+            (SqlValue::Double(x), SqlValue::Smallint(y)) => {
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))
+            }
+            (SqlValue::Smallint(x), SqlValue::Double(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y))
+            }
+            (SqlValue::Real(x), SqlValue::Smallint(y)) => {
+                Some(Self::apply_range_op(*x, op, f32::from(*y)))
+            }
+            (SqlValue::Smallint(x), SqlValue::Real(y)) => {
+                Some(Self::apply_range_op(f32::from(*x), op, *y))
+            }
+            (SqlValue::Numeric(x), SqlValue::Smallint(y)) => {
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))
+            }
+            (SqlValue::Smallint(x), SqlValue::Numeric(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y))
             }
 
             // Type mismatch - fall back to None (needs full evaluation)
@@ -757,5 +810,50 @@ mod tests {
             ],
         };
         assert_eq!(compiled.evaluate(&row), Some(false));
+    }
+
+    /// Test for issue #3360: Float column vs Integer literal comparison
+    /// This ensures that cross-type Float/Integer comparisons work correctly
+    /// in the compiled predicate fast path.
+    #[test]
+    fn test_float_vs_integer_range_comparison() {
+        // Test Float > Integer
+        let result = CompiledPredicate::compare_range(
+            &SqlValue::Float(678.28),
+            RangeOp::GreaterThan,
+            &SqlValue::Integer(85),
+        );
+        assert_eq!(result, Some(true), "Float(678.28) > Integer(85) should be true");
+
+        let result = CompiledPredicate::compare_range(
+            &SqlValue::Float(50.0),
+            RangeOp::GreaterThan,
+            &SqlValue::Integer(85),
+        );
+        assert_eq!(result, Some(false), "Float(50.0) > Integer(85) should be false");
+
+        // Test Integer < Float
+        let result = CompiledPredicate::compare_range(
+            &SqlValue::Integer(85),
+            RangeOp::LessThan,
+            &SqlValue::Float(678.28),
+        );
+        assert_eq!(result, Some(true), "Integer(85) < Float(678.28) should be true");
+
+        // Test Double vs Integer
+        let result = CompiledPredicate::compare_range(
+            &SqlValue::Double(678.28),
+            RangeOp::GreaterThan,
+            &SqlValue::Integer(85),
+        );
+        assert_eq!(result, Some(true), "Double(678.28) > Integer(85) should be true");
+
+        // Test Real vs Integer
+        let result = CompiledPredicate::compare_range(
+            &SqlValue::Real(678.28),
+            RangeOp::GreaterThan,
+            &SqlValue::Integer(85),
+        );
+        assert_eq!(result, Some(true), "Real(678.28) > Integer(85) should be true");
     }
 }
