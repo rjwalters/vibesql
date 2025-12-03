@@ -317,6 +317,17 @@ fn is_column_or_literal(expr: &Expression) -> bool {
     matches!(expr, Expression::ColumnRef { .. } | Expression::Literal(_))
 }
 
+/// Result of extracting equality predicate values from WHERE clause
+///
+/// Distinguishes between:
+/// - `Values(map)`: Successfully extracted equality values
+/// - `Contradiction`: Multiple equality predicates on same column with different values
+///   (e.g., col = 1 AND col = 2 is always false)
+enum EqualityResult {
+    Values(HashMap<String, vibesql_types::SqlValue>),
+    Contradiction,
+}
+
 impl SelectExecutor<'_> {
     /// Execute a query using the fast path
     ///
@@ -438,7 +449,14 @@ impl SelectExecutor<'_> {
             .collect();
 
         // Try to extract equality predicates for PK columns from WHERE clause
-        let pk_values = self.extract_pk_values(where_clause, &pk_columns);
+        let pk_values = match self.extract_pk_values(where_clause, &pk_columns) {
+            EqualityResult::Contradiction => {
+                // Multiple equalities on same column with different values
+                // This is always false, return empty result
+                return Ok(Some(vec![]));
+            }
+            EqualityResult::Values(v) => v,
+        };
 
         // Check if we have values for all PK columns
         if pk_values.len() != pk_columns.len() {
@@ -553,7 +571,14 @@ impl SelectExecutor<'_> {
             .collect();
 
         // Extract equality predicates from WHERE clause
-        let equality_values = self.extract_pk_values(where_clause, &pk_columns);
+        let equality_values = match self.extract_pk_values(where_clause, &pk_columns) {
+            EqualityResult::Contradiction => {
+                // Multiple equalities on same column with different values
+                // This is always false, return empty result
+                return Ok(Some(vec![]));
+            }
+            EqualityResult::Values(v) => v,
+        };
 
         // Check if we have a prefix match (equality on first N-1 columns)
         // For a 3-column PK (a, b, c), we need equality on (a, b) and ORDER BY c
@@ -708,7 +733,14 @@ impl SelectExecutor<'_> {
             }
 
             // Try to extract equality values from WHERE clause for index columns
-            let index_values = self.extract_pk_values(where_clause, &index_columns);
+            let index_values = match self.extract_pk_values(where_clause, &index_columns) {
+                EqualityResult::Contradiction => {
+                    // Multiple equalities on same column with different values
+                    // This is always false, return empty result
+                    return Ok(Some(vec![]));
+                }
+                EqualityResult::Values(v) => v,
+            };
 
             // Build prefix key - equality predicates for first N columns
             let mut prefix_key: Vec<SqlValue> = Vec::new();
@@ -856,7 +888,14 @@ impl SelectExecutor<'_> {
                 .collect();
 
             // Try to extract equality values from WHERE clause
-            let index_values = self.extract_pk_values(where_clause, &index_columns);
+            let index_values = match self.extract_pk_values(where_clause, &index_columns) {
+                EqualityResult::Contradiction => {
+                    // Multiple equalities on same column with different values
+                    // This is always false, return empty result
+                    return Ok(Some(vec![]));
+                }
+                EqualityResult::Values(v) => v,
+            };
 
             // Need at least one column value to use the index
             if index_values.is_empty() {
@@ -974,29 +1013,44 @@ impl SelectExecutor<'_> {
     }
 
     /// Extract equality predicate values for given columns from WHERE clause
+    ///
+    /// Returns `EqualityResult::Contradiction` if multiple equality predicates on the
+    /// same column have different values (e.g., col = 1 AND col = 2), which means
+    /// the WHERE clause is always false and no rows can match.
     fn extract_pk_values(
         &self,
         expr: &Expression,
         pk_columns: &[&str],
-    ) -> HashMap<String, vibesql_types::SqlValue> {
+    ) -> EqualityResult {
         let mut values = HashMap::new();
-        self.collect_pk_equality_values(expr, pk_columns, &mut values);
-        values
+        if self.collect_pk_equality_values(expr, pk_columns, &mut values) {
+            EqualityResult::Values(values)
+        } else {
+            EqualityResult::Contradiction
+        }
     }
 
     /// Recursively collect equality values for PK columns
+    ///
+    /// Returns `false` if a contradiction is detected (multiple equalities on same
+    /// column with different values), `true` otherwise.
     fn collect_pk_equality_values(
         &self,
         expr: &Expression,
         pk_columns: &[&str],
         values: &mut HashMap<String, vibesql_types::SqlValue>,
-    ) {
+    ) -> bool {
         if let Expression::BinaryOp { left, op, right } = expr {
             match op {
                 vibesql_ast::BinaryOperator::And => {
                     // Recurse into both sides of AND
-                    self.collect_pk_equality_values(left, pk_columns, values);
-                    self.collect_pk_equality_values(right, pk_columns, values);
+                    // Short-circuit if contradiction found
+                    if !self.collect_pk_equality_values(left, pk_columns, values) {
+                        return false;
+                    }
+                    if !self.collect_pk_equality_values(right, pk_columns, values) {
+                        return false;
+                    }
                 }
                 vibesql_ast::BinaryOperator::Equal => {
                     // Check for column = literal pattern
@@ -1004,14 +1058,24 @@ impl SelectExecutor<'_> {
                         // Case-insensitive comparison for SQL identifiers
                         // Parser uppercases identifiers but schema may have lowercase column names
                         if pk_columns.iter().any(|pk| pk.eq_ignore_ascii_case(&col_name)) {
-                            // Store with lowercase key for consistent lookup
-                            values.insert(col_name.to_ascii_lowercase(), value);
+                            let key = col_name.to_ascii_lowercase();
+                            // Check for contradiction: multiple equalities with different values
+                            if let Some(existing) = values.get(&key) {
+                                if existing != &value {
+                                    // Contradiction: col = X AND col = Y where X != Y
+                                    return false;
+                                }
+                                // Same value, no need to insert again
+                            } else {
+                                values.insert(key, value);
+                            }
                         }
                     }
                 }
                 _ => {}
             }
         }
+        true
     }
 
     /// Extract column name and literal value from an equality expression
