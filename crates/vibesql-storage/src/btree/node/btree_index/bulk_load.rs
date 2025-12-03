@@ -6,10 +6,10 @@
 use std::sync::Arc;
 use vibesql_types::DataType;
 
-use crate::page::{PageId, PageManager};
+use crate::page::{PageId, PageManager, PAGE_SIZE};
 use crate::StorageError;
 
-use super::super::super::calculate_degree;
+use super::super::super::{calculate_degree, estimate_max_key_size};
 use super::super::structure::{InternalNode, Key, LeafNode};
 use super::BTreeIndex;
 
@@ -49,6 +49,20 @@ impl BTreeIndex {
             return Self::new(page_manager, key_schema);
         }
 
+        // Calculate max row_ids per entry based on page constraints
+        // Page layout: header(3) + entry(key + varint + row_ids * 8) + prev/next leaf(16)
+        // For a single entry to fit, we need: 3 + key_size + 5 + row_ids * 8 + 16 <= PAGE_SIZE
+        // Using conservative varint estimate of 5 bytes for large counts
+        let key_size = estimate_max_key_size(&key_schema);
+        let fixed_overhead = 3 + key_size + 5 + 16; // header + key + varint + leaf pointers
+        let max_row_ids_per_entry = if fixed_overhead >= PAGE_SIZE {
+            1 // Degenerate case - very large keys
+        } else {
+            (PAGE_SIZE - fixed_overhead) / 8
+        };
+        // Use 80% of max to leave room for serialization overhead
+        let max_row_ids_per_entry = (max_row_ids_per_entry * 4 / 5).max(1);
+
         // Group entries by key to support non-unique indexes
         // This converts Vec<(Key, RowId)> to Vec<(Key, Vec<RowId>)>
         let mut grouped_entries: Vec<(Key, Vec<super::super::structure::RowId>)> = Vec::new();
@@ -65,9 +79,28 @@ impl BTreeIndex {
             grouped_entries.push((key, vec![row_id]));
         }
 
-        // Calculate optimal fill factor (75% - balance space vs future inserts)
-        let leaf_capacity = (degree * 3) / 4;
-        let leaf_capacity = leaf_capacity.max(1); // Ensure at least 1 entry per leaf
+        // Split entries with too many row_ids into multiple entries
+        // This ensures each entry can fit within a single page
+        let mut chunked_entries: Vec<(Key, Vec<super::super::structure::RowId>)> = Vec::new();
+        for (key, row_ids) in grouped_entries {
+            if row_ids.len() <= max_row_ids_per_entry {
+                chunked_entries.push((key, row_ids));
+            } else {
+                // Split into chunks
+                for chunk in row_ids.chunks(max_row_ids_per_entry) {
+                    chunked_entries.push((key.clone(), chunk.to_vec()));
+                }
+            }
+        }
+        let grouped_entries = chunked_entries;
+
+        // Calculate leaf capacity based on actual entry sizes with chunked row_ids
+        // Each entry now has up to max_row_ids_per_entry row_ids
+        let entry_size_with_chunk = key_size + 5 + 8 * max_row_ids_per_entry;
+        let available_for_entries = PAGE_SIZE.saturating_sub(19); // header + prev/next leaf
+        let leaf_capacity = (available_for_entries / entry_size_with_chunk).max(1);
+        // Apply 75% fill factor
+        let leaf_capacity = ((leaf_capacity * 3) / 4).max(1);
 
         // 1. Build leaf level
         let mut leaf_page_ids = Vec::new();

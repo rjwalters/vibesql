@@ -131,7 +131,7 @@ fn calculate_degree(key_schema: &[DataType]) -> usize {
 ///
 /// # Returns
 /// Estimated maximum size in bytes (including 2-byte length prefix)
-fn estimate_max_key_size(key_schema: &[DataType]) -> usize {
+pub(crate) fn estimate_max_key_size(key_schema: &[DataType]) -> usize {
     let mut total_size = 0;
 
     for data_type in key_schema {

@@ -49,10 +49,51 @@ impl BTreeIndex {
     /// 3. Return all row_ids associated with the key (or empty Vec if not found)
     pub fn lookup(&self, key: &Key) -> Result<Vec<RowId>, StorageError> {
         // Find the leaf that would contain this key
-        let (leaf, _) = self.find_leaf_path(key)?;
+        let (mut current_leaf, _) = self.find_leaf_path(key)?;
 
-        // Search for the key in the leaf node and return all row_ids
-        Ok(leaf.search(key).cloned().unwrap_or_default())
+        let mut result = Vec::new();
+
+        // Collect all row_ids from entries matching this key
+        // This handles the case where large row_id lists are split across multiple entries
+        loop {
+            // Use binary search to find the first entry with matching key
+            let start_idx = current_leaf
+                .entries
+                .binary_search_by(|(k, _)| k.cmp(key))
+                .unwrap_or_else(|i| i);
+
+            // Collect all consecutive entries with matching key
+            for idx in start_idx..current_leaf.entries.len() {
+                let (entry_key, row_ids) = &current_leaf.entries[idx];
+                if entry_key == key {
+                    result.extend(row_ids.iter().copied());
+                } else {
+                    // Past the key, we're done with this leaf
+                    // If entry_key > key, we've gone past and can return
+                    return Ok(result);
+                }
+            }
+
+            // Check if we need to continue to the next leaf
+            // This is needed when entries with the same key span multiple leaves
+            if current_leaf.next_leaf == super::super::super::NULL_PAGE_ID {
+                break;
+            }
+
+            // Check if next leaf might have more entries with this key
+            // by looking at the first entry of the next leaf
+            let next_leaf = self.read_leaf_node(current_leaf.next_leaf)?;
+            if let Some((first_key, _)) = next_leaf.entries.first() {
+                if first_key == key {
+                    current_leaf = next_leaf;
+                    continue;
+                }
+            }
+            // Next leaf doesn't start with our key, we're done
+            break;
+        }
+
+        Ok(result)
     }
 
     /// Perform a range scan on the B+ tree

@@ -51,6 +51,18 @@ impl ColumnarBatch {
 
         let column_names = storage_columnar.column_names().to_vec();
         let row_count = storage_columnar.row_count();
+
+        // Handle empty tables: return an empty batch with column names but no data
+        // This happens when ColumnarTable::from_rows is called with empty rows -
+        // the column_names are preserved but the columns HashMap is empty
+        if row_count == 0 {
+            return Ok(Self {
+                row_count: 0,
+                columns: Vec::new(),
+                column_names: Some(column_names),
+            });
+        }
+
         let mut columns = Vec::with_capacity(column_names.len());
 
         for col_name in column_names.iter() {
