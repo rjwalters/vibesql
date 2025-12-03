@@ -30,6 +30,17 @@ use vibesql_storage::Database as VibeDB;
 use tpcds::memory::hint_memory_release;
 
 // =============================================================================
+// List Mode Detection
+// =============================================================================
+// Criterion's --list mode enumerates benchmarks without running them.
+// We detect this to skip expensive database loading during enumeration.
+
+/// Check if we're running in --list mode (benchmark enumeration only)
+fn is_list_mode() -> bool {
+    std::env::args().any(|arg| arg == "--list")
+}
+
+// =============================================================================
 // Query Result Tracking
 // =============================================================================
 
@@ -211,14 +222,20 @@ fn duckdb_enabled() -> bool {
 static VIBESQL_DB: OnceLock<VibeDB> = OnceLock::new();
 
 /// Get or initialize the cached VibeSQL database
-fn get_vibesql_db() -> &'static VibeDB {
-    VIBESQL_DB.get_or_init(|| {
+/// Returns None in --list mode to avoid OOM during benchmark enumeration
+fn get_vibesql_db() -> Option<&'static VibeDB> {
+    // Skip database loading in list mode to prevent OOM during enumeration
+    if is_list_mode() {
+        return None;
+    }
+
+    Some(VIBESQL_DB.get_or_init(|| {
         eprintln!("Loading TPC-DS VibeSQL database (scale factor {})...", SCALE_FACTOR);
         let start = std::time::Instant::now();
         let db = load_vibesql(SCALE_FACTOR);
         eprintln!("VibeSQL database loaded in {:?}", start.elapsed());
         db
-    })
+    }))
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -336,8 +353,17 @@ fn bench_sanity_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_sanity");
     group.measurement_time(Duration::from_secs(5));
 
-    // Use cached database
-    let db = get_vibesql_db();
+    // Use cached database (None in --list mode)
+    let Some(db) = get_vibesql_db() else {
+        // In list mode, just register benchmarks without validation
+        for (name, _sql) in TPCDS_SANITY_QUERIES {
+            group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+        }
+        group.finish();
+        return;
+    };
 
     for (name, sql) in TPCDS_SANITY_QUERIES {
         let query_name = format!("sanity_{}", name);
@@ -387,8 +413,24 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_sanity_comparison");
     group.measurement_time(Duration::from_secs(5));
 
-    // Use cached databases (only load if enabled via TPCDS_ENGINE env var)
-    let vibesql_db = get_vibesql_db();
+    // Use cached databases (None in --list mode)
+    let Some(vibesql_db) = get_vibesql_db() else {
+        // In list mode, just register benchmarks without validation
+        for (name, _sql) in TPCDS_SANITY_QUERIES {
+            group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+        }
+        group.finish();
+        return;
+    };
+
     let sqlite_conn = get_sqlite_conn();  // Returns None if SQLite disabled
     let duckdb_conn = get_duckdb_conn();  // Returns None if DuckDB disabled
 
@@ -464,8 +506,20 @@ fn bench_tpcds_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_queries");
     group.measurement_time(Duration::from_secs(10));
 
-    // Use cached database
-    let db = get_vibesql_db();
+    // Use cached database (None in --list mode)
+    let Some(db) = get_vibesql_db() else {
+        // In list mode, just register benchmarks without validation
+        for (name, _sql) in TPCDS_QUERIES {
+            if SLOW_QUERIES.contains(name) {
+                continue;
+            }
+            group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+        }
+        group.finish();
+        return;
+    };
 
     for (name, sql) in TPCDS_QUERIES {
         // Skip slow queries - they have their own benchmark group
@@ -520,8 +574,20 @@ fn bench_tpcds_slow_queries(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
     group.sample_size(10); // Reduced: these queries take >100ms per iteration
 
-    // Use cached database
-    let db = get_vibesql_db();
+    // Use cached database (None in --list mode)
+    let Some(db) = get_vibesql_db() else {
+        // In list mode, just register benchmarks without validation
+        for (name, _sql) in TPCDS_QUERIES {
+            if !SLOW_QUERIES.contains(name) {
+                continue;
+            }
+            group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+        }
+        group.finish();
+        return;
+    };
 
     for (name, sql) in TPCDS_QUERIES {
         // Only benchmark slow queries in this group
