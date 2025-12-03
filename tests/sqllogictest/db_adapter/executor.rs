@@ -6,7 +6,7 @@
 
 use std::{collections::HashSet, env};
 use sqllogictest::{DBOutput, DefaultColumnType};
-use vibesql_executor::SelectExecutor;
+use vibesql_executor::{IntrospectionExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
@@ -351,6 +351,60 @@ pub fn execute_sql(
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(0))
         }
+        vibesql_ast::Statement::ShowTables(stmt) => {
+            // Commit any pending implicit transaction before introspection
+            batching_manager.commit_if_needed(db)?;
+
+            let executor = IntrospectionExecutor::new(db);
+            let result = executor.execute_show_tables(&stmt)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            format_query_result(result.rows)
+        }
+        vibesql_ast::Statement::ShowDatabases(stmt) => {
+            // Commit any pending implicit transaction before introspection
+            batching_manager.commit_if_needed(db)?;
+
+            let executor = IntrospectionExecutor::new(db);
+            let result = executor.execute_show_databases(&stmt)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            format_query_result(result.rows)
+        }
+        vibesql_ast::Statement::ShowColumns(stmt) => {
+            // Commit any pending implicit transaction before introspection
+            batching_manager.commit_if_needed(db)?;
+
+            let executor = IntrospectionExecutor::new(db);
+            let result = executor.execute_show_columns(&stmt)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            format_query_result(result.rows)
+        }
+        vibesql_ast::Statement::Describe(stmt) => {
+            // Commit any pending implicit transaction before introspection
+            batching_manager.commit_if_needed(db)?;
+
+            let executor = IntrospectionExecutor::new(db);
+            let result = executor.execute_describe(&stmt)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            format_query_result(result.rows)
+        }
+        vibesql_ast::Statement::ShowIndex(stmt) => {
+            // Commit any pending implicit transaction before introspection
+            batching_manager.commit_if_needed(db)?;
+
+            let executor = IntrospectionExecutor::new(db);
+            let result = executor.execute_show_index(&stmt)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            format_query_result(result.rows)
+        }
+        vibesql_ast::Statement::ShowCreateTable(stmt) => {
+            // Commit any pending implicit transaction before introspection
+            batching_manager.commit_if_needed(db)?;
+
+            let executor = IntrospectionExecutor::new(db);
+            let result = executor.execute_show_create_table(&stmt)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            format_query_result(result.rows)
+        }
         vibesql_ast::Statement::CreateTrigger(create_trigger_stmt) => {
             // Commit any pending implicit transaction before DDL
             batching_manager.commit_if_needed(db)?;
@@ -436,12 +490,6 @@ pub fn execute_sql(
         | vibesql_ast::Statement::DropFunction(_)
         | vibesql_ast::Statement::Call(_)
         | vibesql_ast::Statement::TruncateTable(_)
-        | vibesql_ast::Statement::ShowTables(_)
-        | vibesql_ast::Statement::ShowDatabases(_)
-        | vibesql_ast::Statement::ShowColumns(_)
-        | vibesql_ast::Statement::ShowIndex(_)
-        | vibesql_ast::Statement::ShowCreateTable(_)
-        | vibesql_ast::Statement::Describe(_)
         | vibesql_ast::Statement::AlterTrigger(_)
         | vibesql_ast::Statement::Prepare(_)
         | vibesql_ast::Statement::Execute(_)

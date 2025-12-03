@@ -21,6 +21,7 @@ mod explain;
 mod grant;
 pub mod index_ddl;
 mod insert;
+mod introspection;
 pub mod limits;
 pub mod memory;
 mod optimizer;
@@ -68,6 +69,7 @@ pub use index_ddl::{
     AnalyzeExecutor, CreateIndexExecutor, DropIndexExecutor, IndexExecutor, ReindexExecutor,
 };
 pub use insert::InsertExecutor;
+pub use introspection::IntrospectionExecutor;
 pub use memory::QueryArena;
 pub use persistence::load_sql_dump;
 pub use pipeline::{
