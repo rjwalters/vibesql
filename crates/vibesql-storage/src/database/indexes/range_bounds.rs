@@ -51,7 +51,10 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
         // Floating point: increment by smallest representable step
         // For floats, we use nextafter functionality via adding epsilon
         SqlValue::Float(f) if f.is_finite() => {
-            let next = f + f.abs() * f32::EPSILON;
+            // Special case: For zero and very small values, abs() * EPSILON may be 0 or too small.
+            // Use f32::MIN_POSITIVE as a fallback minimum increment.
+            let increment = (f.abs() * f32::EPSILON).max(f32::MIN_POSITIVE);
+            let next = f + increment;
             if next > *f && next.is_finite() {
                 Some(SqlValue::Float(next))
             } else {
@@ -59,7 +62,10 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
             }
         }
         SqlValue::Real(f) if f.is_finite() => {
-            let next = f + f.abs() * f32::EPSILON;
+            // Special case: For zero and very small values, abs() * EPSILON may be 0 or too small.
+            // Use f32::MIN_POSITIVE as a fallback minimum increment.
+            let increment = (f.abs() * f32::EPSILON).max(f32::MIN_POSITIVE);
+            let next = f + increment;
             if next > *f && next.is_finite() {
                 Some(SqlValue::Real(next))
             } else {
@@ -67,7 +73,10 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
             }
         }
         SqlValue::Double(f) if f.is_finite() => {
-            let next = f + f.abs() * f64::EPSILON;
+            // Special case: For zero and very small values, abs() * EPSILON may be 0 or too small.
+            // Use f64::MIN_POSITIVE as a fallback minimum increment.
+            let increment = (f.abs() * f64::EPSILON).max(f64::MIN_POSITIVE);
+            let next = f + increment;
             if next > *f && next.is_finite() {
                 Some(SqlValue::Double(next))
             } else {
@@ -75,7 +84,10 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
             }
         }
         SqlValue::Numeric(f) if f.is_finite() => {
-            let next = f + f.abs() * f64::EPSILON;
+            // Special case: For zero and very small values, abs() * EPSILON may be 0 or too small.
+            // Use f64::MIN_POSITIVE as a fallback minimum increment.
+            let increment = (f.abs() * f64::EPSILON).max(f64::MIN_POSITIVE);
+            let next = f + increment;
             if next > *f && next.is_finite() {
                 Some(SqlValue::Numeric(next))
             } else {
@@ -279,5 +291,46 @@ mod tests {
         // Boolean
         assert_eq!(calculate_next_value(&SqlValue::Boolean(true)), None);
         assert_eq!(calculate_next_value(&SqlValue::Boolean(false)), None);
+    }
+
+    #[test]
+    fn test_try_increment_sqlvalue_zero() {
+        // Test that zero values are correctly incremented (issue #3359)
+        // This was a bug where Double(0.0) would return None because
+        // 0.0 * EPSILON = 0.0, causing the increment check to fail.
+
+        // Double zero should increment to MIN_POSITIVE
+        let result = try_increment_sqlvalue(&SqlValue::Double(0.0));
+        assert!(result.is_some(), "Double(0.0) should increment");
+        if let Some(SqlValue::Double(d)) = result {
+            assert!(d > 0.0, "Incremented value should be positive");
+        }
+
+        // Float zero should increment
+        let result = try_increment_sqlvalue(&SqlValue::Float(0.0));
+        assert!(result.is_some(), "Float(0.0) should increment");
+        if let Some(SqlValue::Float(f)) = result {
+            assert!(f > 0.0, "Incremented value should be positive");
+        }
+
+        // Real zero should increment
+        let result = try_increment_sqlvalue(&SqlValue::Real(0.0));
+        assert!(result.is_some(), "Real(0.0) should increment");
+        if let Some(SqlValue::Real(r)) = result {
+            assert!(r > 0.0, "Incremented value should be positive");
+        }
+
+        // Numeric zero should increment
+        let result = try_increment_sqlvalue(&SqlValue::Numeric(0.0));
+        assert!(result.is_some(), "Numeric(0.0) should increment");
+        if let Some(SqlValue::Numeric(n)) = result {
+            assert!(n > 0.0, "Incremented value should be positive");
+        }
+
+        // Integer zero should increment to 1
+        assert_eq!(
+            try_increment_sqlvalue(&SqlValue::Integer(0)),
+            Some(SqlValue::Integer(1))
+        );
     }
 }
