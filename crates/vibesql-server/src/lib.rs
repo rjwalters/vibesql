@@ -9,6 +9,7 @@ pub mod connection;
 pub mod observability;
 pub mod protocol;
 pub mod session;
+pub mod subscription;
 
 pub use auth::PasswordStore;
 pub use config::{AuthConfig, Config, LoggingConfig, ServerConfig};
