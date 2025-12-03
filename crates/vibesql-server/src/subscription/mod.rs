@@ -44,6 +44,7 @@
 
 mod manager;
 pub mod session;
+mod table_dependencies;
 mod table_extract;
 
 use std::collections::HashSet;
@@ -53,6 +54,7 @@ use tokio::sync::mpsc;
 
 pub use manager::SubscriptionManager;
 pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager};
+pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
 
 // ============================================================================
