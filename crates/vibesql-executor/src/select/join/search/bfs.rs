@@ -131,7 +131,8 @@ impl JoinOrderContext {
     /// to the current join sequence. Prunes states that exceed the best known cost.
     fn expand_state_parallel(&self, state: &SearchState, best_cost: u64) -> Vec<SearchState> {
         // For the first table, any table is valid
-        // For subsequent tables, ONLY consider tables with join edges (enforce connectivity)
+        // For subsequent tables, prefer tables with join edges but allow disconnected tables
+        // when the join graph is not fully connected (e.g., Cartesian products)
         let candidates: Vec<&String> = if state.joined_tables.is_empty() {
             // First table: any unjoined table
             self.all_tables
@@ -139,13 +140,31 @@ impl JoinOrderContext {
                 .filter(|t| !state.joined_tables.contains(*t))
                 .collect()
         } else {
-            // Subsequent tables: MUST have join edge to already-joined tables
-            // This enforces connected subgraph enumeration (no CROSS JOINs)
-            self.all_tables
+            // Try to find tables with join edges first (connected subgraph)
+            let connected: Vec<&String> = self.all_tables
                 .iter()
                 .filter(|t| !state.joined_tables.contains(*t))
                 .filter(|t| self.has_join_edge(&state.joined_tables, t))
-                .collect()
+                .collect();
+
+            if !connected.is_empty() {
+                // Prefer connected tables to avoid Cartesian products
+                connected
+            } else {
+                // No connected tables remain - this is a disconnected join graph
+                // Allow ANY remaining table (Cartesian product is unavoidable)
+                // For Cartesian products, order by cardinality (smallest first) to minimize
+                // intermediate result sizes
+                let mut unjoined: Vec<&String> = self.all_tables
+                    .iter()
+                    .filter(|t| !state.joined_tables.contains(*t))
+                    .collect();
+
+                // Sort by cardinality (smallest first) to minimize intermediate sizes
+                unjoined.sort_by_key(|t| self.table_cardinalities.get(*t).copied().unwrap_or(10000));
+
+                unjoined
+            }
         };
 
         candidates
