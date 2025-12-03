@@ -309,3 +309,144 @@ fn test_secondary_index_with_limit() {
         panic!("Expected SELECT statement");
     }
 }
+
+/// Regression test for issue #3354: Secondary index fast path must apply residual predicates
+///
+/// When using a secondary index for lookup, any predicates NOT covered by the index
+/// (i.e., non-equality predicates or predicates on columns not in the index) must still
+/// be applied as a filter.
+///
+/// Bug: Query `WHERE col3 = 81814 AND col0 < 1013` with index on col3 would:
+/// 1. Use index to find rows where col3 = 81814
+/// 2. Return rows WITHOUT checking `col0 < 1013`
+///
+/// This test verifies that residual predicates are correctly applied.
+#[test]
+fn test_secondary_index_residual_predicate_filter() {
+    let mut db = Database::new();
+    db.catalog.set_case_sensitive_identifiers(false);
+
+    // Create simple table with pk, col0, col3
+    let schema = TableSchema::new(
+        "tab1".to_string(),
+        vec![
+            ColumnSchema::new("pk".to_string(), DataType::Integer, false),
+            ColumnSchema::new("col0".to_string(), DataType::Integer, false),
+            ColumnSchema::new("col3".to_string(), DataType::Integer, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Create secondary index on col3 only
+    db.create_index(
+        "idx_tab1_3".to_string(),
+        "tab1".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "col3".to_string(),
+            prefix_length: None,
+            direction: OrderDirection::Asc,
+        }],
+    )
+    .unwrap();
+
+    // Insert row: pk=881, col0=20123, col3=81814
+    // Note: col0=20123 does NOT satisfy col0 < 1013
+    db.insert_row(
+        "tab1",
+        Row::new(vec![
+            SqlValue::Integer(881),
+            SqlValue::Integer(20123),
+            SqlValue::Integer(81814),
+        ]),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // Query: col3 = 81814 (uses index) AND col0 < 1013 (residual filter)
+    // The row has col0=20123 which does NOT satisfy col0 < 1013, so should return 0 rows
+    let query = "SELECT pk, col0, col3 FROM tab1 WHERE col3 = 81814 AND col0 < 1013";
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute(&select_stmt).unwrap();
+
+        // Should return 0 rows because col0=20123 does NOT satisfy col0 < 1013
+        assert_eq!(result.len(), 0, "Residual predicate col0 < 1013 should filter out the row");
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+/// Test that rows matching both index predicate AND residual predicate are returned
+#[test]
+fn test_secondary_index_residual_predicate_match() {
+    let mut db = Database::new();
+    db.catalog.set_case_sensitive_identifiers(false);
+
+    // Create simple table with pk, col0, col3
+    let schema = TableSchema::new(
+        "tab1".to_string(),
+        vec![
+            ColumnSchema::new("pk".to_string(), DataType::Integer, false),
+            ColumnSchema::new("col0".to_string(), DataType::Integer, false),
+            ColumnSchema::new("col3".to_string(), DataType::Integer, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Create secondary index on col3 only
+    db.create_index(
+        "idx_tab1_3".to_string(),
+        "tab1".to_string(),
+        false,
+        vec![IndexColumn {
+            column_name: "col3".to_string(),
+            prefix_length: None,
+            direction: OrderDirection::Asc,
+        }],
+    )
+    .unwrap();
+
+    // Insert two rows with same col3 value but different col0 values
+    // Row 881: col0=20123 (does NOT satisfy col0 < 1013)
+    // Row 882: col0=500 (DOES satisfy col0 < 1013)
+    db.insert_row(
+        "tab1",
+        Row::new(vec![
+            SqlValue::Integer(881),
+            SqlValue::Integer(20123),
+            SqlValue::Integer(81814),
+        ]),
+    )
+    .unwrap();
+
+    db.insert_row(
+        "tab1",
+        Row::new(vec![
+            SqlValue::Integer(882),
+            SqlValue::Integer(500),
+            SqlValue::Integer(81814),
+        ]),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // Query: col3 = 81814 (uses index, finds both rows) AND col0 < 1013 (residual filter)
+    // Only row 882 should be returned (col0=500 < 1013)
+    let query = "SELECT pk, col0, col3 FROM tab1 WHERE col3 = 81814 AND col0 < 1013";
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute(&select_stmt).unwrap();
+
+        // Should return only 1 row (pk=882)
+        assert_eq!(result.len(), 1, "Should return only the row matching residual predicate");
+        assert_eq!(result[0].values[0], SqlValue::Integer(882), "Should return pk=882");
+        assert_eq!(result[0].values[1], SqlValue::Integer(500), "Should return col0=500");
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
