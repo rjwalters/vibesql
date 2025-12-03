@@ -52,7 +52,7 @@ use tpcds::schema::load_duckdb;
 /// These can be skipped with SKIP_SLOW=1 environment variable
 const SLOW_QUERIES: &[&str] = &[
     // Q4, Q11 fixed by PR #3393 (case-insensitive predicate plan lookups for CTE aliases)
-    "Q69", // EXISTS/NOT EXISTS correlated subqueries - 3+ GB memory spike
+    // Q69 was fixed by PR #3338 (EXISTS→semi-join transformation)
     // Q17, Q24, Q29 were fixed by PR #3347 (hash join for derived tables)
 ];
 
