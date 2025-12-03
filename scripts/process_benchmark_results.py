@@ -4,16 +4,27 @@ Process TPC-H benchmark results and store them in the dogfooding database.
 
 This script parses the output from bench-tpch.sh and stores the results
 in the VibeSQL database for performance tracking over time.
+
+NOTE: This script dogfoods VibeSQL - we use our own database to store results!
 """
 
 import argparse
 import re
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Import our VibeSQL helper module
+from vibesql_db import (
+    get_connection,
+    save_connection,
+    get_db_path,
+    get_last_insert_id,
+    init_schema,
+    execute_insert,
+)
 
 
 def get_repo_root() -> Path:
@@ -42,14 +53,10 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
 
-def get_db_path() -> Path:
-    """Get the path to the benchmark results database (SQLite format)."""
-    return Path.home() / ".vibesql" / "test_results" / "benchmark_results.db"
-
-
-def init_benchmark_schema(db_path: Path):
+def init_benchmark_schema(cursor) -> None:
     """Initialize benchmark tables in the database if they don't exist."""
-    schema_path = get_repo_root() / "scripts" / "benchmark_results_schema.sql"
+    # Use VibeSQL-specific schema (avoids reserved keyword 'timestamp')
+    schema_path = get_repo_root() / "scripts" / "benchmark_results_schema_vibesql.sql"
 
     if not schema_path.exists():
         print(f"❌ Schema file not found: {schema_path}")
@@ -58,13 +65,8 @@ def init_benchmark_schema(db_path: Path):
     with open(schema_path) as f:
         schema_sql = f.read()
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.executescript(schema_sql)
-        conn.commit()
-        print(f"✓ Benchmark schema initialized in {db_path}")
-    finally:
-        conn.close()
+    init_schema(cursor, schema_sql)
+    print(f"✓ Benchmark schema initialized")
 
 
 def parse_tpch_output(output_file: Path) -> Tuple[List[Dict], Dict]:
@@ -196,68 +198,61 @@ def parse_tpch_output(output_file: Path) -> Tuple[List[Dict], Dict]:
     return results, summary
 
 
-def insert_benchmark_results(db_path: Path, results: List[Dict], summary: Dict,
+def insert_benchmark_results(db, cursor, results: List[Dict], summary: Dict,
                               timeout_secs: int = 30, notes: Optional[str] = None):
     """Insert benchmark results into the database."""
     git_commit, git_branch = get_git_info()
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cursor = conn.cursor()
+    # Insert benchmark run
+    # Note: using 'run_timestamp' instead of 'timestamp' (reserved keyword in VibeSQL)
+    execute_insert(cursor, "benchmark_runs", [
+        "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
+        "timeout_secs", "total_queries", "passed_queries",
+        "failed_queries", "timeout_queries", "notes"
+    ], [
+        datetime.now().isoformat(),
+        git_commit,
+        git_branch,
+        'tpch',
+        timeout_secs,
+        summary['total_queries'],
+        summary['passed_queries'],
+        summary['failed_queries'],
+        summary['timeout_queries'],
+        notes
+    ])
 
-        # Insert benchmark run
-        cursor.execute("""
-            INSERT INTO benchmark_runs (
-                timestamp, git_commit, git_branch, benchmark_suite,
-                timeout_secs, total_queries, passed_queries,
-                failed_queries, timeout_queries, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            datetime.now().isoformat(),
-            git_commit,
-            git_branch,
-            'tpch',
-            timeout_secs,
-            summary['total_queries'],
-            summary['passed_queries'],
-            summary['failed_queries'],
-            summary['timeout_queries'],
-            notes
-        ))
+    # Get the run_id we just inserted
+    run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
 
-        run_id = cursor.lastrowid
+    # Insert individual query results
+    for result in results:
+        execute_insert(cursor, "benchmark_results", [
+            "run_id", "query_name", "status",
+            "parse_time_ms", "executor_creation_time_ms",
+            "execution_time_ms", "total_time_ms",
+            "row_count", "error_message"
+        ], [
+            run_id,
+            result['query_name'],
+            result['status'],
+            result['parse_time_ms'],
+            result['executor_creation_time_ms'],
+            result['execution_time_ms'],
+            result['total_time_ms'],
+            result['row_count'],
+            result['error_message']
+        ])
 
-        # Insert individual query results
-        for result in results:
-            cursor.execute("""
-                INSERT INTO benchmark_results (
-                    run_id, query_name, status,
-                    parse_time_ms, executor_creation_time_ms,
-                    execution_time_ms, total_time_ms,
-                    row_count, error_message
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run_id,
-                result['query_name'],
-                result['status'],
-                result['parse_time_ms'],
-                result['executor_creation_time_ms'],
-                result['execution_time_ms'],
-                result['total_time_ms'],
-                result['row_count'],
-                result['error_message']
-            ))
+    # Save to disk
+    save_connection(db)
 
-        conn.commit()
-
-        print(f"\n✅ Benchmark results stored in database")
-        print(f"   Run ID: {run_id}")
-        print(f"   Commit: {git_commit or 'unknown'}")
-        print(f"   Branch: {git_branch or 'unknown'}")
-        print(f"   Passed: {summary['passed_queries']}/{summary['total_queries']}")
-
-    finally:
-        conn.close()
+    print(f"\n✅ Benchmark results stored in database")
+    print(f"   Run ID: {run_id}")
+    print(f"   Commit: {git_commit or 'unknown'}")
+    print(f"   Branch: {git_branch or 'unknown'}")
+    print(f"   Passed: {summary['passed_queries']}/{summary['total_queries']}")
+    print(f"   Database: {get_db_path()}")
 
 
 def main():
@@ -289,13 +284,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Get database path
-    db_path = get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Get database connection
+    db, cursor = get_connection()
 
-    # Initialize schema if requested
+    # Initialize schema if requested or if this is a new database
     if args.init_schema:
-        init_benchmark_schema(db_path)
+        init_benchmark_schema(cursor)
+        save_connection(db)
         return
 
     # Parse benchmark output
@@ -313,11 +308,11 @@ def main():
     print(f"   Failed: {summary['failed_queries']}")
     print(f"   Timeout: {summary['timeout_queries']}")
 
-    # Initialize schema if tables don't exist
-    init_benchmark_schema(db_path)
+    # Initialize schema (idempotent - handles already existing tables)
+    init_benchmark_schema(cursor)
 
     # Insert results
-    insert_benchmark_results(db_path, results, summary, args.timeout, args.notes)
+    insert_benchmark_results(db, cursor, results, summary, args.timeout, args.notes)
 
 
 if __name__ == "__main__":
