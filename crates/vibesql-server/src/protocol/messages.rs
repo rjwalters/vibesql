@@ -550,10 +550,13 @@ mod tests {
     fn test_subscribe_message_parsing() {
         let mut buf = BytesMut::new();
         buf.put_u8(0xF0); // Subscribe
-        buf.put_i32(23); // Length: 4 (length) + 21 (query) - 2 (param count already included)
-        buf.put_slice(b"SELECT * FROM users\0");
-        buf.put_i16(0); // No params
-
+        let mut content = BytesMut::new();
+        content.put_slice(b"SELECT * FROM users\0");
+        content.put_i16(0); // No params
+    
+        buf.put_i32((4 + content.len()) as i32);
+        buf.extend(content);
+    
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
