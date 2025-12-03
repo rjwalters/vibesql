@@ -16,6 +16,7 @@ mod helpers;
 mod index;
 mod insert;
 mod introspection;
+mod prepared;
 mod revoke;
 mod role;
 mod schema;
@@ -347,6 +348,18 @@ impl Parser {
             Token::Keyword(Keyword::Describe) => {
                 let describe_stmt = self.parse_describe_statement()?;
                 Ok(vibesql_ast::Statement::Describe(describe_stmt))
+            }
+            Token::Keyword(Keyword::Prepare) => {
+                let prepare_stmt = self.parse_prepare_statement()?;
+                Ok(vibesql_ast::Statement::Prepare(prepare_stmt))
+            }
+            Token::Keyword(Keyword::Execute) => {
+                let execute_stmt = self.parse_execute_statement()?;
+                Ok(vibesql_ast::Statement::Execute(execute_stmt))
+            }
+            Token::Keyword(Keyword::Deallocate) => {
+                let deallocate_stmt = self.parse_deallocate_statement()?;
+                Ok(vibesql_ast::Statement::Deallocate(deallocate_stmt))
             }
             _ => {
                 Err(ParseError { message: format!("Expected statement, found {:?}", self.peek()) })

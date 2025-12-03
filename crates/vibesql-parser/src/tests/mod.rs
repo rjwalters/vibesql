@@ -31,6 +31,7 @@ mod literals;
 mod not_is_null_precedence;
 mod null_functions;
 mod predicates;
+mod prepared;
 mod quantified;
 mod revoke;
 mod role;

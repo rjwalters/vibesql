@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -20,6 +21,8 @@ pub struct Session {
     pub in_transaction: bool,
     /// Prepared statement cache for reduced parsing overhead
     stmt_cache: Arc<PreparedStatementCache>,
+    /// Named prepared statements (from PREPARE SQL syntax)
+    named_statements: HashMap<String, Arc<PreparedStatement>>,
 }
 
 /// Simplified execution result for wire protocol
@@ -47,6 +50,14 @@ pub enum ExecutionResult {
     Analyze {
         tables_analyzed: usize,
     },
+    /// Statement prepared successfully
+    Prepare {
+        statement_name: String,
+    },
+    /// Prepared statement deallocated
+    Deallocate {
+        statement_name: String,
+    },
     Other {
         message: String,
     },
@@ -67,6 +78,8 @@ impl ExecutionResult {
             ExecutionResult::DropIndex => "DROP_INDEX",
             ExecutionResult::DropView => "DROP_VIEW",
             ExecutionResult::Analyze { .. } => "ANALYZE",
+            ExecutionResult::Prepare { .. } => "PREPARE",
+            ExecutionResult::Deallocate { .. } => "DEALLOCATE",
             ExecutionResult::Other { .. } => "OTHER",
         }
     }
@@ -104,6 +117,7 @@ impl Session {
             db,
             in_transaction: false,
             stmt_cache: Arc::new(PreparedStatementCache::default_cache()),
+            named_statements: HashMap::new(),
         })
     }
 
@@ -122,6 +136,7 @@ impl Session {
             db,
             in_transaction: false,
             stmt_cache: cache,
+            named_statements: HashMap::new(),
         })
     }
 
@@ -265,10 +280,120 @@ impl Session {
                 Ok(ExecutionResult::Analyze { tables_analyzed })
             }
 
+            vibesql_ast::Statement::Prepare(prepare_stmt) => {
+                self.execute_prepare(prepare_stmt)
+            }
+
+            vibesql_ast::Statement::Execute(execute_stmt) => {
+                self.execute_execute(execute_stmt)
+            }
+
+            vibesql_ast::Statement::Deallocate(deallocate_stmt) => {
+                self.execute_deallocate(deallocate_stmt)
+            }
+
             _ => {
                 // For now, return a generic success for other statements
                 Ok(ExecutionResult::Other { message: "Command completed successfully".to_string() })
             }
+        }
+    }
+
+    /// Execute PREPARE statement - registers a named prepared statement
+    fn execute_prepare(&mut self, prepare_stmt: &vibesql_ast::PrepareStmt) -> Result<ExecutionResult> {
+        use vibesql_ast::PreparedStatementBody;
+
+        let name = prepare_stmt.name.clone();
+
+        // Get the SQL string to prepare
+        let sql = match &prepare_stmt.statement {
+            PreparedStatementBody::SqlString(s) => s.clone(),
+            PreparedStatementBody::ParsedStatement(_stmt) => {
+                // For parsed statements, we need to re-serialize to SQL for caching
+                // For now, we'll create a prepared statement directly from the AST
+                // This is a simplified approach - a full implementation would
+                // need to serialize the AST back to SQL or work with AST directly
+                return Err(anyhow::anyhow!(
+                    "PREPARE ... AS syntax not yet supported. Use PREPARE ... FROM 'sql_string' instead"
+                ));
+            }
+        };
+
+        // Create the prepared statement
+        let prepared = self.stmt_cache.get_or_prepare(&sql)
+            .map_err(|e| anyhow::anyhow!("Failed to prepare statement: {}", e))?;
+
+        // Store in named statements registry
+        self.named_statements.insert(name.clone(), prepared);
+
+        Ok(ExecutionResult::Prepare { statement_name: name })
+    }
+
+    /// Execute EXECUTE statement - runs a named prepared statement
+    fn execute_execute(&mut self, execute_stmt: &vibesql_ast::ExecuteStmt) -> Result<ExecutionResult> {
+        let name = &execute_stmt.name;
+
+        // Look up the named statement
+        let prepared = self.named_statements.get(name)
+            .ok_or_else(|| anyhow::anyhow!("Prepared statement '{}' not found", name))?
+            .clone();
+
+        // Evaluate parameter expressions to get values
+        let params: Vec<SqlValue> = execute_stmt.params.iter()
+            .map(|expr| self.evaluate_expression(expr))
+            .collect::<Result<Vec<_>>>()?;
+
+        // Execute the prepared statement with parameters
+        self.execute_prepared(&prepared, &params)
+    }
+
+    /// Execute DEALLOCATE statement - removes a named prepared statement
+    fn execute_deallocate(&mut self, deallocate_stmt: &vibesql_ast::DeallocateStmt) -> Result<ExecutionResult> {
+        use vibesql_ast::DeallocateTarget;
+
+        match &deallocate_stmt.target {
+            DeallocateTarget::Name(name) => {
+                if self.named_statements.remove(name).is_none() {
+                    return Err(anyhow::anyhow!("Prepared statement '{}' not found", name));
+                }
+                Ok(ExecutionResult::Deallocate { statement_name: name.clone() })
+            }
+            DeallocateTarget::All => {
+                let count = self.named_statements.len();
+                self.named_statements.clear();
+                Ok(ExecutionResult::Other {
+                    message: format!("Deallocated {} prepared statement(s)", count),
+                })
+            }
+        }
+    }
+
+    /// Evaluate an expression to a SqlValue (for EXECUTE parameters)
+    fn evaluate_expression(&self, expr: &vibesql_ast::Expression) -> Result<SqlValue> {
+        use vibesql_ast::Expression;
+
+        match expr {
+            // Expression::Literal wraps SqlValue directly
+            Expression::Literal(val) => Ok(val.clone()),
+            Expression::UnaryOp { op, expr: operand } => {
+                // Handle negative numbers
+                if let vibesql_ast::UnaryOperator::Minus = op {
+                    let val = self.evaluate_expression(operand)?;
+                    match val {
+                        SqlValue::Integer(n) => Ok(SqlValue::Integer(-n)),
+                        SqlValue::Bigint(n) => Ok(SqlValue::Bigint(-n)),
+                        SqlValue::Float(n) => Ok(SqlValue::Float(-n)),
+                        SqlValue::Double(n) => Ok(SqlValue::Double(-n)),
+                        SqlValue::Numeric(n) => Ok(SqlValue::Numeric(-n)),
+                        _ => Err(anyhow::anyhow!("Cannot negate non-numeric value")),
+                    }
+                } else {
+                    Err(anyhow::anyhow!("Unsupported unary operator in EXECUTE parameter"))
+                }
+            }
+            _ => Err(anyhow::anyhow!(
+                "Unsupported expression type in EXECUTE parameters. Only literals are currently supported."
+            )),
         }
     }
 
