@@ -2,6 +2,7 @@
   "name": "@vibesql/client",
   "version": "0.1.0",
   "description": "TypeScript SDK for VibeSQL with real-time subscription support",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

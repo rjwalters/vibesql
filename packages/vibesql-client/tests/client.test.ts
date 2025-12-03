@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VibeSQL } from '../src/client.js';
 import { SubscriptionState, ConnectionState } from '../src/types.js';
+import { Subscription, SubscriptionManager } from '../src/subscription.js';
 
 describe('VibeSQL Client', () => {
   let client: VibeSQL;
@@ -58,7 +59,6 @@ describe('VibeSQL Client', () => {
 
 describe('Subscription', () => {
   it('should create subscription with correct state', () => {
-    const { Subscription } = require('../src/subscription.js');
     const sub = new Subscription('sub-1', 'SELECT * FROM users');
 
     expect(sub.getId()).toBe('sub-1');
@@ -67,7 +67,6 @@ describe('Subscription', () => {
   });
 
   it('should support chaining listeners', () => {
-    const { Subscription } = require('../src/subscription.js');
     const sub = new Subscription('sub-1', 'SELECT * FROM users');
 
     const dataHandler = vi.fn();
@@ -79,7 +78,6 @@ describe('Subscription', () => {
   });
 
   it('should emit data events', () => {
-    const { Subscription } = require('../src/subscription.js');
     const sub = new Subscription('sub-1', 'SELECT * FROM users');
 
     const handler = vi.fn();
@@ -97,7 +95,6 @@ describe('Subscription', () => {
   });
 
   it('should unsubscribe and remove listeners', () => {
-    const { Subscription } = require('../src/subscription.js');
     const sub = new Subscription('sub-1', 'SELECT * FROM users');
 
     const handler = vi.fn();
@@ -111,7 +108,6 @@ describe('Subscription', () => {
 
 describe('SubscriptionManager', () => {
   it('should create and retrieve subscriptions', () => {
-    const { SubscriptionManager } = require('../src/subscription.js');
     const manager = new SubscriptionManager();
 
     const sub = manager.create('sub-1', 'SELECT * FROM users');
@@ -121,7 +117,6 @@ describe('SubscriptionManager', () => {
   });
 
   it('should remove subscriptions', () => {
-    const { SubscriptionManager } = require('../src/subscription.js');
     const manager = new SubscriptionManager();
 
     manager.create('sub-1', 'SELECT * FROM users');
@@ -132,7 +127,6 @@ describe('SubscriptionManager', () => {
   });
 
   it('should clear all subscriptions', () => {
-    const { SubscriptionManager } = require('../src/subscription.js');
     const manager = new SubscriptionManager();
 
     manager.create('sub-1', 'SELECT * FROM users');
