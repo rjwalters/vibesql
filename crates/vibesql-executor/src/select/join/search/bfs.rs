@@ -23,12 +23,16 @@ impl JoinOrderContext {
         let start_time = std::time::Instant::now();
         let time_budget = std::time::Duration::from_millis(self.config.time_budget_ms);
 
+        // Create initial filter state based on table cardinalities
+        let initial_filter_state = self.create_initial_filter_state();
+
         // Initial state: empty set of joined tables
         let initial_state = SearchState {
             joined_tables: BTreeSet::new(),
             cost_so_far: JoinCost::new(0, 0),
             order: Vec::new(),
             current_cardinality: 0,
+            filter_state: initial_filter_state,
         };
 
         let mut current_layer = vec![initial_state];
@@ -170,8 +174,13 @@ impl JoinOrderContext {
         candidates
             .into_iter()
             .filter_map(|next_table| {
-                // Estimate cost of joining this table (using current intermediate result size)
-                let join_cost = self.estimate_join_cost(state.current_cardinality, &state.joined_tables, next_table);
+                // Estimate cost of joining this table with cascading filter awareness
+                let join_cost = self.estimate_join_cost_with_filters(
+                    state.current_cardinality,
+                    &state.joined_tables,
+                    next_table,
+                    &state.filter_state,
+                );
                 let new_cost = JoinCost::new(
                     state.cost_so_far.cardinality + join_cost.cardinality,
                     state.cost_so_far.operations + join_cost.operations,
@@ -182,13 +191,15 @@ impl JoinOrderContext {
                     return None;
                 }
 
-                // Create new state
+                // Create new state with updated filter information
                 let mut new_state = state.clone();
                 new_state.joined_tables.insert(next_table.clone());
                 new_state.cost_so_far = new_cost;
                 new_state.order.push(next_table.clone());
                 // Update current cardinality to the result of this join
                 new_state.current_cardinality = join_cost.cardinality;
+                // Apply correlation adjustment for the new join
+                new_state.filter_state.apply_correlation_for_join(&new_state.joined_tables);
 
                 Some(new_state)
             })

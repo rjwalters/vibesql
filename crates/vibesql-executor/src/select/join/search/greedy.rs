@@ -35,6 +35,9 @@ impl JoinOrderContext {
         let mut join_order = Vec::new();
         let mut current_cardinality: usize;
 
+        // Create initial filter state based on table cardinalities
+        let mut filter_state = self.create_initial_filter_state();
+
         // Step 1: Start with the smallest table (lowest cardinality)
         let first_table = remaining_tables
             .iter()
@@ -60,7 +63,12 @@ impl JoinOrderContext {
                     continue;
                 }
 
-                let cost = self.estimate_join_cost(current_cardinality, &joined_tables, candidate);
+                let cost = self.estimate_join_cost_with_filters(
+                    current_cardinality,
+                    &joined_tables,
+                    candidate,
+                    &filter_state,
+                );
 
                 if best_table.is_none() || cost.total() < best_cost.total() {
                     best_table = Some(candidate.clone());
@@ -75,6 +83,8 @@ impl JoinOrderContext {
                 join_order.push(table);
                 // Update current cardinality to the result of this join
                 current_cardinality = best_cost.cardinality;
+                // Apply correlation adjustment for the new join
+                filter_state.apply_correlation_for_join(&joined_tables);
             } else {
                 // No connected tables remain - this is a disconnected join graph
                 // This is common in SQLLogicTest where queries have multiple table-local
@@ -85,11 +95,18 @@ impl JoinOrderContext {
                     .min_by_key(|t| self.table_cardinalities.get(*t).copied().unwrap_or(10000))
                     .cloned()
                 {
-                    let cost = self.estimate_join_cost(current_cardinality, &joined_tables, &table);
+                    let cost = self.estimate_join_cost_with_filters(
+                        current_cardinality,
+                        &joined_tables,
+                        &table,
+                        &filter_state,
+                    );
                     joined_tables.insert(table.clone());
                     remaining_tables.remove(&table);
                     join_order.push(table);
                     current_cardinality = cost.cardinality;
+                    // Apply correlation adjustment for the new join
+                    filter_state.apply_correlation_for_join(&joined_tables);
                 } else {
                     break;
                 }

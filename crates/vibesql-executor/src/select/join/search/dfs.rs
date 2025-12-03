@@ -22,11 +22,15 @@ impl JoinOrderContext {
             return self.find_optimal_order_greedy();
         }
 
+        // Create initial filter state based on table cardinalities
+        let initial_filter_state = self.create_initial_filter_state();
+
         let initial_state = SearchState {
             joined_tables: BTreeSet::new(),
             cost_so_far: JoinCost::new(0, 0),
             order: Vec::new(),
             current_cardinality: 0,
+            filter_state: initial_filter_state,
         };
 
         let mut best_cost = u64::MAX;
@@ -128,10 +132,15 @@ impl JoinOrderContext {
                 continue;
             }
 
-            // Estimate cost of joining this table (using current intermediate result size)
-            let join_cost = self.estimate_join_cost(state.current_cardinality, &state.joined_tables, next_table);
+            // Estimate cost of joining this table with cascading filter awareness
+            let join_cost = self.estimate_join_cost_with_filters(
+                state.current_cardinality,
+                &state.joined_tables,
+                next_table,
+                &state.filter_state,
+            );
 
-            // Create new state with this table added
+            // Create new state with this table added and updated filter state
             let mut next_state = state.clone();
             next_state.joined_tables.insert(next_table.clone());
             next_state.cost_so_far = JoinCost::new(
@@ -141,6 +150,8 @@ impl JoinOrderContext {
             next_state.order.push(next_table.clone());
             // Update current cardinality to the result of this join
             next_state.current_cardinality = join_cost.cardinality;
+            // Apply correlation adjustment for the new join
+            next_state.filter_state.apply_correlation_for_join(&next_state.joined_tables);
 
             // Recursively search from this state
             self.search_recursive(next_state, best_cost, best_order, iterations, max_iterations);
