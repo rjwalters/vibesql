@@ -29,6 +29,8 @@ impl Clone for Database {
             // Clone creates a new cache with same config but empty data
             // This is intentional - cloned databases shouldn't share cache state
             columnar_cache: Arc::new(ColumnarCache::new(self.columnar_cache.max_memory())),
+            // Clone does not inherit change event sender - cloned databases are independent
+            change_sender: None,
         }
     }
 }
@@ -48,6 +50,7 @@ impl Database {
             sql_mode: vibesql_types::SqlMode::default(),
             query_buffer_pool: QueryBufferPool::new(),
             columnar_cache: Arc::new(ColumnarCache::new(DEFAULT_COLUMNAR_CACHE_BUDGET)),
+            change_sender: None,
         }
     }
 

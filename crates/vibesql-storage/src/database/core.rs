@@ -6,6 +6,7 @@ use super::lifecycle::Lifecycle;
 use super::metadata::Metadata;
 use super::operations::Operations;
 use super::transactions::TransactionChange;
+use crate::change_events::{ChangeEvent, ChangeEventReceiver, ChangeEventSender};
 use crate::columnar_cache::ColumnarCache;
 use crate::{QueryBufferPool, Row, StorageError, Table};
 use std::collections::HashMap;
@@ -31,6 +32,9 @@ pub struct Database {
     /// LRU cache for columnar table representations
     /// Shared via Arc to allow cloning without duplicating cache data
     pub(super) columnar_cache: Arc<ColumnarCache>,
+    /// Optional broadcast channel for change event notifications
+    /// Enables reactive subscriptions when enabled
+    pub(super) change_sender: Option<ChangeEventSender>,
 }
 
 impl Database {
@@ -225,7 +229,7 @@ impl Database {
 
     /// Insert a row into a table
     pub fn insert_row(&mut self, table_name: &str, row: Row) -> Result<(), StorageError> {
-        let _row_index = self.operations.insert_row(
+        let row_index = self.operations.insert_row(
             &self.catalog,
             &mut self.tables,
             table_name,
@@ -235,6 +239,12 @@ impl Database {
         self.record_change(TransactionChange::Insert {
             table_name: table_name.to_string(),
             row,
+        });
+
+        // Broadcast change event to subscribers
+        self.broadcast_change(ChangeEvent::Insert {
+            table_name: table_name.to_string(),
+            row_index,
         });
 
         // Invalidate columnar cache for this table
@@ -288,11 +298,17 @@ impl Database {
             rows.clone(),
         )?;
 
-        // Record changes for transaction management
-        for row in rows {
+        // Record changes for transaction management and broadcast events
+        for (row, &row_index) in rows.into_iter().zip(row_indices.iter()) {
             self.record_change(TransactionChange::Insert {
                 table_name: table_name.to_string(),
                 row,
+            });
+
+            // Broadcast change event to subscribers
+            self.broadcast_change(ChangeEvent::Insert {
+                table_name: table_name.to_string(),
+                row_index,
             });
         }
 
@@ -453,6 +469,12 @@ impl Database {
             &new_row,
             row_index,
         );
+
+        // Broadcast change event to subscribers
+        self.broadcast_change(ChangeEvent::Update {
+            table_name: resolved_name.clone(),
+            row_index,
+        });
 
         // Invalidate columnar cache
         self.columnar_cache.invalidate(&resolved_name);
@@ -648,6 +670,96 @@ impl Database {
 
         Ok(None)
     }
+
+    // ============================================================================
+    // Change Event Broadcasting (Reactive Subscriptions)
+    // ============================================================================
+
+    /// Enable change event broadcasting
+    ///
+    /// Creates a broadcast channel for notifying subscribers when data changes.
+    /// Returns a receiver for the channel.
+    ///
+    /// # Arguments
+    /// * `capacity` - Maximum number of events to buffer before old events are overwritten
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let mut db = Database::new();
+    /// let mut rx = db.enable_change_events(1024);
+    ///
+    /// // Insert some data
+    /// db.insert_row("users", row)?;
+    ///
+    /// // Receive change events
+    /// for event in rx.recv_all() {
+    ///     println!("Change: {:?}", event);
+    /// }
+    /// ```
+    pub fn enable_change_events(&mut self, capacity: usize) -> ChangeEventReceiver {
+        let (sender, receiver) = crate::change_events::channel(capacity);
+        self.change_sender = Some(sender);
+        receiver
+    }
+
+    /// Subscribe to change events
+    ///
+    /// Returns a new receiver for change events if broadcasting is enabled,
+    /// or None if `enable_change_events()` has not been called.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Enable broadcasting
+    /// db.enable_change_events(1024);
+    ///
+    /// // Create additional subscribers
+    /// let rx1 = db.subscribe_changes().unwrap();
+    /// let rx2 = db.subscribe_changes().unwrap();
+    /// ```
+    pub fn subscribe_changes(&self) -> Option<ChangeEventReceiver> {
+        self.change_sender.as_ref().map(|s| s.subscribe())
+    }
+
+    /// Check if change event broadcasting is enabled
+    pub fn change_events_enabled(&self) -> bool {
+        self.change_sender.is_some()
+    }
+
+    /// Broadcast a change event to all subscribers (internal use)
+    pub(super) fn broadcast_change(&self, event: ChangeEvent) {
+        if let Some(sender) = &self.change_sender {
+            let _ = sender.send(event);
+        }
+    }
+
+    /// Notify subscribers of an update event
+    ///
+    /// This should be called by the executor after successfully updating a row.
+    /// The storage layer broadcasts the event to any subscribers.
+    ///
+    /// # Arguments
+    /// * `table_name` - Name of the table that was modified
+    /// * `row_index` - Index of the row that was updated
+    pub fn notify_update(&self, table_name: &str, row_index: usize) {
+        self.broadcast_change(ChangeEvent::Update { table_name: table_name.to_string(), row_index });
+    }
+
+    /// Notify subscribers of a delete event
+    ///
+    /// This should be called by the executor after successfully deleting rows.
+    /// The storage layer broadcasts the event to any subscribers.
+    ///
+    /// # Arguments
+    /// * `table_name` - Name of the table that was modified
+    /// * `row_indices` - Indices of rows that were deleted (before deletion)
+    pub fn notify_deletes(&self, table_name: &str, row_indices: &[usize]) {
+        for &row_index in row_indices {
+            self.broadcast_change(ChangeEvent::Delete {
+                table_name: table_name.to_string(),
+                row_index,
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -749,5 +861,206 @@ mod tests {
         // Verify the mode changed
         let mode = db.sql_mode();
         assert!(matches!(mode, SqlMode::SQLite));
+    }
+
+    // ============================================================================
+    // Change Event Tests
+    // ============================================================================
+
+    #[test]
+    fn test_change_events_disabled_by_default() {
+        let db = Database::new();
+        assert!(!db.change_events_enabled());
+        assert!(db.subscribe_changes().is_none());
+    }
+
+    #[test]
+    fn test_enable_change_events() {
+        let mut db = Database::new();
+        let _rx = db.enable_change_events(16);
+        assert!(db.change_events_enabled());
+        assert!(db.subscribe_changes().is_some());
+    }
+
+    #[test]
+    fn test_insert_emits_change_event() {
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+
+        let mut db = Database::new();
+        let mut rx = db.enable_change_events(16);
+
+        // Create a simple table
+        let schema = TableSchema::new(
+            "users".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ],
+        );
+        db.create_table(schema).unwrap();
+
+        // Insert a row
+        let row = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
+        db.insert_row("users", row).unwrap();
+
+        // Verify change event was emitted
+        let events = rx.recv_all();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChangeEvent::Insert { table_name, row_index } => {
+                assert_eq!(*row_index, 0);
+                // Table name will be "users" as passed to insert_row
+                assert_eq!(table_name, "users");
+            }
+            _ => panic!("Expected Insert event, got {:?}", events[0]),
+        }
+    }
+
+    #[test]
+    fn test_batch_insert_emits_multiple_events() {
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+
+        let mut db = Database::new();
+        let mut rx = db.enable_change_events(16);
+
+        // Create a simple table
+        let schema = TableSchema::new(
+            "products".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ],
+        );
+        db.create_table(schema).unwrap();
+
+        // Insert batch of rows
+        let rows = vec![
+            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Product A".to_string())]),
+            crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Product B".to_string())]),
+            crate::Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Product C".to_string())]),
+        ];
+        db.insert_rows_batch("products", rows).unwrap();
+
+        // Verify 3 change events were emitted
+        let events = rx.recv_all();
+        assert_eq!(events.len(), 3);
+        for (i, event) in events.iter().enumerate() {
+            assert!(matches!(event, ChangeEvent::Insert { row_index, .. } if *row_index == i));
+        }
+    }
+
+    #[test]
+    fn test_update_emits_change_event() {
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+
+        let mut db = Database::new();
+
+        // Create table with primary key
+        let schema = TableSchema::with_primary_key(
+            "users".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ],
+            vec!["id".to_string()],
+        );
+        db.create_table(schema).unwrap();
+
+        // Insert a row
+        let row = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
+        db.insert_row("users", row).unwrap();
+
+        // Now enable change events and update
+        let mut rx = db.enable_change_events(16);
+
+        db.update_row_by_pk(
+            "users",
+            SqlValue::Integer(1),
+            vec![("name", SqlValue::Varchar("Alice Smith".to_string()))],
+        )
+        .unwrap();
+
+        // Verify update event was emitted
+        let events = rx.recv_all();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], ChangeEvent::Update { row_index: 0, .. }));
+    }
+
+    #[test]
+    fn test_multiple_subscribers() {
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+
+        let mut db = Database::new();
+        let mut rx1 = db.enable_change_events(16);
+        let mut rx2 = db.subscribe_changes().unwrap();
+
+        // Create table and insert
+        let schema = TableSchema::new(
+            "test".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+        db.create_table(schema).unwrap();
+
+        let row = crate::Row::new(vec![SqlValue::Integer(1)]);
+        db.insert_row("test", row).unwrap();
+
+        // Both receivers should get the event
+        assert_eq!(rx1.recv_all().len(), 1);
+        assert_eq!(rx2.recv_all().len(), 1);
+    }
+
+    #[test]
+    fn test_no_panic_on_lagged_receiver() {
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+
+        let mut db = Database::new();
+        let _rx = db.enable_change_events(2); // Very small buffer
+
+        // Create table
+        let schema = TableSchema::new(
+            "test".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+        db.create_table(schema).unwrap();
+
+        // Insert more rows than buffer can hold
+        for i in 0..10 {
+            let row = crate::Row::new(vec![SqlValue::Integer(i)]);
+            db.insert_row("test", row).unwrap();
+        }
+        // Should not panic - lagged receivers are handled gracefully
+    }
+
+    #[test]
+    fn test_notify_deletes() {
+        let mut db = Database::new();
+        let mut rx = db.enable_change_events(16);
+
+        // Directly call notify_deletes (since DELETE is handled by executor)
+        db.notify_deletes("users", &[0, 2, 5]);
+
+        let events = rx.recv_all();
+        assert_eq!(events.len(), 3);
+        assert!(matches!(&events[0], ChangeEvent::Delete { table_name, row_index: 0 } if table_name == "users"));
+        assert!(matches!(&events[1], ChangeEvent::Delete { table_name, row_index: 2 } if table_name == "users"));
+        assert!(matches!(&events[2], ChangeEvent::Delete { table_name, row_index: 5 } if table_name == "users"));
+    }
+
+    #[test]
+    fn test_notify_update() {
+        let mut db = Database::new();
+        let mut rx = db.enable_change_events(16);
+
+        // Directly call notify_update
+        db.notify_update("products", 42);
+
+        let events = rx.recv_all();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], ChangeEvent::Update { table_name, row_index: 42 } if table_name == "products"));
     }
 }
