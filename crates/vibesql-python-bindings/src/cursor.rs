@@ -512,7 +512,7 @@ impl Cursor {
         for item in seq_of_params.iter() {
             let params_tuple = item.cast::<PyTuple>()?;
             // Bind parameters for this iteration
-            let processed_sql = Self::bind_parameters(py, sql, &params_tuple)?;
+            let processed_sql = Self::bind_parameters(py, sql, params_tuple)?;
             
             // Parse the SQL
             let stmt = vibesql_parser::Parser::parse_sql(&processed_sql)
