@@ -17,7 +17,7 @@ impl ExpressionHasher {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let expr1 = Expression::BinaryOp { /* a + b */ };
     /// let expr2 = Expression::BinaryOp { /* a + b */ };
     /// assert_eq!(ExpressionHasher::hash(&expr1), ExpressionHasher::hash(&expr2));

@@ -6,7 +6,7 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```text
 //! use bumpalo::Bump;
 //! use vibesql_parser::arena_parser::ArenaParser;
 //!

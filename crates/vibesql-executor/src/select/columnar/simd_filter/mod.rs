@@ -122,7 +122,7 @@ pub fn simd_create_filter_mask(
 ///
 /// This function is designed for use with fused filter+aggregate optimization:
 ///
-/// ```ignore
+/// ```text
 /// let filter_mask = simd_create_filter_mask_packed(batch, predicates)?;
 /// let sum = simd_ops::sum_f64_packed_filtered(values, &filter_mask);
 /// let count = filter_mask.count_ones();

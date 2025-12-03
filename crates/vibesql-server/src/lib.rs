@@ -20,5 +20,7 @@ pub use protocol::{
 };
 pub use session::{Column, ExecutionResult, Row, Session};
 pub use subscription::{
-    ChangeEvent, SubscriptionError, SubscriptionId, SubscriptionManager, SubscriptionUpdate,
+    extract_table_dependencies, extract_table_refs, ChangeEvent, SessionSubscription,
+    SessionSubscriptionId, SessionSubscriptionManager, Subscription, SubscriptionError,
+    SubscriptionId, SubscriptionManager, SubscriptionUpdate,
 };

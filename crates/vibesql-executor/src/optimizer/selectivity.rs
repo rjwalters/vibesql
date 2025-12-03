@@ -20,7 +20,7 @@ use vibesql_storage::statistics::TableStatistics;
 /// A new vector with predicates ordered by selectivity (most selective first)
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// // Before: [expensive_function(x), y = 5]
 /// // After:  [y = 5, expensive_function(x)]
 /// // If y = 5 filters 99% of rows, expensive_function only runs on 1%
