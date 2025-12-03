@@ -42,7 +42,9 @@
 //! }
 //! ```
 
+mod dependencies;
 mod manager;
+mod router;
 mod table_extract;
 
 use std::collections::HashSet;
@@ -50,7 +52,9 @@ use std::hash::{Hash, Hasher};
 
 use tokio::sync::mpsc;
 
+pub use dependencies::extract_table_dependencies;
 pub use manager::SubscriptionManager;
+pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
 pub use table_extract::extract_table_refs;
 
 // ============================================================================

@@ -1,6 +1,6 @@
 //! Change router that routes storage events to affected subscriptions
 
-use super::manager::SubscriptionId;
+use super::SubscriptionId;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use vibesql_storage::{ChangeEvent, ChangeEventReceiver};
@@ -153,7 +153,7 @@ mod tests {
         let (_sender, receiver) = change_event_channel(16);
         let mut router = ChangeRouter::new(receiver);
 
-        let sub_id = [1u8; 16];
+        let sub_id = SubscriptionId::new();
         router.register_subscription("users".to_string(), sub_id);
 
         assert_eq!(router.subscription_count_for_table("users"), 1);
@@ -164,7 +164,7 @@ mod tests {
         let (_sender, receiver) = change_event_channel(16);
         let mut router = ChangeRouter::new(receiver);
 
-        let sub_id = [1u8; 16];
+        let sub_id = SubscriptionId::new();
         router.register_subscription("users".to_string(), sub_id);
         assert_eq!(router.subscription_count_for_table("users"), 1);
 
@@ -177,8 +177,8 @@ mod tests {
         let (_sender, receiver) = change_event_channel(16);
         let mut router = ChangeRouter::new(receiver);
 
-        let sub1 = [1u8; 16];
-        let sub2 = [2u8; 16];
+        let sub1 = SubscriptionId::new();
+        let sub2 = SubscriptionId::new();
 
         router.register_subscription("users".to_string(), sub1);
         router.register_subscription("users".to_string(), sub2);
@@ -191,8 +191,8 @@ mod tests {
         let (_sender, receiver) = change_event_channel(16);
         let mut router = ChangeRouter::new(receiver);
 
-        let sub1 = [1u8; 16];
-        let sub2 = [2u8; 16];
+        let sub1 = SubscriptionId::new();
+        let sub2 = SubscriptionId::new();
 
         router.register_subscription("users".to_string(), sub1);
         router.register_subscription("orders".to_string(), sub2);
@@ -231,7 +231,7 @@ mod tests {
         let (sender, receiver) = change_event_channel(16);
         let mut router = ChangeRouter::new(receiver);
 
-        let sub_id = [1u8; 16];
+        let sub_id = SubscriptionId::new();
         router.register_subscription("users".to_string(), sub_id);
 
         let (tx, mut rx) = mpsc::channel(16);
