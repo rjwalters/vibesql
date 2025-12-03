@@ -6,6 +6,7 @@
 //! that is reset between files.
 
 use std::cell::RefCell;
+use vibesql_executor::clear_in_subquery_cache;
 use vibesql_storage::Database;
 
 // Thread-local Database pool for reuse across test files within the same worker thread.
@@ -18,6 +19,15 @@ thread_local! {
 /// Get a reset Database from the thread-local pool.
 /// First call creates a new Database, subsequent calls reuse and reset the existing one.
 /// Uses take/replace pattern to avoid cloning overhead.
+///
+/// # Cache Invalidation
+///
+/// When reusing a database, we also clear the thread-local IN subquery HashSet cache.
+/// This cache (in vibesql_executor) stores pre-computed HashSets for non-correlated
+/// IN subqueries. The cache key is based only on the subquery's SQL syntax (AST hash),
+/// not the underlying table data. Without clearing, cached results from one test file
+/// would be incorrectly reused for another file with the same subquery syntax but
+/// different data. See issue #3370.
 pub fn get_pooled_database() -> Database {
     DB_POOL.with(|pool| {
         let mut pool_ref = pool.borrow_mut();
@@ -25,6 +35,9 @@ pub fn get_pooled_database() -> Database {
             Some(mut db) => {
                 // Reuse existing database after resetting it (no clone)
                 db.reset();
+                // Clear the IN subquery HashSet cache to prevent stale results
+                // from previous test files with the same subquery syntax but different data
+                clear_in_subquery_cache();
                 db
             }
             None => {
