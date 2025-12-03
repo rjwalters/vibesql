@@ -94,11 +94,11 @@ impl BTreeIndex {
         }
         let grouped_entries = chunked_entries;
 
-        // Calculate leaf capacity based on actual entry sizes with chunked row_ids
-        // Each entry now has up to max_row_ids_per_entry row_ids
-        let entry_size_with_chunk = key_size + 5 + 8 * max_row_ids_per_entry;
+        // Calculate leaf capacity based on typical entry sizes (most entries have 1 row_id)
+        // Entry size for single row_id: key + 1 byte varint + 8 bytes row_id
+        let typical_entry_size = key_size + 1 + 8;
         let available_for_entries = PAGE_SIZE.saturating_sub(19); // header + prev/next leaf
-        let leaf_capacity = (available_for_entries / entry_size_with_chunk).max(1);
+        let leaf_capacity = (available_for_entries / typical_entry_size).max(1);
         // Apply 75% fill factor
         let leaf_capacity = ((leaf_capacity * 3) / 4).max(1);
 
@@ -113,11 +113,28 @@ impl BTreeIndex {
             let page_id = page_manager.allocate_page()?;
             let mut leaf = LeafNode::new(page_id);
 
-            // Fill leaf node to target capacity
-            for _ in 0..leaf_capacity {
-                if let Some((key, row_ids)) = entries_iter.next() {
-                    leaf.entries.push((key, row_ids));
-                } else {
+            // Fill leaf node based on actual serialized size
+            let mut current_size = 0;
+            let max_size = available_for_entries;
+
+            while let Some((_key, row_ids)) = entries_iter.peek() {
+                // Calculate actual size of this entry
+                // varint encoding: 1 byte for counts < 128, 2 bytes for < 16384, etc.
+                let varint_size = if row_ids.len() < 128 { 1 } else if row_ids.len() < 16384 { 2 } else { 3 };
+                let entry_size = key_size + varint_size + row_ids.len() * 8;
+
+                // Check if we have room for this entry
+                if current_size > 0 && current_size + entry_size > max_size {
+                    break; // This entry would overflow the page
+                }
+
+                // Add the entry
+                current_size += entry_size;
+                let (key, row_ids) = entries_iter.next().unwrap();
+                leaf.entries.push((key, row_ids));
+
+                // Also respect the target fill factor (approx leaf_capacity entries)
+                if leaf.entries.len() >= leaf_capacity {
                     break;
                 }
             }
