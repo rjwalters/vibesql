@@ -149,6 +149,16 @@ impl Session {
         })
     }
 
+    /// Get a reference to the database
+    pub fn database(&self) -> &Database {
+        &self.db
+    }
+
+    /// Get a mutable reference to the database
+    pub fn database_mut(&mut self) -> &mut Database {
+        &mut self.db
+    }
+
     /// Create a new session with a shared statement cache
     #[allow(dead_code)]
     pub fn with_cache(
