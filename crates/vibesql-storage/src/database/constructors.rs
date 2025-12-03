@@ -31,6 +31,8 @@ impl Clone for Database {
             columnar_cache: Arc::new(ColumnarCache::new(self.columnar_cache.max_memory())),
             // Clone does not inherit change event sender - cloned databases are independent
             change_sender: None,
+            // Clone resets last_insert_rowid - each database instance tracks independently
+            last_insert_rowid: 0,
         }
     }
 }
@@ -51,6 +53,7 @@ impl Database {
             query_buffer_pool: QueryBufferPool::new(),
             columnar_cache: Arc::new(ColumnarCache::new(DEFAULT_COLUMNAR_CACHE_BUDGET)),
             change_sender: None,
+            last_insert_rowid: 0,
         }
     }
 

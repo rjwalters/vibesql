@@ -158,11 +158,16 @@ pub fn evaluate_default_expression(
 
 /// Apply DEFAULT values for unspecified columns
 /// Now accepts database parameter to handle sequence NextValue expressions
+///
+/// Returns the first auto-generated sequence value (for LAST_INSERT_ROWID support),
+/// or None if no sequence values were generated.
 pub fn apply_default_values(
     schema: &vibesql_catalog::TableSchema,
     row_values: &mut [vibesql_types::SqlValue],
     database: &mut vibesql_storage::Database,
-) -> Result<(), ExecutorError> {
+) -> Result<Option<i64>, ExecutorError> {
+    let mut first_generated_id: Option<i64> = None;
+
     for (col_idx, col) in schema.columns.iter().enumerate() {
         // If column is NULL and has a default value, apply it
         if row_values[col_idx] == vibesql_types::SqlValue::Null {
@@ -183,6 +188,12 @@ pub fn apply_default_values(
                         let next_val = seq.next_value().map_err(|e| {
                             ExecutorError::ConstraintViolation(format!("Sequence error: {}", e))
                         })?;
+
+                        // Track the first generated ID for LAST_INSERT_ROWID
+                        if first_generated_id.is_none() {
+                            first_generated_id = Some(next_val);
+                        }
+
                         vibesql_types::SqlValue::Integer(next_val)
                     }
                     _ => evaluate_default_expression(default_expr)?,
@@ -192,5 +203,5 @@ pub fn apply_default_values(
             }
         }
     }
-    Ok(())
+    Ok(first_generated_id)
 }
