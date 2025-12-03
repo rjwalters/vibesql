@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use vibesql_executor::{PreparedStatement, PreparedStatementCache, PreparedStatementCacheStats};
+use vibesql_executor::{
+    CursorExecutor, CursorStore, FetchResult as CursorFetchResult, PreparedStatement,
+    PreparedStatementCache, PreparedStatementCacheStats,
+};
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
@@ -23,6 +26,8 @@ pub struct Session {
     stmt_cache: Arc<PreparedStatementCache>,
     /// Named prepared statements (from PREPARE SQL syntax)
     named_statements: HashMap<String, Arc<PreparedStatement>>,
+    /// Cursor storage for DECLARE/OPEN/FETCH/CLOSE operations
+    cursors: CursorStore,
 }
 
 /// Simplified execution result for wire protocol
@@ -58,6 +63,23 @@ pub enum ExecutionResult {
     Deallocate {
         statement_name: String,
     },
+    /// Cursor declared successfully
+    DeclareCursor {
+        cursor_name: String,
+    },
+    /// Cursor opened successfully
+    OpenCursor {
+        cursor_name: String,
+    },
+    /// Cursor fetched rows
+    Fetch {
+        rows: Vec<Row>,
+        columns: Vec<Column>,
+    },
+    /// Cursor closed successfully
+    CloseCursor {
+        cursor_name: String,
+    },
     Other {
         message: String,
     },
@@ -80,6 +102,10 @@ impl ExecutionResult {
             ExecutionResult::Analyze { .. } => "ANALYZE",
             ExecutionResult::Prepare { .. } => "PREPARE",
             ExecutionResult::Deallocate { .. } => "DEALLOCATE",
+            ExecutionResult::DeclareCursor { .. } => "DECLARE_CURSOR",
+            ExecutionResult::OpenCursor { .. } => "OPEN_CURSOR",
+            ExecutionResult::Fetch { .. } => "FETCH",
+            ExecutionResult::CloseCursor { .. } => "CLOSE_CURSOR",
             ExecutionResult::Other { .. } => "OTHER",
         }
     }
@@ -91,6 +117,7 @@ impl ExecutionResult {
             ExecutionResult::Insert { rows_affected } => *rows_affected as u64,
             ExecutionResult::Update { rows_affected } => *rows_affected as u64,
             ExecutionResult::Delete { rows_affected } => *rows_affected as u64,
+            ExecutionResult::Fetch { rows, .. } => rows.len() as u64,
             _ => 0,
         }
     }
@@ -118,6 +145,7 @@ impl Session {
             in_transaction: false,
             stmt_cache: Arc::new(PreparedStatementCache::default_cache()),
             named_statements: HashMap::new(),
+            cursors: CursorStore::new(),
         })
     }
 
@@ -137,6 +165,7 @@ impl Session {
             in_transaction: false,
             stmt_cache: cache,
             named_statements: HashMap::new(),
+            cursors: CursorStore::new(),
         })
     }
 
@@ -292,6 +321,22 @@ impl Session {
                 self.execute_deallocate(deallocate_stmt)
             }
 
+            vibesql_ast::Statement::DeclareCursor(declare_stmt) => {
+                self.execute_declare_cursor(declare_stmt)
+            }
+
+            vibesql_ast::Statement::OpenCursor(open_stmt) => {
+                self.execute_open_cursor(open_stmt)
+            }
+
+            vibesql_ast::Statement::Fetch(fetch_stmt) => {
+                self.execute_fetch(fetch_stmt)
+            }
+
+            vibesql_ast::Statement::CloseCursor(close_stmt) => {
+                self.execute_close_cursor(close_stmt)
+            }
+
             _ => {
                 // For now, return a generic success for other statements
                 Ok(ExecutionResult::Other { message: "Command completed successfully".to_string() })
@@ -437,6 +482,62 @@ impl Session {
         }
         self.in_transaction = false;
         Ok(())
+    }
+
+    /// Execute DECLARE CURSOR statement
+    fn execute_declare_cursor(
+        &mut self,
+        stmt: &vibesql_ast::DeclareCursorStmt,
+    ) -> Result<ExecutionResult> {
+        CursorExecutor::declare(&mut self.cursors, stmt)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(ExecutionResult::DeclareCursor {
+            cursor_name: stmt.cursor_name.clone(),
+        })
+    }
+
+    /// Execute OPEN CURSOR statement
+    fn execute_open_cursor(
+        &mut self,
+        stmt: &vibesql_ast::OpenCursorStmt,
+    ) -> Result<ExecutionResult> {
+        CursorExecutor::open(&mut self.cursors, stmt, &self.db)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(ExecutionResult::OpenCursor {
+            cursor_name: stmt.cursor_name.clone(),
+        })
+    }
+
+    /// Execute FETCH statement
+    fn execute_fetch(&mut self, stmt: &vibesql_ast::FetchStmt) -> Result<ExecutionResult> {
+        let fetch_result: CursorFetchResult = CursorExecutor::fetch(&mut self.cursors, stmt)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // Convert cursor rows to session rows
+        let rows: Vec<Row> = fetch_result
+            .rows
+            .iter()
+            .map(|r| Row { values: r.values.clone() })
+            .collect();
+        let columns: Vec<Column> = fetch_result
+            .columns
+            .iter()
+            .map(|name| Column { name: name.clone() })
+            .collect();
+
+        Ok(ExecutionResult::Fetch { rows, columns })
+    }
+
+    /// Execute CLOSE CURSOR statement
+    fn execute_close_cursor(
+        &mut self,
+        stmt: &vibesql_ast::CloseCursorStmt,
+    ) -> Result<ExecutionResult> {
+        CursorExecutor::close(&mut self.cursors, stmt)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(ExecutionResult::CloseCursor {
+            cursor_name: stmt.cursor_name.clone(),
+        })
     }
 }
 

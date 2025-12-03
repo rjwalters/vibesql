@@ -393,6 +393,54 @@ impl ConnectionHandler {
             ExecutionResult::Deallocate { statement_name } => {
                 self.send_command_complete(&format!("DEALLOCATE {}", statement_name)).await?;
             }
+
+            ExecutionResult::DeclareCursor { cursor_name } => {
+                self.send_command_complete(&format!("DECLARE CURSOR {}", cursor_name)).await?;
+            }
+
+            ExecutionResult::OpenCursor { cursor_name } => {
+                self.send_command_complete(&format!("OPEN {}", cursor_name)).await?;
+            }
+
+            ExecutionResult::Fetch { rows, columns } => {
+                // Send row description
+                let fields: Vec<FieldDescription> = columns
+                    .iter()
+                    .enumerate()
+                    .map(|(i, col)| FieldDescription {
+                        name: col.name.clone(),
+                        table_oid: 0,
+                        column_attr_number: i as i16,
+                        data_type_oid: 25, // TEXT type
+                        data_type_size: -1, // Variable length
+                        type_modifier: -1,
+                        format_code: 0, // Text format
+                    })
+                    .collect();
+
+                self.send_row_description(fields).await?;
+
+                // Save row count before consuming
+                let row_count = rows.len();
+
+                // Send data rows
+                for row in rows {
+                    let values: Vec<Option<Vec<u8>>> = row
+                        .values
+                        .iter()
+                        .map(|v: &vibesql_types::SqlValue| Some(v.to_string().as_bytes().to_vec()))
+                        .collect();
+
+                    self.send_data_row(values).await?;
+                }
+
+                // Send command complete
+                self.send_command_complete(&format!("FETCH {}", row_count)).await?;
+            }
+
+            ExecutionResult::CloseCursor { cursor_name } => {
+                self.send_command_complete(&format!("CLOSE {}", cursor_name)).await?;
+            }
         }
 
         Ok(())

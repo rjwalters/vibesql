@@ -9,6 +9,7 @@ pub mod cache;
 mod constraint_validator;
 pub mod correlation;
 mod create_table;
+pub mod cursor;
 mod delete;
 mod domain_ddl;
 mod drop_table;
@@ -55,6 +56,7 @@ pub use cache::{
 };
 pub use constraint_validator::ConstraintValidator;
 pub use create_table::CreateTableExecutor;
+pub use cursor::{Cursor, CursorExecutor, CursorResult, CursorStore, FetchResult};
 pub use delete::DeleteExecutor;
 pub use domain_ddl::DomainExecutor;
 pub use drop_table::DropTableExecutor;
