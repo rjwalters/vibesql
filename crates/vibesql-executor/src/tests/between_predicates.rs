@@ -76,7 +76,7 @@ fn test_between_integer() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(28))),
@@ -160,7 +160,7 @@ fn test_not_between() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "price".to_string() }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
@@ -209,7 +209,7 @@ fn test_between_boundary_inclusive() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "DATA".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "DATA".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
@@ -288,7 +288,7 @@ fn test_between_with_column_references() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "ranges".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "ranges".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() }),
             low: Box::new(vibesql_ast::Expression::ColumnRef {

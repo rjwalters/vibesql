@@ -229,4 +229,47 @@ impl Parser {
     pub(super) fn parse_identifier_list(&mut self) -> Result<Vec<String>, ParseError> {
         self.parse_comma_separated_list(|p| p.parse_identifier())
     }
+
+    /// Parse an optional column alias list: (col1, col2, ...)
+    ///
+    /// SQL:1999 Feature E051-09: Derived column lists in table aliases
+    /// Example: FROM t AS myalias (x, y) or FROM (SELECT a, b) AS mytemp (x, y)
+    ///
+    /// Returns None if no opening parenthesis is found, otherwise parses
+    /// and returns the list of column aliases.
+    pub(super) fn parse_column_alias_list(&mut self) -> Result<Option<Vec<String>>, ParseError> {
+        // Check for opening parenthesis
+        if self.peek() != &Token::LParen {
+            return Ok(None);
+        }
+        self.advance(); // Consume '('
+
+        // Parse comma-separated list of identifiers
+        let mut aliases = Vec::new();
+
+        // Handle empty list case: ()
+        if self.peek() == &Token::RParen {
+            self.advance();
+            return Ok(Some(aliases));
+        }
+
+        // Parse first alias (use parse_alias_name to allow keywords as column aliases)
+        aliases.push(self.parse_alias_name()?);
+
+        // Parse remaining aliases
+        while self.peek() == &Token::Comma {
+            self.advance(); // Consume ','
+            aliases.push(self.parse_alias_name()?);
+        }
+
+        // Expect closing parenthesis
+        if self.peek() != &Token::RParen {
+            return Err(ParseError {
+                message: format!("Expected ')' after column alias list, found {:?}", self.peek()),
+            });
+        }
+        self.advance(); // Consume ')'
+
+        Ok(Some(aliases))
+    }
 }

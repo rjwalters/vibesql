@@ -81,9 +81,14 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
 }
 
 /// Execute a derived table (subquery with alias)
+///
+/// SQL:1999 Feature E051-09: Supports optional column renaming via `column_aliases`.
+/// When provided, the derived table's columns are renamed to the specified aliases,
+/// allowing syntax like: `FROM (SELECT a, b FROM t) AS mytemp (x, y)`
 pub(crate) fn execute_derived_table<F>(
     query: &vibesql_ast::SelectStmt,
     alias: &str,
+    column_aliases: Option<&Vec<String>>,
     execute_subquery: F,
 ) -> Result<super::FromResult, ExecutorError>
 where
@@ -144,6 +149,19 @@ where
                 col_index += 1;
             }
         }
+    }
+
+    // SQL:1999 E051-09: Apply column aliases if provided
+    // This allows renaming derived table columns without modifying the inner query:
+    // FROM (SELECT a, b FROM t) AS mytemp (x, y)  -- columns a,b become x,y
+    if let Some(aliases) = column_aliases {
+        if aliases.len() != column_names.len() {
+            return Err(ExecutorError::ColumnCountMismatch {
+                expected: column_names.len(),
+                provided: aliases.len(),
+            });
+        }
+        column_names = aliases.clone();
     }
 
     // Create schema with table alias

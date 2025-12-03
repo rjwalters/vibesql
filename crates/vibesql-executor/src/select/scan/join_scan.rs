@@ -309,7 +309,7 @@ fn extract_table_names_from_from_clause(from: &vibesql_ast::FromClause) -> Vec<S
 
 fn collect_table_names(from: &vibesql_ast::FromClause, tables: &mut Vec<String>) {
     match from {
-        vibesql_ast::FromClause::Table { name, alias } => {
+        vibesql_ast::FromClause::Table { name, alias, .. } => {
             // Use alias if present, otherwise use table name
             tables.push(alias.clone().unwrap_or_else(|| name.clone()));
         }

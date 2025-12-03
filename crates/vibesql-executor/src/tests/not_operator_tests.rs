@@ -46,7 +46,7 @@ fn test_not_in_select_where() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -102,7 +102,7 @@ fn test_not_with_equality() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -176,7 +176,7 @@ fn test_not_in_delete_where() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -226,7 +226,7 @@ fn test_not_with_null() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {

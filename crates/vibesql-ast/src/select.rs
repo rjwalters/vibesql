@@ -235,6 +235,9 @@ pub enum FromClause {
     Table {
         name: String,
         alias: Option<String>,
+        /// SQL:1999 Feature E051-09: Optional column renaming in table alias
+        /// Example: `FROM t AS myalias (x, y)` renames columns to x, y
+        column_aliases: Option<Vec<String>>,
     },
     Join {
         left: Box<FromClause>,
@@ -247,9 +250,13 @@ pub enum FromClause {
     /// Subquery in FROM clause (derived table)
     /// SQL:1999 requires AS alias for derived tables
     /// Example: FROM (SELECT * FROM users WHERE active = TRUE) AS active_users
+    /// SQL:1999 Feature E051-09: Optional column renaming
+    /// Example: FROM (SELECT a, b FROM t) AS mytemp (x, y)
     Subquery {
         query: Box<SelectStmt>,
         alias: String,
+        /// Optional column renaming for derived table columns
+        column_aliases: Option<Vec<String>>,
     },
 }
 

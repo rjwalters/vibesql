@@ -411,10 +411,7 @@ fn test_procedural_select_into_single_column() {
                 }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table {
-                    name: "users".to_string(),
-                    alias: None,
-                }),
+                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef {
                         table: None,
@@ -497,10 +494,7 @@ fn test_procedural_select_into_multiple_columns() {
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_id_out".to_string(), "user_name".to_string()]),
-                from: Some(FromClause::Table {
-                    name: "users".to_string(),
-                    alias: None,
-                }),
+                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef {
                         table: None,
@@ -570,10 +564,7 @@ fn test_procedural_select_into_error_no_rows() {
                 }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table {
-                    name: "users".to_string(),
-                    alias: None,
-                }),
+                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef {
                         table: None,
@@ -645,10 +636,7 @@ fn test_procedural_select_into_error_multiple_rows() {
                 }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table {
-                    name: "users".to_string(),
-                    alias: None,
-                }),
+                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -715,10 +703,7 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table {
-                    name: "users".to_string(),
-                    alias: None,
-                }),
+                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef {
                         table: None,

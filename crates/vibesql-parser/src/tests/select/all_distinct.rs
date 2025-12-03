@@ -61,7 +61,7 @@ fn test_parse_select_all_from_table() {
             assert_eq!(select.select_list.len(), 1);
             assert!(select.from.is_some());
             match &select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Table { name, alias } => {
+                vibesql_ast::FromClause::Table { name, alias, .. } => {
                     assert_eq!(name, "T");
                     assert!(alias.is_none());
                 }

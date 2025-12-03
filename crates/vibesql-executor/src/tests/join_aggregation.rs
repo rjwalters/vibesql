@@ -152,14 +152,8 @@ fn test_inner_join_with_group_by_count() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
-                name: "departments".to_string(),
-                alias: Some("d".to_string()),
-            }),
-            right: Box::new(vibesql_ast::FromClause::Table {
-                name: "employees".to_string(),
-                alias: Some("e".to_string()),
-            }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "departments".to_string(), alias: Some("d".to_string()), column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()), column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -254,14 +248,8 @@ fn test_left_join_with_group_by_avg_salary() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
-                name: "departments".to_string(),
-                alias: Some("d".to_string()),
-            }),
-            right: Box::new(vibesql_ast::FromClause::Table {
-                name: "employees".to_string(),
-                alias: Some("e".to_string()),
-            }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "departments".to_string(), alias: Some("d".to_string()), column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()), column_aliases: None }),
             join_type: vibesql_ast::JoinType::LeftOuter,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -357,14 +345,8 @@ fn test_join_group_by_with_having() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
-                name: "departments".to_string(),
-                alias: Some("d".to_string()),
-            }),
-            right: Box::new(vibesql_ast::FromClause::Table {
-                name: "employees".to_string(),
-                alias: Some("e".to_string()),
-            }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "departments".to_string(), alias: Some("d".to_string()), column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()), column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -472,14 +454,8 @@ fn test_join_group_by_multiple_aggregates() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
-                name: "departments".to_string(),
-                alias: Some("d".to_string()),
-            }),
-            right: Box::new(vibesql_ast::FromClause::Table {
-                name: "employees".to_string(),
-                alias: Some("e".to_string()),
-            }),
+            left: Box::new(vibesql_ast::FromClause::Table { name: "departments".to_string(), alias: Some("d".to_string()), column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()), column_aliases: None }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {

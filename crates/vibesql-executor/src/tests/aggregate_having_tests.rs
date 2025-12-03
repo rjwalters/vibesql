@@ -138,7 +138,7 @@ fn test_having_clause() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: None,

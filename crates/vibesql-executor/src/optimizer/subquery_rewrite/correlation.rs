@@ -257,7 +257,7 @@ fn extract_table_prefixes(from: &vibesql_ast::FromClause) -> Vec<char> {
 /// is valid, not `t1.col`.
 fn from_clause_contains_table(from: &vibesql_ast::FromClause, table_name: &str) -> bool {
     match from {
-        vibesql_ast::FromClause::Table { name, alias } => {
+        vibesql_ast::FromClause::Table { name, alias, .. } => {
             // If table has an alias, only the alias is valid for column references
             // in this scope. The original table name is shadowed.
             if let Some(a) = alias {

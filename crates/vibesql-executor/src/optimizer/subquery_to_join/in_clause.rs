@@ -49,7 +49,7 @@ pub(super) fn try_convert_in_to_join(
 
     // Check for simple single-table subquery
     let (table_name, table_alias) = match &subquery.from {
-        Some(FromClause::Table { name, alias }) => (name.clone(), alias.clone()),
+        Some(FromClause::Table { name, alias, .. }) => (name.clone(), alias.clone()),
         _ => return None, // Complex FROM clause, skip
     };
 
@@ -137,10 +137,7 @@ pub(super) fn try_convert_in_to_join(
     };
 
     // Create the right side of the join
-    let right_from = FromClause::Table {
-        name: table_name,
-        alias: effective_alias,
-    };
+    let right_from = FromClause::Table { name: table_name, alias: effective_alias, column_aliases: None };
 
     // Create SEMI or ANTI join based on negation
     let join_type = if negated {

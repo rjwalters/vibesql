@@ -1027,10 +1027,11 @@ pub fn transform_select<V: ExpressionMutVisitor>(
 /// Transform a FROM clause
 fn transform_from_clause<V: ExpressionMutVisitor>(visitor: &mut V, from: FromClause) -> FromClause {
     match from {
-        FromClause::Table { name, alias } => FromClause::Table { name, alias },
-        FromClause::Subquery { query, alias } => FromClause::Subquery {
+        FromClause::Table { name, alias, column_aliases } => FromClause::Table { name, alias, column_aliases },
+        FromClause::Subquery { query, alias, column_aliases } => FromClause::Subquery {
             query: Box::new(transform_select(visitor, *query)),
             alias,
+            column_aliases,
         },
         FromClause::Join { left, right, join_type, condition, natural } => FromClause::Join {
             left: Box::new(transform_from_clause(visitor, *left)),

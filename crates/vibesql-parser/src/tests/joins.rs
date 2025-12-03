@@ -76,13 +76,13 @@ fn test_parse_comma_separated_from() {
 
                     // Left should be tab0 table
                     match **left {
-                        vibesql_ast::FromClause::Table { ref name, alias: None } if name == "TAB0" => {} /* Success */
+                        vibesql_ast::FromClause::Table { ref name, alias: None, .. } if name == "TAB0" => {} /* Success */
                         _ => panic!("Expected left table to be 'tab0'"),
                     }
 
                     // Right should be tab1 table with alias cor0
                     match **right {
-                        vibesql_ast::FromClause::Table { ref name, alias: Some(ref alias) }
+                        vibesql_ast::FromClause::Table { ref name, alias: Some(ref alias), .. }
                             if name == "TAB1" && alias == "COR0" => {} // Success
                         _ => panic!("Expected right table to be 'tab1' with alias 'cor0'"),
                     }

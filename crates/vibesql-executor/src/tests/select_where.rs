@@ -38,7 +38,7 @@ fn test_select_with_where() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() }),
             op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
@@ -105,7 +105,7 @@ fn test_select_with_and_condition() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -186,7 +186,7 @@ fn test_select_with_or_condition() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "items".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "items".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -256,7 +256,7 @@ fn test_select_with_null_in_where() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "data".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "data".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "value".to_string() }),
             op: vibesql_ast::BinaryOperator::GreaterThan,

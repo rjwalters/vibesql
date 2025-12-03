@@ -103,8 +103,8 @@ pub fn analyze_for_plan(stmt: &Statement) -> CachedPlan {
 fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
     // Must have exactly one table in FROM (no joins, no subqueries)
     let table_name = match &stmt.from {
-        Some(FromClause::Table { name, alias: None }) => name.clone(),
-        Some(FromClause::Table { name: _, alias: Some(_) }) => {
+        Some(FromClause::Table { name, alias: None, .. }) => name.clone(),
+        Some(FromClause::Table { name: _, alias: Some(_), .. }) => {
             // Aliased tables are slightly more complex, skip for now
             return CachedPlan::Standard;
         }

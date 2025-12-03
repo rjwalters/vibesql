@@ -35,7 +35,7 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
@@ -43,7 +43,7 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
                 set_operation: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], // * expands to 2 columns!
-                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -102,7 +102,7 @@ fn test_in_subquery_explicit_multi_column_rejected() {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
@@ -119,7 +119,7 @@ fn test_in_subquery_explicit_multi_column_rejected() {
                         alias: None,
                     },
                 ],
-                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -178,7 +178,7 @@ fn test_in_subquery_single_column_accepted() {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
@@ -191,7 +191,7 @@ fn test_in_subquery_single_column_accepted() {
                         alias: None,
                     },
                 ],
-                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -248,7 +248,7 @@ fn test_scalar_subquery_wildcard_multi_column_rejected() {
                 set_operation: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], // * expands to 2 columns!
-                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -259,7 +259,7 @@ fn test_scalar_subquery_wildcard_multi_column_rejected() {
                 into_variables: None,            })),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: None,
         having: None,

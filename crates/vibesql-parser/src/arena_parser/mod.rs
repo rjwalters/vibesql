@@ -581,6 +581,62 @@ impl<'arena> ArenaParser<'arena> {
         }
         Ok(list)
     }
+
+    /// Parse an optional column alias list: (col1, col2, ...)
+    ///
+    /// SQL:1999 Feature E051-09: Derived column lists in table aliases
+    /// Example: FROM t AS myalias (x, y) or FROM (SELECT a, b) AS mytemp (x, y)
+    ///
+    /// Returns None if no opening parenthesis is found, otherwise parses
+    /// and returns the list of column aliases as Symbols.
+    pub(crate) fn parse_column_alias_list(
+        &mut self,
+    ) -> Result<Option<bumpalo::collections::Vec<'arena, Symbol>>, ParseError> {
+        // Check for opening parenthesis
+        if !self.try_consume(&Token::LParen) {
+            return Ok(None);
+        }
+
+        let mut aliases = bumpalo::collections::Vec::new_in(self.arena);
+
+        // Handle empty list case: ()
+        if self.try_consume(&Token::RParen) {
+            return Ok(Some(aliases));
+        }
+
+        // Parse first alias (identifiers or keywords allowed)
+        aliases.push(self.parse_alias_name_symbol()?);
+
+        // Parse remaining aliases
+        while self.try_consume(&Token::Comma) {
+            aliases.push(self.parse_alias_name_symbol()?);
+        }
+
+        // Expect closing parenthesis
+        self.expect_token(Token::RParen)?;
+
+        Ok(Some(aliases))
+    }
+
+    /// Parse an identifier or keyword as an alias name, returning a Symbol.
+    fn parse_alias_name_symbol(&mut self) -> Result<Symbol, ParseError> {
+        match self.peek() {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(self.intern(&name))
+            }
+            Token::Keyword(kw) => {
+                // Allow keywords as alias names
+                let name = kw.to_string();
+                self.advance();
+                Ok(self.intern(&name))
+            }
+            _ => Err(ParseError {
+                message: format!("Expected alias name, found {:?}", self.peek()),
+            }),
+        }
+    }
 }
 
 // ============================================================================

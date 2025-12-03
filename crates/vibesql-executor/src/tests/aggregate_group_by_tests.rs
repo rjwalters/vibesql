@@ -72,7 +72,7 @@ fn test_group_by_select_alias() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         // GROUP BY "department" - uses alias from SELECT list
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
@@ -166,7 +166,7 @@ fn test_group_by_numeric_position() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         // GROUP BY 1 - first column in SELECT list
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
@@ -253,7 +253,7 @@ fn test_group_by_with_count() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None }),
+        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
             table: None,

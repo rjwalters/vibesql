@@ -339,7 +339,7 @@ impl SelectExecutor<'_> {
     ) -> Result<Vec<Row>, ExecutorError> {
         // Extract table name from FROM clause
         let (table_name, alias) = match &stmt.from {
-            Some(vibesql_ast::FromClause::Table { name, alias }) => {
+            Some(vibesql_ast::FromClause::Table { name, alias, .. }) => {
                 (name.as_str(), alias.as_ref())
             }
             _ => unreachable!("Fast path requires simple table FROM clause"),
