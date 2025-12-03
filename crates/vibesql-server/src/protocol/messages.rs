@@ -60,6 +60,16 @@ pub enum ProtocolError {
     UnexpectedMessage(String),
 }
 
+/// Subscription update type for SubscriptionData message
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SubscriptionUpdateType {
+    Full = 0,
+    DeltaInsert = 1,
+    DeltaUpdate = 2,
+    DeltaDelete = 3,
+}
+
 /// Backend message types (server -> client)
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackendMessage {
@@ -97,6 +107,19 @@ pub enum BackendMessage {
 
     /// Empty query response
     EmptyQueryResponse,
+
+    /// Subscription data (0xF2) - query result update
+    SubscriptionData {
+        subscription_id: [u8; 16],
+        update_type: SubscriptionUpdateType,
+        rows: Vec<Vec<Option<Vec<u8>>>>,
+    },
+
+    /// Subscription error (0xF3) - subscription error notification
+    SubscriptionError {
+        subscription_id: [u8; 16],
+        message: String,
+    },
 }
 
 /// Transaction status
@@ -154,6 +177,15 @@ pub enum FrontendMessage {
 
     /// SSL request
     SSLRequest,
+
+    /// Subscribe message (0xF0) - subscribe to query
+    Subscribe {
+        query: String,
+        params: Vec<Option<Vec<u8>>>,
+    },
+
+    /// Unsubscribe message (0xF1) - cancel subscription
+    Unsubscribe { subscription_id: [u8; 16] },
 }
 
 impl BackendMessage {
@@ -275,6 +307,60 @@ impl BackendMessage {
                 buf.put_u8(b'I'); // EmptyQueryResponse
                 buf.put_i32(4);
             }
+
+            BackendMessage::SubscriptionData {
+                subscription_id,
+                update_type,
+                rows,
+            } => {
+                buf.put_u8(0xF2); // SubscriptionData
+
+                // Calculate total length
+                let mut len = 4 + 16 + 1 + 4; // length + subscription_id + update_type + row count
+                for row in rows {
+                    len += 2; // column count
+                    for value in row {
+                        len += 4; // value length
+                        if let Some(v) = value {
+                            len += v.len();
+                        }
+                    }
+                }
+
+                buf.put_i32(len as i32);
+                buf.put_slice(subscription_id);
+                buf.put_u8(*update_type as u8);
+                buf.put_i32(rows.len() as i32);
+
+                for row in rows {
+                    buf.put_i16(row.len() as i16);
+                    for value in row {
+                        match value {
+                            Some(v) => {
+                                buf.put_i32(v.len() as i32);
+                                buf.put_slice(v);
+                            }
+                            None => {
+                                buf.put_i32(-1); // NULL value
+                            }
+                        }
+                    }
+                }
+            }
+
+            BackendMessage::SubscriptionError {
+                subscription_id,
+                message,
+            } => {
+                buf.put_u8(0xF3); // SubscriptionError
+
+                let msg_bytes = message.as_bytes();
+                let len = 4 + 16 + msg_bytes.len() + 1; // length + subscription_id + message + null terminator
+
+                buf.put_i32(len as i32);
+                buf.put_slice(subscription_id);
+                put_cstring(buf, message);
+            }
         }
     }
 }
@@ -330,6 +416,35 @@ impl FrontendMessage {
                 // Terminate message
                 buf.advance(4); // length
                 Ok(Some(FrontendMessage::Terminate))
+            }
+
+            0xF0 => {
+                // Subscribe message
+                buf.advance(4); // length
+                let query = read_cstring(buf)?;
+                let param_count = buf.get_i16() as usize;
+                let mut params = Vec::with_capacity(param_count);
+
+                for _ in 0..param_count {
+                    let param_len = buf.get_i32();
+                    if param_len < 0 {
+                        params.push(None);
+                    } else {
+                        let mut param = vec![0u8; param_len as usize];
+                        buf.copy_to_slice(&mut param);
+                        params.push(Some(param));
+                    }
+                }
+
+                Ok(Some(FrontendMessage::Subscribe { query, params }))
+            }
+
+            0xF1 => {
+                // Unsubscribe message
+                buf.advance(4); // length
+                let mut subscription_id = [0u8; 16];
+                buf.copy_to_slice(&mut subscription_id);
+                Ok(Some(FrontendMessage::Unsubscribe { subscription_id }))
             }
 
             _ => Err(ProtocolError::InvalidMessageType(msg_type)),
@@ -463,6 +578,92 @@ mod tests {
             msg,
             Some(FrontendMessage::Query { query }) if query == "SELECT 1"
         ));
+    }
+
+    #[test]
+    fn test_subscribe_message_parsing() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xF0); // Subscribe
+        buf.put_i32(23); // Length: 4 (length) + 21 (query) - 2 (param count already included)
+        buf.put_slice(b"SELECT * FROM users\0");
+        buf.put_i16(0); // No params
+
+        let msg = FrontendMessage::decode(&mut buf).unwrap();
+        assert!(matches!(
+            msg,
+            Some(FrontendMessage::Subscribe { query, params }) 
+            if query == "SELECT * FROM users" && params.is_empty()
+        ));
+    }
+
+    #[test]
+    fn test_subscribe_with_parameters() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xF0); // Subscribe
+        let mut content = BytesMut::new();
+        content.put_slice(b"SELECT * FROM users WHERE id = $1\0");
+        content.put_i16(1); // 1 param
+        content.put_i32(5); // param length
+        content.put_slice(b"12345");
+
+        buf.put_i32((4 + content.len()) as i32);
+        buf.extend(content);
+
+        let msg = FrontendMessage::decode(&mut buf).unwrap();
+        assert!(matches!(
+            msg,
+            Some(FrontendMessage::Subscribe { query, params }) 
+            if query == "SELECT * FROM users WHERE id = $1" && params.len() == 1
+        ));
+    }
+
+    #[test]
+    fn test_unsubscribe_message_parsing() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xF1); // Unsubscribe
+        buf.put_i32(20); // Length: 4 (length) + 16 (UUID)
+        buf.put_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+
+        let msg = FrontendMessage::decode(&mut buf).unwrap();
+        assert!(matches!(
+            msg,
+            Some(FrontendMessage::Unsubscribe { subscription_id }) 
+            if subscription_id == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        ));
+    }
+
+    #[test]
+    fn test_subscription_data_encoding() {
+        let mut buf = BytesMut::new();
+        let subscription_id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let rows = vec![vec![Some(b"value1".to_vec()), Some(b"value2".to_vec())]];
+
+        let msg = BackendMessage::SubscriptionData {
+            subscription_id,
+            update_type: SubscriptionUpdateType::Full,
+            rows,
+        };
+        msg.encode(&mut buf);
+
+        assert_eq!(buf[0], 0xF2);
+        // Verify subscription_id is at bytes 5-20
+        assert_eq!(&buf[5..21], subscription_id.as_ref());
+    }
+
+    #[test]
+    fn test_subscription_error_encoding() {
+        let mut buf = BytesMut::new();
+        let subscription_id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+        let msg = BackendMessage::SubscriptionError {
+            subscription_id,
+            message: "Query error".to_string(),
+        };
+        msg.encode(&mut buf);
+
+        assert_eq!(buf[0], 0xF3);
+        // Verify subscription_id is at bytes 5-20
+        assert_eq!(&buf[5..21], subscription_id.as_ref());
     }
 
     // =====================================================================
