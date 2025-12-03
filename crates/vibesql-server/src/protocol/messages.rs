@@ -3,6 +3,40 @@ use std::collections::HashMap;
 use std::io;
 use thiserror::Error;
 
+/// Subscription update type for SubscriptionData message
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionUpdateType {
+    /// Full result set (initial subscription or major change)
+    Full,
+    /// Inserted row(s)
+    DeltaInsert,
+    /// Updated row(s)
+    DeltaUpdate,
+    /// Deleted row(s)
+    DeltaDelete,
+}
+
+impl SubscriptionUpdateType {
+    pub fn as_byte(&self) -> u8 {
+        match self {
+            SubscriptionUpdateType::Full => 0,
+            SubscriptionUpdateType::DeltaInsert => 1,
+            SubscriptionUpdateType::DeltaUpdate => 2,
+            SubscriptionUpdateType::DeltaDelete => 3,
+        }
+    }
+
+    pub fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(SubscriptionUpdateType::Full),
+            1 => Some(SubscriptionUpdateType::DeltaInsert),
+            2 => Some(SubscriptionUpdateType::DeltaUpdate),
+            3 => Some(SubscriptionUpdateType::DeltaDelete),
+            _ => None,
+        }
+    }
+}
+
 /// PostgreSQL protocol errors
 #[derive(Debug, Error)]
 pub enum ProtocolError {
