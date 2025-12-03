@@ -234,6 +234,9 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "DECLARE" => Keyword::Declare,
     "CURSOR" => Keyword::Cursor,
     "INSENSITIVE" => Keyword::Insensitive,
+    // Prepared statement keywords (SQL:1999 Feature E141)
+    "PREPARE" => Keyword::Prepare,
+    "DEALLOCATE" => Keyword::Deallocate,
     "SCROLL" => Keyword::Scroll,
     "HOLD" => Keyword::Hold,
     "WITHOUT" => Keyword::Without,

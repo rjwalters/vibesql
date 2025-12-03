@@ -385,6 +385,14 @@ impl ConnectionHandler {
             ExecutionResult::Other { message } => {
                 self.send_command_complete(&message).await?;
             }
+
+            ExecutionResult::Prepare { statement_name } => {
+                self.send_command_complete(&format!("PREPARE {}", statement_name)).await?;
+            }
+
+            ExecutionResult::Deallocate { statement_name } => {
+                self.send_command_complete(&format!("DEALLOCATE {}", statement_name)).await?;
+            }
         }
 
         Ok(())
