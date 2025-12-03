@@ -218,27 +218,28 @@ impl DeleteExecutor {
             check_no_child_references(database, &stmt.table_name, row)?;
         }
 
-        // Extract just the indices
-        let indices_to_delete: std::collections::HashSet<usize> =
+        // Extract indices for deletion
+        let mut deleted_indices: Vec<usize> =
             rows_and_indices_to_delete.iter().map(|(idx, _)| *idx).collect();
+        deleted_indices.sort_unstable();
 
-        // Step 5: Actually delete the rows (now we can borrow mutably)
+        // Step 5a: Remove entries from user-defined indexes BEFORE deleting rows
+        // (while row indices are still valid)
+        for (idx, row) in &rows_and_indices_to_delete {
+            database.update_indexes_for_delete(&stmt.table_name, row, *idx);
+        }
+
+        // Step 5b: Actually delete the rows using fast path (no table scan needed)
         let table_mut = database
             .get_table_mut(&stmt.table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-        // Delete rows using the pre-computed indices
-        use std::cell::Cell;
-        let current_index = Cell::new(0);
-        let deleted_count = table_mut.delete_where(|_row| {
-            let index = current_index.get();
-            let should_delete = indices_to_delete.contains(&index);
-            current_index.set(index + 1);
-            should_delete
-        });
+        // Use delete_by_indices for O(d * log n) instead of O(n) where d = deletes
+        let deleted_count = table_mut.delete_by_indices(&deleted_indices);
 
-        // Rebuild user-defined indexes since row indices may have changed
-        database.rebuild_indexes(&stmt.table_name);
+        // Step 5c: Adjust remaining user-defined index entries
+        // (entries pointing to indices > deleted need to be decremented)
+        database.adjust_indexes_after_delete(&stmt.table_name, &deleted_indices);
 
         // Invalidate columnar cache since table data has changed
         if deleted_count > 0 {

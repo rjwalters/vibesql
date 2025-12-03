@@ -668,29 +668,35 @@ impl Table {
             }
         }
 
-        // Delete rows in reverse order to maintain correct indices
-        for (index, _) in indices_and_rows_to_delete.iter().rev() {
-            self.rows.remove(*index);
+        if indices_and_rows_to_delete.is_empty() {
+            return 0;
         }
 
-        // Update indexes for deleted rows (delegate to IndexManager)
+        // Update indexes for deleted rows BEFORE removing (while indices are still valid)
         for (_, deleted_row) in &indices_and_rows_to_delete {
             self.indexes.update_for_delete(&self.schema, deleted_row);
         }
 
-        // Since rows shifted, we need to rebuild indexes to maintain correct indices (delegate to
-        // IndexManager)
-        self.indexes.rebuild(&self.schema, &self.rows);
+        // Extract just the indices for adjustment
+        let deleted_indices: Vec<usize> =
+            indices_and_rows_to_delete.iter().map(|(idx, _)| *idx).collect();
+
+        // Delete rows in reverse order to maintain correct indices during removal
+        for (index, _) in indices_and_rows_to_delete.iter().rev() {
+            self.rows.remove(*index);
+        }
+
+        // Adjust remaining index entries instead of full rebuild
+        // This is O(num_entries) instead of O(n) for rebuild
+        self.indexes.adjust_after_multi_delete(&deleted_indices);
 
         // For native columnar tables, rebuild columnar data
         // For row tables, invalidate the cache
-        if !indices_and_rows_to_delete.is_empty() {
-            if self.native_columnar.is_some() {
-                // Note: Using expect here since delete_where returns usize, not Result
-                let _ = self.rebuild_native_columnar();
-            } else {
-                *self.columnar_cache.write().unwrap() = None;
-            }
+        if self.native_columnar.is_some() {
+            // Note: Using expect here since delete_where returns usize, not Result
+            let _ = self.rebuild_native_columnar();
+        } else {
+            *self.columnar_cache.write().unwrap() = None;
         }
 
         indices_and_rows_to_delete.len()
@@ -704,8 +710,8 @@ impl Table {
             // Update indexes before removing (delegate to IndexManager)
             self.indexes.update_for_delete(&self.schema, target_row);
             self.rows.remove(pos);
-            // Rebuild indexes since row indices changed (delegate to IndexManager)
-            self.indexes.rebuild(&self.schema, &self.rows);
+            // Adjust remaining index entries instead of full rebuild
+            self.indexes.adjust_after_delete(pos);
             // For native columnar tables, rebuild columnar data
             // For row tables, invalidate the cache
             if self.native_columnar.is_some() {
@@ -717,6 +723,55 @@ impl Table {
         } else {
             Err(StorageError::RowNotFound)
         }
+    }
+
+    /// Delete rows by known indices (fast path - no scanning required)
+    ///
+    /// This is more efficient than `delete_where` when row indices are already known
+    /// (e.g., from a primary key lookup). Avoids O(n) table scan.
+    ///
+    /// # Arguments
+    /// * `indices` - Indices of rows to delete, need not be sorted
+    ///
+    /// # Returns
+    /// Number of rows deleted
+    pub fn delete_by_indices(&mut self, indices: &[usize]) -> usize {
+        if indices.is_empty() {
+            return 0;
+        }
+
+        // Sort indices for consistent processing
+        let mut sorted_indices: Vec<usize> = indices.to_vec();
+        sorted_indices.sort_unstable();
+
+        // Validate all indices before modifying
+        if sorted_indices.last().map_or(false, |&max| max >= self.rows.len()) {
+            return 0; // Invalid index, return early
+        }
+
+        // Update indexes for deleted rows BEFORE removing (while indices are still valid)
+        for &idx in &sorted_indices {
+            let row = &self.rows[idx];
+            self.indexes.update_for_delete(&self.schema, row);
+        }
+
+        // Delete rows in reverse order to maintain correct indices during removal
+        for &idx in sorted_indices.iter().rev() {
+            self.rows.remove(idx);
+        }
+
+        // Adjust remaining index entries
+        self.indexes.adjust_after_multi_delete(&sorted_indices);
+
+        // For native columnar tables, rebuild columnar data
+        // For row tables, invalidate the cache
+        if self.native_columnar.is_some() {
+            let _ = self.rebuild_native_columnar();
+        } else {
+            *self.columnar_cache.write().unwrap() = None;
+        }
+
+        sorted_indices.len()
     }
 
     /// Get mutable reference to rows

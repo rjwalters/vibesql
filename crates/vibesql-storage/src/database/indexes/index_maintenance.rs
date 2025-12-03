@@ -502,6 +502,61 @@ impl IndexManager {
         }
     }
 
+    /// Adjust row indices after row deletions for user-defined indexes
+    ///
+    /// When rows are deleted, all row indices in indexes that are greater than the deleted
+    /// indices need to be decremented. This is much faster than rebuilding all indexes.
+    ///
+    /// Uses binary search for O(n log d) complexity where n = entries, d = deletes,
+    /// instead of O(n * d) with linear search.
+    ///
+    /// # Arguments
+    /// * `table_name` - The table whose indexes need adjustment
+    /// * `deleted_indices` - Sorted list of deleted row indices (ascending order)
+    pub fn adjust_indexes_after_delete(&mut self, table_name: &str, deleted_indices: &[usize]) {
+        if deleted_indices.is_empty() {
+            return;
+        }
+
+        // Find all indexes for this table
+        for (index_name, metadata) in &self.indexes {
+            if !metadata.table_name.eq_ignore_ascii_case(table_name) {
+                continue;
+            }
+
+            if let Some(index_data) = self.index_data.get_mut(index_name) {
+                match index_data {
+                    IndexData::InMemory { data } => {
+                        // For each key, adjust all row indices using binary search
+                        for row_indices in data.values_mut() {
+                            for row_idx in row_indices.iter_mut() {
+                                // Binary search gives count of deleted indices < row_idx
+                                let decrement =
+                                    deleted_indices.partition_point(|&d| d < *row_idx);
+                                *row_idx -= decrement;
+                            }
+                        }
+                    }
+                    IndexData::DiskBacked { btree, .. } => {
+                        // For disk-backed indexes, we need to adjust all row IDs
+                        // This requires iterating through all entries
+                        match acquire_btree_lock(btree) {
+                            Ok(mut guard) => {
+                                guard.adjust_row_ids_after_delete(deleted_indices);
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "BTreeIndex lock acquisition failed in adjust_indexes_after_delete: {}",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Drop an index
     pub fn drop_index(&mut self, index_name: &str) -> Result<(), StorageError> {
         // Normalize index name for case-insensitive comparison
