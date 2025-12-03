@@ -9,6 +9,7 @@ pub mod connection;
 pub mod observability;
 pub mod protocol;
 pub mod session;
+pub mod subscription;
 
 pub use auth::PasswordStore;
 pub use config::{AuthConfig, Config, LoggingConfig, ServerConfig};
@@ -16,3 +17,6 @@ pub use connection::ConnectionHandler;
 pub use observability::ObservabilityProvider;
 pub use protocol::{BackendMessage, FieldDescription, FrontendMessage, TransactionStatus};
 pub use session::{Column, ExecutionResult, Row, Session};
+pub use subscription::{
+    ChangeEvent, SubscriptionError, SubscriptionId, SubscriptionManager, SubscriptionUpdate,
+};
