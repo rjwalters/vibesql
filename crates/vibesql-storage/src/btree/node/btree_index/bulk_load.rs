@@ -2,6 +2,13 @@
 //!
 //! This module provides efficient bottom-up construction of B+ trees from
 //! sorted data, which is approximately 10x faster than incremental inserts.
+//!
+//! # Performance Optimization
+//!
+//! Bulk loading uses deferred sync mode to avoid expensive `fsync` calls on
+//! every page write. Instead, pages are written to the OS buffer cache and
+//! a single `sync` call is made at the end of the bulk load operation.
+//! This can reduce bulk load time from minutes to seconds for large datasets.
 
 use std::sync::Arc;
 use vibesql_types::DataType;
@@ -10,6 +17,7 @@ use crate::page::{PageId, PageManager, PAGE_SIZE};
 use crate::StorageError;
 
 use super::super::super::{calculate_degree, estimate_max_key_size};
+use super::super::super::serialize::{write_leaf_node_no_sync, write_internal_node_no_sync};
 use super::super::structure::{InternalNode, Key, LeafNode};
 use super::BTreeIndex;
 
@@ -145,14 +153,14 @@ impl BTreeIndex {
                 leaf.prev_leaf = prev_id;
 
                 // Update the previous leaf's next_leaf pointer
-                // Read previous leaf, update it, and write it back
+                // Read previous leaf, update it, and write it back (no sync)
                 let mut prev_leaf = super::super::super::serialize::read_leaf_node(&page_manager, prev_id)?;
                 prev_leaf.next_leaf = page_id;
-                super::super::super::serialize::write_leaf_node(&page_manager, &prev_leaf, degree)?;
+                write_leaf_node_no_sync(&page_manager, &prev_leaf, degree)?;
             }
 
-            // Write current leaf to disk
-            super::super::super::serialize::write_leaf_node(&page_manager, &leaf, degree)?;
+            // Write current leaf to disk (no sync - will sync once at end)
+            write_leaf_node_no_sync(&page_manager, &leaf, degree)?;
 
             leaf_page_ids.push(page_id);
             prev_leaf_page_id = Some(page_id);
@@ -194,8 +202,8 @@ impl BTreeIndex {
                     }
                 }
 
-                // Write internal node to disk
-                super::super::super::serialize::write_internal_node(&page_manager, &internal, degree)?;
+                // Write internal node to disk (no sync - will sync once at end)
+                write_internal_node_no_sync(&page_manager, &internal, degree)?;
 
                 next_level.push(page_id);
             }
@@ -215,8 +223,13 @@ impl BTreeIndex {
             metadata_page_id,
         };
 
-        // Save metadata
-        index.save_metadata()?;
+        // Save metadata without syncing (we'll sync once at the end)
+        index.save_metadata_no_sync()?;
+
+        // Sync all page writes to disk in a single fsync call
+        // This is the key optimization: instead of syncing after every page write,
+        // we batch all writes and sync once at the end
+        index.page_manager.sync()?;
 
         Ok(index)
     }

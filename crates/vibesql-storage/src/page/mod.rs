@@ -174,7 +174,11 @@ impl PageManager {
         }
     }
 
-    /// Write a page to disk
+    /// Write a page to disk with immediate sync
+    ///
+    /// This ensures durability by syncing data to disk after each write.
+    /// For bulk operations, consider using `write_page_no_sync` followed
+    /// by a single `sync` call for better performance.
     pub fn write_page(&self, page: &mut Page) -> Result<(), StorageError> {
         let mut file = lock!(self.file);
 
@@ -183,6 +187,35 @@ impl PageManager {
         file.sync_data()?;
 
         page.mark_clean();
+        Ok(())
+    }
+
+    /// Write a page to disk without syncing
+    ///
+    /// This is faster than `write_page` but does not guarantee durability
+    /// until `sync` is called. Use this for bulk operations where you want
+    /// to batch many writes before a single sync.
+    ///
+    /// # Safety
+    /// Data may be lost on crash until `sync` is called.
+    pub fn write_page_no_sync(&self, page: &mut Page) -> Result<(), StorageError> {
+        let mut file = lock!(self.file);
+
+        let offset = page.id * (PAGE_SIZE as u64);
+        file.write_at(offset, &page.data)?;
+
+        page.mark_clean();
+        Ok(())
+    }
+
+    /// Sync all pending writes to disk
+    ///
+    /// This ensures all data written via `write_page_no_sync` is persisted.
+    /// Call this after a batch of `write_page_no_sync` operations to ensure
+    /// durability.
+    pub fn sync(&self) -> Result<(), StorageError> {
+        let mut file = lock!(self.file);
+        file.sync_data()?;
         Ok(())
     }
 
