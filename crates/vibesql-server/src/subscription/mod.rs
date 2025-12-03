@@ -43,6 +43,7 @@
 //! ```
 
 mod manager;
+mod table_dependencies;
 mod table_extract;
 
 use std::collections::HashSet;
@@ -51,6 +52,7 @@ use std::hash::{Hash, Hasher};
 use tokio::sync::mpsc;
 
 pub use manager::SubscriptionManager;
+pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
 
 // ============================================================================
