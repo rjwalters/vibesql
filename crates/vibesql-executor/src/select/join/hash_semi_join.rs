@@ -122,6 +122,9 @@ pub(super) fn hash_semi_join_with_filter(
     combined_schema: &CombinedSchema,
     database: &vibesql_storage::Database,
 ) -> Result<FromResult, ExecutorError> {
+    let debug = std::env::var("SEMI_JOIN_DEBUG").is_ok();
+    let start = std::time::Instant::now();
+
     // If no additional filter, use the simpler version
     if additional_filter.is_none() {
         return hash_semi_join(left, right, left_col_idx, right_col_idx);
@@ -136,6 +139,11 @@ pub(super) fn hash_semi_join_with_filter(
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
 
+    if debug {
+        eprintln!("[SEMI_JOIN] left_rows={}, right_rows={}", left_slice.len(), right_slice.len());
+        eprintln!("[SEMI_JOIN] filter={:?}", filter);
+    }
+
     // Partition the filter into right-only and cross-table predicates
     // Right-only predicates are applied during build, cross-table during probe
     let (right_only_filter, probe_filter) = partition_filter_predicates(
@@ -144,6 +152,11 @@ pub(super) fn hash_semi_join_with_filter(
         &left.schema,
         &right.schema,
     );
+
+    if debug {
+        eprintln!("[SEMI_JOIN] right_only_filter={:?}", right_only_filter);
+        eprintln!("[SEMI_JOIN] probe_filter={:?}", probe_filter);
+    }
 
     // Create evaluators for build and probe phases
     // Right-only evaluator uses only right schema
@@ -184,11 +197,25 @@ pub(super) fn hash_semi_join_with_filter(
                 Ok(vibesql_types::SqlValue::Boolean(false))
                 | Ok(vibesql_types::SqlValue::Null) => {
                     // Row doesn't pass filter, skip it
+                    if debug && _filtered_count < 3 {
+                        eprintln!("[SEMI_JOIN] Filtered out row: {:?}", &row.values[..3.min(row.values.len())]);
+                    }
                     _filtered_count += 1;
                     continue;
                 }
-                Err(_) | Ok(_) => {
-                    // Filter evaluation error or non-boolean, skip this row
+                Err(e) => {
+                    // Filter evaluation error, skip this row
+                    if debug && _filtered_count < 3 {
+                        eprintln!("[SEMI_JOIN] Error evaluating filter: {:?}", e);
+                    }
+                    _filtered_count += 1;
+                    continue;
+                }
+                Ok(v) => {
+                    // Filter didn't return boolean, skip this row
+                    if debug && _filtered_count < 3 {
+                        eprintln!("[SEMI_JOIN] Non-boolean filter result: {:?}", v);
+                    }
                     _filtered_count += 1;
                     continue;
                 }
@@ -197,6 +224,12 @@ pub(super) fn hash_semi_join_with_filter(
             // No right-only filter, add all rows
             hash_table.entry(key).or_default().push(idx);
         }
+    }
+
+    let build_time = start.elapsed();
+    if debug {
+        eprintln!("[SEMI_JOIN] build_time={:?}, hash_table_size={}, filtered_count={}",
+            build_time, hash_table.len(), _filtered_count);
     }
 
     // Probe phase: Check each left row for a match that passes the probe filter
@@ -259,6 +292,12 @@ pub(super) fn hash_semi_join_with_filter(
                 result_rows.push(left_row.clone());
             }
         }
+    }
+
+    if debug {
+        let total_time = start.elapsed();
+        eprintln!("[SEMI_JOIN] probe_time={:?}, total_time={:?}, result_rows={}",
+            total_time - build_time, total_time, result_rows.len());
     }
 
     // Return result with left schema only
