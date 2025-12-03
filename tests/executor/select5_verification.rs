@@ -10,10 +10,6 @@
 //!   join query. This test runs in <1 second and is suitable for regular CI. It verifies
 //!   the predicate pushdown optimization is working.
 //!
-//! - **Full Test Suite** (`test_select5_full_suite`): Runs all 732 queries from the original
-//!   select5.test file. This takes 5-10 minutes and is disabled by default with `#[ignore]`.
-//!   Run manually with: `cargo test test_select5_full_suite -- --ignored`
-//!
 //! ## Performance History
 //!
 //! - **Before optimization**: 73+ GB memory → OOM failure
@@ -22,7 +18,6 @@
 
 use ::sqllogictest::Runner;
 use std::path::Path;
-use std::time::Duration;
 
 #[path = "../sqllogictest/mod.rs"]
 mod sqllogictest;
