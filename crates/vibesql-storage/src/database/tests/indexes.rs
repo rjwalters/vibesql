@@ -111,11 +111,10 @@ fn test_multi_lookup_with_duplicate_values() {
         "multi_lookup with duplicate values should maintain insertion order within the same key");
 }
 
-// TODO(#3417): This test cannot verify DiskBacked variant in test builds because
+// Note: This test cannot verify DiskBacked variant in test builds because
 // DISK_BACKED_THRESHOLD is set to usize::MAX when cfg(test) is active.
 // The test still verifies that large index creation succeeds.
 #[test]
-#[ignore] // Slow test - creates 100k+ row index. Run with: cargo test -- --ignored
 fn test_disk_backed_index_creation_with_bulk_load() {
     // Test that large indexes can be created successfully.
     // Note: In test builds, DISK_BACKED_THRESHOLD is usize::MAX, so this will
@@ -216,9 +215,7 @@ fn test_in_memory_index_for_small_tables() {
     }
 }
 
-// TODO(#3417): This test hangs due to slow disk I/O during eviction.
 #[test]
-#[ignore] // Slow test - triggers disk-backed eviction. See issue #3417
 fn test_budget_enforcement_with_spill_policy() {
     // Test that memory budget is enforced with SpillToDisk policy
     use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -287,9 +284,7 @@ fn test_budget_enforcement_with_spill_policy() {
     assert!(index_manager.index_exists("idx_2"));
 }
 
-// TODO(#3417): This test hangs due to slow disk I/O during eviction.
 #[test]
-#[ignore] // Slow test - triggers disk-backed eviction. See issue #3417
 fn test_lru_eviction_order() {
     // Test that LRU eviction selects the coldest (least recently used) index
     use vibesql_catalog::{ColumnSchema, TableSchema};
