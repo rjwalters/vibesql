@@ -105,6 +105,13 @@ For detailed help on any command:
 Environment Variables:
   SQLLOGICTEST_TIME_BUDGET    Default time budget in seconds
   SQLLOGICTEST_SEED           Random seed for test selection
+  SQLLOGICTEST_FILES          Comma-separated list of files/patterns to test
+                              Supports glob patterns: *, ?, [abc]
+                              Examples:
+                                - "select1.test" (exact file)
+                                - "index/*/10/slt_good_0.test" (directory wildcard)
+                                - "index/commute/10/slt_good_2*.test" (filename wildcard)
+                                - "select1.test,select2.test" (multiple files)
 EOF
 }
 

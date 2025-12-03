@@ -52,14 +52,34 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
     ];
 
     // Check if we're filtering to specific files (for parallel workers)
-    let filter_files: Option<HashSet<String>> = env::var("SQLLOGICTEST_FILES")
+    // Supports both exact file paths and glob patterns (e.g., "index/*/10/*.test")
+    let filter_patterns: Option<Vec<String>> = env::var("SQLLOGICTEST_FILES")
         .ok()
         .map(|files_str| {
             files_str
                 .split(',')
                 .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
                 .collect()
         });
+
+    // Helper function to check if a pattern contains glob characters
+    fn is_glob_pattern(pattern: &str) -> bool {
+        pattern.contains('*') || pattern.contains('?') || pattern.contains('[')
+    }
+
+    // Helper function to match a path against a pattern (glob or exact)
+    fn matches_pattern(path: &str, pattern: &str) -> bool {
+        if is_glob_pattern(pattern) {
+            // Use glob pattern matching
+            glob::Pattern::new(pattern)
+                .map(|p| p.matches(path))
+                .unwrap_or(false)
+        } else {
+            // Exact match
+            path == pattern
+        }
+    }
 
     // Find all .test files
     let pattern = format!("{}/**/*.test", test_dir.display());
@@ -90,14 +110,16 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
     });
 
     // Filter to specific files if SQLLOGICTEST_FILES is set
-    if let Some(ref filter) = filter_files {
+    // Supports exact paths and glob patterns (e.g., "index/*/10/*.test")
+    if let Some(ref patterns) = filter_patterns {
         all_test_files.retain(|test_file| {
             let relative_path = test_file
                 .strip_prefix(&test_dir)
                 .unwrap_or(test_file)
                 .to_string_lossy()
                 .to_string();
-            filter.contains(&relative_path)
+            // Match against any of the patterns
+            patterns.iter().any(|pattern| matches_pattern(&relative_path, pattern))
         });
     }
 
