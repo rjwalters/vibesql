@@ -8,12 +8,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 use vibesql_storage::Database;
+use vibesql_storage::change_events::RecvError;
 
 use super::{
-    extract_table_refs, hash_rows, ChangeEvent, Subscription, SubscriptionError, SubscriptionId,
+    extract_table_refs, hash_rows, Subscription, SubscriptionError, SubscriptionId,
     SubscriptionUpdate,
 };
 
@@ -44,24 +45,14 @@ pub struct SubscriptionManager {
     /// Index: table_name -> subscription IDs that depend on it
     /// This enables fast lookup of affected subscriptions when a table changes
     table_index: DashMap<String, HashSet<SubscriptionId>>,
-
-    /// Channel to receive change events from storage layer
-    /// This will be connected to the storage layer's broadcast channel in Phase 1
-    #[allow(dead_code)]
-    change_rx: Option<broadcast::Receiver<ChangeEvent>>,
 }
 
 impl SubscriptionManager {
     /// Create a new subscription manager
-    ///
-    /// # Arguments
-    ///
-    /// * `change_rx` - Optional broadcast receiver for change events from storage layer
-    pub fn new(change_rx: Option<broadcast::Receiver<ChangeEvent>>) -> Self {
+    pub fn new() -> Self {
         Self {
             subscriptions: DashMap::new(),
             table_index: DashMap::new(),
-            change_rx,
         }
     }
 
@@ -82,7 +73,7 @@ impl SubscriptionManager {
     /// # Example
     ///
     /// ```ignore
-    /// let manager = SubscriptionManager::new(None);
+    /// let manager = SubscriptionManager::new();
     /// let (tx, mut rx) = mpsc::channel(16);
     ///
     /// let id = manager.subscribe("SELECT * FROM users".to_string(), tx)?;
@@ -186,15 +177,15 @@ impl SubscriptionManager {
     ///
     /// # Arguments
     ///
-    /// * `event` - The change event to process
+    /// * `event` - The change event to process (from storage layer)
     /// * `db` - Database to re-execute queries against
-    pub async fn handle_change(&self, event: ChangeEvent, db: &Database) {
+    pub async fn handle_change(&self, event: vibesql_storage::ChangeEvent, db: &Database) {
         let table = event.table_name();
 
         trace!(
             table = %table,
             event = ?event,
-            "Processing change event"
+            "Processing change event from storage"
         );
 
         // Find subscriptions affected by this table
@@ -311,35 +302,38 @@ impl SubscriptionManager {
         }
     }
 
-    /// Run the subscription manager event loop (for use with change channel)
+    /// Run the subscription manager event loop
     ///
-    /// Listens for change events and processes them. This method runs
-    /// indefinitely until the change channel is closed.
+    /// Listens for change events from the storage layer and processes them.
+    /// This method runs indefinitely until the change channel is closed.
     ///
-    /// Note: This method takes ownership of the change receiver to avoid
-    /// borrow conflicts during event handling.
-    #[allow(dead_code)]
-    pub async fn run(&mut self, db: Arc<Database>) {
-        // Take the receiver out of self to avoid borrow conflicts
-        let Some(mut change_rx) = self.change_rx.take() else {
-            warn!("SubscriptionManager::run called without change channel");
-            return;
-        };
-
+    /// # Arguments
+    ///
+    /// * `db` - Database reference for re-executing subscription queries
+    ///
+    /// # Note
+    ///
+    /// This method should be spawned as a tokio task at server startup using `tokio::spawn`.
+    /// It will poll the change receiver and handle events until closed.
+    pub async fn run_event_loop(&self, mut change_rx: vibesql_storage::ChangeEventReceiver, db: Arc<Database>) {
         loop {
-            match change_rx.recv().await {
+            match change_rx.try_recv() {
                 Ok(event) => {
                     self.handle_change(event, &db).await;
                 }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
+                Err(RecvError::Lagged(n)) => {
                     warn!(
                         lagged_count = n,
                         "SubscriptionManager lagged behind change events"
                     );
                 }
-                Err(broadcast::error::RecvError::Closed) => {
+                Err(RecvError::Closed) => {
                     debug!("Change event channel closed, stopping subscription manager");
                     break;
+                }
+                Err(RecvError::Empty) => {
+                    // No events available, yield to other tasks
+                    tokio::task::yield_now().await;
                 }
             }
         }
@@ -404,7 +398,7 @@ impl SubscriptionManager {
 
 impl Default for SubscriptionManager {
     fn default() -> Self {
-        Self::new(None)
+        Self::new()
     }
 }
 
@@ -438,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_subscribe_simple() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
         let result = manager.subscribe("SELECT * FROM users".to_string(), tx);
@@ -455,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_subscribe_with_join() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
         let result = manager.subscribe(
@@ -473,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_unsubscribe() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
         let id = manager
@@ -491,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_invalid_query() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
         let result = manager.subscribe("SELECT * FROM".to_string(), tx);
@@ -501,7 +495,7 @@ mod tests {
 
     #[test]
     fn test_query_without_tables() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
         // SELECT without FROM should fail
@@ -511,7 +505,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_change_notifies_subscribers() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, mut rx) = mpsc::channel(16);
         let db = setup_test_db();
 
@@ -523,9 +517,9 @@ mod tests {
         // Simulate a change to users table
         manager
             .handle_change(
-                ChangeEvent::Insert {
+                vibesql_storage::ChangeEvent::Insert {
                     table_name: "users".to_string(),
-                    row_id: 1,
+                    row_index: 0,
                 },
                 &db,
             )
@@ -546,7 +540,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_change_ignores_unrelated_tables() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, mut rx) = mpsc::channel(16);
         let db = setup_test_db();
 
@@ -558,9 +552,9 @@ mod tests {
         // Simulate a change to orders table (not subscribed)
         manager
             .handle_change(
-                ChangeEvent::Insert {
+                vibesql_storage::ChangeEvent::Insert {
                     table_name: "orders".to_string(),
-                    row_id: 1,
+                    row_index: 0,
                 },
                 &db,
             )
@@ -573,7 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_initial_results() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, mut rx) = mpsc::channel(16);
         let mut db = setup_test_db();
 
@@ -605,7 +599,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_results_changed_detection() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, mut rx) = mpsc::channel(16);
         let mut db = setup_test_db();
 
@@ -628,9 +622,9 @@ mod tests {
         // Trigger change notification
         manager
             .handle_change(
-                ChangeEvent::Insert {
+                vibesql_storage::ChangeEvent::Insert {
                     table_name: "users".to_string(),
-                    row_id: 1,
+                    row_index: 0,
                 },
                 &db,
             )
@@ -648,7 +642,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_notification_when_unchanged() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx, mut rx) = mpsc::channel(16);
         let db = setup_test_db();
 
@@ -664,9 +658,9 @@ mod tests {
         // Trigger change (but data didn't actually change since we didn't insert)
         manager
             .handle_change(
-                ChangeEvent::Insert {
+                vibesql_storage::ChangeEvent::Insert {
                     table_name: "users".to_string(),
-                    row_id: 1,
+                    row_index: 0,
                 },
                 &db,
             )
@@ -679,7 +673,7 @@ mod tests {
 
     #[test]
     fn test_multiple_subscriptions_same_table() {
-        let manager = SubscriptionManager::new(None);
+        let manager = SubscriptionManager::new();
         let (tx1, _rx1) = mpsc::channel(16);
         let (tx2, _rx2) = mpsc::channel(16);
 

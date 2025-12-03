@@ -20,7 +20,9 @@ pub use protocol::{
 };
 pub use session::{Column, ExecutionResult, Row, Session};
 pub use subscription::{
-    extract_table_dependencies, extract_table_refs, ChangeEvent, SessionSubscription,
+    extract_table_dependencies, extract_table_refs, SessionSubscription,
     SessionSubscriptionId, SessionSubscriptionManager, Subscription, SubscriptionError,
     SubscriptionId, SubscriptionManager, SubscriptionUpdate,
 };
+// Re-export ChangeEvent from storage layer for consistency
+pub use vibesql_storage::ChangeEvent;

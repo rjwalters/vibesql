@@ -4,17 +4,28 @@ Process Sysbench OLTP benchmark results and store them in the dogfooding databas
 
 This script parses the Criterion benchmark output from sysbench_oltp and stores
 the results in the VibeSQL database for performance tracking over time.
+
+NOTE: This script dogfoods VibeSQL - we use our own database to store results!
 """
 
 import argparse
 import json
 import re
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Import our VibeSQL helper module
+from vibesql_db import (
+    get_connection,
+    save_connection,
+    get_db_path,
+    get_last_insert_id,
+    init_schema,
+    execute_insert,
+)
 
 
 def get_repo_root() -> Path:
@@ -43,14 +54,9 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
 
-def get_db_path() -> Path:
-    """Get the path to the benchmark results database."""
-    return Path.home() / ".vibesql" / "test_results" / "benchmark_results.db"
-
-
-def init_benchmark_schema(db_path: Path):
+def init_benchmark_schema(cursor):
     """Initialize benchmark tables in the database if they don't exist."""
-    schema_path = get_repo_root() / "scripts" / "benchmark_results_schema.sql"
+    schema_path = get_repo_root() / "scripts" / "benchmark_results_schema_vibesql.sql"
 
     if not schema_path.exists():
         print(f"Error: Schema file not found: {schema_path}")
@@ -59,12 +65,7 @@ def init_benchmark_schema(db_path: Path):
     with open(schema_path) as f:
         schema_sql = f.read()
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.executescript(schema_sql)
-        conn.commit()
-    finally:
-        conn.close()
+    init_schema(cursor, schema_sql)
 
 
 def parse_criterion_estimates(criterion_dir: Path) -> List[Dict]:
@@ -234,75 +235,65 @@ def parse_criterion_output(output: str) -> List[Dict]:
     return results
 
 
-def insert_sysbench_results(db_path: Path, results: List[Dict],
+def insert_sysbench_results(db, cursor, results: List[Dict],
                              table_size: int = 10000,
                              notes: Optional[str] = None):
     """Insert Sysbench results into the database."""
     git_commit, git_branch = get_git_info()
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cursor = conn.cursor()
+    # Insert benchmark run
+    execute_insert(cursor, "benchmark_runs", [
+        "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
+        "scale_factor", "total_queries", "notes"
+    ], [
+        datetime.now().isoformat(),
+        git_commit,
+        git_branch,
+        'sysbench',
+        str(table_size),
+        len(results),
+        notes
+    ])
 
-        # Insert benchmark run
-        cursor.execute("""
-            INSERT INTO benchmark_runs (
-                timestamp, git_commit, git_branch, benchmark_suite,
-                scale_factor, total_queries, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            datetime.now().isoformat(),
-            git_commit,
-            git_branch,
-            'sysbench',
-            str(table_size),
-            len(results),
-            notes
-        ))
+    run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
 
-        run_id = cursor.lastrowid
+    # Insert individual results
+    for result in results:
+        execute_insert(cursor, "sysbench_results", [
+            "run_id", "database_engine", "test_name", "table_size",
+            "mean_time_ns", "std_dev_ns", "median_time_ns", "iterations"
+        ], [
+            run_id,
+            result.get('database_engine', 'unknown'),
+            result.get('test_name', 'unknown'),
+            result.get('table_size', table_size),
+            result.get('mean_time_ns'),
+            result.get('std_dev_ns'),
+            result.get('median_time_ns'),
+            result.get('iterations')
+        ])
 
-        # Insert individual results
-        for result in results:
-            cursor.execute("""
-                INSERT INTO sysbench_results (
-                    run_id, database_engine, test_name, table_size,
-                    mean_time_ns, std_dev_ns, median_time_ns, iterations
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run_id,
-                result.get('database_engine', 'unknown'),
-                result.get('test_name', 'unknown'),
-                result.get('table_size', table_size),
-                result.get('mean_time_ns'),
-                result.get('std_dev_ns'),
-                result.get('median_time_ns'),
-                result.get('iterations')
-            ))
+    save_connection(db)
 
-        conn.commit()
+    print(f"\nSysbench results stored in database")
+    print(f"   Run ID: {run_id}")
+    print(f"   Commit: {git_commit or 'unknown'}")
+    print(f"   Results: {len(results)}")
+    print(f"   Database: {get_db_path()}")
 
-        print(f"\nSysbench results stored in database")
-        print(f"   Run ID: {run_id}")
-        print(f"   Commit: {git_commit or 'unknown'}")
-        print(f"   Results: {len(results)}")
+    # Group by test for summary
+    by_test = {}
+    for r in results:
+        test = r.get('test_name', 'unknown')
+        if test not in by_test:
+            by_test[test] = []
+        by_test[test].append(r)
 
-        # Group by test for summary
-        by_test = {}
-        for r in results:
-            test = r.get('test_name', 'unknown')
-            if test not in by_test:
-                by_test[test] = []
-            by_test[test].append(r)
-
-        for test, test_results in by_test.items():
-            print(f"   {test}:")
-            for r in test_results:
-                mean_us = r.get('mean_time_ns', 0) / 1000
-                print(f"      {r.get('database_engine', 'unknown')}: {mean_us:.2f} us")
-
-    finally:
-        conn.close()
+    for test, test_results in by_test.items():
+        print(f"   {test}:")
+        for r in test_results:
+            mean_us = r.get('mean_time_ns', 0) / 1000
+            print(f"      {r.get('database_engine', 'unknown')}: {mean_us:.2f} us")
 
 
 def main():
@@ -334,12 +325,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Get database path
-    db_path = get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Get database connection
+    db, cursor = get_connection()
 
     # Initialize schema
-    init_benchmark_schema(db_path)
+    init_benchmark_schema(cursor)
 
     # Parse benchmark results
     if args.stdin:
@@ -362,7 +352,7 @@ def main():
     print(f"   Found {len(results)} benchmark results")
 
     # Insert results
-    insert_sysbench_results(db_path, results, args.table_size, args.notes)
+    insert_sysbench_results(db, cursor, results, args.table_size, args.notes)
 
 
 if __name__ == "__main__":

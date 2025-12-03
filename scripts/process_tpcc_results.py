@@ -4,16 +4,27 @@ Process TPC-C benchmark results and store them in the dogfooding database.
 
 This script parses the output from the TPC-C benchmark executable and stores
 the results in the VibeSQL database for performance tracking over time.
+
+NOTE: This script dogfoods VibeSQL - we use our own database to store results!
 """
 
 import argparse
 import re
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Import our VibeSQL helper module
+from vibesql_db import (
+    get_connection,
+    save_connection,
+    get_db_path,
+    get_last_insert_id,
+    init_schema,
+    execute_insert,
+)
 
 
 def get_repo_root() -> Path:
@@ -42,14 +53,9 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
 
-def get_db_path() -> Path:
-    """Get the path to the benchmark results database."""
-    return Path.home() / ".vibesql" / "test_results" / "benchmark_results.db"
-
-
-def init_benchmark_schema(db_path: Path):
+def init_benchmark_schema(cursor):
     """Initialize benchmark tables in the database if they don't exist."""
-    schema_path = get_repo_root() / "scripts" / "benchmark_results_schema.sql"
+    schema_path = get_repo_root() / "scripts" / "benchmark_results_schema_vibesql.sql"
 
     if not schema_path.exists():
         print(f"Error: Schema file not found: {schema_path}")
@@ -58,12 +64,7 @@ def init_benchmark_schema(db_path: Path):
     with open(schema_path) as f:
         schema_sql = f.read()
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.executescript(schema_sql)
-        conn.commit()
-    finally:
-        conn.close()
+    init_schema(cursor, schema_sql)
 
 
 def parse_tpcc_output(output: str) -> Tuple[List[Dict], Dict]:
@@ -166,66 +167,56 @@ def parse_tpcc_output(output: str) -> Tuple[List[Dict], Dict]:
     return results, summary
 
 
-def insert_tpcc_results(db_path: Path, results: List[Dict],
+def insert_tpcc_results(db, cursor, results: List[Dict],
                          scale_factor: int = 1, duration_secs: int = 60,
                          notes: Optional[str] = None):
     """Insert TPC-C results into the database."""
     git_commit, git_branch = get_git_info()
 
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cursor = conn.cursor()
+    # Insert benchmark run
+    execute_insert(cursor, "benchmark_runs", [
+        "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
+        "scale_factor", "timeout_secs", "total_queries", "notes"
+    ], [
+        datetime.now().isoformat(),
+        git_commit,
+        git_branch,
+        'tpcc',
+        str(scale_factor),
+        duration_secs,
+        sum(r.get('transaction_count', 0) for r in results),
+        notes
+    ])
 
-        # Insert benchmark run
-        cursor.execute("""
-            INSERT INTO benchmark_runs (
-                timestamp, git_commit, git_branch, benchmark_suite,
-                scale_factor, timeout_secs, total_queries, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            datetime.now().isoformat(),
-            git_commit,
-            git_branch,
-            'tpcc',
-            str(scale_factor),
-            duration_secs,
-            sum(r.get('transaction_count', 0) for r in results),
-            notes
-        ))
+    run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
 
-        run_id = cursor.lastrowid
+    # Insert individual results
+    for result in results:
+        execute_insert(cursor, "tpcc_results", [
+            "run_id", "database_engine", "transaction_type",
+            "transaction_count", "avg_latency_us", "total_duration_ms",
+            "transactions_per_second", "successful_transactions", "failed_transactions"
+        ], [
+            run_id,
+            result.get('database_engine', 'unknown'),
+            result.get('transaction_type', 'mixed'),
+            result.get('transaction_count', 0),
+            result.get('avg_latency_us'),
+            result.get('total_duration_ms'),
+            result.get('transactions_per_second'),
+            result.get('successful_transactions', 0),
+            result.get('failed_transactions', 0)
+        ])
 
-        # Insert individual results
-        for result in results:
-            cursor.execute("""
-                INSERT INTO tpcc_results (
-                    run_id, database_engine, transaction_type,
-                    transaction_count, avg_latency_us, total_duration_ms,
-                    transactions_per_second, successful_transactions, failed_transactions
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run_id,
-                result.get('database_engine', 'unknown'),
-                result.get('transaction_type', 'mixed'),
-                result.get('transaction_count', 0),
-                result.get('avg_latency_us'),
-                result.get('total_duration_ms'),
-                result.get('transactions_per_second'),
-                result.get('successful_transactions', 0),
-                result.get('failed_transactions', 0)
-            ))
+    save_connection(db)
 
-        conn.commit()
-
-        print(f"\nTPC-C results stored in database")
-        print(f"   Run ID: {run_id}")
-        print(f"   Commit: {git_commit or 'unknown'}")
-        print(f"   Engines: {len(results)}")
-        for r in results:
-            print(f"   {r.get('database_engine', 'unknown')}: {r.get('transactions_per_second', 0):.2f} TPS")
-
-    finally:
-        conn.close()
+    print(f"\nTPC-C results stored in database")
+    print(f"   Run ID: {run_id}")
+    print(f"   Commit: {git_commit or 'unknown'}")
+    print(f"   Engines: {len(results)}")
+    print(f"   Database: {get_db_path()}")
+    for r in results:
+        print(f"   {r.get('database_engine', 'unknown')}: {r.get('transactions_per_second', 0):.2f} TPS")
 
 
 def main():
@@ -263,12 +254,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Get database path
-    db_path = get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Get database connection
+    db, cursor = get_connection()
 
     # Initialize schema
-    init_benchmark_schema(db_path)
+    init_benchmark_schema(cursor)
 
     # Read benchmark output
     if args.stdin:
@@ -292,7 +282,7 @@ def main():
     print(f"   Found {summary['total_engines']} engines, {summary['total_transactions']} total transactions")
 
     # Insert results
-    insert_tpcc_results(db_path, results, args.scale_factor, args.duration, args.notes)
+    insert_tpcc_results(db, cursor, results, args.scale_factor, args.duration, args.notes)
 
 
 if __name__ == "__main__":

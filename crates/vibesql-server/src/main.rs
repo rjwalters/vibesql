@@ -13,6 +13,8 @@ use vibesql_server::config::Config;
 use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::observability::ObservabilityProvider;
 use vibesql_server::protocol::BackendMessage;
+use vibesql_server::subscription::SubscriptionManager;
+use vibesql_storage::Database;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -90,6 +92,24 @@ async fn main() -> Result<()> {
     // Track active connections
     let active_connections = Arc::new(AtomicUsize::new(0));
 
+    // Create a shared database and enable change events
+    let mut db = Database::new();
+    let change_rx = db.enable_change_events(1024);
+    let db = Arc::new(db);
+
+    // Create the global subscription manager
+    let subscription_manager = Arc::new(SubscriptionManager::new());
+    let subscription_manager_for_handler = Arc::clone(&subscription_manager);
+
+    // Spawn the subscription manager event loop in a background task
+    let db_for_subscription_task = Arc::clone(&db);
+    let subscription_manager_for_loop = Arc::clone(&subscription_manager);
+    tokio::spawn(async move {
+        info!("Starting subscription manager event loop");
+        subscription_manager_for_loop.run_event_loop(change_rx, db_for_subscription_task).await;
+        info!("Subscription manager event loop stopped");
+    });
+
     loop {
         // Accept new connections
         match listener.accept().await {
@@ -144,6 +164,7 @@ async fn main() -> Result<()> {
                             let observability = Arc::clone(&observability);
                             let password_store = password_store.clone();
                             let active_connections = Arc::clone(&active_connections);
+                            let subscription_manager = Arc::clone(&subscription_manager_for_handler);
 
                             // Record connection metric
                             if let Some(metrics) = observability.metrics() {
@@ -159,6 +180,7 @@ async fn main() -> Result<()> {
                                     observability,
                                     password_store,
                                     active_connections,
+                                    subscription_manager,
                                 );
                                 if let Err(e) = handler.handle().await {
                                     error!("Connection error from {}: {}", peer_addr, e);

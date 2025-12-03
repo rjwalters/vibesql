@@ -183,62 +183,9 @@ pub enum SubscriptionUpdate {
 // ============================================================================
 // Change Event
 // ============================================================================
-
-/// Event from the storage layer indicating data has changed
-///
-/// These events are produced by the storage layer (Phase 1) and consumed
-/// by the SubscriptionManager to determine which subscriptions need updates.
-#[derive(Debug, Clone)]
-pub enum ChangeEvent {
-    /// A row was inserted into a table
-    Insert {
-        /// Name of the affected table
-        table_name: String,
-        /// ID of the inserted row (for future delta tracking)
-        row_id: u64,
-    },
-
-    /// A row was updated in a table
-    Update {
-        /// Name of the affected table
-        table_name: String,
-        /// ID of the updated row
-        row_id: u64,
-    },
-
-    /// A row was deleted from a table
-    Delete {
-        /// Name of the affected table
-        table_name: String,
-        /// ID of the deleted row
-        row_id: u64,
-    },
-
-    /// A table was truncated (all rows deleted)
-    Truncate {
-        /// Name of the truncated table
-        table_name: String,
-    },
-
-    /// A table was dropped
-    DropTable {
-        /// Name of the dropped table
-        table_name: String,
-    },
-}
-
-impl ChangeEvent {
-    /// Get the name of the affected table
-    pub fn table_name(&self) -> &str {
-        match self {
-            ChangeEvent::Insert { table_name, .. }
-            | ChangeEvent::Update { table_name, .. }
-            | ChangeEvent::Delete { table_name, .. }
-            | ChangeEvent::Truncate { table_name }
-            | ChangeEvent::DropTable { table_name } => table_name,
-        }
-    }
-}
+// Note: ChangeEvent is imported from vibesql_storage and re-exported at the
+// crate level for consistency. This ensures the server uses the same event
+// type that the storage layer emits.
 
 // ============================================================================
 // Subscription Error
@@ -314,36 +261,7 @@ mod tests {
         assert_eq!(format!("{}", id), "sub-42");
     }
 
-    #[test]
-    fn test_change_event_table_name() {
-        let insert = ChangeEvent::Insert {
-            table_name: "users".to_string(),
-            row_id: 1,
-        };
-        assert_eq!(insert.table_name(), "users");
 
-        let update = ChangeEvent::Update {
-            table_name: "orders".to_string(),
-            row_id: 2,
-        };
-        assert_eq!(update.table_name(), "orders");
-
-        let delete = ChangeEvent::Delete {
-            table_name: "products".to_string(),
-            row_id: 3,
-        };
-        assert_eq!(delete.table_name(), "products");
-
-        let truncate = ChangeEvent::Truncate {
-            table_name: "logs".to_string(),
-        };
-        assert_eq!(truncate.table_name(), "logs");
-
-        let drop = ChangeEvent::DropTable {
-            table_name: "temp".to_string(),
-        };
-        assert_eq!(drop.table_name(), "temp");
-    }
 
     #[test]
     fn test_hash_rows_empty() {
