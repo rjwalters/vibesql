@@ -500,7 +500,7 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
 
 /// Queries that are known to be slow and need reduced sample sizes
 /// These queries take >100ms per iteration, so 100 samples would exceed the 10s target
-const SLOW_QUERIES: &[&str] = &["Q2"];
+const SLOW_QUERIES: &[&str] = &["Q2", "Q6", "Q57", "Q59", "Q69"];
 
 fn bench_tpcds_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_queries");
