@@ -14,5 +14,7 @@ pub use auth::PasswordStore;
 pub use config::{AuthConfig, Config, LoggingConfig, ServerConfig};
 pub use connection::ConnectionHandler;
 pub use observability::ObservabilityProvider;
-pub use protocol::{BackendMessage, FieldDescription, FrontendMessage, TransactionStatus};
+pub use protocol::{
+    BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
+};
 pub use session::{Column, ExecutionResult, Row, Session};
