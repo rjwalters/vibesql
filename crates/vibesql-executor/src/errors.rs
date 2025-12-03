@@ -215,6 +215,16 @@ pub enum ExecutorError {
         expected: String,
         actual: String,
     },
+    /// Cursor already exists with this name
+    CursorAlreadyExists(String),
+    /// Cursor not found
+    CursorNotFound(String),
+    /// Cursor is already open
+    CursorAlreadyOpen(String),
+    /// Cursor is not open (must OPEN before FETCH)
+    CursorNotOpen(String),
+    /// Cursor does not support backward movement (not declared with SCROLL)
+    CursorNotScrollable(String),
     Other(String),
 }
 
@@ -624,6 +634,21 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::SpatialArgumentError { function_name, expected, actual } => {
                 write!(f, "{} expects {}, got {}", function_name, expected, actual)
+            }
+            ExecutorError::CursorAlreadyExists(name) => {
+                write!(f, "Cursor '{}' already exists", name)
+            }
+            ExecutorError::CursorNotFound(name) => {
+                write!(f, "Cursor '{}' not found", name)
+            }
+            ExecutorError::CursorAlreadyOpen(name) => {
+                write!(f, "Cursor '{}' is already open", name)
+            }
+            ExecutorError::CursorNotOpen(name) => {
+                write!(f, "Cursor '{}' is not open", name)
+            }
+            ExecutorError::CursorNotScrollable(name) => {
+                write!(f, "Cursor '{}' is not scrollable (SCROLL not specified)", name)
             }
             ExecutorError::Other(msg) => write!(f, "{}", msg),
         }
