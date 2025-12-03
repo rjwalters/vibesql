@@ -118,6 +118,31 @@ impl QueryBufferPool {
             value_buffers_pooled,
         }
     }
+
+    /// Clear all thread-local buffer pools, releasing memory back to the allocator.
+    ///
+    /// This is useful for benchmarks and long-running processes where memory
+    /// pressure needs to be reduced between query batches. The pools will
+    /// automatically refill as needed during subsequent query execution.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use vibesql_storage::QueryBufferPool;
+    ///
+    /// // Run a batch of queries...
+    ///
+    /// // Clear pools to release memory
+    /// QueryBufferPool::clear_thread_local_pools();
+    /// ```
+    pub fn clear_thread_local_pools() {
+        ROW_POOL.with(|pool| {
+            pool.borrow_mut().clear();
+        });
+        VALUE_POOL.with(|pool| {
+            pool.borrow_mut().clear();
+        });
+    }
 }
 
 /// Statistics about buffer pool usage

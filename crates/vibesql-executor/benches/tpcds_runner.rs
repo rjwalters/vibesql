@@ -39,7 +39,8 @@ use std::time::{Duration, Instant};
 use tpcds::memory::{get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled, MemoryTracker};
 use tpcds::queries::TPCDS_QUERIES;
 use tpcds::schema::load_vibesql;
-use vibesql_executor::SelectExecutor;
+use vibesql_executor::{SelectExecutor, clear_in_subquery_cache};
+use vibesql_storage::QueryBufferPool;
 use vibesql_parser::Parser;
 
 #[cfg(feature = "benchmark-comparison")]
@@ -47,11 +48,12 @@ use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use tpcds::schema::load_duckdb;
 
-/// Queries known to be extremely slow due to complex joins/subqueries
+/// Queries known to be extremely slow or memory-intensive
 /// These can be skipped with SKIP_SLOW=1 environment variable
 const SLOW_QUERIES: &[&str] = &[
     "Q4",  // Complex CTE with 6-way self-join
     "Q11", // Customer web vs store sales growth (complex)
+    "Q69", // EXISTS/NOT EXISTS correlated subqueries - 3+ GB memory spike
     // Q17, Q24, Q29 were fixed by PR #3347 (hash join for derived tables)
 ];
 
@@ -343,9 +345,14 @@ fn main() {
 
         queries_in_batch += 1;
 
-        // End of batch: hint memory release
+        // End of batch: clear caches and hint memory release
         if queries_in_batch >= batch_size {
             queries_in_batch = 0;
+
+            // Clear thread-local caches to release memory
+            // This is critical for long-running benchmarks to prevent memory accumulation
+            clear_in_subquery_cache();
+            QueryBufferPool::clear_thread_local_pools();
 
             // Hint to allocator to release memory
             hint_memory_release();
@@ -373,7 +380,9 @@ fn main() {
         }
     }
 
-    // Final memory release hint
+    // Final cleanup: clear all caches and hint memory release
+    clear_in_subquery_cache();
+    QueryBufferPool::clear_thread_local_pools();
     hint_memory_release();
 
     println!("\n{}", "=".repeat(60));
