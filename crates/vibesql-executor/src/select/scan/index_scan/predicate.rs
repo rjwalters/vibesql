@@ -850,7 +850,31 @@ fn extract_column_name(expr: &Expression) -> Option<&str> {
 ///
 /// Returns None if no suitable predicate found for the column.
 pub(crate) fn extract_index_predicate(expr: &Expression, column_name: &str) -> Option<IndexPredicate> {
-    // First try to extract a range predicate
+    // FIRST: Check for contradictions (e.g., col = 70 AND col IN (74, 69, 10))
+    // This must happen before extract_range_predicate() since it returns early
+    // when finding a range (like col = 70), bypassing contradiction checks.
+    if let Expression::BinaryOp { op: BinaryOperator::And, .. } = expr {
+        let mut equality_values: Vec<SqlValue> = Vec::new();
+        let mut in_values: Option<Vec<SqlValue>> = None;
+        let mut range_pred: Option<RangePredicate> = None;
+
+        collect_column_predicates(expr, column_name, &mut equality_values, &mut in_values, &mut range_pred);
+
+        // Check for equality + IN contradiction
+        if !equality_values.is_empty() && in_values.is_some() {
+            let in_vals = in_values.as_ref().unwrap();
+            // If any equality value is NOT in the IN list, we have a contradiction
+            for eq_val in &equality_values {
+                if !in_vals.contains(eq_val) {
+                    // Contradiction: equality value not in IN list - no rows can match
+                    // Return empty IN predicate to signal impossible query
+                    return Some(IndexPredicate::In(vec![]));
+                }
+            }
+        }
+    }
+
+    // Try to extract a range predicate
     if let Some(range) = extract_range_predicate(expr, column_name) {
         return Some(IndexPredicate::Range(range));
     }
@@ -890,35 +914,9 @@ pub(crate) fn extract_index_predicate(expr: &Expression, column_name: &str) -> O
                 }
             }
         }
-        // Handle AND: check for contradictions between equality and IN predicates
-        // e.g., col = 40 AND col IN (84, 23, 58) should return empty result (contradiction)
+        // Handle AND: try to extract predicate from either side
+        // Note: Contradiction checks are handled at the top of this function
         Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
-            // Collect all predicates from both sides
-            let mut equality_values: Vec<SqlValue> = Vec::new();
-            let mut in_values: Option<Vec<SqlValue>> = None;
-            let mut range_pred: Option<RangePredicate> = None;
-
-            collect_column_predicates(left, column_name, &mut equality_values, &mut in_values, &mut range_pred);
-            collect_column_predicates(right, column_name, &mut equality_values, &mut in_values, &mut range_pred);
-
-            // Check for equality + IN contradiction
-            if !equality_values.is_empty() && in_values.is_some() {
-                let in_vals = in_values.as_ref().unwrap();
-                // If any equality value is NOT in the IN list, we have a contradiction
-                for eq_val in &equality_values {
-                    if !in_vals.contains(eq_val) {
-                        // Contradiction: equality value not in IN list - no rows can match
-                        // Return empty IN predicate to signal impossible query
-                        return Some(IndexPredicate::In(vec![]));
-                    }
-                }
-                // All equality values are in the IN list - use the range predicate if available
-                if let Some(range) = range_pred {
-                    return Some(IndexPredicate::Range(range));
-                }
-            }
-
-            // No contradiction found - fall back to normal extraction
             // Try left side first
             if let Some(pred) = extract_index_predicate(left, column_name) {
                 return Some(pred);
