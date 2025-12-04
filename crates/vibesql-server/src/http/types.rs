@@ -12,6 +12,12 @@ pub struct QueryRequest {
     /// Query parameters (optional)
     #[serde(default)]
     pub params: Vec<JsonValue>,
+    /// Limit for pagination (max rows to return)
+    #[serde(default)]
+    pub limit: Option<usize>,
+    /// Offset for pagination (rows to skip)
+    #[serde(default)]
+    pub offset: Option<usize>,
 }
 
 impl QueryRequest {
@@ -30,6 +36,15 @@ pub struct QueryResponse {
     pub rows: Vec<Vec<JsonValue>>,
     /// Number of rows returned
     pub row_count: usize,
+    /// Total count in result set (before pagination)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_count: Option<usize>,
+    /// Current offset used in query
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<usize>,
+    /// Current limit used in query
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
 }
 
 /// Mutation response (INSERT, UPDATE, DELETE)

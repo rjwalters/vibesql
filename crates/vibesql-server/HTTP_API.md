@@ -40,24 +40,49 @@ POST /api/query
 Content-Type: application/json
 ```
 
-Execute a SQL query with optional parameters.
+Execute a SQL query with optional parameters and pagination.
 
-**Request:**
+#### Pagination
+
+You can optionally include pagination parameters to limit and offset results:
+
+- `limit` (number): Maximum number of rows to return
+- `offset` (number): Number of rows to skip (zero-indexed)
+
+**Request (with pagination):**
 ```json
 {
-  "sql": "SELECT * FROM users WHERE id = $1",
-  "params": [123]
+  "sql": "SELECT * FROM users WHERE status = $1",
+  "params": ["active"],
+  "limit": 10,
+  "offset": 20
 }
 ```
 
-**Response (SELECT):**
+**Response (SELECT without pagination):**
 ```json
 {
   "columns": ["id", "name", "email"],
   "rows": [
-    [123, "Alice", "alice@example.com"]
+    [123, "Alice", "alice@example.com"],
+    [124, "Bob", "bob@example.com"]
   ],
-  "row_count": 1
+  "row_count": 2
+}
+```
+
+**Response (SELECT with pagination):**
+```json
+{
+  "columns": ["id", "name", "email"],
+  "rows": [
+    [23, "User 23", "user23@example.com"],
+    [24, "User 24", "user24@example.com"]
+  ],
+  "row_count": 2,
+  "total_count": 100,
+  "offset": 20,
+  "limit": 10
 }
 ```
 
@@ -67,6 +92,33 @@ Execute a SQL query with optional parameters.
   "rows_affected": 5
 }
 ```
+
+#### Pagination Examples
+
+Get first 10 users:
+```json
+{
+  "sql": "SELECT * FROM users",
+  "limit": 10
+}
+```
+
+Get second page (users 11-20):
+```json
+{
+  "sql": "SELECT * FROM users",
+  "limit": 10,
+  "offset": 10
+}
+```
+
+Get all matching records with count:
+```json
+{
+  "sql": "SELECT * FROM users WHERE active = true"
+}
+```
+The response will include `total_count` with the total matching rows.
 
 ### List Tables
 
