@@ -1,6 +1,6 @@
 {
   "name": "@vibesql/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript client for VibeSql with real-time subscription support",
   "type": "module",
   "main": "dist/index.js",
@@ -50,8 +50,14 @@
     "directory": "packages/vibesql-client-ts"
   },
   "license": "MIT OR Apache-2.0",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "@types/react": "^19.2.7",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "@vitest/coverage-v8": "^1.0.0",
