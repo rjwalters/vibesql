@@ -12,6 +12,7 @@ export type {
   SubscriptionCallbacks,
   UpdateDelta,
   Subscription,
+  StorageOptions,
 } from './types/index';
 
 // Errors
@@ -21,6 +22,20 @@ export {
   QueryError,
   SubscriptionError,
 } from './types/index';
+
+// Storage types and errors
+export type {
+  StorageClient,
+  StorageMetadata,
+  UploadOptions,
+} from './storage/index';
+
+export {
+  StorageError,
+  BlobNotFoundError,
+  UploadError,
+  HttpStorageClient,
+} from './storage/index';
 
 // Protocol types (for advanced users)
 export type {

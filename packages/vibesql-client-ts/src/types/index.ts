@@ -3,6 +3,22 @@
  */
 
 /**
+ * Storage configuration options
+ */
+export interface StorageOptions {
+  /**
+   * Base URL for the storage HTTP API
+   * If not set, derived from host and httpPort
+   */
+  baseUrl?: string;
+
+  /**
+   * Custom headers to include with storage requests
+   */
+  headers?: Record<string, string>;
+}
+
+/**
  * Client configuration options
  */
 export interface VibeSqlClientOptions {
@@ -12,6 +28,9 @@ export interface VibeSqlClientOptions {
   database: string;
   user: string;
   password?: string;
+
+  // HTTP API port (for storage and REST API)
+  httpPort?: number;
 
   // Connection pool settings
   pool?: {
@@ -30,6 +49,9 @@ export interface VibeSqlClientOptions {
 
   // TLS settings
   ssl?: boolean | TlsOptions;
+
+  // Storage settings
+  storage?: StorageOptions;
 }
 
 /**
