@@ -74,6 +74,7 @@ impl ScheduleExecutor {
         };
 
         // Execute with retries
+        #[allow(unused_assignments)] // Initial None is never read, but keeps the code clear
         let mut last_error: Option<String> = None;
         let mut attempt = 0;
 
