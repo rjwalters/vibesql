@@ -2447,7 +2447,8 @@ LIMIT 100
 "#;
 
 // TPC-DS Q69: Customer analysis with address
-// Tests: NOT EXISTS, multiple subqueries
+// Tests: NOT EXISTS, multiple subqueries (EXISTS and NOT EXISTS patterns)
+// Fixed: Removed unnecessary date_dim cross join from outer query
 pub const TPCDS_Q69: &str = r#"
 SELECT
     c_customer_id,
@@ -2457,10 +2458,9 @@ SELECT
     c_birth_country,
     c_login,
     c_email_address
-FROM customer c, customer_address ca, date_dim
+FROM customer c, customer_address ca
 WHERE c.c_current_addr_sk = ca.ca_address_sk
     AND ca_state IN ('KY', 'GA', 'NM')
-    AND d_year = 2000
     AND EXISTS (
         SELECT 1
         FROM store_sales, date_dim d2
