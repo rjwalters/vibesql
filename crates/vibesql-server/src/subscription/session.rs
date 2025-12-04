@@ -4,8 +4,11 @@
 //! subscriptions for a single client session. Unlike the global SubscriptionManager,
 //! this is used to track which queries a specific client is subscribed to.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Instant;
 use uuid::Uuid;
+
+use super::{SubscriptionConfig, SubscriptionError};
 
 /// Unique identifier for a subscription (UUID bytes)
 pub type SessionSubscriptionId = [u8; 16];
@@ -24,32 +27,60 @@ pub struct SessionSubscription {
 }
 
 /// Manages subscriptions for a single connection/session
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SessionSubscriptionManager {
     /// Active subscriptions by ID
     subscriptions: HashMap<SessionSubscriptionId, SessionSubscription>,
     /// Index from table name to subscription IDs that depend on it
     table_to_subscriptions: HashMap<String, HashSet<SessionSubscriptionId>>,
+    /// Configuration for limits and quotas
+    config: SubscriptionConfig,
+    /// Timestamps of recent subscription creations for rate limiting
+    /// Stores timestamps within the last second
+    recent_subscriptions: VecDeque<Instant>,
 }
 
 impl SessionSubscriptionManager {
-    /// Create a new subscription manager
+    /// Create a new subscription manager with default configuration
     pub fn new() -> Self {
+        Self::with_config(SubscriptionConfig::default())
+    }
+
+    /// Create a new subscription manager with custom configuration
+    pub fn with_config(config: SubscriptionConfig) -> Self {
         Self {
             subscriptions: HashMap::new(),
             table_to_subscriptions: HashMap::new(),
+            config,
+            recent_subscriptions: VecDeque::new(),
         }
     }
 
     /// Subscribe to a query with the given table dependencies
     ///
-    /// Returns the generated subscription ID
+    /// Returns the generated subscription ID on success, or an error if limits are exceeded.
+    ///
+    /// # Errors
+    ///
+    /// - `ConnectionLimitExceeded` if this connection has too many subscriptions
+    /// - `RateLimited` if subscriptions are being created too quickly
     pub fn subscribe(
         &mut self,
         query: String,
         params: Vec<Option<Vec<u8>>>,
         table_dependencies: HashSet<String>,
-    ) -> SessionSubscriptionId {
+    ) -> Result<SessionSubscriptionId, SubscriptionError> {
+        // Check per-connection limit
+        if self.subscriptions.len() >= self.config.max_per_connection {
+            return Err(SubscriptionError::ConnectionLimitExceeded {
+                current: self.subscriptions.len(),
+                max: self.config.max_per_connection,
+            });
+        }
+
+        // Check rate limit
+        self.check_rate_limit()?;
+
         let id = generate_subscription_id();
 
         // Register subscription
@@ -69,7 +100,38 @@ impl SessionSubscriptionManager {
         }
 
         self.subscriptions.insert(id, subscription);
-        id
+
+        // Record this subscription for rate limiting
+        self.recent_subscriptions.push_back(Instant::now());
+
+        Ok(id)
+    }
+
+    /// Check rate limit and return error if exceeded
+    fn check_rate_limit(&mut self) -> Result<(), SubscriptionError> {
+        let now = Instant::now();
+        let one_second_ago = now - std::time::Duration::from_secs(1);
+
+        // Remove old entries (older than 1 second)
+        while let Some(front) = self.recent_subscriptions.front() {
+            if *front < one_second_ago {
+                self.recent_subscriptions.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        // Check if we've hit the rate limit
+        if self.recent_subscriptions.len() >= self.config.rate_limit_per_second as usize {
+            // Calculate retry-after based on oldest entry
+            if let Some(oldest) = self.recent_subscriptions.front() {
+                let elapsed = now.duration_since(*oldest);
+                let retry_after_ms = 1000u64.saturating_sub(elapsed.as_millis() as u64);
+                return Err(SubscriptionError::RateLimited { retry_after_ms });
+            }
+        }
+
+        Ok(())
     }
 
     /// Unsubscribe from a query
@@ -117,12 +179,24 @@ impl SessionSubscriptionManager {
     pub fn clear(&mut self) {
         self.subscriptions.clear();
         self.table_to_subscriptions.clear();
+        self.recent_subscriptions.clear();
     }
 
     /// Get all active subscription IDs
     #[allow(dead_code)]
     pub fn all_subscription_ids(&self) -> Vec<SessionSubscriptionId> {
         self.subscriptions.keys().copied().collect()
+    }
+
+    /// Get the current configuration
+    pub fn config(&self) -> &SubscriptionConfig {
+        &self.config
+    }
+}
+
+impl Default for SessionSubscriptionManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -147,7 +221,7 @@ mod tests {
             "SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string(),
             vec![],
             deps,
-        );
+        ).unwrap();
 
         assert_eq!(manager.subscription_count(), 1);
         assert!(manager.get(&id).is_some());
@@ -182,12 +256,12 @@ mod tests {
         deps2.insert("users".to_string());
         deps2.insert("products".to_string());
 
-        let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1);
+        let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1).unwrap();
         let id2 = manager.subscribe(
             "SELECT * FROM users JOIN products ON users.id = products.seller_id".to_string(),
             vec![],
             deps2,
-        );
+        ).unwrap();
 
         assert_eq!(manager.subscription_count(), 2);
 
@@ -219,8 +293,8 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone());
-        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps);
+        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
+        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps).unwrap();
 
         assert_eq!(manager.subscription_count(), 2);
 
@@ -237,5 +311,51 @@ mod tests {
 
         let result = manager.unsubscribe(&fake_id);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_connection_limit_exceeded() {
+        // Create manager with very low limit for testing
+        let config = SubscriptionConfig {
+            max_per_connection: 2,
+            max_global: 10000,
+            max_result_rows: 10000,
+            rate_limit_per_second: 100, // High rate limit to not interfere
+        };
+        let mut manager = SessionSubscriptionManager::with_config(config);
+
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        // First two subscriptions should succeed
+        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
+        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone()).unwrap();
+
+        // Third subscription should fail with limit exceeded
+        let result = manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
+        assert!(matches!(result, Err(SubscriptionError::ConnectionLimitExceeded { current: 2, max: 2 })));
+    }
+
+    #[test]
+    fn test_rate_limit() {
+        // Create manager with very low rate limit for testing
+        let config = SubscriptionConfig {
+            max_per_connection: 100,
+            max_global: 10000,
+            max_result_rows: 10000,
+            rate_limit_per_second: 2,
+        };
+        let mut manager = SessionSubscriptionManager::with_config(config);
+
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        // First two subscriptions should succeed (rate limit = 2/sec)
+        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
+        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone()).unwrap();
+
+        // Third subscription should be rate limited
+        let result = manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
+        assert!(matches!(result, Err(SubscriptionError::RateLimited { .. })));
     }
 }

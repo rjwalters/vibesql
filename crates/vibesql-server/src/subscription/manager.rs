@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dashmap::DashMap;
 use tokio::sync::mpsc;
@@ -14,7 +15,7 @@ use vibesql_storage::Database;
 use vibesql_storage::change_events::RecvError;
 
 use super::{
-    compute_delta, extract_table_refs, hash_rows, Subscription, SubscriptionError, SubscriptionId,
+    compute_delta, extract_table_refs, hash_rows, Subscription, SubscriptionConfig, SubscriptionError, SubscriptionId,
     SubscriptionUpdate,
 };
 
@@ -45,14 +46,35 @@ pub struct SubscriptionManager {
     /// Index: table_name -> subscription IDs that depend on it
     /// This enables fast lookup of affected subscriptions when a table changes
     table_index: DashMap<String, HashSet<SubscriptionId>>,
+
+    /// Configuration for limits and quotas
+    config: SubscriptionConfig,
+
+    /// Counter for global limit exceeded events (for metrics)
+    limit_exceeded_count: AtomicUsize,
+
+    /// Counter for result set too large events (for metrics)
+    result_set_exceeded_count: AtomicUsize,
+
+    /// Atomic counter for current subscription count (for lock-free limit checking)
+    subscription_count_atomic: AtomicUsize,
 }
 
 impl SubscriptionManager {
-    /// Create a new subscription manager
+    /// Create a new subscription manager with default configuration
     pub fn new() -> Self {
+        Self::with_config(SubscriptionConfig::default())
+    }
+
+    /// Create a new subscription manager with custom configuration
+    pub fn with_config(config: SubscriptionConfig) -> Self {
         Self {
             subscriptions: DashMap::new(),
             table_index: DashMap::new(),
+            config,
+            limit_exceeded_count: AtomicUsize::new(0),
+            result_set_exceeded_count: AtomicUsize::new(0),
+            subscription_count_atomic: AtomicUsize::new(0),
         }
     }
 
@@ -68,7 +90,12 @@ impl SubscriptionManager {
     ///
     /// # Returns
     ///
-    /// The subscription ID on success, or an error if parsing fails
+    /// The subscription ID on success, or an error if parsing fails or limits exceeded
+    ///
+    /// # Errors
+    ///
+    /// - `ParseError` if the query cannot be parsed or references no tables
+    /// - `GlobalLimitExceeded` if the global subscription limit is reached
     ///
     /// # Example
     ///
@@ -84,10 +111,43 @@ impl SubscriptionManager {
         query: String,
         notify_tx: mpsc::Sender<SubscriptionUpdate>,
     ) -> Result<SubscriptionId, SubscriptionError> {
+        // Atomically reserve a slot to prevent TOCTOU race condition
+        // Use compare-and-swap loop to safely increment the counter
+        loop {
+            let current_count = self.subscription_count_atomic.load(Ordering::Acquire);
+            if current_count >= self.config.max_global {
+                self.limit_exceeded_count.fetch_add(1, Ordering::Relaxed);
+                return Err(SubscriptionError::GlobalLimitExceeded {
+                    current: current_count,
+                    max: self.config.max_global,
+                });
+            }
+
+            // Try to atomically increment the count
+            match self.subscription_count_atomic.compare_exchange(
+                current_count,
+                current_count + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break, // Successfully reserved a slot
+                Err(_) => continue, // Another thread changed the count, retry
+            }
+        }
+
         // Parse query and extract table dependencies
-        let tables = self.extract_tables(&query)?;
+        let tables = match self.extract_tables(&query) {
+            Ok(tables) => tables,
+            Err(e) => {
+                // Release the reserved slot on parse error
+                self.subscription_count_atomic.fetch_sub(1, Ordering::Release);
+                return Err(e);
+            }
+        };
 
         if tables.is_empty() {
+            // Release the reserved slot
+            self.subscription_count_atomic.fetch_sub(1, Ordering::Release);
             return Err(SubscriptionError::ParseError(
                 "Query must reference at least one table".to_string(),
             ));
@@ -127,6 +187,9 @@ impl SubscriptionManager {
     pub fn unsubscribe(&self, id: SubscriptionId) {
         if let Some((_, subscription)) = self.subscriptions.remove(&id) {
             debug!(subscription_id = %id, "Removing subscription");
+
+            // Decrement the atomic counter
+            self.subscription_count_atomic.fetch_sub(1, Ordering::Release);
 
             // Remove from table index
             for table in &subscription.tables {
@@ -389,6 +452,13 @@ impl SubscriptionManager {
     /// Executes the query and sends the initial results. This should be called
     /// right after subscribing to provide immediate data. The initial results
     /// are always sent as a Full update.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the subscription doesn't exist
+    /// - `ParseError` if the query fails to execute
+    /// - `ResultSetTooLarge` if the result set exceeds the configured limit
+    /// - `ChannelClosed` if the notification channel is closed
     pub async fn send_initial_results(
         &self,
         id: SubscriptionId,
@@ -413,6 +483,15 @@ impl SubscriptionManager {
             _ => return Err(SubscriptionError::ParseError("Not a SELECT query".to_string())),
         };
 
+        // Check result set size limit
+        if rows.len() > self.config.max_result_rows {
+            self.result_set_exceeded_count.fetch_add(1, Ordering::Relaxed);
+            return Err(SubscriptionError::ResultSetTooLarge {
+                rows: rows.len(),
+                max: self.config.max_result_rows,
+            });
+        }
+
         // Convert to Row format
         let result_rows: Vec<crate::Row> = rows
             .iter()
@@ -434,6 +513,21 @@ impl SubscriptionManager {
 
         Ok(())
     }
+
+    /// Get the current configuration
+    pub fn config(&self) -> &SubscriptionConfig {
+        &self.config
+    }
+
+    /// Get the number of times the global limit was exceeded (for metrics)
+    pub fn limit_exceeded_count(&self) -> usize {
+        self.limit_exceeded_count.load(Ordering::Relaxed)
+    }
+
+    /// Get the number of times a result set was too large (for metrics)
+    pub fn result_set_exceeded_count(&self) -> usize {
+        self.result_set_exceeded_count.load(Ordering::Relaxed)
+    }
 }
 
 impl Default for SubscriptionManager {
@@ -445,6 +539,7 @@ impl Default for SubscriptionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::subscription::SubscriptionConfig;
     use vibesql_types::SqlValue;
 
     fn setup_test_db() -> Database {
@@ -878,5 +973,63 @@ mod tests {
             }
             _ => panic!("Unexpected update type"),
         }
+    }
+
+    #[test]
+    fn test_global_limit_exceeded() {
+        // Create manager with very low global limit for testing
+        let config = SubscriptionConfig {
+            max_per_connection: 100,
+            max_global: 2,
+            max_result_rows: 10000,
+            rate_limit_per_second: 100,
+        };
+        let manager = SubscriptionManager::with_config(config);
+
+        // First two subscriptions should succeed
+        let (tx1, _rx1) = mpsc::channel(16);
+        let (tx2, _rx2) = mpsc::channel(16);
+        let (tx3, _rx3) = mpsc::channel(16);
+
+        manager.subscribe("SELECT * FROM users".to_string(), tx1).unwrap();
+        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), tx2).unwrap();
+
+        // Third subscription should fail with global limit exceeded
+        let result = manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), tx3);
+        assert!(matches!(result, Err(SubscriptionError::GlobalLimitExceeded { current: 2, max: 2 })));
+
+        // Metrics should reflect the limit exceeded event
+        assert_eq!(manager.limit_exceeded_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_result_set_too_large() {
+        // Create manager with very low result limit for testing
+        let config = SubscriptionConfig {
+            max_per_connection: 100,
+            max_global: 10000,
+            max_result_rows: 0, // No rows allowed
+            rate_limit_per_second: 100,
+        };
+        let manager = SubscriptionManager::with_config(config);
+        let mut db = setup_test_db();
+
+        // Insert some data
+        let insert = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
+            .unwrap();
+        if let vibesql_ast::Statement::Insert(stmt) = insert {
+            vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
+        }
+
+        // Subscribe
+        let (tx, _rx) = mpsc::channel(16);
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
+
+        // Send initial results should fail due to result set too large
+        let result = manager.send_initial_results(id, &db).await;
+        assert!(matches!(result, Err(SubscriptionError::ResultSetTooLarge { rows: 1, max: 0 })));
+
+        // Metrics should reflect the result set exceeded event
+        assert_eq!(manager.result_set_exceeded_count(), 1);
     }
 }
