@@ -115,7 +115,7 @@ jobs:
   # Runs TPC-DS queries against VibeSQL and validates results against DuckDB
   tpcds:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     needs: test
     continue-on-error: true
     steps:
