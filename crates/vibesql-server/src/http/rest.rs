@@ -5,22 +5,20 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    middleware,
     response::IntoResponse,
     routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::mpsc;
 use tracing::{debug, error};
 
 use vibesql_storage::Database;
 
-use super::auth::{auth_middleware, token_handler, AuthState};
-use super::graphql;
 use super::types::*;
-use crate::auth::PasswordStore;
-use crate::config::HttpAuthConfig;
+use super::graphql;
+use crate::subscription::{SubscriptionManager, SubscriptionUpdate};
 
 /// Pagination configuration
 #[derive(Debug, Clone)]
@@ -56,35 +54,19 @@ impl PaginationParams {
 #[derive(Clone)]
 pub struct HttpState {
     pub db: Arc<Database>,
+    pub subscription_manager: Arc<SubscriptionManager>,
 }
 
 /// Create the HTTP API router
-pub fn create_http_router(db: Arc<Database>) -> Router {
-    create_http_router_with_auth(db, None, None)
-}
-
-/// Create the HTTP API router with optional authentication
-pub fn create_http_router_with_auth(
-    db: Arc<Database>,
-    auth_config: Option<Arc<HttpAuthConfig>>,
-    password_store: Option<Arc<PasswordStore>>,
-) -> Router {
-    let state = HttpState { db: db.clone() };
-
-    // Create auth state
-    let auth_state = AuthState {
-        config: auth_config.clone().unwrap_or_else(|| Arc::new(HttpAuthConfig::default())),
-        password_store: password_store.clone(),
+pub fn create_http_router(db: Arc<Database>, subscription_manager: Arc<SubscriptionManager>) -> Router {
+    let state = HttpState {
+        db: db.clone(),
+        subscription_manager: subscription_manager.clone(),
     };
 
-    // Public routes that don't require authentication
-    let public_routes = Router::new()
+    // Create main router with state
+    let main_router = Router::new()
         .route("/health", get(health_check))
-        .route("/api/auth/token", post(token_handler))
-        .with_state(auth_state.clone());
-
-    // Protected routes that require authentication (when enabled)
-    let protected_routes = Router::new()
         .route("/api/query", post(execute_query))
         .route("/api/subscribe", get(subscribe_stream))
         .route("/api/tables", get(list_tables))
@@ -98,16 +80,13 @@ pub fn create_http_router_with_auth(
         .route("/api/tables/:table_name/rows/:id", delete(super::crud::delete_row))
         // GraphQL endpoint
         .route("/api/graphql", post(graphql_handler))
-        .layer(middleware::from_fn_with_state(auth_state, auth_middleware))
         .with_state(state);
 
     // Create storage sub-router with its own state
+    // We nest it after the main router is state-resolved
     let storage_router = super::storage::create_storage_router(db);
 
-    // Merge all routes
-    public_routes
-        .merge(protected_routes)
-        .nest("/api/storage", storage_router)
+    main_router.nest("/api/storage", storage_router)
 }
 
 /// GraphQL endpoint handler with relationship resolution support
@@ -613,7 +592,7 @@ pub struct SseEvent {
 ///
 /// Returns a text/event-stream response with real-time updates
 async fn subscribe_stream(
-    State(_state): State<HttpState>,
+    State(state): State<HttpState>,
     Query(params): Query<SubscribeQuery>,
 ) -> axum::response::Response {
     use axum::response::sse::{Event, KeepAlive, Sse};
@@ -670,14 +649,10 @@ async fn subscribe_stream(
         session.execute_with_params(&params.query, &params_vec)
     };
 
-    let (columns, rows) = match result {
-        Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
-            let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
-            let row_values: Vec<Vec<_>> = rows
-                .iter()
-                .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
-                .collect();
-            (column_names, row_values)
+    // Validate it's a SELECT statement
+    let columns = match result {
+        Ok(crate::session::ExecutionResult::Select { rows: _, columns }) => {
+            columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>()
         }
         Ok(_) => {
             error!("Subscription query must be a SELECT statement");
@@ -723,26 +698,154 @@ async fn subscribe_stream(
         }
     };
 
-    // Send initial result set and keepalive messages
-    let initial_event_data = serde_json::to_string(&SseEvent {
-        event_type: "initial".to_string(),
-        columns: Some(columns),
-        rows: Some(rows),
-        old: None,
-        new: None,
-        error: None,
-    }).unwrap_or_default();
+    // Create subscription via SubscriptionManager
+    let (tx, mut rx) = mpsc::channel(32);
+    let subscription_id = match state.subscription_manager.subscribe(params.query.clone(), tx) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("Failed to create subscription: {}", e);
+            let event_data = serde_json::to_string(&SseEvent {
+                event_type: "error".to_string(),
+                columns: None,
+                rows: None,
+                old: None,
+                new: None,
+                error: Some(format!("Failed to create subscription: {}", e)),
+            }).unwrap_or_default();
+            
+            let stream = futures::stream::once(async move {
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    Event::default().data(event_data)
+                )
+            });
+            
+            return Sse::new(stream)
+                .keep_alive(KeepAlive::default())
+                .into_response();
+        }
+    };
 
-    // Create stream that sends initial result then keepalives
-    let stream = {
-        let initial = Event::default().data(initial_event_data);
-        let mut events = vec![Ok::<_, Box<dyn std::error::Error + Send + Sync>>(initial)];
+    // Send initial results
+    let columns_clone = columns.clone();
+    if let Err(e) = state.subscription_manager.send_initial_results(subscription_id, &state.db).await {
+        error!("Failed to send initial results: {}", e);
+        state.subscription_manager.unsubscribe(subscription_id);
 
-        // For now, add a placeholder keepalive. Real implementation would subscribe
-        // to changes and stream updates continuously
-        events.push(Ok(Event::default().comment("TODO: add real-time updates")));
+        let event_data = serde_json::to_string(&SseEvent {
+            event_type: "error".to_string(),
+            columns: None,
+            rows: None,
+            old: None,
+            new: None,
+            error: Some(format!("Failed to send initial results: {}", e)),
+        }).unwrap_or_default();
 
-        futures::stream::iter(events)
+        let stream = futures::stream::once(async move {
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                Event::default().data(event_data)
+            )
+        });
+
+        return Sse::new(stream)
+            .keep_alive(KeepAlive::default())
+            .into_response();
+    }
+
+    // Create stream that receives updates from subscription and converts to SSE events
+    let stream = async_stream::stream! {
+        while let Some(update) = rx.recv().await {
+            match update {
+                SubscriptionUpdate::Full { rows } => {
+                    // Convert rows to JSON
+                    let row_values: Vec<Vec<serde_json::Value>> = rows
+                        .iter()
+                        .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
+                        .collect();
+
+                    let event_data = match serde_json::to_string(&SseEvent {
+                        event_type: "update".to_string(),
+                        columns: Some(columns_clone.clone()),
+                        rows: Some(row_values),
+                        old: None,
+                        new: None,
+                        error: None,
+                    }) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!("Failed to serialize update event: {}", e);
+                            continue;
+                        }
+                    };
+
+                    yield Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                        Event::default().event("update").data(event_data)
+                    );
+                }
+                SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+                    let insert_rows: Vec<Vec<serde_json::Value>> = inserts
+                        .iter()
+                        .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
+                        .collect();
+
+                    let update_pairs: Vec<(Vec<serde_json::Value>, Vec<serde_json::Value>)> = updates
+                        .iter()
+                        .map(|(old, new)| {
+                            let old_vals = old.values.iter().map(super::types::sql_value_to_json).collect();
+                            let new_vals = new.values.iter().map(super::types::sql_value_to_json).collect();
+                            (old_vals, new_vals)
+                        })
+                        .collect();
+
+                    let delete_rows: Vec<Vec<serde_json::Value>> = deletes
+                        .iter()
+                        .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
+                        .collect();
+
+                    let event_data = match serde_json::to_string(&json!({
+                        "type": "delta",
+                        "inserts": insert_rows,
+                        "updates": update_pairs,
+                        "deletes": delete_rows,
+                    })) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!("Failed to serialize delta event: {}", e);
+                            continue;
+                        }
+                    };
+
+                    yield Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                        Event::default().event("delta").data(event_data)
+                    );
+                }
+                SubscriptionUpdate::Error { message } => {
+                    let event_data = match serde_json::to_string(&SseEvent {
+                        event_type: "error".to_string(),
+                        columns: None,
+                        rows: None,
+                        old: None,
+                        new: None,
+                        error: Some(message),
+                    }) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!("Failed to serialize error event: {}", e);
+                            continue;
+                        }
+                    };
+
+                    yield Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                        Event::default().event("error").data(event_data)
+                    );
+
+                    // Stop stream on error
+                    break;
+                }
+            }
+        }
+
+        // Clean up subscription when stream ends
+        state.subscription_manager.unsubscribe(subscription_id);
     };
 
     // Create SSE response with keepalive

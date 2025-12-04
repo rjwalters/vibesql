@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 use vibesql_server::auth::PasswordStore;
 use vibesql_server::config::Config;
 use vibesql_server::connection::ConnectionHandler;
-use vibesql_server::http::create_http_router_with_auth;
+use vibesql_server::http::create_http_router;
 use vibesql_server::observability::ObservabilityProvider;
 use vibesql_server::protocol::BackendMessage;
 use vibesql_server::subscription::SubscriptionManager;
@@ -123,29 +123,10 @@ async fn main() -> Result<()> {
         let http_addr: SocketAddr =
             format!("{}:{}", config.http.host, config.http.port).parse().expect("Invalid HTTP address");
         let db_for_http = Arc::clone(&db);
-        let http_auth_config = Arc::new(config.http.auth.clone());
-        let http_password_store = password_store.clone();
-
-        // Log HTTP auth configuration
-        if config.http.auth.enabled {
-            info!("  HTTP Authentication: enabled");
-            info!("    Methods: {:?}", config.http.auth.methods);
-            if !config.http.auth.api_keys.keys.is_empty() {
-                info!("    API keys configured: {}", config.http.auth.api_keys.keys.len());
-            }
-            if !config.http.auth.jwt.secret.is_empty() {
-                info!("    JWT authentication: configured");
-            }
-        } else {
-            info!("  HTTP Authentication: disabled (all endpoints public)");
-        }
+        let subscription_manager_for_http = Arc::clone(&subscription_manager);
 
         tokio::spawn(async move {
-            let app = create_http_router_with_auth(
-                db_for_http,
-                Some(http_auth_config),
-                http_password_store,
-            );
+            let app = create_http_router(db_for_http, subscription_manager_for_http);
             let listener = tokio::net::TcpListener::bind(&http_addr)
                 .await
                 .expect("Failed to bind HTTP server");
