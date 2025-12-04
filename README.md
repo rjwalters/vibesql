@@ -13,7 +13,9 @@
 
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
 - **100% SQLLogicTest conformance** - 624 files (~5.9M tests)
+- **Real-time subscriptions** - Convex-like reactivity with delta updates
 - **Full-featured CLI** with PostgreSQL-compatible commands
+- **TypeScript SDK** with React hooks
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
 - **215,000+ lines** of Rust across 11 crates
@@ -75,6 +77,47 @@ See [Python Bindings Guide](docs/PYTHON_BINDINGS.md) for full API reference.
 
 ## Features
 
+### Real-Time Subscriptions
+
+Subscribe to SQL queries and receive automatic updates when data changes—Convex-like reactivity with full SQL power.
+
+```typescript
+import { VibeSqlClient } from '@vibesql/client';
+
+const db = new VibeSqlClient({ host: 'localhost', port: 5432 });
+await db.connect();
+
+// Subscribe to a query - get updates when data changes
+const subscription = db.subscribe(
+  'SELECT * FROM messages WHERE channel_id = $1 ORDER BY created_at DESC LIMIT 50',
+  [channelId],
+  {
+    onData: (messages) => setMessages(messages),
+    onDelta: (delta) => {
+      // Efficient incremental updates
+      if (delta.type === 'insert') addMessage(delta.row);
+      if (delta.type === 'delete') removeMessage(delta.row);
+    },
+  }
+);
+
+// React hook for easy integration
+function ChatRoom({ channelId }) {
+  const { data, isLoading } = useSubscription(db,
+    'SELECT * FROM messages WHERE channel_id = $1',
+    [channelId]
+  );
+  return <MessageList messages={data} />;
+}
+```
+
+**Features:**
+- Delta updates (only changed rows sent)
+- Automatic reconnection with subscription restoration
+- Configurable limits, quotas, and backpressure handling
+- HTTP SSE endpoint for REST API consumers
+- React hooks (`useSubscription`, `useQuery`)
+
 ### SQL Support
 
 - **Queries**: SELECT, JOINs (INNER/LEFT/RIGHT/FULL/CROSS), subqueries, CTEs, UNION/INTERSECT/EXCEPT
@@ -122,6 +165,7 @@ make help           # Show all targets
 
 | Guide | Description |
 |-------|-------------|
+| [TypeScript SDK](packages/vibesql-client-ts/README.md) | Real-time subscriptions & React hooks |
 | [CLI Guide](docs/CLI_GUIDE.md) | Command-line interface |
 | [Python Bindings](docs/PYTHON_BINDINGS.md) | Python API reference |
 | [Scheduled Functions](docs/scheduled-functions.md) | Cron jobs and scheduled tasks |
