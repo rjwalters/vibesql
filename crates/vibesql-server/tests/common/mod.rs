@@ -9,7 +9,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
 use vibesql_server::auth::PasswordStore;
-use vibesql_server::config::{AuthConfig, Config, HttpConfig, LoggingConfig, ServerConfig};
+use vibesql_server::config::{AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig};
 use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
 use vibesql_server::SubscriptionManager;
@@ -146,6 +146,7 @@ pub fn test_config() -> Config {
             enabled: false, // Disable HTTP for tests
             host: "127.0.0.1".to_string(),
             port: 0,
+            auth: HttpAuthConfig::default(),
         },
         observability: ObservabilityConfig::default(),
     }

@@ -57,6 +57,9 @@ pub struct HttpConfig {
     pub host: String,
     /// HTTP server port (default: 8080)
     pub port: u16,
+    /// HTTP authentication configuration
+    #[serde(default)]
+    pub auth: HttpAuthConfig,
 }
 
 impl Default for HttpConfig {
@@ -65,6 +68,91 @@ impl Default for HttpConfig {
             enabled: true,
             host: "0.0.0.0".to_string(),
             port: 8080,
+            auth: HttpAuthConfig::default(),
+        }
+    }
+}
+
+/// HTTP API authentication configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpAuthConfig {
+    /// Enable authentication for HTTP API (default: false for backward compatibility)
+    pub enabled: bool,
+    /// Allowed authentication methods: api_key, basic, jwt
+    pub methods: Vec<HttpAuthMethod>,
+    /// API key configuration
+    #[serde(default)]
+    pub api_keys: ApiKeyConfig,
+    /// JWT configuration
+    #[serde(default)]
+    pub jwt: JwtConfig,
+}
+
+impl Default for HttpAuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            methods: vec![HttpAuthMethod::ApiKey, HttpAuthMethod::Basic],
+            api_keys: ApiKeyConfig::default(),
+            jwt: JwtConfig::default(),
+        }
+    }
+}
+
+/// Supported HTTP authentication methods
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HttpAuthMethod {
+    /// API key authentication via Bearer token
+    ApiKey,
+    /// Basic HTTP authentication
+    Basic,
+    /// JWT authentication
+    Jwt,
+}
+
+/// API key configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyConfig {
+    /// List of valid API keys
+    #[serde(default)]
+    pub keys: Vec<String>,
+}
+
+impl Default for ApiKeyConfig {
+    fn default() -> Self {
+        Self { keys: vec![] }
+    }
+}
+
+/// JWT configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwtConfig {
+    /// Secret key for JWT signing/verification (HS256)
+    #[serde(default)]
+    pub secret: String,
+    /// Expected issuer (iss claim)
+    #[serde(default)]
+    pub issuer: Option<String>,
+    /// Expected audience (aud claim)
+    #[serde(default)]
+    pub audience: Option<String>,
+    /// Token expiration time in seconds (default: 3600 = 1 hour)
+    #[serde(default = "default_jwt_expiration")]
+    pub expiration_secs: u64,
+}
+
+fn default_jwt_expiration() -> u64 {
+    3600
+}
+
+impl Default for JwtConfig {
+    fn default() -> Self {
+        Self {
+            secret: String::new(),
+            issuer: Some("vibesql".to_string()),
+            audience: Some("vibesql-api".to_string()),
+            expiration_secs: default_jwt_expiration(),
         }
     }
 }

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    middleware,
     response::IntoResponse,
     routing::{delete, get, patch, post, put},
     Json, Router,
@@ -15,8 +16,11 @@ use tracing::{debug, error};
 
 use vibesql_storage::Database;
 
-use super::types::*;
+use super::auth::{auth_middleware, token_handler, AuthState};
 use super::graphql;
+use super::types::*;
+use crate::auth::PasswordStore;
+use crate::config::HttpAuthConfig;
 
 /// Pagination configuration
 #[derive(Debug, Clone)]
@@ -56,11 +60,31 @@ pub struct HttpState {
 
 /// Create the HTTP API router
 pub fn create_http_router(db: Arc<Database>) -> Router {
+    create_http_router_with_auth(db, None, None)
+}
+
+/// Create the HTTP API router with optional authentication
+pub fn create_http_router_with_auth(
+    db: Arc<Database>,
+    auth_config: Option<Arc<HttpAuthConfig>>,
+    password_store: Option<Arc<PasswordStore>>,
+) -> Router {
     let state = HttpState { db: db.clone() };
 
-    // Create main router with state
-    let main_router = Router::new()
+    // Create auth state
+    let auth_state = AuthState {
+        config: auth_config.clone().unwrap_or_else(|| Arc::new(HttpAuthConfig::default())),
+        password_store: password_store.clone(),
+    };
+
+    // Public routes that don't require authentication
+    let public_routes = Router::new()
         .route("/health", get(health_check))
+        .route("/api/auth/token", post(token_handler))
+        .with_state(auth_state.clone());
+
+    // Protected routes that require authentication (when enabled)
+    let protected_routes = Router::new()
         .route("/api/query", post(execute_query))
         .route("/api/subscribe", get(subscribe_stream))
         .route("/api/tables", get(list_tables))
@@ -74,13 +98,16 @@ pub fn create_http_router(db: Arc<Database>) -> Router {
         .route("/api/tables/:table_name/rows/:id", delete(super::crud::delete_row))
         // GraphQL endpoint
         .route("/api/graphql", post(graphql_handler))
+        .layer(middleware::from_fn_with_state(auth_state, auth_middleware))
         .with_state(state);
 
     // Create storage sub-router with its own state
-    // We nest it after the main router is state-resolved
     let storage_router = super::storage::create_storage_router(db);
 
-    main_router.nest("/api/storage", storage_router)
+    // Merge all routes
+    public_routes
+        .merge(protected_routes)
+        .nest("/api/storage", storage_router)
 }
 
 /// GraphQL endpoint handler
