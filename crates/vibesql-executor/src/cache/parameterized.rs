@@ -46,6 +46,11 @@ impl LiteralValue {
             SqlValue::Timestamp(s) => LiteralValue::Timestamp(s.to_string()),
             SqlValue::Interval(s) => LiteralValue::Varchar(s.to_string()), /* Treat interval as */
             // string for now
+            SqlValue::Vector(v) => {
+                // Treat vector as string representation for now
+                let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+                LiteralValue::Varchar(format!("[{}]", formatted.join(", ")))
+            }
             SqlValue::Null => LiteralValue::Null,
         }
     }

@@ -60,6 +60,14 @@ pub fn execute_query(db: &Database, sql: &str) -> Result<JsValue, JsValue> {
                     vibesql_types::SqlValue::Time(t) => serde_json::Value::String(t.to_string()),
                     vibesql_types::SqlValue::Timestamp(ts) => serde_json::Value::String(ts.to_string()),
                     vibesql_types::SqlValue::Interval(i) => serde_json::Value::String(i.to_string()),
+                    vibesql_types::SqlValue::Vector(v) => {
+                        // Serialize vector as JSON array of floats
+                        serde_json::Value::Array(v.iter().map(|f| {
+                            serde_json::Number::from_f64(*f as f64)
+                                .map(serde_json::Value::Number)
+                                .unwrap_or(serde_json::Value::Null)
+                        }).collect())
+                    }
                     vibesql_types::SqlValue::Null => serde_json::Value::Null,
                 })
                 .collect();

@@ -440,6 +440,12 @@ impl ExpressionHasher {
             vibesql_types::SqlValue::Time(t) => t.hash(hasher),
             vibesql_types::SqlValue::Timestamp(ts) => ts.hash(hasher),
             vibesql_types::SqlValue::Interval(i) => i.hash(hasher),
+            vibesql_types::SqlValue::Vector(v) => {
+                // Hash each f32 using to_bits() for consistent hashing
+                for f in v.iter() {
+                    f.to_bits().hash(hasher);
+                }
+            }
         }
     }
 
@@ -475,6 +481,7 @@ impl ExpressionHasher {
             vibesql_types::DataType::BinaryLargeObject => {}
             vibesql_types::DataType::Bit { length } => length.hash(hasher),
             vibesql_types::DataType::UserDefined { type_name } => type_name.hash(hasher),
+            vibesql_types::DataType::Vector { dimensions } => dimensions.hash(hasher),
             vibesql_types::DataType::Null => {}
         }
     }

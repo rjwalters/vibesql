@@ -488,6 +488,7 @@ fn format_data_type(dt: &vibesql_types::DataType) -> String {
             }
         }
         DataType::UserDefined { type_name } => type_name.clone(),
+        DataType::Vector { dimensions } => format!("VECTOR({})", dimensions),
         DataType::Null => "NULL".to_string(),
     }
 }
