@@ -199,9 +199,9 @@ fn extract_quoted_value(input: &str, param_name: &str) -> Option<String> {
     let content = after_pattern.trim_start();
 
     // Find quoted string
-    if content.starts_with('"') {
-        let end = content[1..].find('"')?;
-        Some(content[1..end + 1].to_string())
+    if let Some(stripped) = content.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        Some(stripped[..end].to_string())
     } else {
         None
     }
@@ -221,17 +221,16 @@ fn extract_json_value(
     if content.starts_with('{') {
         // Find the matching closing brace
         let mut brace_count = 0;
-        for (i, ch) in content.chars().enumerate() {
+        // Use char_indices() to get byte positions for correct string slicing
+        for (i, ch) in content.char_indices() {
             match ch {
                 '{' => brace_count += 1,
                 '}' => {
                     brace_count -= 1;
                     if brace_count == 0 {
                         let json_str = &content[..=i];
-                        if let Ok(val) = serde_json::from_str(json_str) {
-                            if let JsonValue::Object(map) = val {
-                                return Some(map);
-                            }
+                        if let Ok(JsonValue::Object(map)) = serde_json::from_str(json_str) {
+                            return Some(map);
                         }
                         return None;
                     }
