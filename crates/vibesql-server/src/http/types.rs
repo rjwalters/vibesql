@@ -153,3 +153,33 @@ pub fn json_to_sql_value(val: &JsonValue) -> Result<SqlValue, String> {
         JsonValue::Object(_) => Err("Objects not yet supported".to_string()),
     }
 }
+
+// ============================================================================
+// Blob Storage Types
+// ============================================================================
+
+/// Response for blob upload
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobUploadResponse {
+    /// Unique blob ID
+    pub id: String,
+    /// Size in bytes
+    pub size: i64,
+    /// MIME content type
+    pub content_type: String,
+    /// URL to access the blob
+    pub url: String,
+}
+
+/// Response for blob metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobMetadataResponse {
+    /// Unique blob ID
+    pub id: String,
+    /// Size in bytes
+    pub size: i64,
+    /// MIME content type
+    pub content_type: String,
+    /// ISO 8601 timestamp when blob was created
+    pub created_at: String,
+}
