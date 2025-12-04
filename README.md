@@ -92,6 +92,7 @@ See [Python Bindings Guide](docs/PYTHON_BINDINGS.md) for full API reference.
 - Full-text search (MATCH AGAINST)
 - Spatial functions (ST_* library)
 - Triggers (BEFORE/AFTER)
+- [Scheduled functions](docs/scheduled-functions.md) (SCHEDULE AFTER/AT, CREATE CRON)
 
 ### Performance
 
@@ -123,6 +124,7 @@ make help           # Show all targets
 |-------|-------------|
 | [CLI Guide](docs/CLI_GUIDE.md) | Command-line interface |
 | [Python Bindings](docs/PYTHON_BINDINGS.md) | Python API reference |
+| [Scheduled Functions](docs/scheduled-functions.md) | Cron jobs and scheduled tasks |
 | [ODBC/JDBC](docs/ODBC_JDBC_CONNECTIVITY.md) | Database connectivity |
 | [Roadmap](docs/ROADMAP.md) | Future plans |
 | [History](docs/HISTORY.md) | Development timeline |
