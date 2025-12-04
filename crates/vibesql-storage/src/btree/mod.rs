@@ -181,6 +181,10 @@ pub(crate) fn estimate_max_key_size(key_schema: &[DataType]) -> usize {
                 let byte_length = bit_length.div_ceil(8);  // Round up to nearest byte
                 1 + 8 + byte_length
             }
+            DataType::Vector { dimensions } => {
+                // tag + dimensions(4) + vector data (4 bytes per f32)
+                1 + 4 + ((*dimensions as usize) * 4)
+            }
             DataType::UserDefined { .. } => {
                 // Unknown type, use conservative estimate
                 1 + 8 + 256

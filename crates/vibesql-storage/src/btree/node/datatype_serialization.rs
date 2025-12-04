@@ -116,6 +116,11 @@ pub(crate) fn serialize_datatype(data_type: &DataType, buffer: &mut [u8]) -> Res
             buffer[offset + 2..offset + 2 + len].copy_from_slice(&name_bytes[..len]);
             2 + len
         }
+        DataType::Vector { dimensions } => {
+            buffer[offset] = 23;
+            buffer[offset + 1..offset + 5].copy_from_slice(&dimensions.to_le_bytes());
+            5
+        }
         DataType::Null => {
             buffer[offset] = 21;
             1
@@ -202,6 +207,12 @@ pub(crate) fn deserialize_datatype(buffer: &[u8]) -> Result<(DataType, usize), S
             let type_name = String::from_utf8_lossy(&buffer[offset..offset + len]).to_string();
             offset += len;
             DataType::UserDefined { type_name }
+        }
+        23 => {
+            let dim_bytes: [u8; 4] = buffer[offset..offset + 4].try_into().unwrap();
+            let dimensions = u32::from_le_bytes(dim_bytes);
+            offset += 4;
+            DataType::Vector { dimensions }
         }
         21 => DataType::Null,
         _ => return Err(StorageError::IoError(format!("Invalid DataType tag: {}", type_tag))),
