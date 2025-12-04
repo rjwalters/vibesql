@@ -180,35 +180,21 @@ test-sqllogictest-halting:
 #
 # Benchmark Targets
 #
+# Use ./scripts/bench directly for full flexibility:
+#   ./scripts/bench --help              Show all options
+#   ./scripts/bench --test=tpch         Run TPC-H only
+#   ./scripts/bench --test=tpcc         Run TPC-C only
+#   ./scripts/bench --engine=mysql      Compare against MySQL
+#   ./scripts/bench --query=Q1,Q6       Run specific queries
+#
 
-# Run all benchmarks with analysis (using unified CLI)
+# Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)
 benchmark:
 	@./scripts/bench --all
 
-# Run TPC-H benchmarks with 30s timeout per query and store results in database
-benchmark-tpch:
-	@./scripts/bench --test=tpch --timeout=30
-
-# Run TPC-C benchmarks (OLTP workload) with database tracking
-# Automatically starts MySQL Docker container if Docker is available
-benchmark-tpcc:
-	@./scripts/bench --test=tpcc --engine=vibesql,mysql --duration=60
-
-# Run TPC-DS benchmarks with database tracking
-# Uses isolated execution (each database engine in separate process) to avoid memory pressure
-benchmark-tpcds:
-	@./scripts/bench --test=tpcds
-
-# Run TPC-DS benchmarks with all engines simultaneously (may cause memory pressure)
-benchmark-tpcds-all:
-	@echo "⚠️  This target is deprecated. Use 'make benchmark-tpcds' instead."
-	@echo "   Use '--engine=all' for comparison: ./scripts/bench --test=tpcds --engine=all"
-	@./scripts/bench --test=tpcds --engine=all
-
-# Run Sysbench OLTP benchmarks with database tracking
-# Automatically starts MySQL Docker container if Docker is available
-benchmark-sysbench:
-	@./scripts/bench --test=sysbench --engine=vibesql,mysql
+# Quick benchmark subset for CI (fast, no comparisons)
+benchmark-quick:
+	@./scripts/bench --quick
 
 #
 # Analysis Targets
