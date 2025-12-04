@@ -28,7 +28,7 @@ pub mod io;
 pub mod value;
 
 // Re-export public API
-pub use catalog::{read_catalog, write_catalog};
+pub use catalog::{read_catalog, read_catalog_v, write_catalog};
 pub use data::{read_data, write_data};
 pub use expression::{read_expression, write_expression};
 pub use format::{read_header, write_header};
@@ -83,11 +83,11 @@ impl Database {
 
         let mut reader = BufReader::new(file);
 
-        // Read and validate header
-        read_header(&mut reader)?;
+        // Read and validate header, get version for backward compatibility
+        let version = read_header(&mut reader)?;
 
-        // Read catalog section
-        let mut db = read_catalog(&mut reader)?;
+        // Read catalog section with version awareness
+        let mut db = read_catalog_v(&mut reader, version)?;
 
         // Read data section
         read_data(&mut reader, &mut db)?;
@@ -202,11 +202,11 @@ impl Database {
         // Parse the uncompressed binary data
         let mut reader = BufReader::new(&uncompressed_data[..]);
 
-        // Read and validate header
-        read_header(&mut reader)?;
+        // Read and validate header, get version for backward compatibility
+        let version = read_header(&mut reader)?;
 
-        // Read catalog section
-        let mut db = read_catalog(&mut reader)?;
+        // Read catalog section with version awareness
+        let mut db = read_catalog_v(&mut reader, version)?;
 
         // Read data section
         read_data(&mut reader, &mut db)?;
@@ -233,7 +233,8 @@ mod tests {
         assert_eq!(buf[5], VERSION);
 
         let mut reader = &buf[..];
-        read_header(&mut reader).unwrap();
+        let version = read_header(&mut reader).unwrap();
+        assert_eq!(version, VERSION);
     }
 
     #[test]

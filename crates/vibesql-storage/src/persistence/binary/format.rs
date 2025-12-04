@@ -12,7 +12,10 @@ use crate::StorageError;
 pub const MAGIC: &[u8; 5] = b"VBSQL";
 
 /// Current format version
-pub const VERSION: u8 = 1;
+/// Version history:
+/// - v1: Initial binary format
+/// - v2: Added sequence persistence and column default_value expressions
+pub const VERSION: u8 = 2;
 
 /// Type tags for binary serialization
 #[repr(u8)]
@@ -96,7 +99,8 @@ pub fn write_header<W: Write>(writer: &mut W) -> Result<(), StorageError> {
 }
 
 /// Read and validate binary file header
-pub fn read_header<R: Read>(reader: &mut R) -> Result<(), StorageError> {
+/// Returns the format version for backward compatibility handling
+pub fn read_header<R: Read>(reader: &mut R) -> Result<u8, StorageError> {
     // Read and validate magic number
     let mut magic = [0u8; 5];
     reader
@@ -135,7 +139,7 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<(), StorageError> {
         StorageError::NotImplemented(format!("Failed to read reserved bytes: {}", e))
     })?;
 
-    Ok(())
+    Ok(version[0])
 }
 
 #[cfg(test)]
@@ -152,6 +156,7 @@ mod tests {
         assert_eq!(buf[5], VERSION);
 
         let mut reader = &buf[..];
-        read_header(&mut reader).unwrap();
+        let version = read_header(&mut reader).unwrap();
+        assert_eq!(version, VERSION);
     }
 }

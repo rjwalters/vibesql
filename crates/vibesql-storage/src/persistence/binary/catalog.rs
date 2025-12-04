@@ -28,6 +28,31 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
         write_string(writer, &role_name)?;
     }
 
+    // Write sequences (for AUTO_INCREMENT support)
+    let sequence_names = db.catalog.list_sequences();
+    write_u32(writer, sequence_names.len() as u32)?;
+    for name in sequence_names {
+        let seq = db.catalog.get_sequence(name).map_err(|e| {
+            StorageError::NotImplemented(format!("Failed to get sequence {}: {}", name, e))
+        })?;
+        write_string(writer, name)?;
+        write_i64(writer, seq.start_with)?;
+        write_i64(writer, seq.increment_by)?;
+        // Write min_value (optional)
+        write_bool(writer, seq.min_value.is_some())?;
+        if let Some(min) = seq.min_value {
+            write_i64(writer, min)?;
+        }
+        // Write max_value (optional)
+        write_bool(writer, seq.max_value.is_some())?;
+        if let Some(max) = seq.max_value {
+            write_i64(writer, max)?;
+        }
+        write_bool(writer, seq.cycle)?;
+        write_i64(writer, seq.current_value)?;
+        write_bool(writer, seq.exhausted)?;
+    }
+
     // Write table schemas
     let table_names = db.catalog.list_tables();
     write_u32(writer, table_names.len() as u32)?;
@@ -44,6 +69,11 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                 write_string(writer, &col.name)?;
                 write_string(writer, &save::format_data_type(&col.data_type))?;
                 write_bool(writer, col.nullable)?;
+                // Write default_value expression (for AUTO_INCREMENT support)
+                write_bool(writer, col.default_value.is_some())?;
+                if let Some(default_expr) = &col.default_value {
+                    super::expression::write_expression(writer, default_expr)?;
+                }
             }
         }
     }
@@ -157,7 +187,9 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     Ok(())
 }
 
-pub fn read_catalog<R: Read>(reader: &mut R) -> Result<Database, StorageError> {
+/// Read catalog from binary format with version awareness
+/// Use version 0 to auto-detect (for backward compatibility with existing callers)
+pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, StorageError> {
     let mut db = Database::new();
 
     // Read schemas
@@ -179,6 +211,49 @@ pub fn read_catalog<R: Read>(reader: &mut R) -> Result<Database, StorageError> {
             .map_err(|e| StorageError::NotImplemented(format!("Failed to create role: {}", e)))?;
     }
 
+    // Read sequences (for AUTO_INCREMENT support) - v2+
+    if version >= 2 {
+        let sequence_count = read_u32(reader)?;
+        for _ in 0..sequence_count {
+            let name = read_string(reader)?;
+            let start_with = read_i64(reader)?;
+            let increment_by = read_i64(reader)?;
+            // Read min_value (optional)
+            let has_min = read_bool(reader)?;
+            let min_value = if has_min {
+                Some(read_i64(reader)?)
+            } else {
+                None
+            };
+            // Read max_value (optional)
+            let has_max = read_bool(reader)?;
+            let max_value = if has_max {
+                Some(read_i64(reader)?)
+            } else {
+                None
+            };
+            let cycle = read_bool(reader)?;
+            let current_value = read_i64(reader)?;
+            let exhausted = read_bool(reader)?;
+
+            // Create the sequence with all its state
+            let mut seq = vibesql_catalog::Sequence::new(
+                name.clone(),
+                Some(start_with),
+                increment_by,
+                min_value,
+                max_value,
+                cycle,
+            );
+            // Restore the current_value and exhausted state
+            seq.current_value = current_value;
+            seq.exhausted = exhausted;
+
+            // Insert sequence using public API
+            db.catalog.insert_sequence(name, seq);
+        }
+    }
+
     // Read table schemas (will create tables later when we read data)
     let table_count = read_u32(reader)?;
     let mut table_schemas = Vec::new();
@@ -196,11 +271,23 @@ pub fn read_catalog<R: Read>(reader: &mut R) -> Result<Database, StorageError> {
             // Parse data type from string (reuse existing logic)
             let data_type = parse_data_type(&col_type_str)?;
 
+            // Read default_value expression (for AUTO_INCREMENT support) - v2+
+            let default_value = if version >= 2 {
+                let has_default = read_bool(reader)?;
+                if has_default {
+                    Some(super::expression::read_expression(reader)?)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             columns.push(vibesql_catalog::ColumnSchema {
                 name: col_name,
                 data_type,
                 nullable,
-                default_value: None,
+                default_value,
             });
         }
 
@@ -351,6 +438,12 @@ pub fn read_catalog<R: Read>(reader: &mut R) -> Result<Database, StorageError> {
     }
 
     Ok(db)
+}
+
+/// Legacy read_catalog function for backward compatibility (defaults to v1 format)
+pub fn read_catalog<R: Read>(reader: &mut R) -> Result<Database, StorageError> {
+    // Default to v1 for backward compatibility with tests that don't pass version
+    read_catalog_v(reader, 1)
 }
 
 /// Parse data type string back to DataType enum

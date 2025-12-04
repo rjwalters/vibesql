@@ -176,4 +176,21 @@ impl super::super::Catalog {
     pub fn get_sequence_mut(&mut self, name: &str) -> Result<&mut Sequence, CatalogError> {
         self.sequences.get_mut(name).ok_or_else(|| CatalogError::SequenceNotFound(name.to_string()))
     }
+
+    /// Get an immutable reference to a SEQUENCE
+    pub fn get_sequence(&self, name: &str) -> Result<&Sequence, CatalogError> {
+        self.sequences
+            .get(name)
+            .ok_or_else(|| CatalogError::SequenceNotFound(name.to_string()))
+    }
+
+    /// List all sequence names
+    pub fn list_sequences(&self) -> Vec<&str> {
+        self.sequences.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Insert a pre-constructed sequence (for persistence restoration)
+    pub fn insert_sequence(&mut self, name: String, sequence: Sequence) {
+        self.sequences.insert(name, sequence);
+    }
 }
