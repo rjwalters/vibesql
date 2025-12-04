@@ -63,6 +63,10 @@ use vibesql_types::Date;
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::prelude::*;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::{Pool, PooledConn};
 
 use std::str::FromStr;
 
@@ -341,6 +345,162 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     load_inventory_duckdb(&conn, &mut data);
 
     conn
+}
+
+/// Load MySQL TPC-DS database
+/// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/tpcds)
+/// Returns None if MYSQL_URL is not set or connection fails
+#[cfg(feature = "benchmark-comparison")]
+pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
+    use std::io::Write;
+
+    let url = std::env::var("MYSQL_URL").ok()?;
+    let pool = Pool::new(url.as_str()).ok()?;
+    let mut conn = pool.get_conn().ok()?;
+    let mut data = TPCDSData::new(scale_factor);
+
+    // Create schema (drops and recreates tables)
+    eprint!("  Creating MySQL schema... ");
+    std::io::stderr().flush().ok();
+    create_tpcds_schema_mysql(&mut conn);
+    eprintln!("done");
+
+    // Phase 1 tables (core dimension and fact tables)
+    eprint!("  Loading date_dim ({} rows)... ", data.date_dim_count);
+    std::io::stderr().flush().ok();
+    load_date_dim_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading time_dim... ");
+    std::io::stderr().flush().ok();
+    load_time_dim_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading item ({} rows)... ", data.item_count);
+    std::io::stderr().flush().ok();
+    load_item_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading customer_address ({} rows)... ", data.customer_address_count);
+    std::io::stderr().flush().ok();
+    load_customer_address_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading customer ({} rows)... ", data.customer_count);
+    std::io::stderr().flush().ok();
+    load_customer_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading store ({} rows)... ", data.store_count);
+    std::io::stderr().flush().ok();
+    load_store_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading store_sales ({} rows)... ", data.store_sales_count);
+    std::io::stderr().flush().ok();
+    load_store_sales_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    // Phase 2 tables
+    eprint!("  Loading promotion ({} rows)... ", data.promotion_count);
+    std::io::stderr().flush().ok();
+    load_promotion_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading warehouse... ");
+    std::io::stderr().flush().ok();
+    load_warehouse_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading ship_mode... ");
+    std::io::stderr().flush().ok();
+    load_ship_mode_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading reason... ");
+    std::io::stderr().flush().ok();
+    load_reason_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading store_returns ({} rows)... ", data.store_returns_count);
+    std::io::stderr().flush().ok();
+    load_store_returns_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    // Phase 3 tables
+    eprint!("  Loading catalog_page ({} rows)... ", data.catalog_page_count);
+    std::io::stderr().flush().ok();
+    load_catalog_page_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_page ({} rows)... ", data.web_page_count);
+    std::io::stderr().flush().ok();
+    load_web_page_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_site ({} rows)... ", data.web_site_count);
+    std::io::stderr().flush().ok();
+    load_web_site_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading catalog_sales ({} rows)... ", data.catalog_sales_count);
+    std::io::stderr().flush().ok();
+    load_catalog_sales_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading catalog_returns ({} rows)... ", data.catalog_returns_count);
+    std::io::stderr().flush().ok();
+    load_catalog_returns_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_sales ({} rows)... ", data.web_sales_count);
+    std::io::stderr().flush().ok();
+    load_web_sales_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading web_returns ({} rows)... ", data.web_returns_count);
+    std::io::stderr().flush().ok();
+    load_web_returns_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    // Phase 4 tables
+    eprint!("  Loading customer_demographics ({} rows)... ", data.customer_demographics_count);
+    std::io::stderr().flush().ok();
+    load_customer_demographics_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading household_demographics ({} rows)... ", data.household_demographics_count);
+    std::io::stderr().flush().ok();
+    load_household_demographics_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading income_band... ");
+    std::io::stderr().flush().ok();
+    load_income_band_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading call_center ({} rows)... ", data.call_center_count);
+    std::io::stderr().flush().ok();
+    load_call_center_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading inventory ({} rows)... ", data.inventory_count);
+    std::io::stderr().flush().ok();
+    load_inventory_mysql(&mut conn, &mut data);
+    eprintln!("done");
+
+    // Analyze tables for query optimization
+    eprint!("  Analyzing tables... ");
+    std::io::stderr().flush().ok();
+    conn.query_drop(
+        "ANALYZE TABLE date_dim, time_dim, item, customer, customer_address, store, \
+         promotion, warehouse, ship_mode, reason, catalog_page, web_page, web_site, \
+         customer_demographics, household_demographics, income_band, call_center, \
+         store_sales, store_returns, catalog_sales, catalog_returns, web_sales, web_returns, inventory"
+    ).unwrap();
+    eprintln!("done");
+
+    Some(conn)
 }
 
 // =============================================================================
@@ -7970,6 +8130,1714 @@ fn load_inventory_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
                     warehouse_sk as i64,
                     data.random_i32(0, 1000)
                 ]).unwrap();
+            }
+        }
+    }
+}
+
+// =============================================================================
+// MySQL Schema and Loading (for comparison)
+// =============================================================================
+
+#[cfg(feature = "benchmark-comparison")]
+fn create_tpcds_schema_mysql(conn: &mut PooledConn) {
+    // Drop tables in reverse dependency order
+    let drop_tables = [
+        "DROP TABLE IF EXISTS inventory",
+        "DROP TABLE IF EXISTS web_returns",
+        "DROP TABLE IF EXISTS web_sales",
+        "DROP TABLE IF EXISTS catalog_returns",
+        "DROP TABLE IF EXISTS catalog_sales",
+        "DROP TABLE IF EXISTS store_returns",
+        "DROP TABLE IF EXISTS store_sales",
+        "DROP TABLE IF EXISTS call_center",
+        "DROP TABLE IF EXISTS income_band",
+        "DROP TABLE IF EXISTS household_demographics",
+        "DROP TABLE IF EXISTS customer_demographics",
+        "DROP TABLE IF EXISTS web_site",
+        "DROP TABLE IF EXISTS web_page",
+        "DROP TABLE IF EXISTS catalog_page",
+        "DROP TABLE IF EXISTS reason",
+        "DROP TABLE IF EXISTS ship_mode",
+        "DROP TABLE IF EXISTS warehouse",
+        "DROP TABLE IF EXISTS promotion",
+        "DROP TABLE IF EXISTS store",
+        "DROP TABLE IF EXISTS customer",
+        "DROP TABLE IF EXISTS customer_address",
+        "DROP TABLE IF EXISTS item",
+        "DROP TABLE IF EXISTS time_dim",
+        "DROP TABLE IF EXISTS date_dim",
+    ];
+    for stmt in drop_tables {
+        conn.query_drop(stmt).unwrap();
+    }
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE date_dim (
+            d_date_sk INTEGER PRIMARY KEY,
+            d_date_id VARCHAR(16) NOT NULL,
+            d_date DATE,
+            d_month_seq INTEGER,
+            d_week_seq INTEGER,
+            d_quarter_seq INTEGER,
+            d_year INTEGER,
+            d_dow INTEGER,
+            d_moy INTEGER,
+            d_dom INTEGER,
+            d_qoy INTEGER,
+            d_fy_year INTEGER,
+            d_fy_quarter_seq INTEGER,
+            d_fy_week_seq INTEGER,
+            d_day_name VARCHAR(9),
+            d_quarter_name VARCHAR(6),
+            d_holiday VARCHAR(1),
+            d_weekend VARCHAR(1),
+            d_following_holiday VARCHAR(1),
+            d_first_dom INTEGER,
+            d_last_dom INTEGER,
+            d_same_day_ly INTEGER,
+            d_same_day_lq INTEGER,
+            d_current_day VARCHAR(1),
+            d_current_week VARCHAR(1),
+            d_current_month VARCHAR(1),
+            d_current_quarter VARCHAR(1),
+            d_current_year VARCHAR(1)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE time_dim (
+            t_time_sk INTEGER PRIMARY KEY,
+            t_time_id VARCHAR(16) NOT NULL,
+            t_time INTEGER,
+            t_hour INTEGER,
+            t_minute INTEGER,
+            t_second INTEGER,
+            t_am_pm VARCHAR(2),
+            t_shift VARCHAR(20),
+            t_sub_shift VARCHAR(20),
+            t_meal_time VARCHAR(20)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE item (
+            i_item_sk INTEGER PRIMARY KEY,
+            i_item_id VARCHAR(16) NOT NULL,
+            i_rec_start_date DATE,
+            i_rec_end_date DATE,
+            i_item_desc VARCHAR(200),
+            i_current_price DECIMAL(7,2),
+            i_wholesale_cost DECIMAL(7,2),
+            i_brand_id INTEGER,
+            i_brand VARCHAR(50),
+            i_class_id INTEGER,
+            i_class VARCHAR(50),
+            i_category_id INTEGER,
+            i_category VARCHAR(50),
+            i_manufact_id INTEGER,
+            i_manufact VARCHAR(50),
+            i_size VARCHAR(20),
+            i_formulation VARCHAR(20),
+            i_color VARCHAR(20),
+            i_units VARCHAR(10),
+            i_container VARCHAR(10),
+            i_manager_id INTEGER,
+            i_product_name VARCHAR(50)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE customer_address (
+            ca_address_sk INTEGER PRIMARY KEY,
+            ca_address_id VARCHAR(16) NOT NULL,
+            ca_street_number VARCHAR(10),
+            ca_street_name VARCHAR(60),
+            ca_street_type VARCHAR(15),
+            ca_suite_number VARCHAR(10),
+            ca_city VARCHAR(60),
+            ca_county VARCHAR(30),
+            ca_state VARCHAR(2),
+            ca_zip VARCHAR(10),
+            ca_country VARCHAR(20),
+            ca_gmt_offset DECIMAL(5,2),
+            ca_location_type VARCHAR(20)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE customer (
+            c_customer_sk INTEGER PRIMARY KEY,
+            c_customer_id VARCHAR(16) NOT NULL,
+            c_current_cdemo_sk INTEGER,
+            c_current_hdemo_sk INTEGER,
+            c_current_addr_sk INTEGER,
+            c_first_shipto_date_sk INTEGER,
+            c_first_sales_date_sk INTEGER,
+            c_salutation VARCHAR(10),
+            c_first_name VARCHAR(20),
+            c_last_name VARCHAR(30),
+            c_preferred_cust_flag VARCHAR(1),
+            c_birth_day INTEGER,
+            c_birth_month INTEGER,
+            c_birth_year INTEGER,
+            c_birth_country VARCHAR(20),
+            c_login VARCHAR(13),
+            c_email_address VARCHAR(50),
+            c_last_review_date_sk INTEGER
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE store (
+            s_store_sk INTEGER PRIMARY KEY,
+            s_store_id VARCHAR(16) NOT NULL,
+            s_rec_start_date DATE,
+            s_rec_end_date DATE,
+            s_closed_date_sk INTEGER,
+            s_store_name VARCHAR(50),
+            s_number_employees INTEGER,
+            s_floor_space INTEGER,
+            s_hours VARCHAR(20),
+            s_manager VARCHAR(40),
+            s_market_id INTEGER,
+            s_geography_class VARCHAR(100),
+            s_market_desc VARCHAR(100),
+            s_market_manager VARCHAR(40),
+            s_division_id INTEGER,
+            s_division_name VARCHAR(50),
+            s_company_id INTEGER,
+            s_company_name VARCHAR(50),
+            s_street_number VARCHAR(10),
+            s_street_name VARCHAR(60),
+            s_street_type VARCHAR(15),
+            s_suite_number VARCHAR(10),
+            s_city VARCHAR(60),
+            s_county VARCHAR(30),
+            s_state VARCHAR(2),
+            s_zip VARCHAR(10),
+            s_country VARCHAR(20),
+            s_gmt_offset DECIMAL(5,2),
+            s_tax_percentage DECIMAL(5,2)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE store_sales (
+            ss_sold_date_sk INTEGER,
+            ss_sold_time_sk INTEGER,
+            ss_item_sk INTEGER NOT NULL,
+            ss_customer_sk INTEGER,
+            ss_cdemo_sk INTEGER,
+            ss_hdemo_sk INTEGER,
+            ss_addr_sk INTEGER,
+            ss_store_sk INTEGER,
+            ss_promo_sk INTEGER,
+            ss_ticket_number INTEGER NOT NULL,
+            ss_quantity INTEGER,
+            ss_wholesale_cost DECIMAL(7,2),
+            ss_list_price DECIMAL(7,2),
+            ss_sales_price DECIMAL(7,2),
+            ss_ext_discount_amt DECIMAL(7,2),
+            ss_ext_sales_price DECIMAL(7,2),
+            ss_ext_wholesale_cost DECIMAL(7,2),
+            ss_ext_list_price DECIMAL(7,2),
+            ss_ext_tax DECIMAL(7,2),
+            ss_coupon_amt DECIMAL(7,2),
+            ss_net_paid DECIMAL(7,2),
+            ss_net_paid_inc_tax DECIMAL(7,2),
+            ss_net_profit DECIMAL(7,2),
+            PRIMARY KEY (ss_item_sk, ss_ticket_number)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop("CREATE INDEX idx_ss_date ON store_sales(ss_sold_date_sk)").unwrap();
+    conn.query_drop("CREATE INDEX idx_ss_customer ON store_sales(ss_customer_sk)").unwrap();
+    conn.query_drop("CREATE INDEX idx_ss_store ON store_sales(ss_store_sk)").unwrap();
+
+    // Phase 2 tables
+    conn.query_drop(
+        r#"
+        CREATE TABLE promotion (
+            p_promo_sk INTEGER PRIMARY KEY,
+            p_promo_id VARCHAR(16) NOT NULL,
+            p_start_date_sk INTEGER,
+            p_end_date_sk INTEGER,
+            p_item_sk INTEGER,
+            p_cost DECIMAL(15,2),
+            p_response_target INTEGER,
+            p_promo_name VARCHAR(50),
+            p_channel_dmail VARCHAR(1),
+            p_channel_email VARCHAR(1),
+            p_channel_catalog VARCHAR(1),
+            p_channel_tv VARCHAR(1),
+            p_channel_radio VARCHAR(1),
+            p_channel_press VARCHAR(1),
+            p_channel_event VARCHAR(1),
+            p_channel_demo VARCHAR(1),
+            p_channel_details VARCHAR(100),
+            p_purpose VARCHAR(15),
+            p_discount_active VARCHAR(1)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE warehouse (
+            w_warehouse_sk INTEGER PRIMARY KEY,
+            w_warehouse_id VARCHAR(16) NOT NULL,
+            w_warehouse_name VARCHAR(20),
+            w_warehouse_sq_ft INTEGER,
+            w_street_number VARCHAR(10),
+            w_street_name VARCHAR(60),
+            w_street_type VARCHAR(15),
+            w_suite_number VARCHAR(10),
+            w_city VARCHAR(60),
+            w_county VARCHAR(30),
+            w_state VARCHAR(2),
+            w_zip VARCHAR(10),
+            w_country VARCHAR(20),
+            w_gmt_offset DECIMAL(5,2)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE ship_mode (
+            sm_ship_mode_sk INTEGER PRIMARY KEY,
+            sm_ship_mode_id VARCHAR(16) NOT NULL,
+            sm_type VARCHAR(30),
+            sm_code VARCHAR(10),
+            sm_carrier VARCHAR(20),
+            sm_contract VARCHAR(20)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE reason (
+            r_reason_sk INTEGER PRIMARY KEY,
+            r_reason_id VARCHAR(16) NOT NULL,
+            r_reason_desc VARCHAR(100)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE store_returns (
+            sr_returned_date_sk INTEGER,
+            sr_return_time_sk INTEGER,
+            sr_item_sk INTEGER NOT NULL,
+            sr_customer_sk INTEGER,
+            sr_cdemo_sk INTEGER,
+            sr_hdemo_sk INTEGER,
+            sr_addr_sk INTEGER,
+            sr_store_sk INTEGER,
+            sr_reason_sk INTEGER,
+            sr_ticket_number INTEGER NOT NULL,
+            sr_return_quantity INTEGER,
+            sr_return_amt DECIMAL(7,2),
+            sr_return_tax DECIMAL(7,2),
+            sr_return_amt_inc_tax DECIMAL(7,2),
+            sr_fee DECIMAL(7,2),
+            sr_return_ship_cost DECIMAL(7,2),
+            sr_refunded_cash DECIMAL(7,2),
+            sr_reversed_charge DECIMAL(7,2),
+            sr_store_credit DECIMAL(7,2),
+            sr_net_loss DECIMAL(7,2),
+            PRIMARY KEY (sr_item_sk, sr_ticket_number)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    // Phase 3 tables
+    conn.query_drop(
+        r#"
+        CREATE TABLE catalog_page (
+            cp_catalog_page_sk INTEGER PRIMARY KEY,
+            cp_catalog_page_id VARCHAR(16) NOT NULL,
+            cp_start_date_sk INTEGER,
+            cp_end_date_sk INTEGER,
+            cp_department VARCHAR(50),
+            cp_catalog_number INTEGER,
+            cp_catalog_page_number INTEGER,
+            cp_description VARCHAR(100),
+            cp_type VARCHAR(100)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE web_page (
+            wp_web_page_sk INTEGER PRIMARY KEY,
+            wp_web_page_id VARCHAR(16) NOT NULL,
+            wp_rec_start_date DATE,
+            wp_rec_end_date DATE,
+            wp_creation_date_sk INTEGER,
+            wp_access_date_sk INTEGER,
+            wp_autogen_flag VARCHAR(1),
+            wp_customer_sk INTEGER,
+            wp_url VARCHAR(100),
+            wp_type VARCHAR(50),
+            wp_char_count INTEGER,
+            wp_link_count INTEGER,
+            wp_image_count INTEGER,
+            wp_max_ad_count INTEGER
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE web_site (
+            web_site_sk INTEGER PRIMARY KEY,
+            web_site_id VARCHAR(16) NOT NULL,
+            web_rec_start_date DATE,
+            web_rec_end_date DATE,
+            web_name VARCHAR(50),
+            web_open_date_sk INTEGER,
+            web_close_date_sk INTEGER,
+            web_class VARCHAR(50),
+            web_manager VARCHAR(40),
+            web_mkt_id INTEGER,
+            web_mkt_class VARCHAR(50),
+            web_mkt_desc VARCHAR(100),
+            web_market_manager VARCHAR(40),
+            web_company_id INTEGER,
+            web_company_name VARCHAR(50),
+            web_street_number VARCHAR(10),
+            web_street_name VARCHAR(60),
+            web_street_type VARCHAR(15),
+            web_suite_number VARCHAR(10),
+            web_city VARCHAR(60),
+            web_county VARCHAR(30),
+            web_state VARCHAR(2),
+            web_zip VARCHAR(10),
+            web_country VARCHAR(20),
+            web_gmt_offset DECIMAL(5,2),
+            web_tax_percentage DECIMAL(5,2)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE catalog_sales (
+            cs_sold_date_sk INTEGER,
+            cs_sold_time_sk INTEGER,
+            cs_ship_date_sk INTEGER,
+            cs_bill_customer_sk INTEGER,
+            cs_bill_cdemo_sk INTEGER,
+            cs_bill_hdemo_sk INTEGER,
+            cs_bill_addr_sk INTEGER,
+            cs_ship_customer_sk INTEGER,
+            cs_ship_cdemo_sk INTEGER,
+            cs_ship_hdemo_sk INTEGER,
+            cs_ship_addr_sk INTEGER,
+            cs_call_center_sk INTEGER,
+            cs_catalog_page_sk INTEGER,
+            cs_ship_mode_sk INTEGER,
+            cs_warehouse_sk INTEGER,
+            cs_item_sk INTEGER NOT NULL,
+            cs_promo_sk INTEGER,
+            cs_order_number INTEGER NOT NULL,
+            cs_quantity INTEGER,
+            cs_wholesale_cost DECIMAL(7,2),
+            cs_list_price DECIMAL(7,2),
+            cs_sales_price DECIMAL(7,2),
+            cs_ext_discount_amt DECIMAL(7,2),
+            cs_ext_sales_price DECIMAL(7,2),
+            cs_ext_wholesale_cost DECIMAL(7,2),
+            cs_ext_list_price DECIMAL(7,2),
+            cs_ext_tax DECIMAL(7,2),
+            cs_coupon_amt DECIMAL(7,2),
+            cs_ext_ship_cost DECIMAL(7,2),
+            cs_net_paid DECIMAL(7,2),
+            cs_net_paid_inc_tax DECIMAL(7,2),
+            cs_net_paid_inc_ship DECIMAL(7,2),
+            cs_net_paid_inc_ship_tax DECIMAL(7,2),
+            cs_net_profit DECIMAL(7,2),
+            PRIMARY KEY (cs_item_sk, cs_order_number)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE catalog_returns (
+            cr_returned_date_sk INTEGER,
+            cr_returned_time_sk INTEGER,
+            cr_item_sk INTEGER NOT NULL,
+            cr_refunded_customer_sk INTEGER,
+            cr_refunded_cdemo_sk INTEGER,
+            cr_refunded_hdemo_sk INTEGER,
+            cr_refunded_addr_sk INTEGER,
+            cr_returning_customer_sk INTEGER,
+            cr_returning_cdemo_sk INTEGER,
+            cr_returning_hdemo_sk INTEGER,
+            cr_returning_addr_sk INTEGER,
+            cr_call_center_sk INTEGER,
+            cr_catalog_page_sk INTEGER,
+            cr_ship_mode_sk INTEGER,
+            cr_warehouse_sk INTEGER,
+            cr_reason_sk INTEGER,
+            cr_order_number INTEGER NOT NULL,
+            cr_return_quantity INTEGER,
+            cr_return_amount DECIMAL(7,2),
+            cr_return_tax DECIMAL(7,2),
+            cr_return_amt_inc_tax DECIMAL(7,2),
+            cr_fee DECIMAL(7,2),
+            cr_return_ship_cost DECIMAL(7,2),
+            cr_refunded_cash DECIMAL(7,2),
+            cr_reversed_charge DECIMAL(7,2),
+            cr_store_credit DECIMAL(7,2),
+            cr_net_loss DECIMAL(7,2),
+            PRIMARY KEY (cr_item_sk, cr_order_number)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE web_sales (
+            ws_sold_date_sk INTEGER,
+            ws_sold_time_sk INTEGER,
+            ws_ship_date_sk INTEGER,
+            ws_item_sk INTEGER NOT NULL,
+            ws_bill_customer_sk INTEGER,
+            ws_bill_cdemo_sk INTEGER,
+            ws_bill_hdemo_sk INTEGER,
+            ws_bill_addr_sk INTEGER,
+            ws_ship_customer_sk INTEGER,
+            ws_ship_cdemo_sk INTEGER,
+            ws_ship_hdemo_sk INTEGER,
+            ws_ship_addr_sk INTEGER,
+            ws_web_page_sk INTEGER,
+            ws_web_site_sk INTEGER,
+            ws_ship_mode_sk INTEGER,
+            ws_warehouse_sk INTEGER,
+            ws_promo_sk INTEGER,
+            ws_order_number INTEGER NOT NULL,
+            ws_quantity INTEGER,
+            ws_wholesale_cost DECIMAL(7,2),
+            ws_list_price DECIMAL(7,2),
+            ws_sales_price DECIMAL(7,2),
+            ws_ext_discount_amt DECIMAL(7,2),
+            ws_ext_sales_price DECIMAL(7,2),
+            ws_ext_wholesale_cost DECIMAL(7,2),
+            ws_ext_list_price DECIMAL(7,2),
+            ws_ext_tax DECIMAL(7,2),
+            ws_coupon_amt DECIMAL(7,2),
+            ws_ext_ship_cost DECIMAL(7,2),
+            ws_net_paid DECIMAL(7,2),
+            ws_net_paid_inc_tax DECIMAL(7,2),
+            ws_net_paid_inc_ship DECIMAL(7,2),
+            ws_net_paid_inc_ship_tax DECIMAL(7,2),
+            ws_net_profit DECIMAL(7,2),
+            PRIMARY KEY (ws_item_sk, ws_order_number)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE web_returns (
+            wr_returned_date_sk INTEGER,
+            wr_returned_time_sk INTEGER,
+            wr_item_sk INTEGER NOT NULL,
+            wr_refunded_customer_sk INTEGER,
+            wr_refunded_cdemo_sk INTEGER,
+            wr_refunded_hdemo_sk INTEGER,
+            wr_refunded_addr_sk INTEGER,
+            wr_returning_customer_sk INTEGER,
+            wr_returning_cdemo_sk INTEGER,
+            wr_returning_hdemo_sk INTEGER,
+            wr_returning_addr_sk INTEGER,
+            wr_web_page_sk INTEGER,
+            wr_reason_sk INTEGER,
+            wr_order_number INTEGER NOT NULL,
+            wr_return_quantity INTEGER,
+            wr_return_amt DECIMAL(7,2),
+            wr_return_tax DECIMAL(7,2),
+            wr_return_amt_inc_tax DECIMAL(7,2),
+            wr_fee DECIMAL(7,2),
+            wr_return_ship_cost DECIMAL(7,2),
+            wr_refunded_cash DECIMAL(7,2),
+            wr_reversed_charge DECIMAL(7,2),
+            wr_account_credit DECIMAL(7,2),
+            wr_net_loss DECIMAL(7,2),
+            PRIMARY KEY (wr_item_sk, wr_order_number)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    // Phase 4 tables
+    conn.query_drop(
+        r#"
+        CREATE TABLE customer_demographics (
+            cd_demo_sk INTEGER PRIMARY KEY,
+            cd_gender VARCHAR(1),
+            cd_marital_status VARCHAR(1),
+            cd_education_status VARCHAR(20),
+            cd_purchase_estimate INTEGER,
+            cd_credit_rating VARCHAR(10),
+            cd_dep_count INTEGER,
+            cd_dep_employed_count INTEGER,
+            cd_dep_college_count INTEGER
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE household_demographics (
+            hd_demo_sk INTEGER PRIMARY KEY,
+            hd_income_band_sk INTEGER,
+            hd_buy_potential VARCHAR(15),
+            hd_dep_count INTEGER,
+            hd_vehicle_count INTEGER
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE income_band (
+            ib_income_band_sk INTEGER PRIMARY KEY,
+            ib_lower_bound INTEGER,
+            ib_upper_bound INTEGER
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE call_center (
+            cc_call_center_sk INTEGER PRIMARY KEY,
+            cc_call_center_id VARCHAR(16) NOT NULL,
+            cc_rec_start_date DATE,
+            cc_rec_end_date DATE,
+            cc_closed_date_sk INTEGER,
+            cc_open_date_sk INTEGER,
+            cc_name VARCHAR(50),
+            cc_class VARCHAR(50),
+            cc_employees INTEGER,
+            cc_sq_ft INTEGER,
+            cc_hours VARCHAR(20),
+            cc_manager VARCHAR(40),
+            cc_mkt_id INTEGER,
+            cc_mkt_class VARCHAR(50),
+            cc_mkt_desc VARCHAR(100),
+            cc_market_manager VARCHAR(40),
+            cc_division INTEGER,
+            cc_division_name VARCHAR(50),
+            cc_company INTEGER,
+            cc_company_name VARCHAR(50),
+            cc_street_number VARCHAR(10),
+            cc_street_name VARCHAR(60),
+            cc_street_type VARCHAR(15),
+            cc_suite_number VARCHAR(10),
+            cc_city VARCHAR(60),
+            cc_county VARCHAR(30),
+            cc_state VARCHAR(2),
+            cc_zip VARCHAR(10),
+            cc_country VARCHAR(20),
+            cc_gmt_offset DECIMAL(5,2),
+            cc_tax_percentage DECIMAL(5,2)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+
+    conn.query_drop(
+        r#"
+        CREATE TABLE inventory (
+            inv_date_sk INTEGER NOT NULL,
+            inv_item_sk INTEGER NOT NULL,
+            inv_warehouse_sk INTEGER NOT NULL,
+            inv_quantity_on_hand INTEGER,
+            PRIMARY KEY (inv_date_sk, inv_item_sk, inv_warehouse_sk)
+        ) ENGINE=InnoDB
+    "#,
+    )
+    .unwrap();
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_date_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
+    use mysql::Value;
+    let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    let start_year = data.config.date_start_year;
+    let num_dates = data.date_dim_count;
+
+    for d_date_sk in 1..=num_dates {
+        let days_since_base = d_date_sk as i64 - 1;
+        let year = start_year + (days_since_base / 365) as i32;
+        let day_of_year = (days_since_base % 365) as i32;
+        let month = (day_of_year / 30).min(11) + 1;
+        let day = (day_of_year % 30) + 1;
+        let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
+        let d_date_id = format!("AAAAAA{:010}", d_date_sk);
+        let d_dow = (days_since_base % 7) as i32;
+        let d_week_seq = (days_since_base / 7) as i32 + 1;
+        let d_month_seq = (year - start_year) * 12 + month;
+        let d_quarter_seq = (year - start_year) * 4 + ((month - 1) / 3) + 1;
+        let d_qoy = ((month - 1) / 3) + 1;
+        let quarter_name = format!("{}Q{}", year, d_qoy);
+        let is_weekend = d_dow == 0 || d_dow == 6;
+
+        let params: Vec<Value> = vec![
+            Value::from(d_date_sk as i64),
+            Value::from(d_date_id),
+            Value::from(date_str),
+            Value::from(d_month_seq as i64),
+            Value::from(d_week_seq as i64),
+            Value::from(d_quarter_seq as i64),
+            Value::from(year as i64),
+            Value::from(d_dow as i64),
+            Value::from(month as i64),
+            Value::from(day as i64),
+            Value::from(d_qoy as i64),
+            Value::from(year as i64),
+            Value::from(d_quarter_seq as i64),
+            Value::from(d_week_seq as i64),
+            Value::from(day_names[d_dow as usize]),
+            Value::from(quarter_name),
+            Value::from("N"),
+            Value::from(if is_weekend { "Y" } else { "N" }),
+            Value::from("N"),
+            Value::from(((d_month_seq - 1) * 30 + 1) as i64),
+            Value::from((d_month_seq * 30) as i64),
+            Value::from((d_date_sk as i64 - 365).max(1)),
+            Value::from((d_date_sk as i64 - 91).max(1)),
+            Value::from("N"),
+            Value::from("N"),
+            Value::from("N"),
+            Value::from("N"),
+            Value::from("N"),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO date_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_time_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
+    let seconds_per_row = data.config.time_granularity.seconds_per_row();
+    let num_times = data.time_dim_count;
+
+    for i in 0..num_times {
+        let t_time_sk = i as i32 + 1;
+        let total_seconds = (i * seconds_per_row) as i32;
+        let t_hour = total_seconds / 3600;
+        let t_minute = (total_seconds % 3600) / 60;
+        let t_second = total_seconds % 60;
+        let t_time_id = format!("AAAAAA{:010}", t_time_sk);
+        let t_am_pm = if t_hour < 12 { "AM" } else { "PM" };
+        let t_shift = match t_hour {
+            0..=5 => "third",
+            6..=13 => "first",
+            _ => "second",
+        };
+        let t_sub_shift = if t_hour % 2 == 0 { "night" } else { "day" };
+        let t_meal_time = match t_hour {
+            7..=8 => "breakfast",
+            11..=13 => "lunch",
+            17..=19 => "dinner",
+            _ => "",
+        };
+
+        conn.exec_drop(
+            "INSERT INTO time_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                t_time_sk as i64,
+                t_time_id,
+                total_seconds as i64,
+                t_hour as i64,
+                t_minute as i64,
+                t_second as i64,
+                t_am_pm,
+                t_shift,
+                t_sub_shift,
+                t_meal_time,
+            ),
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_item_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    for i in 1..=data.item_count {
+        let item_id = format!("AAAAAAAAA{:07}", i);
+        let brand_id = (i % BRANDS.len()) + 1;
+        let class_id = (i % CLASSES.len()) + 1;
+        let category_id = (i % CATEGORIES.len()) + 1;
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(item_id),
+            Value::NULL, // rec_start_date
+            Value::NULL, // rec_end_date
+            Value::from(data.random_varchar(200)),
+            Value::from(data.random_decimal(1.0, 100.0)),
+            Value::from(data.random_decimal(0.5, 50.0)),
+            Value::from(brand_id as i64),
+            Value::from(BRANDS[brand_id - 1]),
+            Value::from(class_id as i64),
+            Value::from(CLASSES[class_id - 1]),
+            Value::from(category_id as i64),
+            Value::from(CATEGORIES[category_id - 1]),
+            Value::from(data.random_i32(1, 10) as i64),
+            Value::from(format!("Manufacturer #{}", data.random_i32(1, 100))),
+            Value::from(ITEM_SIZES[i % ITEM_SIZES.len()]),
+            Value::from(format!("{:02}", data.random_i32(1, 20))),
+            Value::from(ITEM_COLORS[i % ITEM_COLORS.len()]),
+            Value::from("N/A"),
+            Value::from("Unknown"),
+            Value::from(data.random_i32(1, 100) as i64),
+            Value::from(format!("Product Name #{}", i)),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO item VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_customer_address_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    for i in 1..=data.customer_address_count {
+        let address_id = format!("AAAAAAAAA{:07}", i);
+        let state_idx = i % STATES.len();
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(address_id),
+            Value::from(format!("{}", data.random_i32(100, 9999))),
+            Value::from(data.random_varchar(40)),
+            Value::from("Street"),
+            Value::from(format!("Suite {}", data.random_i32(100, 999))),
+            Value::from(data.random_city()),
+            Value::from(format!("{} County", STATES[state_idx])),
+            Value::from(STATES[state_idx]),
+            Value::from(data.random_zip()),
+            Value::from("United States"),
+            Value::from(-5.0 - (state_idx % 4) as f64),
+            Value::from("residential"),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+    let salutations = ["Mr.", "Mrs.", "Ms.", "Dr.", ""];
+
+    for i in 1..=data.customer_count {
+        let customer_id = format!("AAAAAA{:010}", i);
+        let sal_idx = i % salutations.len();
+        let birth_year = data.random_i32(1930, 1990);
+        let birth_month = data.random_i32(1, 12);
+        let birth_day = data.random_i32(1, 28);
+        let addr_sk = ((i - 1) % data.customer_address_count) + 1;
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(customer_id),
+            Value::from((i % 1920 + 1) as i64),
+            Value::from((i % 7200 + 1) as i64),
+            Value::from(addr_sk as i64),
+            Value::from(data.random_i32(1, 2191) as i64),
+            Value::from(data.random_i32(1, 2191) as i64),
+            Value::from(salutations[sal_idx]),
+            Value::from(format!("FirstName{}", i % 1000)),
+            Value::from(format!("LastName{}", i % 2000)),
+            Value::from(if i % 3 == 0 { "Y" } else { "N" }),
+            Value::from(birth_day as i64),
+            Value::from(birth_month as i64),
+            Value::from(birth_year as i64),
+            Value::from("UNITED STATES"),
+            Value::from(format!("user{}", i)),
+            Value::from(data.random_email()),
+            Value::from(data.random_i32(1, 2191) as i64),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_store_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    for i in 1..=data.store_count {
+        let store_id = format!("AAAAAAAAA{:07}", i);
+        let state_idx = i % STATES.len();
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(store_id),
+            Value::NULL, // rec_start_date
+            Value::NULL, // rec_end_date
+            Value::NULL, // closed_date_sk
+            Value::from(format!("Store #{}", i)),
+            Value::from(data.random_i32(50, 500) as i64),
+            Value::from(data.random_i32(10000, 100000) as i64),
+            Value::from("8AM-10PM"),
+            Value::from(data.random_varchar(30)),
+            Value::from(((i % 6) + 1) as i64),
+            Value::from("Unknown"),
+            Value::from(format!("Market Description {}", i)),
+            Value::from(data.random_varchar(30)),
+            Value::from(((i % 3) + 1) as i64),
+            Value::from(format!("Division {}", (i % 3) + 1)),
+            Value::from(((i % 2) + 1) as i64),
+            Value::from(format!("Company {}", (i % 2) + 1)),
+            Value::from(format!("{}", data.random_i32(100, 9999))),
+            Value::from(data.random_varchar(40)),
+            Value::from("Street"),
+            Value::from(format!("Suite {}", data.random_i32(100, 999))),
+            Value::from(data.random_city()),
+            Value::from(format!("{} County", STATES[state_idx])),
+            Value::from(STATES[state_idx]),
+            Value::from(data.random_zip()),
+            Value::from("United States"),
+            Value::from(-5.0 - (state_idx % 4) as f64),
+            Value::from(data.random_f64(0.0, 0.11)),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO store VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_store_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    let date_range = data.date_dim_count.min(730);
+    let mut ticket = 0;
+
+    for _ in 0..data.store_sales_count {
+        ticket += 1;
+        let date_sk = data.random_i32(1, date_range as i32);
+        let item_sk = data.random_i32(1, data.item_count as i32);
+        let customer_sk = data.random_i32(1, data.customer_count as i32);
+        let store_sk = data.random_i32(1, data.store_count as i32);
+
+        let quantity = data.random_i32(1, 100);
+        let wholesale = data.random_decimal(1.0, 50.0);
+        let list_price = data.random_decimal(wholesale * 1.1, wholesale * 2.0);
+        let sales_price = data.random_decimal(wholesale, list_price);
+        let discount = data.random_decimal(0.0, list_price * 0.3);
+        let ext_sales = sales_price * quantity as f64;
+        let ext_wholesale = wholesale * quantity as f64;
+        let ext_list = list_price * quantity as f64;
+        let ext_tax = ext_sales * 0.08;
+        let coupon = data.random_decimal(0.0, ext_sales * 0.1);
+        let net_paid = ext_sales - discount;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_profit = net_paid - ext_wholesale;
+
+        let params: Vec<Value> = vec![
+            Value::from(date_sk as i64),
+            Value::NULL, // time_sk
+            Value::from(item_sk as i64),
+            Value::from(customer_sk as i64),
+            Value::NULL, // cdemo_sk
+            Value::NULL, // hdemo_sk
+            Value::NULL, // addr_sk
+            Value::from(store_sk as i64),
+            Value::NULL, // promo_sk
+            Value::from(ticket as i64),
+            Value::from(quantity as i64),
+            Value::from(wholesale),
+            Value::from(list_price),
+            Value::from(sales_price),
+            Value::from(discount),
+            Value::from(ext_sales),
+            Value::from(ext_wholesale),
+            Value::from(ext_list),
+            Value::from(ext_tax),
+            Value::from(coupon),
+            Value::from(net_paid),
+            Value::from(net_paid_inc_tax),
+            Value::from(net_profit),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO store_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_promotion_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    for i in 1..=data.promotion_count {
+        let promo_id = format!("AAAAAAAAA{:07}", i);
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(promo_id),
+            Value::from(data.random_i32(1, 100) as i64),
+            Value::from(data.random_i32(101, 200) as i64),
+            Value::from(data.random_i32(1, data.item_count as i32) as i64),
+            Value::from(data.random_decimal(100.0, 10000.0)),
+            Value::from(data.random_i32(1000, 10000) as i64),
+            Value::from(format!("Promotion #{}", i)),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::from(format!("Details for promotion {}", i)),
+            Value::from("UNKNOWN"),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO promotion VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    for i in 1..=data.warehouse_count {
+        let warehouse_id = format!("AAAAAAAAA{:07}", i);
+        let state_idx = i % STATES.len();
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(warehouse_id),
+            Value::from(format!("Warehouse #{}", i)),
+            Value::from(data.random_i32(50000, 500000) as i64),
+            Value::from(format!("{}", data.random_i32(100, 9999))),
+            Value::from(data.random_varchar(40)),
+            Value::from("Street"),
+            Value::from(format!("Suite {}", data.random_i32(100, 999))),
+            Value::from(data.random_city()),
+            Value::from(format!("{} County", STATES[state_idx])),
+            Value::from(STATES[state_idx]),
+            Value::from(data.random_zip()),
+            Value::from("United States"),
+            Value::from(-5.0 - (state_idx % 4) as f64),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_ship_mode_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    let ship_types = ["LIBRARY", "REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY"];
+    let carriers = ["UPS", "FEDEX", "USPS", "DHL"];
+
+    for i in 1..=data.ship_mode_count {
+        let ship_mode_id = format!("AAAAAAAAA{:07}", i);
+
+        conn.exec_drop(
+            "INSERT INTO ship_mode VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                i as i64,
+                &ship_mode_id,
+                ship_types[i % ship_types.len()],
+                format!("SM{}", i),
+                carriers[i % carriers.len()],
+                format!("Contract{}", i),
+            ),
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_reason_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    let reasons = [
+        "Package was damaged",
+        "Wrong item shipped",
+        "Did not like item",
+        "Found cheaper elsewhere",
+        "Item did not fit",
+        "No longer needed",
+        "Defective item",
+        "Gift unwanted",
+    ];
+
+    for i in 1..=data.reason_count {
+        let reason_id = format!("AAAAAAAAA{:07}", i);
+
+        conn.exec_drop(
+            "INSERT INTO reason VALUES (?, ?, ?)",
+            (i as i64, &reason_id, reasons[i % reasons.len()]),
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_store_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    let date_range = data.date_dim_count.min(730);
+    let mut ticket = 0;
+
+    for _ in 0..data.store_returns_count {
+        ticket += 1;
+        let date_sk = data.random_i32(1, date_range as i32);
+        let item_sk = data.random_i32(1, data.item_count as i32);
+        let customer_sk = data.random_i32(1, data.customer_count as i32);
+        let store_sk = data.random_i32(1, data.store_count as i32);
+        let reason_sk = data.random_i32(1, data.reason_count as i32);
+
+        let quantity = data.random_i32(1, 20);
+        let return_amt = data.random_decimal(5.0, 200.0);
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_decimal(1.0, 20.0);
+        let ship_cost = data.random_decimal(2.0, 30.0);
+        let refunded_cash = return_amt * 0.9;
+        let reversed_charge = return_amt * 0.05;
+        let store_credit = return_amt * 0.05;
+        let net_loss = fee + ship_cost;
+
+        let params: Vec<Value> = vec![
+            Value::from(date_sk as i64),
+            Value::NULL, // time_sk
+            Value::from(item_sk as i64),
+            Value::from(customer_sk as i64),
+            Value::NULL, // cdemo_sk
+            Value::NULL, // hdemo_sk
+            Value::NULL, // addr_sk
+            Value::from(store_sk as i64),
+            Value::from(reason_sk as i64),
+            Value::from(ticket as i64),
+            Value::from(quantity as i64),
+            Value::from(return_amt),
+            Value::from(return_tax),
+            Value::from(return_amt_inc_tax),
+            Value::from(fee),
+            Value::from(ship_cost),
+            Value::from(refunded_cash),
+            Value::from(reversed_charge),
+            Value::from(store_credit),
+            Value::from(net_loss),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO store_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    for i in 1..=data.catalog_page_count {
+        let page_id = format!("AAAAAAAAA{:07}", i);
+
+        conn.exec_drop(
+            "INSERT INTO catalog_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                i as i64,
+                &page_id,
+                data.random_i32(1, 100) as i64,
+                data.random_i32(101, 200) as i64,
+                format!("Department {}", i % 10),
+                (i / 100 + 1) as i64,
+                (i % 100 + 1) as i64,
+                format!("Catalog page {} description", i),
+                "bi-annual",
+            ),
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    for i in 1..=data.web_page_count {
+        let page_id = format!("AAAAAAAAA{:07}", i);
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(page_id),
+            Value::NULL, // rec_start_date
+            Value::NULL, // rec_end_date
+            Value::from(data.random_i32(1, 100) as i64),
+            Value::from(data.random_i32(1, 100) as i64),
+            Value::from(if data.random_i32(0, 1) == 1 { "Y" } else { "N" }),
+            Value::NULL, // customer_sk
+            Value::from(format!("http://www.site.com/page{}", i)),
+            Value::from("catalog"),
+            Value::from(data.random_i32(100, 10000) as i64),
+            Value::from(data.random_i32(1, 50) as i64),
+            Value::from(data.random_i32(0, 20) as i64),
+            Value::from(data.random_i32(0, 10) as i64),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_site_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    for i in 1..=data.web_site_count {
+        let site_id = format!("AAAAAAAAA{:07}", i);
+        let state_idx = i % STATES.len();
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(site_id),
+            Value::NULL, // rec_start_date
+            Value::NULL, // rec_end_date
+            Value::from(format!("Site {}", i)),
+            Value::from(data.random_i32(1, 100) as i64),
+            Value::NULL, // close_date_sk
+            Value::from("Unknown"),
+            Value::from(data.random_varchar(30)),
+            Value::from(((i % 6) + 1) as i64),
+            Value::from(format!("Market Class {}", i % 10)),
+            Value::from(format!("Market Description {}", i)),
+            Value::from(data.random_varchar(30)),
+            Value::from(((i % 2) + 1) as i64),
+            Value::from(format!("Company {}", (i % 2) + 1)),
+            Value::from(format!("{}", data.random_i32(100, 9999))),
+            Value::from(data.random_varchar(40)),
+            Value::from("Street"),
+            Value::from(format!("Suite {}", data.random_i32(100, 999))),
+            Value::from(data.random_city()),
+            Value::from(format!("{} County", STATES[state_idx])),
+            Value::from(STATES[state_idx]),
+            Value::from(data.random_zip()),
+            Value::from("United States"),
+            Value::from(-5.0 - (state_idx % 4) as f64),
+            Value::from(data.random_f64(0.0, 0.11)),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO web_site VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    let date_range = data.date_dim_count.min(730);
+    let mut order_num = 0;
+
+    for _ in 0..data.catalog_sales_count {
+        order_num += 1;
+        let date_sk = data.random_i32(1, date_range as i32);
+        let item_sk = data.random_i32(1, data.item_count as i32);
+        let customer_sk = data.random_i32(1, data.customer_count as i32);
+        let page_sk = data.random_i32(1, data.catalog_page_count as i32);
+        let warehouse_sk = data.random_i32(1, data.warehouse_count as i32);
+        let ship_mode_sk = data.random_i32(1, data.ship_mode_count as i32);
+
+        let quantity = data.random_i32(1, 100);
+        let wholesale = data.random_decimal(1.0, 50.0);
+        let list_price = data.random_decimal(wholesale * 1.1, wholesale * 2.0);
+        let sales_price = data.random_decimal(wholesale, list_price);
+        let discount = data.random_decimal(0.0, list_price * 0.3);
+        let ext_sales = sales_price * quantity as f64;
+        let ext_wholesale = wholesale * quantity as f64;
+        let ext_list = list_price * quantity as f64;
+        let ext_tax = ext_sales * 0.08;
+        let coupon = data.random_decimal(0.0, ext_sales * 0.1);
+        let ext_ship = data.random_decimal(5.0, 50.0);
+        let net_paid = ext_sales - discount;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale;
+
+        let params: Vec<Value> = vec![
+            Value::from(date_sk as i64),
+            Value::NULL, // time_sk
+            Value::from((date_sk + data.random_i32(1, 7)) as i64), // ship_date_sk
+            Value::from(customer_sk as i64),
+            Value::NULL, // bill_cdemo_sk
+            Value::NULL, // bill_hdemo_sk
+            Value::NULL, // bill_addr_sk
+            Value::from(customer_sk as i64), // ship_customer_sk
+            Value::NULL, // ship_cdemo_sk
+            Value::NULL, // ship_hdemo_sk
+            Value::NULL, // ship_addr_sk
+            Value::NULL, // call_center_sk
+            Value::from(page_sk as i64),
+            Value::from(ship_mode_sk as i64),
+            Value::from(warehouse_sk as i64),
+            Value::from(item_sk as i64),
+            Value::NULL, // promo_sk
+            Value::from(order_num as i64),
+            Value::from(quantity as i64),
+            Value::from(wholesale),
+            Value::from(list_price),
+            Value::from(sales_price),
+            Value::from(discount),
+            Value::from(ext_sales),
+            Value::from(ext_wholesale),
+            Value::from(ext_list),
+            Value::from(ext_tax),
+            Value::from(coupon),
+            Value::from(ext_ship),
+            Value::from(net_paid),
+            Value::from(net_paid_inc_tax),
+            Value::from(net_paid_inc_ship),
+            Value::from(net_paid_inc_ship_tax),
+            Value::from(net_profit),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO catalog_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_catalog_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    let date_range = data.date_dim_count.min(730);
+    let mut order_num = 0;
+
+    for _ in 0..data.catalog_returns_count {
+        order_num += 1;
+        let date_sk = data.random_i32(1, date_range as i32);
+        let item_sk = data.random_i32(1, data.item_count as i32);
+        let customer_sk = data.random_i32(1, data.customer_count as i32);
+        let page_sk = data.random_i32(1, data.catalog_page_count as i32);
+        let warehouse_sk = data.random_i32(1, data.warehouse_count as i32);
+        let reason_sk = data.random_i32(1, data.reason_count as i32);
+        let ship_mode_sk = data.random_i32(1, data.ship_mode_count as i32);
+
+        let quantity = data.random_i32(1, 20);
+        let return_amt = data.random_decimal(5.0, 200.0);
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_decimal(1.0, 20.0);
+        let ship_cost = data.random_decimal(2.0, 30.0);
+        let refunded_cash = return_amt * 0.9;
+        let reversed_charge = return_amt * 0.05;
+        let store_credit = return_amt * 0.05;
+        let net_loss = fee + ship_cost;
+
+        let params: Vec<Value> = vec![
+            Value::from(date_sk as i64),
+            Value::NULL, // time_sk
+            Value::from(item_sk as i64),
+            Value::from(customer_sk as i64), // refunded_customer_sk
+            Value::NULL, // refunded_cdemo_sk
+            Value::NULL, // refunded_hdemo_sk
+            Value::NULL, // refunded_addr_sk
+            Value::from(customer_sk as i64), // returning_customer_sk
+            Value::NULL, // returning_cdemo_sk
+            Value::NULL, // returning_hdemo_sk
+            Value::NULL, // returning_addr_sk
+            Value::NULL, // call_center_sk
+            Value::from(page_sk as i64),
+            Value::from(ship_mode_sk as i64),
+            Value::from(warehouse_sk as i64),
+            Value::from(reason_sk as i64),
+            Value::from(order_num as i64),
+            Value::from(quantity as i64),
+            Value::from(return_amt),
+            Value::from(return_tax),
+            Value::from(return_amt_inc_tax),
+            Value::from(fee),
+            Value::from(ship_cost),
+            Value::from(refunded_cash),
+            Value::from(reversed_charge),
+            Value::from(store_credit),
+            Value::from(net_loss),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO catalog_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    let date_range = data.date_dim_count.min(730);
+    let mut order_num = 0;
+
+    for _ in 0..data.web_sales_count {
+        order_num += 1;
+        let date_sk = data.random_i32(1, date_range as i32);
+        let item_sk = data.random_i32(1, data.item_count as i32);
+        let customer_sk = data.random_i32(1, data.customer_count as i32);
+        let page_sk = data.random_i32(1, data.web_page_count as i32);
+        let site_sk = data.random_i32(1, data.web_site_count as i32);
+        let warehouse_sk = data.random_i32(1, data.warehouse_count as i32);
+        let ship_mode_sk = data.random_i32(1, data.ship_mode_count as i32);
+
+        let quantity = data.random_i32(1, 100);
+        let wholesale = data.random_decimal(1.0, 50.0);
+        let list_price = data.random_decimal(wholesale * 1.1, wholesale * 2.0);
+        let sales_price = data.random_decimal(wholesale, list_price);
+        let discount = data.random_decimal(0.0, list_price * 0.3);
+        let ext_sales = sales_price * quantity as f64;
+        let ext_wholesale = wholesale * quantity as f64;
+        let ext_list = list_price * quantity as f64;
+        let ext_tax = ext_sales * 0.08;
+        let coupon = data.random_decimal(0.0, ext_sales * 0.1);
+        let ext_ship = data.random_decimal(5.0, 50.0);
+        let net_paid = ext_sales - discount;
+        let net_paid_inc_tax = net_paid + ext_tax;
+        let net_paid_inc_ship = net_paid + ext_ship;
+        let net_paid_inc_ship_tax = net_paid_inc_ship + ext_tax;
+        let net_profit = net_paid - ext_wholesale;
+
+        let params: Vec<Value> = vec![
+            Value::from(date_sk as i64),
+            Value::NULL, // time_sk
+            Value::from((date_sk + data.random_i32(1, 7)) as i64), // ship_date_sk
+            Value::from(item_sk as i64),
+            Value::from(customer_sk as i64),
+            Value::NULL, // bill_cdemo_sk
+            Value::NULL, // bill_hdemo_sk
+            Value::NULL, // bill_addr_sk
+            Value::from(customer_sk as i64), // ship_customer_sk
+            Value::NULL, // ship_cdemo_sk
+            Value::NULL, // ship_hdemo_sk
+            Value::NULL, // ship_addr_sk
+            Value::from(page_sk as i64),
+            Value::from(site_sk as i64),
+            Value::from(ship_mode_sk as i64),
+            Value::from(warehouse_sk as i64),
+            Value::NULL, // promo_sk
+            Value::from(order_num as i64),
+            Value::from(quantity as i64),
+            Value::from(wholesale),
+            Value::from(list_price),
+            Value::from(sales_price),
+            Value::from(discount),
+            Value::from(ext_sales),
+            Value::from(ext_wholesale),
+            Value::from(ext_list),
+            Value::from(ext_tax),
+            Value::from(coupon),
+            Value::from(ext_ship),
+            Value::from(net_paid),
+            Value::from(net_paid_inc_tax),
+            Value::from(net_paid_inc_ship),
+            Value::from(net_paid_inc_ship_tax),
+            Value::from(net_profit),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO web_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_web_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    let date_range = data.date_dim_count.min(730);
+    let mut order_num = 0;
+
+    for _ in 0..data.web_returns_count {
+        order_num += 1;
+        let date_sk = data.random_i32(1, date_range as i32);
+        let item_sk = data.random_i32(1, data.item_count as i32);
+        let customer_sk = data.random_i32(1, data.customer_count as i32);
+        let page_sk = data.random_i32(1, data.web_page_count as i32);
+        let reason_sk = data.random_i32(1, data.reason_count as i32);
+
+        let quantity = data.random_i32(1, 20);
+        let return_amt = data.random_decimal(5.0, 200.0);
+        let return_tax = return_amt * 0.08;
+        let return_amt_inc_tax = return_amt + return_tax;
+        let fee = data.random_decimal(1.0, 20.0);
+        let ship_cost = data.random_decimal(2.0, 30.0);
+        let refunded_cash = return_amt * 0.9;
+        let reversed_charge = return_amt * 0.05;
+        let account_credit = return_amt * 0.05;
+        let net_loss = fee + ship_cost;
+
+        let params: Vec<Value> = vec![
+            Value::from(date_sk as i64),
+            Value::NULL, // time_sk
+            Value::from(item_sk as i64),
+            Value::from(customer_sk as i64), // refunded_customer_sk
+            Value::NULL, // refunded_cdemo_sk
+            Value::NULL, // refunded_hdemo_sk
+            Value::NULL, // refunded_addr_sk
+            Value::from(customer_sk as i64), // returning_customer_sk
+            Value::NULL, // returning_cdemo_sk
+            Value::NULL, // returning_hdemo_sk
+            Value::NULL, // returning_addr_sk
+            Value::from(page_sk as i64),
+            Value::from(reason_sk as i64),
+            Value::from(order_num as i64),
+            Value::from(quantity as i64),
+            Value::from(return_amt),
+            Value::from(return_tax),
+            Value::from(return_amt_inc_tax),
+            Value::from(fee),
+            Value::from(ship_cost),
+            Value::from(refunded_cash),
+            Value::from(reversed_charge),
+            Value::from(account_credit),
+            Value::from(net_loss),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO web_returns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_customer_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    let mut sk = 0;
+    'outer: for gender in GENDERS.iter() {
+        for marital in MARITAL_STATUS.iter() {
+            for education in EDUCATION_STATUS.iter() {
+                for &credit in CREDIT_RATINGS.iter() {
+                    for &dep_count in &DEP_COUNTS[0..3] {
+                        sk += 1;
+                        if sk > data.customer_demographics_count {
+                            break 'outer;
+                        }
+
+                        let purchase_estimate = data.random_i32(500, 10000);
+                        let dep_employed = data.random_i32(0, dep_count);
+                        let dep_college = data.random_i32(0, dep_count);
+
+                        conn.exec_drop(
+                            "INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                sk as i64,
+                                *gender,
+                                *marital,
+                                *education,
+                                purchase_estimate as i64,
+                                credit,
+                                dep_count as i64,
+                                dep_employed as i64,
+                                dep_college as i64,
+                            ),
+                        ).unwrap();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_household_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    let mut sk = 0;
+    'outer: for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
+        for &buy_potential in BUY_POTENTIALS.iter() {
+            for &dep_count in DEP_COUNTS.iter() {
+                for &vehicle_count in VEHICLE_COUNTS.iter() {
+                    sk += 1;
+                    if sk > data.household_demographics_count {
+                        break 'outer;
+                    }
+
+                    conn.exec_drop(
+                        "INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)",
+                        (
+                            sk as i64,
+                            income_band_sk as i64,
+                            buy_potential,
+                            dep_count as i64,
+                            vehicle_count as i64,
+                        ),
+                    ).unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_income_band_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    let count = data.income_band_count.min(INCOME_BANDS.len());
+    for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
+        conn.exec_drop(
+            "INSERT INTO income_band VALUES (?, ?, ?)",
+            ((i + 1) as i64, lower, upper),
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_call_center_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    use mysql::Value;
+
+    let classes = ["small", "medium", "large", "unknown"];
+    let hours = ["8AM-4PM", "8AM-8PM", "8AM-12AM"];
+
+    for i in 1..=data.call_center_count {
+        let cc_call_center_id = format!("AAAAAA{:010}", i);
+        let class_idx = i % classes.len();
+        let hours_idx = i % hours.len();
+        let state_idx = i % STATES.len();
+
+        let params: Vec<Value> = vec![
+            Value::from(i as i64),
+            Value::from(cc_call_center_id),
+            Value::NULL, // rec_start_date
+            Value::NULL, // rec_end_date
+            Value::NULL, // closed_date_sk
+            Value::from(data.random_i32(1, 500) as i64),
+            Value::from(format!("Call Center {}", i)),
+            Value::from(classes[class_idx]),
+            Value::from(data.random_i32(10, 500) as i64),
+            Value::from(data.random_i32(1000, 50000) as i64),
+            Value::from(hours[hours_idx]),
+            Value::from(data.random_varchar(30)),
+            Value::from(((i % 6) + 1) as i64),
+            Value::from(format!("Market Class {}", i % 10)),
+            Value::from(format!("Market Description {}", i)),
+            Value::from(data.random_varchar(30)),
+            Value::from(((i % 3) + 1) as i64),
+            Value::from(format!("Division {}", (i % 3) + 1)),
+            Value::from(((i % 2) + 1) as i64),
+            Value::from(format!("Company {}", (i % 2) + 1)),
+            Value::from(format!("{}", data.random_i32(100, 9999))),
+            Value::from(data.random_varchar(40)),
+            Value::from("Street"),
+            Value::from(format!("Suite {}", data.random_i32(100, 999))),
+            Value::from(data.random_city()),
+            Value::from(format!("{} County", STATES[state_idx])),
+            Value::from(STATES[state_idx]),
+            Value::from(data.random_zip()),
+            Value::from("United States"),
+            Value::from(-5.0 - (state_idx % 4) as f64),
+            Value::from(data.random_f64(0.0, 0.11)),
+        ];
+
+        conn.exec_drop(
+            "INSERT INTO call_center VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+        ).unwrap();
+    }
+}
+
+#[cfg(feature = "benchmark-comparison")]
+fn load_inventory_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
+    let num_dates = 52.min(data.date_dim_count);
+    let num_items = data.item_count;
+    let num_warehouses = data.warehouse_count;
+
+    let mut count = 0;
+    'outer: for week in 0..num_dates {
+        let date_sk = week * 7 + 1;
+        let items_per_week = (data.inventory_count / num_dates).min(num_items * num_warehouses);
+        let items_sample = (items_per_week / num_warehouses).max(1);
+
+        for item_offset in 0..items_sample {
+            let item_sk = (item_offset % num_items) + 1;
+
+            for warehouse_sk in 1..=num_warehouses {
+                count += 1;
+                if count > data.inventory_count {
+                    break 'outer;
+                }
+
+                conn.exec_drop(
+                    "INSERT INTO inventory VALUES (?, ?, ?, ?)",
+                    (
+                        date_sk as i64,
+                        item_sk as i64,
+                        warehouse_sk as i64,
+                        data.random_i32(0, 1000) as i64,
+                    ),
+                ).unwrap();
             }
         }
     }

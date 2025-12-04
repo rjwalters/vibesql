@@ -10,6 +10,11 @@
 # Examples:
 #   ./scripts/bench-tpcds-isolated.sh /tmp/tpcds_results.txt
 #   ./scripts/bench-tpcds-isolated.sh  # Uses default output
+#
+# Environment Variables:
+#   MYSQL_URL - MySQL connection URL for optional MySQL comparison
+#               Example: MYSQL_URL="mysql://user:pass@localhost:3306/tpcds"
+#               If not set, MySQL phase is skipped
 
 set -e
 
@@ -86,6 +91,28 @@ else
 fi
 echo "" >> "$OUTPUT_FILE"
 echo ""
+
+# Phase 4: Run MySQL comparison benchmark (optional, requires MYSQL_URL)
+if [ -n "$MYSQL_URL" ]; then
+    echo -e "${YELLOW}Phase 4: Running MySQL comparison benchmark...${NC}"
+    echo ""
+    echo "--- Phase 4: MySQL comparison ---" >> "$OUTPUT_FILE"
+
+    if TPCDS_ENGINE=mysql cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+        echo -e "${GREEN}✓ MySQL comparison completed${NC}"
+        ((ENGINES_PASSED++))
+    else
+        echo -e "${YELLOW}⚠ MySQL comparison failed (continuing)${NC}"
+        ((ENGINES_FAILED++))
+    fi
+    echo "" >> "$OUTPUT_FILE"
+    echo ""
+else
+    echo -e "${YELLOW}Phase 4: Skipping MySQL (MYSQL_URL not set)${NC}"
+    echo ""
+    echo "--- Phase 4: MySQL comparison (skipped - MYSQL_URL not set) ---" >> "$OUTPUT_FILE"
+    echo "" >> "$OUTPUT_FILE"
+fi
 
 # Summary
 echo -e "${BLUE}=== Summary ===${NC}"
