@@ -60,6 +60,16 @@ impl Hash for SqlValue {
             Time(s) => s.hash(state),
             Timestamp(s) => s.hash(state),
             Interval(s) => s.hash(state),
+            Vector(v) => {
+                // Hash each f32 value using to_bits() for consistent NaN handling
+                for f in v.iter() {
+                    if f.is_nan() {
+                        f32::NAN.to_bits().hash(state);
+                    } else {
+                        f.to_bits().hash(state);
+                    }
+                }
+            }
 
             // NULL hashes to nothing (discriminant is enough)
             Null => {}

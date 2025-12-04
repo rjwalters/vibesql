@@ -220,6 +220,7 @@ pub(super) fn format_data_type(data_type: &vibesql_types::DataType) -> String {
                 "BIT".to_string()
             }
         }
+        DataType::Vector { dimensions } => format!("VECTOR({})", dimensions),
         DataType::UserDefined { type_name } => type_name.clone(),
         DataType::Null => "NULL".to_string(),
     }
@@ -268,5 +269,10 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
         SqlValue::Time(t) => format!("TIME '{}'", t),
         SqlValue::Timestamp(ts) => format!("TIMESTAMP '{}'", ts),
         SqlValue::Interval(i) => format!("INTERVAL '{}'", i),
+        SqlValue::Vector(v) => {
+            // Format vector as space-separated values: [v1, v2, ...]
+            let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+            format!("'{}'", formatted.join(","))
+        }
     }
 }

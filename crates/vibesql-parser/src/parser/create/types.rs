@@ -600,6 +600,37 @@ impl Parser {
                     }
                 }
             }
+            "VECTOR" => {
+                // Parse VECTOR(dimensions)
+                // Syntax: VECTOR(n) where n is the dimension count (e.g., VECTOR(1536) for OpenAI embeddings)
+                if !matches!(self.peek(), Token::LParen) {
+                    return Err(ParseError {
+                        message: "VECTOR type requires dimension specification: VECTOR(n)".to_string(),
+                    });
+                }
+                self.advance(); // consume (
+                let dimensions = match self.peek() {
+                    Token::Number(n) => {
+                        let d = n.parse::<u32>().map_err(|_| ParseError {
+                            message: "Invalid VECTOR dimension (must be positive integer)".to_string(),
+                        })?;
+                        if d == 0 {
+                            return Err(ParseError {
+                                message: "VECTOR dimension must be greater than 0".to_string(),
+                            });
+                        }
+                        self.advance();
+                        d
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected dimension count after VECTOR(".to_string(),
+                        })
+                    }
+                };
+                self.expect_token(Token::RParen)?;
+                Ok(vibesql_types::DataType::Vector { dimensions })
+            }
             _ => {
                 // Check if this is a known non-standard type that we should support
                 if Self::is_supported_extension_type(&type_upper) {

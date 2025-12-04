@@ -360,6 +360,24 @@ impl<'a> RowNormalizer<'a> {
                     );
                 }
             }
+            // Vector type
+            DataType::Vector { dimensions } => {
+                if let SqlValue::Vector(v) = value {
+                    if v.len() != *dimensions as usize {
+                        return Err(StorageError::TypeMismatch {
+                            column: column_name.to_string(),
+                            expected: format!("VECTOR({})", dimensions),
+                            actual: format!("VECTOR({})", v.len()),
+                        });
+                    }
+                } else {
+                    return Err(StorageError::TypeMismatch {
+                        column: column_name.to_string(),
+                        expected: format!("VECTOR({})", dimensions),
+                        actual: value.type_name().to_string(),
+                    });
+                }
+            }
             // NULL type
             DataType::Null => {
                 // NULL type always accepts NULL values (already checked above)

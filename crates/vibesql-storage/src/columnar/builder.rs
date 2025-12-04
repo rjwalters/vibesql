@@ -72,6 +72,10 @@ impl ColumnBuilder {
             ColumnTypeClass::Interval => {
                 builder.interval_values = Vec::with_capacity(capacity);
             }
+            ColumnTypeClass::Vector => {
+                // Vector storage is not yet implemented in columnar format
+                // Future phase will add specialized vector storage
+            }
         }
 
         builder
@@ -238,6 +242,10 @@ impl ColumnBuilder {
             }
             ColumnTypeClass::Interval => {
                 ColumnData::Interval { values: Arc::new(self.interval_values), nulls: Arc::new(self.nulls) }
+            }
+            ColumnTypeClass::Vector => {
+                // Vector values are stored as Vec<Vec<f32>>
+                ColumnData::Vector { values: Arc::new(Vec::new()), nulls: Arc::new(self.nulls) }
             }
         }
     }

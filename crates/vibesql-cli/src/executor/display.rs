@@ -186,6 +186,7 @@ pub fn format_data_type(data_type: &vibesql_types::DataType) -> String {
             }
         }
         vibesql_types::DataType::UserDefined { type_name } => type_name.clone(),
+        vibesql_types::DataType::Vector { dimensions } => format!("vector({})", dimensions),
         vibesql_types::DataType::Null => "null".to_string(),
     }
 }

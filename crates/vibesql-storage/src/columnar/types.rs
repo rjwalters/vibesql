@@ -27,6 +27,8 @@ pub enum ColumnTypeClass {
     Timestamp,
     /// Interval values
     Interval,
+    /// Vector values (for AI/ML workloads)
+    Vector,
     /// NULL (used when column type cannot be inferred)
     Null,
 }
@@ -55,6 +57,7 @@ impl ColumnTypeClass {
             SqlValue::Time(_) => ColumnTypeClass::Time,
             SqlValue::Timestamp(_) => ColumnTypeClass::Timestamp,
             SqlValue::Interval(_) => ColumnTypeClass::Interval,
+            SqlValue::Vector(_) => ColumnTypeClass::Vector,
             SqlValue::Null => ColumnTypeClass::Null,
         }
     }

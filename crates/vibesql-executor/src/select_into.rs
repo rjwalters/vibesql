@@ -152,6 +152,7 @@ impl SelectIntoExecutor {
                 start_field: vibesql_types::IntervalField::Year,
                 end_field: Some(vibesql_types::IntervalField::Month),
             },
+            vibesql_types::SqlValue::Vector(v) => DataType::Vector { dimensions: v.len() as u32 },
         }
     }
 }

@@ -130,6 +130,7 @@ pub fn sql_value_to_json(val: &SqlValue) -> JsonValue {
         SqlValue::Date(d) => JsonValue::String(format!("{:?}", d)),
         SqlValue::Time(t) => JsonValue::String(format!("{:?}", t)),
         SqlValue::Interval(_) => JsonValue::Null, // TODO: proper interval serialization
+        SqlValue::Vector(v) => json!(v), // Vector as JSON array of floats
     }
 }
 

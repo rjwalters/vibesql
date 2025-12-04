@@ -73,6 +73,10 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
                 vibesql_types::SqlValue::Time(t) => format!("'{}'", t),
                 vibesql_types::SqlValue::Timestamp(ts) => format!("'{}'", ts),
                 vibesql_types::SqlValue::Interval(i) => format!("INTERVAL '{}'", i),
+                vibesql_types::SqlValue::Vector(v) => {
+                    let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+                    format!("[{}]", formatted.join(", "))
+                }
                 vibesql_types::SqlValue::Null => "NULL".to_string(),
             }
         }

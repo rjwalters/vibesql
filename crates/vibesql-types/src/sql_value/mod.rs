@@ -37,6 +37,9 @@ pub enum SqlValue {
     // Interval type
     Interval(Interval),
 
+    // Vector type (for AI/ML workloads)
+    Vector(Vec<f32>),
+
     Null,
 }
 
@@ -64,6 +67,7 @@ impl SqlValue {
             SqlValue::Time(_) => "TIME",
             SqlValue::Timestamp(_) => "TIMESTAMP",
             SqlValue::Interval(_) => "INTERVAL",
+            SqlValue::Vector(_) => "VECTOR",
             SqlValue::Null => "NULL",
         }
     }
@@ -88,9 +92,10 @@ impl SqlValue {
             SqlValue::Timestamp(_) => DataType::Timestamp { with_timezone: false },
             SqlValue::Interval(_) => DataType::Interval {
                 start_field: IntervalField::Day, /* Default - actual type lost in string
-                                                  * representation */
+                                                   * representation */
                 end_field: None,
             },
+            SqlValue::Vector(v) => DataType::Vector { dimensions: v.len() as u32 },
             SqlValue::Null => DataType::Null,
         }
     }
@@ -114,6 +119,10 @@ impl SqlValue {
             SqlValue::Interval(i) => {
                 // Interval stores a String internally
                 base_size + i.to_string().len()
+            }
+            SqlValue::Vector(v) => {
+                // Vector: base + heap capacity (each f32 is 4 bytes)
+                base_size + (v.capacity() * std::mem::size_of::<f32>())
             }
             // Fixed-size types: just the enum size
             SqlValue::Integer(_)

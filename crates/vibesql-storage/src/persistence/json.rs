@@ -394,6 +394,9 @@ fn column_to_json(col: &ColumnSchema) -> JsonColumn {
         DataType::Interval { .. } => ("INTERVAL".to_string(), None, None, None),
         DataType::BinaryLargeObject => ("BLOB".to_string(), None, None, None),
         DataType::Bit { length } => ("BIT".to_string(), *length, None, None),
+        DataType::Vector { dimensions } => {
+            (format!("VECTOR({})", dimensions), None, None, None)
+        }
         DataType::UserDefined { type_name } => (type_name.clone(), None, None, None),
         DataType::Null => ("NULL".to_string(), None, None, None),
     };
@@ -425,6 +428,10 @@ fn sql_value_to_json(value: &SqlValue) -> serde_json::Value {
         SqlValue::Time(t) => serde_json::Value::String(t.to_string()),
         SqlValue::Timestamp(ts) => serde_json::Value::String(ts.to_string()),
         SqlValue::Interval(i) => serde_json::Value::String(i.to_string()),
+        SqlValue::Vector(v) => {
+            // Serialize vector as JSON array of floats
+            serde_json::Value::Array(v.iter().map(|f| serde_json::json!(f)).collect())
+        }
         SqlValue::Null => serde_json::Value::Null,
     }
 }
