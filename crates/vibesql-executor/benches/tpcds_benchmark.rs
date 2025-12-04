@@ -655,7 +655,6 @@ criterion_group!(
 #[cfg(feature = "benchmark-comparison")]
 criterion_group!(
     benches,
-    bench_sanity_queries,
     bench_sanity_queries_comparison,
     bench_tpcds_queries,
     bench_tpcds_slow_queries,
