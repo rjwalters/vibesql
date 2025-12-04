@@ -44,9 +44,10 @@ impl SelectExecutor<'_> {
         // Execute FROM clause (handles JOINs, subqueries, CTEs)
         // Pass WHERE clause for predicate pushdown optimization
         // Note: ORDER BY and LIMIT are applied after aggregation, so we pass None here
+        // Pass select_list for table elimination optimization (#3556)
         let from_result = match &stmt.from {
             Some(from_clause) => {
-                self.execute_from_with_where(from_clause, cte_results, stmt.where_clause.as_ref(), None, None)?
+                self.execute_from_with_where(from_clause, cte_results, stmt.where_clause.as_ref(), None, None, Some(&stmt.select_list))?
             }
             None => {
                 // SELECT without FROM with aggregates - operate over ONE implicit row

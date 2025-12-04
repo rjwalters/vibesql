@@ -88,6 +88,11 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let _optimizer_time = optimizer_start.elapsed();
 
+        // Eliminate unused tables that create unnecessary cross joins (#3556)
+        // Must run BEFORE semi-join transformation to avoid complex interactions
+        // with derived tables from EXISTS/IN transformations
+        let optimized_stmt = crate::optimizer::eliminate_unused_tables(&optimized_stmt);
+
         // Transform decorrelated IN/EXISTS subqueries to semi/anti-joins (#2424)
         // This enables hash-based join execution instead of row-by-row subquery evaluation
         // Converts WHERE clauses like "WHERE x IN (SELECT y FROM t)" to "SEMI JOIN t ON x = y"
@@ -174,12 +179,14 @@ impl SelectExecutor<'_> {
             // Pass WHERE, ORDER BY, and LIMIT for optimizations
             // This is critical for GROUP BY queries to avoid CROSS JOINs
             // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
+            // Pass select_list for table elimination optimization (#3556)
             Some(self.execute_from_with_where(
                 from_clause,
                 &cte_results,
                 stmt.where_clause.as_ref(),
                 stmt.order_by.as_deref(),
                 stmt.limit,
+                Some(&stmt.select_list),
             )?)
         } else {
             None
@@ -437,12 +444,14 @@ impl SelectExecutor<'_> {
 
         // Execute FROM clause to get input data
         // Note: WHERE, ORDER BY, and LIMIT are handled by the pipeline, not here
+        // Note: Table elimination requires WHERE clause, so pass None for select_list too
         let from_result = self.execute_from_with_where(
             from_clause,
             cte_results,
             None, // Pipeline will apply WHERE filter
             None, // ORDER BY handled separately
             None, // LIMIT applied after pipeline
+            None, // No table elimination when WHERE is deferred
         )?;
 
         // Build execution context
@@ -630,12 +639,14 @@ impl SelectExecutor<'_> {
 
             // Pass WHERE, ORDER BY, and LIMIT to execute_from for optimization
             // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
+            // Pass select_list for table elimination optimization (#3556)
             let from_result = self.execute_from_with_where(
                 from_clause,
                 cte_results,
                 stmt.where_clause.as_ref(),
                 stmt.order_by.as_deref(),
                 stmt.limit,
+                Some(&stmt.select_list),
             )?;
 
             // Validate column references BEFORE processing rows (issue #2654)
@@ -679,8 +690,9 @@ impl SelectExecutor<'_> {
             self.execute_with_aggregation(right_stmt, cte_results)?
         } else if let Some(from_clause) = &right_stmt.from {
             // Note: LIMIT is None for set operation sides - it's applied after the set operation
+            // Pass select_list for table elimination optimization (#3556)
             let from_result =
-                self.execute_from_with_where(from_clause, cte_results, right_stmt.where_clause.as_ref(), right_stmt.order_by.as_deref(), None)?;
+                self.execute_from_with_where(from_clause, cte_results, right_stmt.where_clause.as_ref(), right_stmt.order_by.as_deref(), None, Some(&right_stmt.select_list))?;
             self.execute_without_aggregation(right_stmt, from_result, cte_results)?
         } else {
             self.execute_select_without_from(right_stmt)?
@@ -711,6 +723,10 @@ impl SelectExecutor<'_> {
     /// The LIMIT parameter enables early termination optimization (#3253):
     /// - When ORDER BY is satisfied by an index and no post-filter is needed,
     ///   the index scan can stop after fetching LIMIT rows
+    ///
+    /// Note: Table elimination (#3556) is now handled at the optimizer level
+    /// via crate::optimizer::eliminate_unused_tables(), which runs before
+    /// semi-join transformation to avoid complex interactions.
     pub(super) fn execute_from_with_where(
         &self,
         from: &vibesql_ast::FromClause,
@@ -718,8 +734,10 @@ impl SelectExecutor<'_> {
         where_clause: Option<&vibesql_ast::Expression>,
         order_by: Option<&[vibesql_ast::OrderByItem]>,
         limit: Option<usize>,
+        _select_list: Option<&[vibesql_ast::SelectItem]>, // No longer used - optimization moved to optimizer pass
     ) -> Result<FromResult, ExecutorError> {
         use crate::select::scan::execute_from_clause;
+
         let from_result = execute_from_clause(from, cte_results, self.database, where_clause, order_by, limit, self.outer_row, self.outer_schema, |query| {
             // For derived table subqueries, create a child executor with CTE context
             // This allows CTEs from the outer WITH clause to be referenced in subqueries
