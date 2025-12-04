@@ -145,6 +145,8 @@ fn test_subscription_manager_unique_ids() {
         max_global: 10000,
         max_result_rows: 10000,
         rate_limit_per_second: 200, // High rate limit for test
+        channel_buffer_size: 64,
+        slow_consumer_threshold_percent: 80,
     };
     let mut manager = SessionSubscriptionManager::with_config(config);
 
