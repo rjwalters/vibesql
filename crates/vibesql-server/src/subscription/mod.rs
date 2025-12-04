@@ -51,6 +51,7 @@ mod table_extract;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 pub use manager::SubscriptionManager;
@@ -58,6 +59,71 @@ pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
 pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager};
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
+
+// ============================================================================
+// Subscription Configuration
+// ============================================================================
+
+/// Configuration for subscription limits and quotas
+///
+/// Provides configurable limits to prevent resource exhaustion attacks
+/// and ensure fair resource sharing between clients.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionConfig {
+    /// Maximum subscriptions per connection (default: 100)
+    ///
+    /// Prevents a single client from creating too many subscriptions
+    /// and monopolizing server resources.
+    #[serde(default = "default_max_per_connection")]
+    pub max_per_connection: usize,
+
+    /// Maximum subscriptions globally across all connections (default: 10,000)
+    ///
+    /// Sets an upper bound on total subscriptions to ensure predictable
+    /// memory usage and performance.
+    #[serde(default = "default_max_global")]
+    pub max_global: usize,
+
+    /// Maximum result set size per subscription in rows (default: 10,000)
+    ///
+    /// Limits memory usage per subscription by capping the number of rows
+    /// that can be returned.
+    #[serde(default = "default_max_result_rows")]
+    pub max_result_rows: usize,
+
+    /// Rate limit: subscriptions per second per connection (default: 10)
+    ///
+    /// Prevents rapid subscription creation that could degrade performance.
+    #[serde(default = "default_rate_limit_per_second")]
+    pub rate_limit_per_second: u32,
+}
+
+fn default_max_per_connection() -> usize {
+    100
+}
+
+fn default_max_global() -> usize {
+    10_000
+}
+
+fn default_max_result_rows() -> usize {
+    10_000
+}
+
+fn default_rate_limit_per_second() -> u32 {
+    10
+}
+
+impl Default for SubscriptionConfig {
+    fn default() -> Self {
+        Self {
+            max_per_connection: default_max_per_connection(),
+            max_global: default_max_global(),
+            max_result_rows: default_max_result_rows(),
+            rate_limit_per_second: default_rate_limit_per_second(),
+        }
+    }
+}
 
 // ============================================================================
 // Subscription ID
@@ -213,6 +279,40 @@ pub enum SubscriptionError {
     /// Failed to send notification to subscriber
     #[error("Failed to send notification: channel closed")]
     ChannelClosed,
+
+    /// Per-connection subscription limit exceeded
+    #[error("Connection limit exceeded: {current} subscriptions (max: {max})")]
+    ConnectionLimitExceeded {
+        /// Current number of subscriptions for this connection
+        current: usize,
+        /// Maximum allowed subscriptions per connection
+        max: usize,
+    },
+
+    /// Global subscription limit exceeded
+    #[error("Global limit exceeded: {current} subscriptions (max: {max})")]
+    GlobalLimitExceeded {
+        /// Current total subscriptions across all connections
+        current: usize,
+        /// Maximum allowed subscriptions globally
+        max: usize,
+    },
+
+    /// Result set too large for subscription
+    #[error("Result set too large: {rows} rows (max: {max})")]
+    ResultSetTooLarge {
+        /// Number of rows in the result set
+        rows: usize,
+        /// Maximum allowed rows per subscription
+        max: usize,
+    },
+
+    /// Rate limit exceeded for subscription creation
+    #[error("Rate limited: retry after {retry_after_ms}ms")]
+    RateLimited {
+        /// Milliseconds to wait before retrying
+        retry_after_ms: u64,
+    },
 }
 
 // ============================================================================

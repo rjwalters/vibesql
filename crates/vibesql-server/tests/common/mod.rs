@@ -12,6 +12,7 @@ use vibesql_server::auth::PasswordStore;
 use vibesql_server::config::{AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig};
 use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
+use vibesql_server::subscription::SubscriptionConfig;
 use vibesql_server::SubscriptionManager;
 
 /// Test server handle - holds the shutdown channel and address
@@ -149,6 +150,7 @@ pub fn test_config() -> Config {
             auth: HttpAuthConfig::default(),
         },
         observability: ObservabilityConfig::default(),
+        subscriptions: SubscriptionConfig::default(),
     }
 }
 

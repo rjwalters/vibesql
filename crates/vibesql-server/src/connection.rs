@@ -368,9 +368,18 @@ impl ConnectionHandler {
         let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
 
         // Register the subscription first (to get the ID)
-        let subscription_id =
-            self.subscription_manager
-                .subscribe(query.to_string(), params, table_dependencies);
+        let subscription_id = match self.subscription_manager
+            .subscribe(query.to_string(), params, table_dependencies)
+        {
+            Ok(id) => id,
+            Err(e) => {
+                // Send subscription error with a dummy subscription ID (subscription failed before registration)
+                let error_id = [0u8; 16];
+                self.send_subscription_error(&error_id, &format!("{}", e))
+                    .await?;
+                return Ok(());
+            }
+        };
 
         // Execute the query to get initial data
         match session.execute(query) {

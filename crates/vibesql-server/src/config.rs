@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::observability::ObservabilityConfig;
+use crate::subscription::SubscriptionConfig;
 
 /// Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,8 @@ pub struct Config {
     pub http: HttpConfig,
     #[serde(default)]
     pub observability: ObservabilityConfig,
+    #[serde(default)]
+    pub subscriptions: SubscriptionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +181,7 @@ impl Default for Config {
             },
             http: HttpConfig::default(),
             observability: ObservabilityConfig::default(),
+            subscriptions: SubscriptionConfig::default(),
         }
     }
 }
