@@ -162,7 +162,7 @@ VibeSQL runs industry-standard database benchmarks. Performance optimization is 
 | SQL:1999 Core | 100% | 739/739 sqltest |
 | SQLLogicTest | 100% | 623 files (~7.4M tests) |
 | Unit Tests | - | 5,391 tests |
-| TPC-DS | 89% | 88/99 queries |
+| TPC-DS | 98% | 97/99 queries |
 | TPC-H | 100% | 22/22 queries |
 | TPC-C | 100% | All transactions |
 
@@ -178,12 +178,10 @@ VibeSQL runs industry-standard database benchmarks. Performance optimization is 
 
 ### TPC-DS (Complex Analytics)
 
-88/99 queries passing at SF 0.001. Remaining gaps:
-- 3 queries need `GROUPING()` function
-- 2 queries have column resolution issues
-- 1 query exceeds memory limits
+97/99 queries passing at SF 0.001. Remaining gaps:
+- Q14, Q95: CTE table resolution issues
 
-*Average query time: 1.52s. See [full results](docs/benchmarks/TPCDS_RESULTS.md).*
+*See [full results](docs/benchmarks/TPCDS_RESULTS.md).*
 
 ### TPC-H (Decision Support)
 
