@@ -67,6 +67,10 @@ pub fn format_sql_value(value: &SqlValue, expected_type: Option<&DefaultColumnTy
         SqlValue::Time(d) => d.to_string(),
         SqlValue::Timestamp(d) => d.to_string(),
         SqlValue::Interval(d) => d.to_string(),
+        SqlValue::Vector(v) => {
+            let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+            format!("[{}]", formatted.join(", "))
+        }
     }
 }
 
@@ -132,5 +136,9 @@ pub fn format_sql_value_canonical(
         SqlValue::Time(d) => d.to_string(),
         SqlValue::Timestamp(d) => d.to_string(),
         SqlValue::Interval(d) => d.to_string(),
+        SqlValue::Vector(v) => {
+            let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+            format!("[{}]", formatted.join(", "))
+        }
     }
 }

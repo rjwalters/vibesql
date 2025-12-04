@@ -664,6 +664,7 @@ fn format_query_result(
             | SqlValue::Timestamp(_)
             | SqlValue::Interval(_) => DefaultColumnType::Text,
             SqlValue::Boolean(_) => DefaultColumnType::Integer,
+            SqlValue::Vector(_) => DefaultColumnType::Text,
             SqlValue::Null => DefaultColumnType::Any,
         })
         .collect();

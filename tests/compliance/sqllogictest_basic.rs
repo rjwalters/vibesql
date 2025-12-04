@@ -94,7 +94,8 @@ impl VibeSqlDB {
                 | SqlValue::Date(_)
                 | SqlValue::Time(_)
                 | SqlValue::Timestamp(_)
-                | SqlValue::Interval(_) => DefaultColumnType::Text,
+                | SqlValue::Interval(_)
+                | SqlValue::Vector(_) => DefaultColumnType::Text,
                 SqlValue::Boolean(_) => DefaultColumnType::Integer,
                 SqlValue::Null => DefaultColumnType::Any,
             })
@@ -170,6 +171,10 @@ impl VibeSqlDB {
             SqlValue::Time(d) => d.to_string(),
             SqlValue::Timestamp(d) => d.to_string(),
             SqlValue::Interval(d) => d.to_string(),
+            SqlValue::Vector(v) => {
+                let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+                format!("[{}]", formatted.join(", "))
+            }
         }
     }
 }
