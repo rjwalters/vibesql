@@ -39,6 +39,8 @@ pub enum ColumnData {
     Timestamp { values: Arc<Vec<Timestamp>>, nulls: Arc<Vec<bool>> },
     /// Interval values
     Interval { values: Arc<Vec<Interval>>, nulls: Arc<Vec<bool>> },
+    /// Vector values (for AI/ML workloads)
+    Vector { values: Arc<Vec<Vec<f32>>>, nulls: Arc<Vec<bool>> },
 }
 
 #[allow(clippy::type_complexity)]
@@ -54,6 +56,7 @@ impl ColumnData {
             ColumnData::Time { nulls, .. } => nulls.len(),
             ColumnData::Timestamp { nulls, .. } => nulls.len(),
             ColumnData::Interval { nulls, .. } => nulls.len(),
+            ColumnData::Vector { nulls, .. } => nulls.len(),
         }
     }
 
@@ -122,6 +125,15 @@ impl ColumnData {
                     + string_data
                     + nulls.capacity() * std::mem::size_of::<bool>()
             }
+            ColumnData::Vector { values, nulls } => {
+                // Vector contains Vec<f32>, so we need to account for each inner vector
+                let vec_overhead = std::mem::size_of::<Vec<f32>>();
+                let vector_data: usize = values.iter().map(|v| v.capacity() * std::mem::size_of::<f32>()).sum();
+                VEC_OVERHEAD * 2
+                    + values.capacity() * vec_overhead
+                    + vector_data
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
         }
     }
 
@@ -136,6 +148,7 @@ impl ColumnData {
             ColumnData::Time { nulls, .. } => nulls[index],
             ColumnData::Timestamp { nulls, .. } => nulls[index],
             ColumnData::Interval { nulls, .. } => nulls[index],
+            ColumnData::Vector { nulls, .. } => nulls[index],
         }
     }
 
@@ -154,6 +167,7 @@ impl ColumnData {
             ColumnData::Time { values, .. } => SqlValue::Time(values[index]),
             ColumnData::Timestamp { values, .. } => SqlValue::Timestamp(values[index]),
             ColumnData::Interval { values, .. } => SqlValue::Interval(values[index].clone()),
+            ColumnData::Vector { values, .. } => SqlValue::Vector(values[index].clone()),
         }
     }
 
