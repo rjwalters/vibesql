@@ -222,7 +222,7 @@ def run_tpch_profiling(config: BenchConfig, timeout: int) -> int:
     # Process results into database
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_benchmark_results.py", "--input", "/tmp/tpch_results.txt", "--timeout", str(timeout)],
+        ["./scripts/process_results.py", "--type=tpch", "--input", "/tmp/tpch_results.txt", "--timeout", str(timeout)],
         cwd=Path(__file__).parent.parent
     )
 
@@ -372,11 +372,11 @@ def run_tpcc(config: BenchConfig) -> int:
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_tpcc_results.py", "--input", "/tmp/tpcc_results.txt",
+        ["./scripts/process_results.py", "--type=tpcc", "--input", "/tmp/tpcc_results.txt",
          "--scale-factor", str(config.scale or 1), "--duration", str(duration)],
         cwd=Path(__file__).parent.parent
     )
-    
+
     return result.returncode
 
 
@@ -398,11 +398,10 @@ def run_tpcds(config: BenchConfig) -> int:
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_tpcds_results.py", "--stdin"],
-        cwd=Path(__file__).parent.parent,
-        stdin=open("/tmp/tpcds_results.txt")
+        ["./scripts/process_results.py", "--type=tpcds", "--input", "/tmp/tpcds_results.txt"],
+        cwd=Path(__file__).parent.parent
     )
-    
+
     return 0  # Don't fail on process errors
 
 
@@ -452,10 +451,10 @@ def run_sysbench(config: BenchConfig) -> int:
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_sysbench_results.py", "--criterion-dir", "target/criterion"],
+        ["./scripts/process_results.py", "--type=sysbench", "--criterion-dir", "target/criterion"],
         cwd=Path(__file__).parent.parent
     )
-    
+
     return 0
 
 
