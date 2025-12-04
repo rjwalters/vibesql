@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use serde::Deserialize;
@@ -33,6 +33,13 @@ pub fn create_http_router(db: Arc<Database>) -> Router {
         .route("/api/subscribe", get(subscribe_stream))
         .route("/api/tables", get(list_tables))
         .route("/api/tables/:table_name", get(get_table_info))
+        // CRUD endpoints for auto-generated RESTful access
+        .route("/api/tables/:table_name/rows", get(super::crud::list_rows))
+        .route("/api/tables/:table_name/rows", post(super::crud::create_row))
+        .route("/api/tables/:table_name/rows/:id", get(super::crud::get_row))
+        .route("/api/tables/:table_name/rows/:id", put(super::crud::update_row))
+        .route("/api/tables/:table_name/rows/:id", patch(super::crud::patch_row))
+        .route("/api/tables/:table_name/rows/:id", delete(super::crud::delete_row))
         .with_state(state)
 }
 
@@ -149,29 +156,50 @@ async fn get_table_info(
     State(state): State<HttpState>,
     Path(table_name): Path<String>,
 ) -> impl IntoResponse {
-    let table_names = state.db.list_tables();
+    // Try to get the table (with case-insensitive lookup)
+    let table = state.db.get_table(&table_name);
 
-    if !table_names.contains(&table_name) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse::new(format!("Table '{}' not found", table_name))),
-        )
-            .into_response();
+    if table.is_none() {
+        // Try case-insensitive lookup
+        let table_names = state.db.list_tables();
+        if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse::new(format!("Table '{}' not found", table_name))),
+            )
+                .into_response();
+        }
     }
 
-    // For now, we return a minimal table info
-    // In the future, we can enhance this to get actual column information
-    let columns = vec![
-        ColumnInfo {
-            name: "*".to_string(),
-            data_type: "unknown".to_string(),
-            nullable: true,
-            primary_key: false,
-        }
-    ];
+    // Get schema information
+    if let Some(table) = state.db.get_table(&table_name) {
+        let schema = &table.schema;
+        let pk_columns: Vec<&String> = schema.primary_key.as_ref().map(|pk| pk.iter().collect()).unwrap_or_default();
+
+        let columns: Vec<ColumnInfo> = schema
+            .columns
+            .iter()
+            .map(|col| ColumnInfo {
+                name: col.name.clone(),
+                data_type: format!("{:?}", col.data_type),
+                nullable: col.nullable,
+                primary_key: pk_columns.contains(&&col.name),
+            })
+            .collect();
+
+        let info = TableInfo { name: table_name, columns };
+        return (StatusCode::OK, Json(info)).into_response();
+    }
+
+    // Fallback: return minimal info if we couldn't get schema
+    let columns = vec![ColumnInfo {
+        name: "*".to_string(),
+        data_type: "unknown".to_string(),
+        nullable: true,
+        primary_key: false,
+    }];
 
     let info = TableInfo { name: table_name, columns };
-
     (StatusCode::OK, Json(info)).into_response()
 }
 
