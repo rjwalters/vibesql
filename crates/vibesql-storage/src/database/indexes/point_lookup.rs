@@ -46,6 +46,10 @@ impl IndexData {
                     }
                 }
             }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support point lookups - use search() method instead
+                None
+            }
         }
     }
 
@@ -83,6 +87,10 @@ impl IndexData {
                         false
                     }
                 }
+            }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support contains_key - use search() method instead
+                false
             }
         }
     }
@@ -143,6 +151,10 @@ impl IndexData {
                     }
                 }
             }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support multi_lookup - use search() method instead
+                vec![]
+            }
         }
     }
 
@@ -170,6 +182,10 @@ impl IndexData {
                 // For now, return empty iterator since this method is rarely used
                 // Callers should use values() for full scans or lookup()/multi_lookup() for point queries
                 log::warn!("DiskBacked iter() is not yet implemented - use values() instead");
+                Box::new(std::iter::empty())
+            }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support iteration - use search() method instead
                 Box::new(std::iter::empty())
             }
         }
@@ -209,6 +225,11 @@ impl IndexData {
                         Box::new(std::iter::empty())
                     }
                 }
+            }
+            IndexData::IVFFlat { index } => {
+                // Return all row IDs stored in the IVFFlat index
+                let all_row_ids: Vec<usize> = index.all_row_ids();
+                Box::new(std::iter::once(all_row_ids))
             }
         }
     }

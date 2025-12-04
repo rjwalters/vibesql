@@ -258,6 +258,82 @@ impl CreateIndexExecutor {
                     index_name, qualified_table_name
                 ))
             }
+            vibesql_ast::IndexType::IVFFlat { metric, lists } => {
+                // IVFFlat index validation: must be exactly 1 column (vector column)
+                if stmt.columns.len() != 1 {
+                    return Err(ExecutorError::InvalidIndexDefinition(
+                        "IVFFlat indexes must be defined on exactly one vector column".to_string(),
+                    ));
+                }
+
+                let column_name = &stmt.columns[0].column_name;
+
+                // Get the column index and validate it's a vector type
+                let col_idx = table_schema
+                    .get_column_index(column_name)
+                    .ok_or_else(|| ExecutorError::ColumnNotFound {
+                        column_name: column_name.clone(),
+                        table_name: qualified_table_name.clone(),
+                        searched_tables: vec![qualified_table_name.clone()],
+                        available_columns: table_schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    })?;
+
+                // Validate column type is VECTOR
+                let col_type = &table_schema.columns[col_idx].data_type;
+                let dimensions = match col_type {
+                    vibesql_types::DataType::Vector { dimensions } => *dimensions as usize,
+                    _ => {
+                        return Err(ExecutorError::InvalidIndexDefinition(format!(
+                            "IVFFlat indexes can only be created on VECTOR columns, but '{}' has type {:?}",
+                            column_name, col_type
+                        )));
+                    }
+                };
+
+                // Convert AST metric to catalog metric
+                let catalog_metric = match metric {
+                    vibesql_ast::VectorDistanceMetric::L2 => vibesql_catalog::VectorDistanceMetric::L2,
+                    vibesql_ast::VectorDistanceMetric::Cosine => vibesql_catalog::VectorDistanceMetric::Cosine,
+                    vibesql_ast::VectorDistanceMetric::InnerProduct => vibesql_catalog::VectorDistanceMetric::InnerProduct,
+                };
+
+                // Add to catalog first
+                let index_metadata = vibesql_catalog::IndexMetadata::new(
+                    index_name.clone(),
+                    table_name.clone(),
+                    vibesql_catalog::IndexType::IVFFlat {
+                        metric: catalog_metric,
+                        lists: *lists,
+                    },
+                    vec![vibesql_catalog::IndexedColumn {
+                        column_name: column_name.clone(),
+                        order: vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
+                        prefix_length: None,
+                    }],
+                    false, // IVFFlat indexes are never unique
+                );
+                database.catalog.add_index(index_metadata)?;
+
+                // Create the IVFFlat index in storage
+                database.create_ivfflat_index(
+                    index_name.clone(),
+                    table_name.clone(),
+                    column_name.clone(),
+                    col_idx,
+                    dimensions,
+                    *lists as usize,
+                    *metric,
+                )?;
+
+                Ok(format!(
+                    "IVFFlat index '{}' created successfully on table '{}' column '{}'",
+                    index_name, qualified_table_name, column_name
+                ))
+            }
         }
     }
 }
@@ -265,7 +341,8 @@ impl CreateIndexExecutor {
 #[cfg(test)]
 mod tests {
     use vibesql_ast::{ColumnDef, CreateTableStmt, IndexColumn, OrderDirection};
-    use vibesql_types::DataType;
+    use vibesql_storage::Row;
+    use vibesql_types::{DataType, SqlValue};
 
     use super::*;
     use crate::CreateTableExecutor;
@@ -560,5 +637,363 @@ mod tests {
         let result = CreateIndexExecutor::execute(&index_stmt, &mut db);
         assert!(result.is_err());
         assert!(matches!(result, Err(ExecutorError::TableNotFound(_))));
+    }
+
+    // ========================================================================
+    // IVFFlat Index Tests
+    // ========================================================================
+
+    fn create_vector_table(db: &mut Database) {
+        let stmt = CreateTableStmt {
+            table_name: "documents".to_string(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: false,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                },
+                ColumnDef {
+                    name: "embedding".to_string(),
+                    data_type: DataType::Vector { dimensions: 3 },
+                    nullable: true,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                },
+                ColumnDef {
+                    name: "content".to_string(),
+                    data_type: DataType::Varchar { max_length: Some(1000) },
+                    nullable: true,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                },
+            ],
+            table_constraints: vec![],
+            table_options: vec![],
+        };
+
+        CreateTableExecutor::execute(&stmt, db).unwrap();
+    }
+
+    #[test]
+    fn test_create_ivfflat_index_l2() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        let stmt = CreateIndexStmt {
+            index_name: "idx_documents_embedding".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::L2,
+                lists: 4,
+            },
+            columns: vec![IndexColumn {
+                column_name: "embedding".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok(), "IVFFlat index creation failed: {:?}", result.err());
+        assert!(result.unwrap().contains("IVFFlat index 'idx_documents_embedding' created successfully"));
+        assert!(db.index_exists("idx_documents_embedding"));
+    }
+
+    #[test]
+    fn test_create_ivfflat_index_cosine() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        let stmt = CreateIndexStmt {
+            index_name: "idx_documents_cosine".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::Cosine,
+                lists: 4,
+            },
+            columns: vec![IndexColumn {
+                column_name: "embedding".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok());
+        assert!(db.index_exists("idx_documents_cosine"));
+    }
+
+    #[test]
+    fn test_create_ivfflat_index_inner_product() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        let stmt = CreateIndexStmt {
+            index_name: "idx_documents_ip".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::InnerProduct,
+                lists: 4,
+            },
+            columns: vec![IndexColumn {
+                column_name: "embedding".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok());
+        assert!(db.index_exists("idx_documents_ip"));
+    }
+
+    #[test]
+    fn test_create_ivfflat_index_on_non_vector_column() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        // Try to create IVFFlat index on a non-vector column
+        let stmt = CreateIndexStmt {
+            index_name: "idx_documents_content".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::L2,
+                lists: 4,
+            },
+            columns: vec![IndexColumn {
+                column_name: "content".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ExecutorError::InvalidIndexDefinition(_))));
+    }
+
+    #[test]
+    fn test_create_ivfflat_index_multiple_columns_fails() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        // IVFFlat indexes must be on exactly one column
+        let stmt = CreateIndexStmt {
+            index_name: "idx_documents_multi".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::L2,
+                lists: 4,
+            },
+            columns: vec![
+                IndexColumn {
+                    column_name: "embedding".to_string(),
+                    direction: OrderDirection::Asc,
+                    prefix_length: None,
+                },
+                IndexColumn {
+                    column_name: "id".to_string(),
+                    direction: OrderDirection::Asc,
+                    prefix_length: None,
+                },
+            ],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ExecutorError::InvalidIndexDefinition(_))));
+    }
+
+    #[test]
+    fn test_create_ivfflat_index_if_not_exists() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        let stmt = CreateIndexStmt {
+            index_name: "idx_documents_embedding".to_string(),
+            if_not_exists: true,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::L2,
+                lists: 4,
+            },
+            columns: vec![IndexColumn {
+                column_name: "embedding".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        // First creation
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok());
+
+        // Second creation with IF NOT EXISTS should succeed
+        let result2 = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result2.is_ok());
+        assert!(result2.unwrap().contains("already exists"));
+    }
+
+    #[test]
+    fn test_ivfflat_index_search() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        // Insert test vector data
+        // Row 0: [1.0, 0.0, 0.0] - should be closest to query [0.9, 0.1, 0.0]
+        db.insert_row(
+            "documents",
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Vector(vec![1.0, 0.0, 0.0]),
+                SqlValue::Varchar("doc1".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        // Row 1: [0.0, 1.0, 0.0]
+        db.insert_row(
+            "documents",
+            Row::new(vec![
+                SqlValue::Integer(2),
+                SqlValue::Vector(vec![0.0, 1.0, 0.0]),
+                SqlValue::Varchar("doc2".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        // Row 2: [0.0, 0.0, 1.0]
+        db.insert_row(
+            "documents",
+            Row::new(vec![
+                SqlValue::Integer(3),
+                SqlValue::Vector(vec![0.0, 0.0, 1.0]),
+                SqlValue::Varchar("doc3".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        // Row 3: [0.5, 0.5, 0.0] - second closest to query
+        db.insert_row(
+            "documents",
+            Row::new(vec![
+                SqlValue::Integer(4),
+                SqlValue::Vector(vec![0.5, 0.5, 0.0]),
+                SqlValue::Varchar("doc4".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        // Create IVFFlat index (should build on existing data)
+        let stmt = CreateIndexStmt {
+            index_name: "idx_embedding".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::L2,
+                lists: 2, // 2 clusters for small test data
+            },
+            columns: vec![IndexColumn {
+                column_name: "embedding".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok(), "Index creation failed: {:?}", result.err());
+
+        // Test search API
+        // Query vector near [1.0, 0.0, 0.0]
+        let query_vector = vec![0.9, 0.1, 0.0];
+        let results = db.search_ivfflat_index("idx_embedding", &query_vector, 2);
+        assert!(results.is_ok(), "Search should succeed: {:?}", results.err());
+
+        let neighbors = results.unwrap();
+        // Should find at least the nearest vectors
+        assert!(!neighbors.is_empty(), "Should find at least one neighbor");
+
+        // The closest vector should be [1.0, 0.0, 0.0] (row 0)
+        let (first_row_id, first_distance) = neighbors[0];
+        assert!(first_distance >= 0.0, "Distance should be non-negative");
+        // Since we inserted [1.0, 0.0, 0.0] at row 0, it should be closest
+        assert_eq!(first_row_id, 0, "First result should be the closest vector");
+    }
+
+    #[test]
+    fn test_ivfflat_get_indexes_for_table() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        // Create IVFFlat index
+        let stmt = CreateIndexStmt {
+            index_name: "idx_vec".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::Cosine,
+                lists: 2,
+            },
+            columns: vec![IndexColumn {
+                column_name: "embedding".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok());
+
+        // Test getting IVFFlat indexes for the table
+        let ivfflat_indexes = db.get_ivfflat_indexes_for_table("documents");
+        assert_eq!(ivfflat_indexes.len(), 1, "Should have one IVFFlat index");
+
+        let (metadata, index) = &ivfflat_indexes[0];
+        assert!(metadata.index_name.to_uppercase().contains("IDX_VEC"));
+        assert_eq!(index.metric(), vibesql_ast::VectorDistanceMetric::Cosine);
+    }
+
+    #[test]
+    fn test_ivfflat_set_probes() {
+        let mut db = Database::new();
+        create_vector_table(&mut db);
+
+        // Create IVFFlat index
+        let stmt = CreateIndexStmt {
+            index_name: "idx_probes".to_string(),
+            if_not_exists: false,
+            table_name: "documents".to_string(),
+            index_type: vibesql_ast::IndexType::IVFFlat {
+                metric: vibesql_ast::VectorDistanceMetric::L2,
+                lists: 4,
+            },
+            columns: vec![IndexColumn {
+                column_name: "embedding".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok());
+
+        // Set probes to search more clusters (improves recall at cost of speed)
+        let set_probes_result = db.set_ivfflat_probes("idx_probes", 3);
+        assert!(set_probes_result.is_ok());
+
+        // Verify the index can still be searched
+        let query_vector = vec![0.5, 0.5, 0.5];
+        let search_result = db.search_ivfflat_index("idx_probes", &query_vector, 3);
+        assert!(search_result.is_ok());
     }
 }

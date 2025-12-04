@@ -115,6 +115,78 @@ impl Database {
         self.operations.create_spatial_index(metadata, spatial_index)
     }
 
+    /// Create an IVFFlat index for approximate nearest neighbor search on vector columns
+    ///
+    /// This method creates an IVFFlat (Inverted File with Flat quantization) index
+    /// for efficient approximate nearest neighbor search on vector data.
+    ///
+    /// # Arguments
+    /// * `index_name` - Name for the new index
+    /// * `table_name` - Name of the table containing the vector column
+    /// * `column_name` - Name of the vector column to index
+    /// * `col_idx` - Column index in the table schema
+    /// * `dimensions` - Number of dimensions in the vectors
+    /// * `lists` - Number of clusters for the IVFFlat algorithm
+    /// * `metric` - Distance metric to use (L2, Cosine, InnerProduct)
+    pub fn create_ivfflat_index(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        column_name: String,
+        col_idx: usize,
+        dimensions: usize,
+        lists: usize,
+        metric: vibesql_ast::VectorDistanceMetric,
+    ) -> Result<(), StorageError> {
+        self.operations.create_ivfflat_index(
+            &self.catalog,
+            &self.tables,
+            index_name,
+            table_name,
+            column_name,
+            col_idx,
+            dimensions,
+            lists,
+            metric,
+        )
+    }
+
+    /// Search an IVFFlat index for approximate nearest neighbors
+    ///
+    /// # Arguments
+    /// * `index_name` - Name of the IVFFlat index
+    /// * `query_vector` - The query vector (f64)
+    /// * `k` - Maximum number of nearest neighbors to return
+    ///
+    /// # Returns
+    /// * `Ok(Vec<(usize, f64)>)` - Vector of (row_id, distance) pairs, ordered by distance
+    /// * `Err(StorageError)` - If index not found or not an IVFFlat index
+    pub fn search_ivfflat_index(
+        &self,
+        index_name: &str,
+        query_vector: &[f64],
+        k: usize,
+    ) -> Result<Vec<(usize, f64)>, StorageError> {
+        self.operations.search_ivfflat_index(index_name, query_vector, k)
+    }
+
+    /// Get all IVFFlat indexes for a specific table
+    pub fn get_ivfflat_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(&super::indexes::IndexMetadata, &super::indexes::ivfflat::IVFFlatIndex)> {
+        self.operations.get_ivfflat_indexes_for_table(table_name)
+    }
+
+    /// Set the number of probes for an IVFFlat index
+    pub fn set_ivfflat_probes(
+        &mut self,
+        index_name: &str,
+        probes: usize,
+    ) -> Result<(), StorageError> {
+        self.operations.set_ivfflat_probes(index_name, probes)
+    }
+
     /// Check if a spatial index exists
     pub fn spatial_index_exists(&self, index_name: &str) -> bool {
         self.operations.spatial_index_exists(index_name)

@@ -290,6 +290,10 @@ pub enum Keyword {
     Query,
     // Spatial index keywords
     Spatial,
+    // Vector index keywords (IVFFlat)
+    Ivfflat,
+    Lists,
+    Probes,
     // Database introspection keywords
     Show,
     Describe,
@@ -586,6 +590,10 @@ impl fmt::Display for Keyword {
             Keyword::Query => "QUERY",
             // Spatial index keywords
             Keyword::Spatial => "SPATIAL",
+            // Vector index keywords (IVFFlat)
+            Keyword::Ivfflat => "IVFFLAT",
+            Keyword::Lists => "LISTS",
+            Keyword::Probes => "PROBES",
             // Database introspection keywords
             Keyword::Show => "SHOW",
             Keyword::Describe => "DESCRIBE",

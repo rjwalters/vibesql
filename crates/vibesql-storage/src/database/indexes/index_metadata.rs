@@ -18,6 +18,8 @@ use crate::btree::BTreeIndex;
 use crate::page::PageManager;
 use crate::StorageError;
 
+use super::ivfflat::IVFFlatIndex;
+
 /// Normalize an index name to uppercase for case-insensitive comparison
 /// This follows SQL standard identifier rules
 pub(super) fn normalize_index_name(name: &str) -> String {
@@ -92,5 +94,9 @@ pub enum IndexData {
     DiskBacked {
         btree: Arc<Mutex<BTreeIndex>>,
         page_manager: Arc<PageManager>,
+    },
+    /// IVFFlat index for approximate nearest neighbor search on vectors
+    IVFFlat {
+        index: IVFFlatIndex,
     },
 }

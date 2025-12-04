@@ -230,6 +230,10 @@ impl IndexManager {
                                     }
                                 }
                             }
+                            IndexData::IVFFlat { .. } => {
+                                // IVFFlat indexes don't support unique constraints
+                                // Vector indexes are for similarity search, not uniqueness
+                            }
                         }
                     }
                 }
@@ -332,11 +336,17 @@ impl IndexManager {
         let index_data = self.index_data.remove(index_name)
             .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
-        // Extract InMemory data, or return if already DiskBacked
+        // Extract InMemory data, or return if already DiskBacked or IVFFlat
         let data = match index_data {
             IndexData::InMemory { data } => data,
             IndexData::DiskBacked { .. } => {
                 // Already disk-backed, just put it back
+                self.index_data.insert(index_name.to_string(), index_data);
+                return Ok(());
+            }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes can't be spilled to disk-backed B-tree format
+                // They have a different structure (inverted lists + centroids)
                 self.index_data.insert(index_name.to_string(), index_data);
                 return Ok(());
             }
