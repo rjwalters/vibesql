@@ -566,6 +566,7 @@ fn format_data_type(dt: &DataType) -> String {
         }
         DataType::Unsigned => "bigint".to_string(), // No unsigned in PostgreSQL, use bigint
         DataType::UserDefined { type_name } => type_name.clone(),
+        DataType::Vector { dimensions } => format!("vector({})", dimensions),
         DataType::Null => "unknown".to_string(),
     }
 }
@@ -597,6 +598,7 @@ fn format_udt_name(dt: &DataType) -> String {
         DataType::Bit { .. } => "bit".to_string(),
         DataType::Unsigned => "int8".to_string(),
         DataType::UserDefined { type_name } => type_name.clone(),
+        DataType::Vector { .. } => "vector".to_string(),
         DataType::Null => "unknown".to_string(),
     }
 }
