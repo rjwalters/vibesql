@@ -7,9 +7,11 @@
 //! **Phase 1 Optimization**: This module now uses `PredicatePlan` to avoid redundant
 //! WHERE clause decomposition. The plan is computed once at query start and passed through.
 
+use std::collections::HashMap;
+
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator,
-    optimizer::PredicatePlan, schema::CombinedSchema,
+    optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult,
 };
 
 #[cfg(feature = "parallel")]
@@ -29,6 +31,7 @@ use std::sync::Arc;
 ///
 /// **Phase 1**: Optimized to work with row slices instead of owned vectors.
 /// **Phase 2**: Attempts columnar execution for complex predicates with OR logic.
+/// **Issue #3563**: Now accepts CTE context for WHERE clauses with IN subqueries referencing CTEs.
 pub(crate) fn apply_table_local_predicates_ref(
     rows: &[vibesql_storage::Row],
     schema: CombinedSchema,
@@ -37,6 +40,7 @@ pub(crate) fn apply_table_local_predicates_ref(
     database: &vibesql_storage::Database,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
+    cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // Get table statistics for selectivity-based ordering
     let table_stats = database
@@ -82,11 +86,23 @@ pub(crate) fn apply_table_local_predicates_ref(
             // If columnar extraction fails, fall through to row-by-row evaluation
         }
 
-        // Create evaluator for filtering with outer context for correlated subqueries
-        let evaluator = if let (Some(outer_row), Some(outer_schema)) = (outer_row, outer_schema) {
-            CombinedExpressionEvaluator::with_database_and_outer_context(&schema, database, outer_row, outer_schema)
-        } else {
-            CombinedExpressionEvaluator::with_database(&schema, database)
+        // Create evaluator for filtering with outer context, CTE context, or both (#3563)
+        // Priority: outer+CTE > outer > CTE > database only
+        let evaluator = match (outer_row, outer_schema, cte_results) {
+            (Some(outer_row), Some(outer_schema), Some(cte_ctx)) if !cte_ctx.is_empty() => {
+                CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
+                    &schema, database, outer_row, outer_schema, cte_ctx,
+                )
+            }
+            (Some(outer_row), Some(outer_schema), _) => {
+                CombinedExpressionEvaluator::with_database_and_outer_context(
+                    &schema, database, outer_row, outer_schema,
+                )
+            }
+            (_, _, Some(cte_ctx)) if !cte_ctx.is_empty() => {
+                CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_ctx)
+            }
+            _ => CombinedExpressionEvaluator::with_database(&schema, database),
         };
 
         // Filter rows, only cloning those that pass
@@ -139,6 +155,7 @@ pub(crate) fn apply_table_local_predicates_ref(
 /// **Phase 1**: Now accepts `PredicatePlan` instead of decomposing WHERE clause internally.
 /// **Phase 2**: Attempts columnar execution for complex predicates with OR logic.
 /// **Phase 4**: Uses cost-based predicate ordering via selectivity estimation.
+/// **Issue #3563**: Now accepts CTE context for WHERE clauses with IN subqueries referencing CTEs.
 ///
 /// **Note**: This version takes owned Vec<Row>. Consider using apply_table_local_predicates_ref
 /// for better performance with large datasets.
@@ -150,6 +167,7 @@ pub(crate) fn apply_table_local_predicates(
     database: &vibesql_storage::Database,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
+    cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // Get table statistics for selectivity-based ordering
     let table_stats = database
@@ -187,11 +205,23 @@ pub(crate) fn apply_table_local_predicates(
             }
         }
 
-        // Create evaluator for filtering with outer context for correlated subqueries
-        let evaluator = if let (Some(outer_row), Some(outer_schema)) = (outer_row, outer_schema) {
-            CombinedExpressionEvaluator::with_database_and_outer_context(&schema, database, outer_row, outer_schema)
-        } else {
-            CombinedExpressionEvaluator::with_database(&schema, database)
+        // Create evaluator for filtering with outer context, CTE context, or both (#3563)
+        // Priority: outer+CTE > outer > CTE > database only
+        let evaluator = match (outer_row, outer_schema, cte_results) {
+            (Some(outer_row), Some(outer_schema), Some(cte_ctx)) if !cte_ctx.is_empty() => {
+                CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
+                    &schema, database, outer_row, outer_schema, cte_ctx,
+                )
+            }
+            (Some(outer_row), Some(outer_schema), _) => {
+                CombinedExpressionEvaluator::with_database_and_outer_context(
+                    &schema, database, outer_row, outer_schema,
+                )
+            }
+            (_, _, Some(cte_ctx)) if !cte_ctx.is_empty() => {
+                CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_ctx)
+            }
+            _ => CombinedExpressionEvaluator::with_database(&schema, database),
         };
 
         // Check if we should use parallel filtering
