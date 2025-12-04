@@ -3,6 +3,13 @@
 use std::fs;
 use std::process::Command;
 
+/// Get the path to the vibesql binary.
+/// Uses CARGO_BIN_EXE_vibesql which is set by cargo during test compilation,
+/// pointing to the compiled binary in the target directory.
+fn vibesql_binary() -> &'static str {
+    env!("CARGO_BIN_EXE_vibesql")
+}
+
 #[test]
 fn test_command_mode_persistence() {
     let test_db = "/tmp/test_vibesql_cmd_mode.db";
@@ -11,34 +18,16 @@ fn test_command_mode_persistence() {
     let _ = fs::remove_file(test_db);
 
     // Create a table
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
-            "--database",
-            test_db,
-            "-c",
-            "CREATE TABLE test_users (id INTEGER, name TEXT)",
-        ])
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "CREATE TABLE test_users (id INTEGER, name TEXT)"])
         .output()
         .expect("Failed to execute command");
 
     assert!(output.status.success(), "CREATE TABLE should succeed");
 
     // Insert data
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
-            "--database",
-            test_db,
-            "-c",
-            "INSERT INTO test_users VALUES (1, 'Alice')",
-        ])
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "INSERT INTO test_users VALUES (1, 'Alice')"])
         .output()
         .expect("Failed to execute command");
 
@@ -62,17 +51,8 @@ fn test_command_mode_persistence() {
     );
 
     // Query the data in a new session
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
-            "--database",
-            test_db,
-            "-c",
-            "SELECT * FROM test_users",
-        ])
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "SELECT * FROM test_users"])
         .output()
         .expect("Failed to execute command");
 
@@ -95,12 +75,8 @@ fn test_multiple_sessions_persistence() {
     let _ = fs::remove_file(test_db);
 
     // Session 1: Create table
-    let output = Command::new("cargo")
+    let output = Command::new(vibesql_binary())
         .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
             "--database",
             test_db,
             "-c",
@@ -112,12 +88,8 @@ fn test_multiple_sessions_persistence() {
     assert!(output.status.success());
 
     // Session 2: Insert first row
-    let output = Command::new("cargo")
+    let output = Command::new(vibesql_binary())
         .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
             "--database",
             test_db,
             "-c",
@@ -129,12 +101,8 @@ fn test_multiple_sessions_persistence() {
     assert!(output.status.success());
 
     // Session 3: Insert second row
-    let output = Command::new("cargo")
+    let output = Command::new(vibesql_binary())
         .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
             "--database",
             test_db,
             "-c",
@@ -146,17 +114,8 @@ fn test_multiple_sessions_persistence() {
     assert!(output.status.success());
 
     // Session 4: Query all data
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
-            "--database",
-            test_db,
-            "-c",
-            "SELECT * FROM products",
-        ])
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "SELECT * FROM products"])
         .output()
         .expect("Failed to execute command");
 
@@ -176,21 +135,11 @@ fn test_binary_file_error_message() {
     let mut binary_data = b"SQLite format 3\0".to_vec();
     // Add some non-UTF8 bytes
     binary_data.extend_from_slice(&[0xFF, 0xFE, 0xFD, 0xFC, 0x00, 0x01, 0x02]);
-    fs::write(test_db, binary_data)
-        .expect("Failed to create test file");
+    fs::write(test_db, binary_data).expect("Failed to create test file");
 
     // Try to open it with vibesql
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
-            "--database",
-            test_db,
-            "-c",
-            "SELECT 1",
-        ])
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "SELECT 1"])
         .output()
         .expect("Failed to execute command");
 
@@ -215,17 +164,8 @@ fn test_new_database_file_creation() {
     let _ = fs::remove_file(test_db);
 
     // Create database with a non-existent file path
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "vibesql",
-            "--",
-            "--database",
-            test_db,
-            "-c",
-            "CREATE TABLE new_table (id INTEGER)",
-        ])
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "CREATE TABLE new_table (id INTEGER)"])
         .output()
         .expect("Failed to execute command");
 
