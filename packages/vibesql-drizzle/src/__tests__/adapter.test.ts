@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createDrizzle } from '../adapter.js';
+import { sql } from 'drizzle-orm';
+import { createDrizzle, getClient } from '../adapter.js';
 import type { VibeSQLClient } from '../types.js';
 
 // Mock VibeSQL client
@@ -21,6 +22,12 @@ describe('createDrizzle', () => {
     expect(db).toBeDefined();
   });
 
+  it('should store client reference for retrieval via getClient()', () => {
+    const db = createDrizzle(mockClient);
+    const retrievedClient = getClient(db);
+    expect(retrievedClient).toBe(mockClient);
+  });
+
   it('should execute SELECT queries via sqlite-proxy', async () => {
     mockClient.query.mockResolvedValueOnce({
       columns: ['id', 'name', 'email'],
@@ -32,9 +39,8 @@ describe('createDrizzle', () => {
 
     const db = createDrizzle(mockClient);
 
-    // Execute a raw SQL query through Drizzle's run method
-    // Note: In real usage, you'd use Drizzle's query builder
-    await db.run({ sql: 'SELECT * FROM users', params: [] });
+    // Execute a raw SQL query through Drizzle's run method using sql template tag
+    await db.run(sql`SELECT * FROM users`);
 
     expect(mockClient.query).toHaveBeenCalledWith(
       'SELECT * FROM users',
@@ -50,11 +56,10 @@ describe('createDrizzle', () => {
     });
 
     const db = createDrizzle(mockClient);
+    const name = 'Alice';
+    const email = 'alice@example.com';
 
-    await db.run({
-      sql: 'INSERT INTO users (name, email) VALUES (?, ?)',
-      params: ['Alice', 'alice@example.com'],
-    });
+    await db.run(sql`INSERT INTO users (name, email) VALUES (${name}, ${email})`);
 
     expect(mockClient.query).toHaveBeenCalledWith(
       'INSERT INTO users (name, email) VALUES (?, ?)',
@@ -72,7 +77,7 @@ describe('createDrizzle', () => {
 
     const db = createDrizzle(mockClient, { logger: true });
 
-    await db.run({ sql: 'SELECT 1 as id', params: [] });
+    await db.run(sql`SELECT 1 as id`);
 
     expect(consoleSpy).toHaveBeenCalledWith(
       '[Drizzle Query]',
@@ -95,7 +100,7 @@ describe('createDrizzle', () => {
 
     const db = createDrizzle(mockClient, { logger: customLogger });
 
-    await db.run({ sql: 'SELECT 1 as id', params: [] });
+    await db.run(sql`SELECT 1 as id`);
 
     expect(customLogger.logQuery).toHaveBeenCalledWith('SELECT 1 as id', []);
   });
@@ -113,7 +118,7 @@ describe('createDrizzle', () => {
 
     // The adapter should convert objects to arrays internally
     // for sqlite-proxy compatibility
-    const result = await db.all({ sql: 'SELECT id, name FROM users', params: [] });
+    const result = await db.all(sql`SELECT id, name FROM users`);
 
     expect(mockClient.query).toHaveBeenCalled();
     // Result should be properly formatted
@@ -127,11 +132,9 @@ describe('createDrizzle', () => {
     });
 
     const db = createDrizzle(mockClient);
+    const userId = 1;
 
-    await db.run({
-      sql: 'SELECT * FROM users WHERE id = ?',
-      params: [1],
-    });
+    await db.run(sql`SELECT * FROM users WHERE id = ${userId}`);
 
     expect(mockClient.query).toHaveBeenCalledWith(
       'SELECT * FROM users WHERE id = ?',
@@ -147,7 +150,7 @@ describe('createDrizzle', () => {
 
     const db = createDrizzle(mockClient);
 
-    const result = await db.all({ sql: 'SELECT * FROM users WHERE 1=0', params: [] });
+    const result = await db.all(sql`SELECT * FROM users WHERE 1=0`);
 
     expect(result).toBeDefined();
   });
@@ -158,7 +161,7 @@ describe('createDrizzle', () => {
     const db = createDrizzle(mockClient);
 
     await expect(
-      db.run({ sql: 'SELECT * FROM nonexistent', params: [] })
+      db.run(sql`SELECT * FROM nonexistent`)
     ).rejects.toThrow('Database error');
   });
 });
@@ -179,8 +182,10 @@ describe('batch operations', () => {
 
     // Batch operations are handled by sqlite-proxy internally
     // This test verifies that queries are executed
-    await db.run({ sql: 'INSERT INTO users (name) VALUES (?)', params: ['Alice'] });
-    await db.run({ sql: 'INSERT INTO users (name) VALUES (?)', params: ['Bob'] });
+    const name1 = 'Alice';
+    const name2 = 'Bob';
+    await db.run(sql`INSERT INTO users (name) VALUES (${name1})`);
+    await db.run(sql`INSERT INTO users (name) VALUES (${name2})`);
 
     expect(mockClient.query).toHaveBeenCalledTimes(2);
   });

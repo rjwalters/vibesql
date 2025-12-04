@@ -111,9 +111,14 @@ export function createDrizzle<TSchema extends Record<string, unknown> = Record<s
   });
 
   // Create and return Drizzle instance with sqlite-proxy driver
-  return drizzle<TSchema>(queryCallback, batchCallback, {
+  const db = drizzle<TSchema>(queryCallback, batchCallback, {
     logger: false, // We handle logging ourselves
   });
+
+  // Store client reference for later retrieval via getClient()
+  (db as unknown as { _vibesqlClient: VibeSQLClient })._vibesqlClient = client;
+
+  return db;
 }
 
 /**
