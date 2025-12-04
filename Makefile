@@ -181,79 +181,34 @@ test-sqllogictest-halting:
 # Benchmark Targets
 #
 
-# Run all benchmarks with analysis
-benchmark: benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-sysbench analyze-benchmarks
+# Run all benchmarks with analysis (using unified CLI)
+benchmark:
+	@./scripts/bench --all
 
 # Run TPC-H benchmarks with 30s timeout per query and store results in database
 benchmark-tpch:
-	@echo "Running TPC-H benchmarks..."
-	./scripts/bench-tpch.sh 30
-	@echo ""
-	@echo "Processing benchmark results into database..."
-	./scripts/process_benchmark_results.py --input /tmp/tpch_results.txt --timeout 30
-	@echo ""
-	@echo "Query results:"
-	@echo "  ./scripts/query_benchmark_results.py --latest"
-	@echo "  ./scripts/query_benchmark_results.py --trend"
+	@./scripts/bench --test=tpch --timeout=30
 
 # Run TPC-C benchmarks (OLTP workload) with database tracking
 # Automatically starts MySQL Docker container if Docker is available
 benchmark-tpcc:
-	@echo "Running TPC-C benchmarks..."
-	@echo "Building TPC-C benchmark..."
-	cargo bench --package vibesql-executor --bench tpcc_benchmark --features benchmark-comparison --no-run
-	@echo ""
-	@# Try to start MySQL Docker, but continue if it fails (Docker not installed, etc.)
-	@MYSQL_URL=$$(./scripts/ensure-mysql-docker.sh 2>/dev/null) || MYSQL_URL=""; \
-	echo "Running TPC-C benchmark (60s duration, 10s warmup)..."; \
-	if [ -n "$$MYSQL_URL" ]; then \
-		echo "MySQL enabled: $$MYSQL_URL"; \
-	else \
-		echo "MySQL disabled (Docker not available or failed to start)"; \
-	fi; \
-	MYSQL_URL="$$MYSQL_URL" TPCC_DURATION_SECS=60 TPCC_WARMUP_SECS=10 TPCC_SCALE_FACTOR=1 \
-		$$(find ./target/release/deps -maxdepth 1 -name "tpcc_benchmark-*" -type f ! -name "*.d" ! -name "*.o" -perm +111 | head -1) \
-		2>&1 | tee /tmp/tpcc_results.txt
-	@echo ""
-	@echo "Processing TPC-C results into database..."
-	./scripts/process_tpcc_results.py --input /tmp/tpcc_results.txt --scale-factor 1 --duration 60
+	@./scripts/bench --test=tpcc --engine=vibesql,mysql --duration=60
 
 # Run TPC-DS benchmarks with database tracking
 # Uses isolated execution (each database engine in separate process) to avoid memory pressure
 benchmark-tpcds:
-	@echo "Running TPC-DS benchmarks (isolated mode)..."
-	./scripts/bench-tpcds-isolated.sh /tmp/tpcds_results.txt
-	@echo ""
-	@echo "Processing TPC-DS results into database..."
-	./scripts/process_tpcds_results.py --stdin < /tmp/tpcds_results.txt || \
-		./scripts/process_tpcds_results.py --criterion-dir target/criterion
+	@./scripts/bench --test=tpcds
 
 # Run TPC-DS benchmarks with all engines simultaneously (may cause memory pressure)
 benchmark-tpcds-all:
-	@echo "Running TPC-DS benchmarks (all engines simultaneously)..."
-	@echo "WARNING: This may cause memory pressure. Use 'make benchmark-tpcds' for isolated execution."
-	cargo bench --package vibesql-executor --bench tpcds_benchmark --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/tpcds_results.txt
-	@echo ""
-	@echo "Processing TPC-DS results into database..."
-	./scripts/process_tpcds_results.py --stdin < /tmp/tpcds_results.txt || \
-		./scripts/process_tpcds_results.py --criterion-dir target/criterion
+	@echo "⚠️  This target is deprecated. Use 'make benchmark-tpcds' instead."
+	@echo "   Use '--engine=all' for comparison: ./scripts/bench --test=tpcds --engine=all"
+	@./scripts/bench --test=tpcds --engine=all
 
 # Run Sysbench OLTP benchmarks with database tracking
 # Automatically starts MySQL Docker container if Docker is available
 benchmark-sysbench:
-	@echo "Running Sysbench OLTP benchmarks..."
-	@# Try to start MySQL Docker, but continue if it fails (Docker not installed, etc.)
-	@MYSQL_URL=$$(./scripts/ensure-mysql-docker.sh 2>/dev/null) || MYSQL_URL=""; \
-	if [ -n "$$MYSQL_URL" ]; then \
-		echo "MySQL enabled: $$MYSQL_URL"; \
-	else \
-		echo "MySQL disabled (Docker not available or failed to start)"; \
-	fi; \
-	MYSQL_URL="$$MYSQL_URL" cargo bench --package vibesql-executor --bench sysbench_oltp --features benchmark-comparison -- --noplot 2>&1 | tee /tmp/sysbench_results.txt
-	@echo ""
-	@echo "Processing Sysbench results into database..."
-	./scripts/process_sysbench_results.py --criterion-dir target/criterion || \
-		./scripts/process_sysbench_results.py --stdin < /tmp/sysbench_results.txt
+	@./scripts/bench --test=sysbench --engine=vibesql,mysql
 
 #
 # Analysis Targets
