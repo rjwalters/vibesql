@@ -33,15 +33,14 @@ VibeSQL uses **two complementary benchmark systems** that measure different aspe
 benchmarks/
 ├── test_*.py       # Python binding benchmarks (PyO3 + SQL engine)
 ├── profile_*.py    # Python profiling tools
-├── suite/          # Full SQLLogicTest suite benchmarks
-│   ├── suite.sh    # Run all 623 test files
-│   ├── head-to-head.sh  # VibeSQL vs SQLite comparison
-│   ├── analyze.py  # Load results into database
-│   └── README.md   # Detailed documentation
-│
-└── micro/          # Pytest-based micro-benchmarks
-    ├── test_*.py   # Individual operation benchmarks
-    └── utils/      # Helper utilities
+├── conftest.py     # pytest-benchmark configuration
+├── requirements.txt # Python dependencies
+├── utils/          # Helper utilities for benchmarks
+└── suite/          # Full SQLLogicTest suite benchmarks
+    ├── suite.sh    # Run all 623 test files
+    ├── head-to-head.sh  # VibeSQL vs SQLite comparison
+    ├── analyze.py  # Load results into database
+    └── README.md   # Detailed documentation
 ```
 
 ## Quick Start
