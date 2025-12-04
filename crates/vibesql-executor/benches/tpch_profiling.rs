@@ -3,17 +3,23 @@
 //! Run with:
 //!   cargo bench --package vibesql-executor --bench tpch_profiling --features benchmark-comparison --no-run && ./target/release/deps/tpch_profiling-*
 //!
-//! Set QUERY_TIMEOUT_SECS env var to limit per-query time (default: 30s)
+//! Environment Variables:
+//!   QUERY_TIMEOUT_SECS    Timeout per query in seconds (default: 30)
+//!   QUERY_FILTER          Comma-separated list of queries to run (e.g., "Q1,Q6,Q9")
 //!
-//! Run single query:
+//! Run single query (CLI arg):
 //!   ./target/release/deps/tpch_profiling-* Q1
 //!   ./target/release/deps/tpch_profiling-* Q2
+//!
+//! Run filtered queries (env var):
+//!   QUERY_FILTER=Q1,Q6 ./target/release/deps/tpch_profiling-*
 //!
 //! Run all queries (default):
 //!   ./target/release/deps/tpch_profiling-*
 
 mod tpch;
 
+use std::collections::HashSet;
 use std::env;
 use std::time::{Duration, Instant};
 use tpch::queries::*;
@@ -109,20 +115,34 @@ fn main() {
         eprintln!("  QUERY    Optional query to run (Q1-Q22). If not specified, runs all queries.");
         eprintln!("\nEnvironment Variables:");
         eprintln!("  QUERY_TIMEOUT_SECS        Timeout per query in seconds (default: 30)");
+        eprintln!("  QUERY_FILTER              Comma-separated list of queries (e.g., Q1,Q6,Q9)");
         eprintln!("  JOIN_REORDER_VERBOSE      Enable verbose join reordering logs");
         eprintln!("\nExamples:");
-        eprintln!("  {}                          # Run all 22 queries", args[0]);
-        eprintln!("  {} Q9                       # Run only Q9", args[0]);
+        eprintln!("  {}                           # Run all 22 queries", args[0]);
+        eprintln!("  {} Q9                        # Run only Q9", args[0]);
+        eprintln!("  QUERY_FILTER=Q1,Q6 {}        # Run Q1 and Q6", args[0]);
         eprintln!("  QUERY_TIMEOUT_SECS=60 {} Q9  # Run Q9 with 60s timeout", args[0]);
         std::process::exit(0);
     }
 
+    // Query filter from env var (comma-separated, e.g., "Q1,Q6,Q9")
+    let query_filter: HashSet<String> = env::var("QUERY_FILTER")
+        .ok()
+        .map(|s| s.split(',').map(|q| q.trim().to_uppercase()).collect())
+        .unwrap_or_default();
+
     let queries_to_run = if args.len() > 1 {
-        // Run only specified query
+        // CLI arg takes precedence: run only specified query
         let target_query = &args[1];
         eprintln!("Single-query mode: {}", target_query);
         all_queries.into_iter()
             .filter(|(name, _)| *name == target_query)
+            .collect()
+    } else if !query_filter.is_empty() {
+        // Env var filter: run multiple specified queries
+        eprintln!("Query filter mode: {:?}", query_filter);
+        all_queries.into_iter()
+            .filter(|(name, _)| query_filter.contains(&name.to_uppercase()))
             .collect()
     } else {
         // Run all queries
@@ -131,7 +151,11 @@ fn main() {
     };
 
     if queries_to_run.is_empty() {
-        eprintln!("Error: Query '{}' not found. Valid queries: Q1-Q22", args[1]);
+        if args.len() > 1 {
+            eprintln!("Error: Query '{}' not found. Valid queries: Q1-Q22", args[1]);
+        } else {
+            eprintln!("Error: No matching queries for filter {:?}. Valid queries: Q1-Q22", query_filter);
+        }
         eprintln!("Run with --help for usage information.");
         std::process::exit(1);
     }

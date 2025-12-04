@@ -54,8 +54,20 @@ Examples:
   ./scripts/bench --test=tpcc --engine=mysql      Run TPC-C with MySQL
   ./scripts/bench --test=all                      Run all benchmarks
   ./scripts/bench --quick                         Quick CI-friendly subset
-  ./scripts/bench --test=tpch --query=Q1,Q6       Run specific queries
+  ./scripts/bench --test=tpch --query=Q1,Q6       Run only Q1 and Q6 queries
+  ./scripts/bench --test=tpcds --query=Q4,Q11     Run specific TPC-DS queries
+  ./scripts/bench --test=tpcc --txn=new-order     Run only new-order transactions
   ./scripts/bench --test=tpcc --duration=120      Run TPC-C for 120s
+
+Query Filter (--query):
+  Works with TPC-H and TPC-DS benchmarks.
+  Format: Comma-separated list of query names (e.g., Q1,Q6,Q9)
+  Query names are case-insensitive.
+
+Transaction Filter (--txn):
+  Works with TPC-C benchmark.
+  Valid values: new-order, payment, order-status, delivery, stock-level, mixed
+  Only single transaction type supported (multiple values ignored).
         """)
 
     # Test selection
@@ -78,13 +90,13 @@ Examples:
     parser.add_argument(
         "--query",
         type=str,
-        help="Specific queries for TPC-H/TPC-DS (comma-separated, e.g., Q1,Q6)"
+        help="Filter queries for TPC-H/TPC-DS (comma-separated). Examples: Q1,Q6,Q9"
     )
 
     parser.add_argument(
         "--txn",
         type=str,
-        help="Specific transactions for TPC-C (comma-separated, e.g., new-order,payment)"
+        help="Filter transaction type for TPC-C. Options: new-order, payment, order-status, delivery, stock-level, mixed"
     )
 
     # Timing options
@@ -209,11 +221,17 @@ def run_tpch_profiling(config: BenchConfig, timeout: int) -> int:
     print(f"Mode: Profiling (VibeSQL only, detailed timing breakdown)")
     print(f"Timeout: {timeout}s per query")
 
+    # Set up environment with query filter
+    env = os.environ.copy()
+    if config.queries:
+        env["QUERY_FILTER"] = ",".join(config.queries)
+        print(f"Query filter: {env['QUERY_FILTER']}")
+
     # Run the existing bench-tpch.sh script
     cmd = ["./scripts/bench-tpch.sh", "--mode", "standard", "--timeout", str(timeout)]
 
     print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent, env=env)
 
     if result.returncode != 0:
         print(f"❌ TPC-H benchmark failed")
@@ -356,10 +374,21 @@ def run_tpcc(config: BenchConfig) -> int:
         return 1
     
     bench_bin = benchmarks[0]
-    
+
+    # Build command with transaction filter if specified
+    cmd = [bench_bin]
+    if config.transactions and len(config.transactions) == 1:
+        # TPC-C benchmark accepts a single transaction type as CLI arg
+        txn_type = config.transactions[0].lower().replace("_", "-")
+        cmd.append(txn_type)
+        print(f"Transaction filter: {txn_type}")
+    elif config.transactions and len(config.transactions) > 1:
+        print(f"⚠ TPC-C only supports filtering to a single transaction type")
+        print(f"   Running 'mixed' workload instead of {config.transactions}")
+
     with open("/tmp/tpcc_results.txt", "w") as f:
         result = subprocess.run(
-            [bench_bin],
+            cmd,
             cwd=Path(__file__).parent.parent,
             env=env,
             stdout=f,
@@ -385,16 +414,24 @@ def run_tpcds(config: BenchConfig) -> int:
     print("\n" + "=" * 60)
     print("TPC-DS Benchmark")
     print("=" * 60)
-    
+
+    # Set up environment with query filter
+    env = os.environ.copy()
+    if config.queries:
+        env["QUERY_FILTER"] = ",".join(config.queries)
+        print(f"Query filter: {env['QUERY_FILTER']}")
+    if config.scale:
+        env["SCALE_FACTOR"] = str(config.scale)
+
     # Use isolated runner to avoid memory pressure
     print("Running TPC-DS (isolated mode - each engine in separate process)...")
-    
+
     cmd = ["./scripts/bench-tpcds-isolated.sh", "/tmp/tpcds_results.txt"]
-    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
-    
+    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent, env=env)
+
     if result.returncode != 0:
         print("⚠ TPC-DS benchmark completed with warnings")
-    
+
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
