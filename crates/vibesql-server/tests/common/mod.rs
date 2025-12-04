@@ -284,24 +284,48 @@ impl TestClient {
         Ok(self.read_buf.to_vec())
     }
 
-    /// Read until we get a specific message type
+    /// Read until we get a specific message type (with 5 second timeout)
     pub async fn read_until_message_type(&mut self, msg_type: u8) -> std::io::Result<Vec<u8>> {
+        self.read_until_message_type_timeout(msg_type, std::time::Duration::from_secs(5)).await
+    }
+
+    /// Read until we get a specific message type with custom timeout
+    pub async fn read_until_message_type_timeout(&mut self, msg_type: u8, timeout: std::time::Duration) -> std::io::Result<Vec<u8>> {
         let mut all_data = Vec::new();
+        let deadline = tokio::time::Instant::now() + timeout;
+
         loop {
-            let n = self.stream.read_buf(&mut self.read_buf).await?;
-            if n == 0 {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
                 return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "Connection closed",
+                    std::io::ErrorKind::TimedOut,
+                    format!("Timeout waiting for message type 0x{:02X}", msg_type),
                 ));
             }
 
-            all_data.extend_from_slice(&self.read_buf);
-            self.read_buf.clear();
+            match tokio::time::timeout(remaining, self.stream.read_buf(&mut self.read_buf)).await {
+                Ok(Ok(0)) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "Connection closed",
+                    ));
+                }
+                Ok(Ok(_n)) => {
+                    all_data.extend_from_slice(&self.read_buf);
+                    self.read_buf.clear();
 
-            // Check if we have the target message
-            if contains_message_type(&all_data, msg_type) {
-                return Ok(all_data);
+                    // Check if we have the target message
+                    if contains_message_type(&all_data, msg_type) {
+                        return Ok(all_data);
+                    }
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("Timeout waiting for message type 0x{:02X}", msg_type),
+                    ));
+                }
             }
         }
     }
