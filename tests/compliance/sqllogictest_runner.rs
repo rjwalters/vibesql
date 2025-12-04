@@ -346,7 +346,13 @@ impl VibeSqlDB {
             | vibesql_ast::Statement::Prepare(_)
             | vibesql_ast::Statement::Execute(_)
             | vibesql_ast::Statement::Deallocate(_)
-            | vibesql_ast::Statement::Explain(_) => Ok(DBOutput::StatementComplete(0)),
+            | vibesql_ast::Statement::Explain(_)
+            | vibesql_ast::Statement::ScheduleAfter(_)
+            | vibesql_ast::Statement::ScheduleAt(_)
+            | vibesql_ast::Statement::CreateCron(_)
+            | vibesql_ast::Statement::DropCron(_)
+            | vibesql_ast::Statement::AlterCron(_)
+            | vibesql_ast::Statement::CancelSchedule(_) => Ok(DBOutput::StatementComplete(0)),
         }
     }
 
