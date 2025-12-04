@@ -317,18 +317,18 @@ fn has_unqualified_column_ref(expr: &Expression) -> bool {
         }
         Expression::UnaryOp { expr, .. } => has_unqualified_column_ref(expr),
         Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
-            args.iter().any(|a| has_unqualified_column_ref(a))
+            args.iter().any(has_unqualified_column_ref)
         }
         Expression::InList { expr, values, .. } => {
-            has_unqualified_column_ref(expr) || values.iter().any(|v| has_unqualified_column_ref(v))
+            has_unqualified_column_ref(expr) || values.iter().any(has_unqualified_column_ref)
         }
         Expression::Case { operand, when_clauses, else_result } => {
-            operand.as_ref().map_or(false, |o| has_unqualified_column_ref(o))
+            operand.as_ref().is_some_and(|o| has_unqualified_column_ref(o))
                 || when_clauses.iter().any(|c| {
-                    c.conditions.iter().any(|cond| has_unqualified_column_ref(cond))
+                    c.conditions.iter().any(has_unqualified_column_ref)
                         || has_unqualified_column_ref(&c.result)
                 })
-                || else_result.as_ref().map_or(false, |e| has_unqualified_column_ref(e))
+                || else_result.as_ref().is_some_and(|e| has_unqualified_column_ref(e))
         }
         Expression::IsNull { expr, .. } => has_unqualified_column_ref(expr),
         Expression::Cast { expr, .. } => has_unqualified_column_ref(expr),
