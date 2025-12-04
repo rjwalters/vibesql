@@ -50,8 +50,14 @@ pub struct SubscriptionManager {
     /// Configuration for limits and quotas
     config: SubscriptionConfig,
 
-    /// Counter for limit exceeded events (for metrics)
+    /// Counter for global limit exceeded events (for metrics)
     limit_exceeded_count: AtomicUsize,
+
+    /// Counter for result set too large events (for metrics)
+    result_set_exceeded_count: AtomicUsize,
+
+    /// Atomic counter for current subscription count (for lock-free limit checking)
+    subscription_count_atomic: AtomicUsize,
 }
 
 impl SubscriptionManager {
@@ -67,6 +73,8 @@ impl SubscriptionManager {
             table_index: DashMap::new(),
             config,
             limit_exceeded_count: AtomicUsize::new(0),
+            result_set_exceeded_count: AtomicUsize::new(0),
+            subscription_count_atomic: AtomicUsize::new(0),
         }
     }
 
@@ -103,20 +111,43 @@ impl SubscriptionManager {
         query: String,
         notify_tx: mpsc::Sender<SubscriptionUpdate>,
     ) -> Result<SubscriptionId, SubscriptionError> {
-        // Check global limit before creating subscription
-        let current_count = self.subscriptions.len();
-        if current_count >= self.config.max_global {
-            self.limit_exceeded_count.fetch_add(1, Ordering::Relaxed);
-            return Err(SubscriptionError::GlobalLimitExceeded {
-                current: current_count,
-                max: self.config.max_global,
-            });
+        // Atomically reserve a slot to prevent TOCTOU race condition
+        // Use compare-and-swap loop to safely increment the counter
+        loop {
+            let current_count = self.subscription_count_atomic.load(Ordering::Acquire);
+            if current_count >= self.config.max_global {
+                self.limit_exceeded_count.fetch_add(1, Ordering::Relaxed);
+                return Err(SubscriptionError::GlobalLimitExceeded {
+                    current: current_count,
+                    max: self.config.max_global,
+                });
+            }
+
+            // Try to atomically increment the count
+            match self.subscription_count_atomic.compare_exchange(
+                current_count,
+                current_count + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break, // Successfully reserved a slot
+                Err(_) => continue, // Another thread changed the count, retry
+            }
         }
 
         // Parse query and extract table dependencies
-        let tables = self.extract_tables(&query)?;
+        let tables = match self.extract_tables(&query) {
+            Ok(tables) => tables,
+            Err(e) => {
+                // Release the reserved slot on parse error
+                self.subscription_count_atomic.fetch_sub(1, Ordering::Release);
+                return Err(e);
+            }
+        };
 
         if tables.is_empty() {
+            // Release the reserved slot
+            self.subscription_count_atomic.fetch_sub(1, Ordering::Release);
             return Err(SubscriptionError::ParseError(
                 "Query must reference at least one table".to_string(),
             ));
@@ -156,6 +187,9 @@ impl SubscriptionManager {
     pub fn unsubscribe(&self, id: SubscriptionId) {
         if let Some((_, subscription)) = self.subscriptions.remove(&id) {
             debug!(subscription_id = %id, "Removing subscription");
+
+            // Decrement the atomic counter
+            self.subscription_count_atomic.fetch_sub(1, Ordering::Release);
 
             // Remove from table index
             for table in &subscription.tables {
@@ -451,6 +485,7 @@ impl SubscriptionManager {
 
         // Check result set size limit
         if rows.len() > self.config.max_result_rows {
+            self.result_set_exceeded_count.fetch_add(1, Ordering::Relaxed);
             return Err(SubscriptionError::ResultSetTooLarge {
                 rows: rows.len(),
                 max: self.config.max_result_rows,
@@ -484,9 +519,14 @@ impl SubscriptionManager {
         &self.config
     }
 
-    /// Get the number of times a limit was exceeded (for metrics)
+    /// Get the number of times the global limit was exceeded (for metrics)
     pub fn limit_exceeded_count(&self) -> usize {
         self.limit_exceeded_count.load(Ordering::Relaxed)
+    }
+
+    /// Get the number of times a result set was too large (for metrics)
+    pub fn result_set_exceeded_count(&self) -> usize {
+        self.result_set_exceeded_count.load(Ordering::Relaxed)
     }
 }
 
@@ -988,5 +1028,8 @@ mod tests {
         // Send initial results should fail due to result set too large
         let result = manager.send_initial_results(id, &db).await;
         assert!(matches!(result, Err(SubscriptionError::ResultSetTooLarge { rows: 1, max: 0 })));
+
+        // Metrics should reflect the result set exceeded event
+        assert_eq!(manager.result_set_exceeded_count(), 1);
     }
 }
