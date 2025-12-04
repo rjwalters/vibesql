@@ -17,6 +17,36 @@ use vibesql_storage::Database;
 
 use super::types::*;
 
+/// Pagination configuration
+#[derive(Debug, Clone)]
+pub struct PaginationParams {
+    /// Number of rows to skip
+    pub offset: usize,
+    /// Maximum rows to return
+    pub limit: usize,
+}
+
+impl PaginationParams {
+    /// Create pagination from request parameters
+    pub fn from_request(limit: Option<usize>, offset: Option<usize>) -> Self {
+        Self {
+            offset: offset.unwrap_or(0),
+            limit: limit.unwrap_or(usize::MAX),
+        }
+    }
+
+    /// Apply pagination to results
+    pub fn apply(&self, rows: Vec<Vec<serde_json::Value>>) -> (Vec<Vec<serde_json::Value>>, usize) {
+        let total_count = rows.len();
+        let paginated = rows
+            .into_iter()
+            .skip(self.offset)
+            .take(self.limit)
+            .collect();
+        (paginated, total_count)
+    }
+}
+
 /// HTTP server state
 #[derive(Clone)]
 pub struct HttpState {
@@ -44,12 +74,12 @@ async fn health_check() -> impl IntoResponse {
     })
 }
 
-/// Execute a SQL query
+/// Execute a SQL query with optional pagination
 async fn execute_query(
     State(_state): State<HttpState>,
     Json(req): Json<QueryRequest>,
 ) -> impl IntoResponse {
-    debug!("Executing query: {}", req.sql);
+    debug!("Executing query: {} (limit: {:?}, offset: {:?})", req.sql, req.limit, req.offset);
 
     // Convert JSON parameters to SqlValue
     let params = match req.to_sql_values() {
@@ -94,10 +124,17 @@ async fn execute_query(
                         .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
                         .collect();
 
+                    // Apply pagination
+                    let pagination = PaginationParams::from_request(req.limit, req.offset);
+                    let (paginated_rows, total_count) = pagination.apply(row_values);
+
                     let response = QueryResponse {
                         columns: column_names,
-                        row_count: row_values.len(),
-                        rows: row_values,
+                        row_count: paginated_rows.len(),
+                        rows: paginated_rows,
+                        total_count: Some(total_count),
+                        offset: req.offset,
+                        limit: req.limit,
                     };
 
                     (StatusCode::OK, Json(response)).into_response()
@@ -354,4 +391,89 @@ async fn subscribe_stream(
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pagination_from_request_defaults() {
+        let pagination = PaginationParams::from_request(None, None);
+        assert_eq!(pagination.offset, 0);
+        assert_eq!(pagination.limit, usize::MAX);
+    }
+
+    #[test]
+    fn test_pagination_from_request_with_limit() {
+        let pagination = PaginationParams::from_request(Some(10), None);
+        assert_eq!(pagination.offset, 0);
+        assert_eq!(pagination.limit, 10);
+    }
+
+    #[test]
+    fn test_pagination_from_request_with_offset() {
+        let pagination = PaginationParams::from_request(None, Some(5));
+        assert_eq!(pagination.offset, 5);
+        assert_eq!(pagination.limit, usize::MAX);
+    }
+
+    #[test]
+    fn test_pagination_from_request_with_both() {
+        let pagination = PaginationParams::from_request(Some(10), Some(5));
+        assert_eq!(pagination.offset, 5);
+        assert_eq!(pagination.limit, 10);
+    }
+
+    #[test]
+    fn test_pagination_apply_basic() {
+        let pagination = PaginationParams::from_request(Some(2), Some(1));
+        let rows = vec![
+            vec![serde_json::json!("a")],
+            vec![serde_json::json!("b")],
+            vec![serde_json::json!("c")],
+            vec![serde_json::json!("d")],
+        ];
+
+        let (paginated, total) = pagination.apply(rows);
+        assert_eq!(total, 4, "Total should be 4");
+        assert_eq!(paginated.len(), 2, "Paginated should have 2 rows");
+    }
+
+    #[test]
+    fn test_pagination_apply_offset_exceeds_total() {
+        let pagination = PaginationParams::from_request(Some(10), Some(100));
+        let rows = vec![
+            vec![serde_json::json!("a")],
+            vec![serde_json::json!("b")],
+        ];
+
+        let (paginated, total) = pagination.apply(rows);
+        assert_eq!(total, 2, "Total should be 2");
+        assert_eq!(paginated.len(), 0, "Paginated should be empty");
+    }
+
+    #[test]
+    fn test_pagination_apply_no_limit() {
+        let pagination = PaginationParams::from_request(None, Some(1));
+        let rows = vec![
+            vec![serde_json::json!("a")],
+            vec![serde_json::json!("b")],
+            vec![serde_json::json!("c")],
+        ];
+
+        let (paginated, total) = pagination.apply(rows);
+        assert_eq!(total, 3, "Total should be 3");
+        assert_eq!(paginated.len(), 2, "Should return remaining rows");
+    }
+
+    #[test]
+    fn test_pagination_apply_empty_rows() {
+        let pagination = PaginationParams::from_request(Some(10), Some(5));
+        let rows: Vec<Vec<serde_json::Value>> = vec![];
+
+        let (paginated, total) = pagination.apply(rows);
+        assert_eq!(total, 0, "Total should be 0");
+        assert_eq!(paginated.len(), 0, "Paginated should be empty");
+    }
 }
