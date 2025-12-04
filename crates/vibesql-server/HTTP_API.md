@@ -120,6 +120,124 @@ Get all matching records with count:
 ```
 The response will include `total_count` with the total matching rows.
 
+### Subscribe to Query Changes (SSE)
+
+```
+GET /api/subscribe?query=SELECT...&params=...
+Content-Type: text/event-stream
+```
+
+Subscribe to real-time updates for a query using Server-Sent Events (SSE). The server will send initial results and subsequent updates whenever the underlying data changes.
+
+#### Request Parameters
+
+- `query` (string, required): URL-encoded SQL SELECT query
+- `params` (array, optional): JSON array of query parameters (URL-encoded)
+
+#### Response Format
+
+The response is streamed as `text/event-stream` with the following event types:
+
+**`initial` event** - Sent first with the initial result set:
+```
+event: initial
+data: {"columns":["id","name","email"],"rows":[[1,"Alice","alice@example.com"],[2,"Bob","bob@example.com"]]}
+```
+
+**`update` event** - Sent when the full result set changes:
+```
+event: update
+data: {"columns":["id","name","email"],"rows":[[1,"Alice","alice@example.com"],[2,"Bob","bob@example.com"],[3,"Charlie","charlie@example.com"]]}
+```
+
+**`delta` event** - Sent for incremental changes (when supported):
+```
+event: delta
+data: {"inserts":[[3,"Charlie","charlie@example.com"]],"updates":[],"deletes":[]}
+```
+
+**`error` event** - Sent if an error occurs:
+```
+event: error
+data: {"error":"Query execution failed: invalid column name"}
+```
+
+**Keepalive** - Empty comments sent every 30 seconds to keep the connection alive:
+```
+: keepalive
+```
+
+#### cURL Example
+
+```bash
+curl "http://localhost:8080/api/subscribe?query=SELECT%20*%20FROM%20users" \
+  --no-buffer
+```
+
+#### JavaScript Example
+
+```javascript
+// Simple event listener approach
+const eventSource = new EventSource(
+  'http://localhost:8080/api/subscribe?query=SELECT%20*%20FROM%20users'
+);
+
+// Handle initial result set
+eventSource.addEventListener('initial', (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Initial data:', data);
+  renderTable(data);
+});
+
+// Handle updates
+eventSource.addEventListener('update', (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Data updated:', data);
+  renderTable(data);
+});
+
+// Handle incremental changes
+eventSource.addEventListener('delta', (event) => {
+  const delta = JSON.parse(event.data);
+  console.log('Changes:', delta);
+  // Apply inserts, updates, deletes to local data
+  applyDelta(delta);
+});
+
+// Handle errors
+eventSource.addEventListener('error', (event) => {
+  const error = JSON.parse(event.data);
+  console.error('Subscription error:', error);
+});
+
+// Close subscription when done
+eventSource.close();
+```
+
+#### JavaScript Example with Parameters
+
+```javascript
+// Subscribe with parameterized query
+const params = JSON.stringify(['active']);
+const eventSource = new EventSource(
+  `http://localhost:8080/api/subscribe?query=SELECT%20*%20FROM%20users%20WHERE%20status%20%3D%20%24%31&params=${encodeURIComponent(params)}`
+);
+
+eventSource.addEventListener('initial', (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Filtered results:', data);
+});
+```
+
+#### Behavior Notes
+
+- The connection remains open, streaming events as data changes
+- Keepalive messages are sent automatically to prevent connection timeouts
+- Each subscription is independent and maintains its own connection
+- The query is re-executed whenever monitored tables are modified
+- SSE connections typically close after 24 hours or on network inactivity
+- Client should handle reconnection logic for long-lived subscriptions
+
 ### List Tables
 
 ```
@@ -246,9 +364,9 @@ Status codes:
 ## Future Phases
 
 ### Phase 2: Real-time HTTP
-- Server-Sent Events (SSE) for subscriptions
-- WebSocket support for persistent connections
-- Connection management and pooling
+- [x] Server-Sent Events (SSE) for subscriptions
+- [ ] WebSocket support for persistent connections
+- [ ] Connection management and pooling
 
 ### Phase 3: GraphQL
 - Auto-generated GraphQL schema from SQL tables
