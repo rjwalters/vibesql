@@ -108,6 +108,7 @@ mod triggers;
 mod truncate_cascade_tests;
 mod truncate_table_tests;
 mod unique_index_tests;
+mod vector_distance_operators;
 mod view_tests;
 mod sql_mode_tests;
 mod secondary_index_fast_path;

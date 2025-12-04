@@ -16,6 +16,12 @@ pub enum MultiCharOperator {
     NotEqualAlt,
     /// || (string concatenation)
     Concat,
+    /// <-> (cosine distance - pgvector compatible)
+    CosineDistance,
+    /// <#> (negative inner product - pgvector compatible)
+    NegativeInnerProduct,
+    /// <=> (L2/Euclidean distance - pgvector compatible)
+    L2Distance,
 }
 
 impl fmt::Display for MultiCharOperator {
@@ -26,6 +32,9 @@ impl fmt::Display for MultiCharOperator {
             MultiCharOperator::NotEqual => write!(f, "!="),
             MultiCharOperator::NotEqualAlt => write!(f, "<>"),
             MultiCharOperator::Concat => write!(f, "||"),
+            MultiCharOperator::CosineDistance => write!(f, "<->"),
+            MultiCharOperator::NegativeInnerProduct => write!(f, "<#>"),
+            MultiCharOperator::L2Distance => write!(f, "<=>"),
         }
     }
 }
