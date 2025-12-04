@@ -4,6 +4,20 @@
 //! benchmark tables across multiple database engines (VibeSQL, SQLite, DuckDB, MySQL).
 
 use super::data::SysbenchData;
+
+// =============================================================================
+// SQL Statement Constants
+// =============================================================================
+// Note: Column is named "padding" instead of "pad" because PAD is a SQL keyword.
+// These constants ensure consistency across all engines.
+
+/// Insert statement for sysbench table (parameterized)
+/// Parameters: id, k, c, padding
+pub const INSERT_SQL: &str = "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)";
+
+/// Insert statement for SQLite/DuckDB (numbered parameters)
+#[cfg(feature = "benchmark-comparison")]
+pub const INSERT_SQL_NUMBERED: &str = "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)";
 use vibesql_storage::Database as VibeDB;
 
 #[cfg(feature = "benchmark-comparison")]

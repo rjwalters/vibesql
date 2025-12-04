@@ -423,6 +423,23 @@ def run_tpcds(config: BenchConfig) -> int:
     if config.scale:
         env["SCALE_FACTOR"] = str(config.scale)
 
+    # Start MySQL Docker container for MySQL comparison
+    # Always try to start MySQL for TPC-DS - the isolated script handles it gracefully
+    print("\nStarting MySQL Docker container...")
+    result = subprocess.run(
+        ["./scripts/ensure-mysql-docker.sh"],
+        cwd=Path(__file__).parent.parent,
+        capture_output=True,
+        text=True
+    )
+    if result.returncode == 0:
+        mysql_url = result.stdout.strip()
+        if mysql_url:
+            env["MYSQL_URL"] = mysql_url
+            print(f"✓ MySQL ready: {mysql_url}")
+    else:
+        print("⚠ MySQL unavailable (Docker not available, skipping MySQL comparison)")
+
     # Use isolated runner to avoid memory pressure
     print("Running TPC-DS (isolated mode - each engine in separate process)...")
 

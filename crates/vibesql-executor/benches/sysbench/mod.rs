@@ -18,5 +18,10 @@ pub mod schema;
 pub use data::SysbenchData;
 pub use schema::load_vibesql;
 
+// SQL constants for consistent column naming across engines
+pub use schema::INSERT_SQL;
+#[cfg(feature = "benchmark-comparison")]
+pub use schema::INSERT_SQL_NUMBERED;
+
 #[cfg(feature = "benchmark-comparison")]
 pub use schema::{load_duckdb, load_mysql, load_sqlite};

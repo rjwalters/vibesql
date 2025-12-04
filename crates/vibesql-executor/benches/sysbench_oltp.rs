@@ -282,7 +282,7 @@ fn sqlite_point_select(conn: &SqliteConn, id: i64) -> usize {
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_insert(conn: &SqliteConn, id: i64, k: i64, c: &str, pad: &str) {
     let mut stmt = conn
-        .prepare_cached("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
+        .prepare_cached(sysbench::INSERT_SQL_NUMBERED)
         .unwrap();
     stmt.execute(rusqlite::params![id, k, c, pad]).unwrap();
 }
@@ -383,7 +383,7 @@ fn duckdb_point_select(conn: &DuckDBConn, id: i64) -> usize {
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_insert(conn: &DuckDBConn, id: i64, k: i64, c: &str, pad: &str) {
     let mut stmt = conn
-        .prepare_cached("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
+        .prepare_cached(sysbench::INSERT_SQL_NUMBERED)
         .unwrap();
     stmt.execute(duckdb::params![id, k, c, pad]).unwrap();
 }
