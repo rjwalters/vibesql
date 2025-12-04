@@ -62,12 +62,13 @@ pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptio
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
 pub use error::{SubscriptionErrorKind, classify_error, classify_error_str};
+// SubscriptionMetrics is defined inline in this module and exported directly
 
 // ============================================================================
 // Subscription Configuration
 // ============================================================================
 
-/// Configuration for subscription limits and quotas
+/// Configuration for subscription limits, quotas, and backpressure
 ///
 /// Provides configurable limits to prevent resource exhaustion attacks
 /// and ensure fair resource sharing between clients.
@@ -99,6 +100,17 @@ pub struct SubscriptionConfig {
     /// Prevents rapid subscription creation that could degrade performance.
     #[serde(default = "default_rate_limit_per_second")]
     pub rate_limit_per_second: u32,
+
+    /// Channel buffer size per subscription (default: 64)
+    /// Larger values reduce chance of drops but use more memory.
+    /// Smaller values detect slow consumers faster.
+    #[serde(default = "default_channel_buffer_size")]
+    pub channel_buffer_size: usize,
+
+    /// Slow consumer threshold as percentage of buffer full (default: 80)
+    /// When channel depth exceeds this percentage, warn about slow consumer
+    #[serde(default = "default_slow_consumer_threshold_percent")]
+    pub slow_consumer_threshold_percent: u8,
 }
 
 fn default_max_per_connection() -> usize {
@@ -117,6 +129,14 @@ fn default_rate_limit_per_second() -> u32 {
     10
 }
 
+fn default_channel_buffer_size() -> usize {
+    64
+}
+
+fn default_slow_consumer_threshold_percent() -> u8 {
+    80
+}
+
 impl Default for SubscriptionConfig {
     fn default() -> Self {
         Self {
@@ -124,8 +144,33 @@ impl Default for SubscriptionConfig {
             max_global: default_max_global(),
             max_result_rows: default_max_result_rows(),
             rate_limit_per_second: default_rate_limit_per_second(),
+            channel_buffer_size: default_channel_buffer_size(),
+            slow_consumer_threshold_percent: default_slow_consumer_threshold_percent(),
         }
     }
+}
+
+// ============================================================================
+// Subscription Metrics
+// ============================================================================
+
+/// Metrics for a single subscription
+///
+/// Provides observability into subscription health and backpressure.
+#[derive(Debug, Clone, Default)]
+pub struct SubscriptionMetrics {
+    /// Subscription ID
+    pub subscription_id: Option<SubscriptionId>,
+    /// Total updates successfully sent to this subscription
+    pub updates_sent: u64,
+    /// Total updates dropped due to channel being full
+    pub updates_dropped: u64,
+    /// Configured channel buffer size
+    pub channel_buffer_size: usize,
+    /// Current channel capacity (available slots)
+    pub channel_capacity: usize,
+    /// Slow consumer threshold percentage
+    pub slow_consumer_threshold_percent: u8,
 }
 
 // ============================================================================
@@ -259,6 +304,14 @@ pub struct Subscription {
     pub retry_policy: SubscriptionRetryPolicy,
     /// Current retry attempt count (resets on successful execution)
     pub retry_count: u32,
+    /// Total updates sent to this subscription
+    pub updates_sent: u64,
+    /// Total updates dropped due to channel being full
+    pub updates_dropped: u64,
+    /// Buffer size for the subscription channel
+    pub channel_buffer_size: usize,
+    /// Slow consumer threshold percentage
+    pub slow_consumer_threshold_percent: u8,
 }
 
 impl Subscription {
@@ -287,6 +340,33 @@ impl Subscription {
             notify_tx,
             retry_policy,
             retry_count: 0,
+            updates_sent: 0,
+            updates_dropped: 0,
+            channel_buffer_size: 64, // default buffer size
+            slow_consumer_threshold_percent: 80,
+        }
+    }
+
+    /// Create a new subscription with custom configuration
+    pub fn with_config(
+        query: String,
+        tables: HashSet<String>,
+        notify_tx: mpsc::Sender<SubscriptionUpdate>,
+        config: &SubscriptionConfig,
+    ) -> Self {
+        Self {
+            id: SubscriptionId::new(),
+            query,
+            tables,
+            last_result_hash: 0,
+            last_result: None,
+            notify_tx,
+            retry_policy: SubscriptionRetryPolicy::default(),
+            retry_count: 0,
+            updates_sent: 0,
+            updates_dropped: 0,
+            channel_buffer_size: config.channel_buffer_size,
+            slow_consumer_threshold_percent: config.slow_consumer_threshold_percent,
         }
     }
 }

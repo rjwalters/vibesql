@@ -154,7 +154,7 @@ impl SubscriptionManager {
             ));
         }
 
-        // Create subscription
+        // Create subscription with default channel buffer size
         let subscription = Subscription::new(query.clone(), tables.clone(), notify_tx);
         let id = subscription.id;
 
@@ -370,12 +370,56 @@ impl SubscriptionManager {
                         subscription.last_result_hash = new_hash;
                         subscription.last_result = Some(result_rows);
 
-                        // Send update - ignore errors (channel may be closed)
-                        if subscription.notify_tx.send(update).await.is_err() {
-                            trace!(
+                        // Check for slow consumer before sending
+                        let capacity = subscription.notify_tx.capacity();
+                        let max_capacity = subscription.notify_tx.max_capacity();
+                        let used = max_capacity.saturating_sub(capacity);
+                        let usage_percent = if max_capacity > 0 {
+                            (used * 100) / max_capacity
+                        } else {
+                            0
+                        };
+
+                        if usage_percent >= subscription.slow_consumer_threshold_percent as usize {
+                            warn!(
                                 subscription_id = %id,
-                                "Notification channel closed, subscription will be cleaned up"
+                                used = used,
+                                max_capacity = max_capacity,
+                                usage_percent = usage_percent,
+                                threshold = subscription.slow_consumer_threshold_percent,
+                                "Slow consumer detected: subscription channel is {}% full. \
+                                 Consider increasing channel_buffer_size or client is consuming too slowly.",
+                                usage_percent
                             );
+                        }
+
+                        // Use try_send for non-blocking send with backpressure detection
+                        match subscription.notify_tx.try_send(update) {
+                            Ok(()) => {
+                                subscription.updates_sent += 1;
+                                trace!(
+                                    subscription_id = %id,
+                                    updates_sent = subscription.updates_sent,
+                                    "Update sent successfully"
+                                );
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                subscription.updates_dropped += 1;
+                                warn!(
+                                    subscription_id = %id,
+                                    updates_dropped = subscription.updates_dropped,
+                                    channel_buffer_size = subscription.channel_buffer_size,
+                                    "Subscription channel full, dropping update. \
+                                     Consider increasing channel_buffer_size in SubscriptionConfig \
+                                     or ensure client is consuming updates faster."
+                                );
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                trace!(
+                                    subscription_id = %id,
+                                    "Notification channel closed, subscription will be cleaned up"
+                                );
+                            }
                         }
                     } else {
                         trace!(
@@ -607,6 +651,44 @@ impl SubscriptionManager {
     /// Get the number of times a result set was too large (for metrics)
     pub fn result_set_exceeded_count(&self) -> usize {
         self.result_set_exceeded_count.load(Ordering::Relaxed)
+    }
+
+    /// Get metrics for a specific subscription
+    ///
+    /// Returns metrics including updates sent, dropped, and channel health.
+    /// Returns None if the subscription doesn't exist.
+    pub fn get_subscription_metrics(&self, id: SubscriptionId) -> Option<super::SubscriptionMetrics> {
+        self.subscriptions.get(&id).map(|sub| {
+            super::SubscriptionMetrics {
+                subscription_id: Some(sub.id),
+                updates_sent: sub.updates_sent,
+                updates_dropped: sub.updates_dropped,
+                channel_buffer_size: sub.channel_buffer_size,
+                channel_capacity: sub.notify_tx.capacity(),
+                slow_consumer_threshold_percent: sub.slow_consumer_threshold_percent,
+            }
+        })
+    }
+
+    /// Get metrics for all active subscriptions
+    ///
+    /// Returns a vector of metrics for all subscriptions, useful for
+    /// monitoring and alerting on subscription health.
+    pub fn get_all_metrics(&self) -> Vec<super::SubscriptionMetrics> {
+        self.subscriptions
+            .iter()
+            .map(|entry| {
+                let sub = entry.value();
+                super::SubscriptionMetrics {
+                    subscription_id: Some(sub.id),
+                    updates_sent: sub.updates_sent,
+                    updates_dropped: sub.updates_dropped,
+                    channel_buffer_size: sub.channel_buffer_size,
+                    channel_capacity: sub.notify_tx.capacity(),
+                    slow_consumer_threshold_percent: sub.slow_consumer_threshold_percent,
+                }
+            })
+            .collect()
     }
 }
 
@@ -1063,6 +1145,7 @@ mod tests {
             max_global: 2,
             max_result_rows: 10000,
             rate_limit_per_second: 100,
+            ..Default::default()
         };
         let manager = SubscriptionManager::with_config(config);
 
@@ -1090,6 +1173,7 @@ mod tests {
             max_global: 10000,
             max_result_rows: 0, // No rows allowed
             rate_limit_per_second: 100,
+            ..Default::default()
         };
         let manager = SubscriptionManager::with_config(config);
         let mut db = setup_test_db();
@@ -1178,5 +1262,114 @@ mod tests {
         assert_eq!(sub.retry_count, 0);
         assert_eq!(sub.retry_policy.max_retries, 5);
         assert_eq!(sub.retry_policy.base_delay_ms, 500);
+    }
+
+    #[test]
+    fn test_subscription_backpressure_fields_initialization() {
+        let (tx, _rx) = mpsc::channel(16);
+        let tables: std::collections::HashSet<_> = vec!["users".to_string()].into_iter().collect();
+
+        let sub = Subscription::new("SELECT * FROM users".to_string(), tables, tx);
+
+        // Verify backpressure tracking fields are initialized
+        assert_eq!(sub.updates_sent, 0);
+        assert_eq!(sub.updates_dropped, 0);
+        assert_eq!(sub.channel_buffer_size, 64); // default
+        assert_eq!(sub.slow_consumer_threshold_percent, 80); // default
+    }
+
+    #[test]
+    fn test_subscription_with_config_backpressure() {
+        use crate::subscription::SubscriptionConfig;
+
+        let (tx, _rx) = mpsc::channel(16);
+        let tables: std::collections::HashSet<_> = vec!["users".to_string()].into_iter().collect();
+
+        let config = SubscriptionConfig {
+            max_per_connection: 100,
+            max_global: 10000,
+            max_result_rows: 10000,
+            rate_limit_per_second: 100,
+            channel_buffer_size: 128,
+            slow_consumer_threshold_percent: 90,
+        };
+
+        let sub = Subscription::with_config(
+            "SELECT * FROM users".to_string(),
+            tables,
+            tx,
+            &config,
+        );
+
+        // Verify config values are applied
+        assert_eq!(sub.updates_sent, 0);
+        assert_eq!(sub.updates_dropped, 0);
+        assert_eq!(sub.channel_buffer_size, 128);
+        assert_eq!(sub.slow_consumer_threshold_percent, 90);
+    }
+
+    #[test]
+    fn test_get_subscription_metrics() {
+        let manager = SubscriptionManager::new();
+        let (tx, _rx) = mpsc::channel(16);
+
+        let id = manager
+            .subscribe("SELECT * FROM users".to_string(), tx)
+            .unwrap();
+
+        // Get metrics for the subscription
+        let metrics = manager.get_subscription_metrics(id);
+        assert!(metrics.is_some());
+
+        let metrics = metrics.unwrap();
+        assert_eq!(metrics.subscription_id, Some(id));
+        assert_eq!(metrics.updates_sent, 0);
+        assert_eq!(metrics.updates_dropped, 0);
+        assert_eq!(metrics.channel_buffer_size, 64);
+        assert_eq!(metrics.slow_consumer_threshold_percent, 80);
+    }
+
+    #[test]
+    fn test_get_subscription_metrics_not_found() {
+        let manager = SubscriptionManager::new();
+
+        // Get metrics for a non-existent subscription
+        let fake_id = SubscriptionId::new();
+        let metrics = manager.get_subscription_metrics(fake_id);
+        assert!(metrics.is_none());
+    }
+
+    #[test]
+    fn test_get_all_metrics() {
+        let manager = SubscriptionManager::new();
+        let (tx1, _rx1) = mpsc::channel(16);
+        let (tx2, _rx2) = mpsc::channel(16);
+
+        manager
+            .subscribe("SELECT * FROM users".to_string(), tx1)
+            .unwrap();
+        manager
+            .subscribe("SELECT * FROM orders".to_string(), tx2)
+            .unwrap();
+
+        // Get all metrics
+        let all_metrics = manager.get_all_metrics();
+        assert_eq!(all_metrics.len(), 2);
+
+        // Verify each subscription has metrics
+        for metrics in all_metrics {
+            assert!(metrics.subscription_id.is_some());
+            assert_eq!(metrics.updates_sent, 0);
+            assert_eq!(metrics.updates_dropped, 0);
+        }
+    }
+
+    #[test]
+    fn test_get_all_metrics_empty() {
+        let manager = SubscriptionManager::new();
+
+        // Get all metrics when no subscriptions exist
+        let all_metrics = manager.get_all_metrics();
+        assert!(all_metrics.is_empty());
     }
 }
