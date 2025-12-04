@@ -1413,36 +1413,66 @@ impl<'a> MysqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse tax rate
-        let _: Option<(f64,)> = self.conn.exec_first(
+        if let Err(e) = self.conn.exec_drop(
             "SELECT w_tax FROM warehouse WHERE w_id = ?",
             (input.w_id,),
-        ).ok().flatten();
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Warehouse query failed: {}", e)),
+            };
+        }
 
         // Get district info
-        let _: Option<(f64, i32)> = self.conn.exec_first(
+        if let Err(e) = self.conn.exec_drop(
             "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
             (input.w_id, input.d_id),
-        ).ok().flatten();
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("District query failed: {}", e)),
+            };
+        }
 
         // Get customer info
-        let _: Option<(f64, String, String)> = self.conn.exec_first(
+        if let Err(e) = self.conn.exec_drop(
             "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
             (input.w_id, input.d_id, input.c_id),
-        ).ok().flatten();
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Customer query failed: {}", e)),
+            };
+        }
 
         // Process each order line - query item and stock info
         for item in &input.items {
             // Get item info
-            let _: Option<(f64, String, String)> = self.conn.exec_first(
+            if let Err(e) = self.conn.exec_drop(
                 "SELECT i_price, i_name, i_data FROM item WHERE i_id = ?",
                 (item.ol_i_id,),
-            ).ok().flatten();
+            ) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Item query failed: {}", e)),
+                };
+            }
 
             // Get stock info
-            let _: Option<(i32, i32, i32)> = self.conn.exec_first(
+            if let Err(e) = self.conn.exec_drop(
                 "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = ? AND s_w_id = ?",
                 (item.ol_i_id, item.ol_supply_w_id),
-            ).ok().flatten();
+            ) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Stock query failed: {}", e)),
+                };
+            }
         }
 
         TransactionResult {
@@ -1457,28 +1487,52 @@ impl<'a> MysqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse info
-        let _: Option<(String, String, String, String, String, String)> = self.conn.exec_first(
+        if let Err(e) = self.conn.exec_drop(
             "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = ?",
             (input.w_id,),
-        ).ok().flatten();
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Warehouse query failed: {}", e)),
+            };
+        }
 
         // Get district info
-        let _: Option<(String, String, String, String, String, String)> = self.conn.exec_first(
+        if let Err(e) = self.conn.exec_drop(
             "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = ? AND d_id = ?",
             (input.w_id, input.d_id),
-        ).ok().flatten();
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("District query failed: {}", e)),
+            };
+        }
 
         // Get customer (by ID or last name)
         if let Some(c_id) = input.c_id {
-            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+            if let Err(e) = self.conn.exec_drop(
                 "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
                 (input.c_w_id, input.c_d_id, c_id),
-            ).ok().flatten();
+            ) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Customer query failed: {}", e)),
+                };
+            }
         } else {
-            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+            if let Err(e) = self.conn.exec_drop(
                 "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
                 (input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()),
-            ).ok().flatten();
+            ) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Customer query failed: {}", e)),
+                };
+            }
         }
 
         TransactionResult {
@@ -1494,24 +1548,42 @@ impl<'a> MysqlTransactionExecutor<'a> {
 
         // Get customer (by ID or last name)
         let c_id = if let Some(c_id) = input.c_id {
-            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+            if let Err(e) = self.conn.exec_drop(
                 "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
                 (input.w_id, input.d_id, c_id),
-            ).ok().flatten();
+            ) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Customer query failed: {}", e)),
+                };
+            }
             c_id
         } else {
-            let _: Option<(i32, String, String, String, f64)> = self.conn.exec_first(
+            if let Err(e) = self.conn.exec_drop(
                 "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
                 (input.w_id, input.d_id, input.c_last.as_ref().unwrap()),
-            ).ok().flatten();
+            ) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Customer query failed: {}", e)),
+                };
+            }
             1 // Default c_id for order lookup
         };
 
         // Get last order for customer
-        let _: Option<(i32, String, Option<i32>)> = self.conn.exec_first(
+        if let Err(e) = self.conn.exec_drop(
             "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = ? AND o_d_id = ? AND o_c_id = ? ORDER BY o_id DESC LIMIT 1",
             (input.w_id, input.d_id, c_id),
-        ).ok().flatten();
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Order query failed: {}", e)),
+            };
+        }
 
         TransactionResult {
             success: true,
@@ -1526,10 +1598,16 @@ impl<'a> MysqlTransactionExecutor<'a> {
 
         // Process each district - query for new orders
         for d_id in 1..=10 {
-            let _: Option<(i32,)> = self.conn.exec_first(
+            if let Err(e) = self.conn.exec_drop(
                 "SELECT no_o_id FROM new_order WHERE no_w_id = ? AND no_d_id = ? ORDER BY no_o_id LIMIT 1",
                 (input.w_id, d_id),
-            ).ok().flatten();
+            ) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("New order query failed: {}", e)),
+                };
+            }
         }
 
         TransactionResult {
@@ -1544,21 +1622,43 @@ impl<'a> MysqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get district next order ID
-        let d_next_o_id: i32 = self.conn.exec_first(
+        let d_next_o_id: i32 = match self.conn.exec_first(
             "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
             (input.w_id, input.d_id),
-        ).ok().flatten().map(|(id,): (i32,)| id).unwrap_or(3001);
+        ) {
+            Ok(Some((id,))) => id,
+            Ok(None) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some("District not found".to_string()),
+                };
+            }
+            Err(e) => {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("District query failed: {}", e)),
+                };
+            }
+        };
 
         // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
         // Use subquery approach for better optimization
         let ol_o_id_min = d_next_o_id - 20;
-        let _: Option<(i64,)> = self.conn.exec_first(
+        if let Err(e) = self.conn.exec_drop(
             "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
              WHERE ol_w_id = ? AND ol_d_id = ? \
              AND ol_o_id >= ? AND ol_o_id < ? \
              AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?)",
             (input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold),
-        ).ok().flatten();
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Stock level query failed: {}", e)),
+            };
+        }
 
         TransactionResult {
             success: true,
