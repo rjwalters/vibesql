@@ -60,9 +60,7 @@ jobs:
   # ============================================================================
   # JOB 2: TPC-H Benchmarks
   # ============================================================================
-  # NOTE: TPC-H benchmarks are currently too slow for CI (5+ minutes per query)
-  # This job is allowed to fail until we implement faster micro-benchmarks
-  benchmark:
+  tpch:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: test
@@ -85,7 +83,6 @@ jobs:
     steps:
       - name: Free disk space
         run: |
-          # Remove large pre-installed software to free disk space
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
@@ -110,60 +107,149 @@ jobs:
       - name: Run TPC-H benchmarks (quick mode)
         continue-on-error: true
         run: |
-          python3 scripts/run_tpch_benchmarks.py --quick --output benchmark_results.json
+          python3 scripts/run_tpch_benchmarks.py --quick --output tpch_results.json
+
+      - name: Upload TPC-H results
+        if: always() && hashFiles('tpch_results.json') != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: ci-tpch-results
+          path: tpch_results.json
+          retention-days: 90
+
+      - name: Display results summary
+        if: always()
+        run: |
+          echo "## TPC-H Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Real-world decision support queries (TPC-H SF 0.01)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f tpch_results.json ]; then
+            echo "TPC-H benchmarks completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No results file generated" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # JOB 3: TPC-C Benchmarks (OLTP workload)
+  # ============================================================================
+  tpcc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
+
+      - name: Run TPC-C benchmark
+        env:
+          TPCC_SCALE_FACTOR: "1"
+          TPCC_DURATION_SECS: "10"
+          TPCC_WARMUP_SECS: "2"
+        run: |
+          cargo bench --package vibesql-executor --bench tpcc_benchmark -- 2>&1 | tee tpcc_output.txt
+
+      - name: Display TPC-C results
+        if: always()
+        run: |
+          echo "## TPC-C Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "OLTP transactional workload (Scale Factor 1, 10s duration)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f tpcc_output.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            # Extract summary section
+            grep -A 20 "TPC-C Results" tpcc_output.txt >> $GITHUB_STEP_SUMMARY || tail -30 tpcc_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # JOB 4: Sysbench Benchmarks
+  # ============================================================================
+  sysbench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
 
       - name: Run Sysbench benchmarks (quick mode)
         continue-on-error: true
         run: |
           python3 scripts/run_sysbench_benchmarks.py --quick --output sysbench_results.json
 
-      - name: Upload benchmark results
-        if: always() && hashFiles('benchmark_results.json') != ''
+      - name: Upload Sysbench results
+        if: always() && hashFiles('sysbench_results.json') != ''
         uses: actions/upload-artifact@v5
         with:
-          name: ci-benchmark-results
-          path: |
-            benchmark_results.json
-            sysbench_results.json
+          name: ci-sysbench-results
+          path: sysbench_results.json
           retention-days: 90
 
-      - name: Display results summary
-        if: always() && hashFiles('benchmark_results.json') != ''
+      - name: Display Sysbench results
+        if: always()
         run: |
-          echo "## TPC-H Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "## Sysbench Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Real-world decision support queries (TPC-H SF 0.01)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          python3 -c "
+          if [ -f sysbench_results.json ]; then
+            python3 << 'PYEOF' >> $GITHUB_STEP_SUMMARY
           import json
-          with open('benchmark_results.json') as f:
+          with open('sysbench_results.json') as f:
               data = json.load(f)
-
-          print('| Query | VibeSQL | SQLite | DuckDB |')
-          print('|-------|---------|--------|--------|')
-
-          # Group by query
-          queries = {}
-          for b in data['benchmarks']:
-              parts = b['name'].rsplit('_', 1)
-              query = parts[0]
-              db = parts[1]
-              if query not in queries:
-                  queries[query] = {}
-              queries[query][db] = b['stats']['mean']
-
-          for query in sorted(queries.keys()):
-              dbs = queries[query]
-              vibesql = f\"{dbs.get('vibesql', 0)*1000:.2f}ms\" if 'vibesql' in dbs else 'N/A'
-              sqlite = f\"{dbs.get('sqlite', 0)*1000:.2f}ms\" if 'sqlite' in dbs else 'N/A'
-              duckdb = f\"{dbs.get('duckdb', 0)*1000:.2f}ms\" if 'duckdb' in dbs else 'N/A'
-              print(f\"| {query.replace('tpch_', '').replace('_', ' ').title()} | {vibesql} | {sqlite} | {duckdb} |\")
-          " >> $GITHUB_STEP_SUMMARY
+          print('| Workload | Database | Latency |')
+          print('|----------|----------|---------|')
+          for b in data.get('benchmarks', []):
+              name_parts = b['name'].split('_')
+              db = name_parts[-1]
+              workload = '_'.join(name_parts[1:-1])
+              latency_us = b['stats']['mean'] * 1_000_000
+              print(f'| {workload} | {db} | {latency_us:.2f} us |')
+          PYEOF
+          else
+            echo "No results file generated" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ============================================================================
-  # JOB 3: TPC-DS Benchmark with Validation
+  # JOB 5: TPC-DS Benchmark with Validation
   # ============================================================================
-  # Runs TPC-DS queries against VibeSQL and validates results against DuckDB
   tpcds:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -172,7 +258,6 @@ jobs:
     steps:
       - name: Free disk space
         run: |
-          # Remove large pre-installed software to free disk space
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
@@ -225,9 +310,155 @@ jobs:
           fi
 
   # ============================================================================
-  # JOB 4: Deploy (calls centralized workflow)
-  # NOTE: Only depends on test, not benchmark. Deploy workflow will use:
-  #   - New benchmark data if the benchmark job finishes in time
+  # JOB 6: SQLLogicTest Suite
+  # ============================================================================
+  sqllogictest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
+
+      - name: Run SQLLogicTest suite
+        env:
+          # Run comprehensive test suite for main branch
+          SQLLOGICTEST_TIME_BUDGET: "2400"
+        run: |
+          cargo test --release --package vibesql --test sqllogictest_suite -- --nocapture 2>&1 | tee sqllogictest_output.txt
+
+      - name: Upload SQLLogicTest results
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ci-sqllogictest-results
+          path: |
+            target/sqllogictest_results.json
+          retention-days: 90
+
+      - name: Display SQLLogicTest results
+        if: always()
+        run: |
+          echo "## SQLLogicTest Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "SQL conformance test suite (40-minute time budget)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f sqllogictest_output.txt ]; then
+            if grep -q "test result: ok" sqllogictest_output.txt; then
+              echo "Status: PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "Status: Some tests failed (see logs)" >> $GITHUB_STEP_SUMMARY
+            fi
+            # Show summary statistics if available
+            if [ -f target/sqllogictest_results.json ]; then
+              python3 << 'PYEOF' >> $GITHUB_STEP_SUMMARY
+          import json
+          try:
+              with open('target/sqllogictest_results.json') as f:
+                  data = json.load(f)
+              print(f"Files tested: {data.get('total', 'N/A')}")
+              print(f"Pass rate: {data.get('pass_rate', 'N/A')}%")
+          except:
+              pass
+          PYEOF
+            fi
+          fi
+
+  # ============================================================================
+  # JOB 7: Python Benchmarks
+  # ============================================================================
+  python-benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build and install Python bindings
+        run: |
+          uv pip install --system maturin
+          cd crates/vibesql-python-bindings
+          maturin build --release
+          uv pip install --system ../../target/wheels/vibesql-*.whl
+
+      - name: Install benchmark dependencies
+        run: |
+          grep -v "^vibesql" benchmarks/requirements.txt > /tmp/requirements-ci.txt
+          uv pip install --system -r /tmp/requirements-ci.txt
+
+      - name: Run benchmarks
+        working-directory: benchmarks
+        run: |
+          pytest test_insert.py test_update.py test_delete.py test_select.py test_aggregates.py \
+            --benchmark-only \
+            --benchmark-json=../benchmark_results.json \
+            --benchmark-min-rounds=3 \
+            --benchmark-warmup=off
+
+      - name: Upload benchmark results
+        if: always() && hashFiles('benchmark_results.json') != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: ci-benchmark-results
+          path: benchmark_results.json
+          retention-days: 90
+
+      - name: Display benchmark summary
+        if: always()
+        run: |
+          echo "## Python Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f benchmark_results.json ]; then
+            python benchmarks/format_results.py benchmark_results.json >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No benchmark results generated" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # JOB 8: Deploy (calls centralized workflow)
+  # NOTE: Only depends on test, not benchmarks. Deploy workflow will use:
+  #   - New benchmark data if benchmark jobs finish in time
   #   - Historical benchmark data from Pages site otherwise
   # This prevents slow benchmarks from blocking deployment.
   # ============================================================================
