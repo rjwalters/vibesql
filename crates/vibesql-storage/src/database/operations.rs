@@ -582,6 +582,104 @@ impl Operations {
         Ok(())
     }
 
+    /// Create an IVFFlat index for approximate nearest neighbor search
+    ///
+    /// Extracts vectors from the specified table and builds an IVFFlat index
+    /// using k-means clustering.
+    pub fn create_ivfflat_index(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        tables: &std::collections::HashMap<String, crate::Table>,
+        index_name: String,
+        table_name: String,
+        column_name: String,
+        col_idx: usize,
+        dimensions: usize,
+        lists: usize,
+        metric: vibesql_ast::VectorDistanceMetric,
+    ) -> Result<(), StorageError> {
+        // Normalize table name for lookup (matches catalog normalization)
+        let normalized_name = if catalog.is_case_sensitive_identifiers() {
+            table_name.clone()
+        } else {
+            table_name.to_uppercase()
+        };
+
+        // Try to find the table with normalized name or qualified name
+        let table = if let Some(tbl) = tables.get(&normalized_name) {
+            tbl
+        } else if !table_name.contains('.') {
+            // Try with schema prefix
+            let current_schema = catalog.get_current_schema();
+            let qualified_name = format!("{}.{}", current_schema, normalized_name);
+            tables
+                .get(&qualified_name)
+                .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+        } else {
+            return Err(StorageError::TableNotFound(table_name.clone()));
+        };
+
+        // Extract vectors from the table
+        // Note: SqlValue::Vector stores f32, but IVFFlat uses f64 for precision in clustering
+        let mut vectors: Vec<(usize, Vec<f64>)> = Vec::new();
+        for (row_idx, row) in table.scan().iter().enumerate() {
+            if col_idx < row.values.len() {
+                if let vibesql_types::SqlValue::Vector(vec_data) = &row.values[col_idx] {
+                    // Convert f32 vector to f64 for IVFFlat processing
+                    let vec_f64: Vec<f64> = vec_data.iter().map(|&v| v as f64).collect();
+                    vectors.push((row_idx, vec_f64));
+                }
+            }
+        }
+
+        // Create the IVFFlat index with the extracted vectors
+        self.index_manager.create_ivfflat_index_with_vectors(
+            index_name,
+            table_name,
+            column_name,
+            dimensions,
+            lists,
+            metric,
+            vectors,
+        )
+    }
+
+    /// Search an IVFFlat index for approximate nearest neighbors
+    ///
+    /// # Arguments
+    /// * `index_name` - Name of the IVFFlat index
+    /// * `query_vector` - The query vector (f64)
+    /// * `k` - Maximum number of nearest neighbors to return
+    ///
+    /// # Returns
+    /// * `Ok(Vec<(usize, f64)>)` - Vector of (row_id, distance) pairs, ordered by distance
+    /// * `Err(StorageError)` - If index not found or not an IVFFlat index
+    pub fn search_ivfflat_index(
+        &self,
+        index_name: &str,
+        query_vector: &[f64],
+        k: usize,
+    ) -> Result<Vec<(usize, f64)>, StorageError> {
+        self.index_manager.search_ivfflat_index(index_name, query_vector, k)
+    }
+
+    /// Get all IVFFlat indexes for a specific table
+    pub fn get_ivfflat_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(&super::indexes::IndexMetadata, &super::indexes::ivfflat::IVFFlatIndex)> {
+        self.index_manager.get_ivfflat_indexes_for_table(table_name)
+    }
+
+    /// Set the number of probes for an IVFFlat index
+    pub fn set_ivfflat_probes(
+        &mut self,
+        index_name: &str,
+        probes: usize,
+    ) -> Result<(), StorageError> {
+        self.index_manager.set_ivfflat_probes(index_name, probes)
+    }
+
     /// Check if a spatial index exists
     pub fn spatial_index_exists(&self, index_name: &str) -> bool {
         let normalized = Self::normalize_index_name(index_name);

@@ -214,6 +214,10 @@ impl IndexData {
                 // as that would destroy the index-based ordering.
                 matching_row_indices
             }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support range scans - use search() method instead
+                Vec::new()
+            }
             IndexData::DiskBacked { btree, .. } => {
                 // Normalize bounds for consistent numeric comparison (same as InMemory)
                 // This ensures Real, Numeric, Integer, etc. can be compared correctly

@@ -48,6 +48,7 @@ pub use ddl::{
     DropSchemaStmt, DropSequenceStmt, DropTableStmt, DropTranslationStmt, DropTriggerStmt,
     DropTypeStmt, DropViewStmt, ExecuteStmt, FetchOrientation, FetchStmt, FunctionParameter,
     IndexColumn, IndexType, InsertMethod, IsolationLevel, ModifyColumnStmt, OpenCursorStmt,
+    VectorDistanceMetric,
     ParameterMode, PrepareStmt, PreparedStatementBody, ProcedureBody, ProcedureParameter,
     ProceduralStatement, ReferentialAction, ReindexStmt, ReleaseSavepointStmt, RenameTableStmt,
     RollbackStmt, RollbackToSavepointStmt, RowFormat, SavepointStmt, ScheduleAfterStmt,

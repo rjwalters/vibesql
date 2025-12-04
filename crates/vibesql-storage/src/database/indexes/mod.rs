@@ -15,6 +15,7 @@
 //   - reverse_scan: Reverse iteration for DESC ORDER BY optimization
 // - index_maintenance: CRUD operations (create, drop, rebuild, update)
 // - index_manager: Core IndexManager coordination and queries
+// - ivfflat: IVFFlat index for approximate nearest neighbor search on vectors
 
 mod index_metadata;
 mod value_normalization;
@@ -26,7 +27,9 @@ mod reverse_scan;
 mod index_operations;
 mod index_maintenance;
 mod index_manager;
+pub mod ivfflat;
 
 // Re-export public API
 pub use index_metadata::{IndexData, IndexMetadata};
 pub use index_manager::IndexManager;
+pub use ivfflat::IVFFlatIndex;

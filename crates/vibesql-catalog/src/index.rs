@@ -29,6 +29,24 @@ pub enum IndexType {
     RTree,
     /// Full-text index for text search
     Fulltext,
+    /// IVFFlat index for approximate nearest neighbor search on vectors
+    IVFFlat {
+        /// Distance metric used for similarity calculations
+        metric: VectorDistanceMetric,
+        /// Number of clusters/lists
+        lists: u32,
+    },
+}
+
+/// Distance metric for vector index operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VectorDistanceMetric {
+    /// Euclidean distance (L2 norm)
+    L2,
+    /// Cosine similarity
+    Cosine,
+    /// Inner product (dot product)
+    InnerProduct,
 }
 
 /// Column specification within an index

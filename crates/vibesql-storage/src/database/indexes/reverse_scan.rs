@@ -128,6 +128,10 @@ impl IndexData {
                     }
                 }
             }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support reverse scans - use search() method instead
+                vec![]
+            }
         }
     }
 
@@ -240,6 +244,10 @@ impl IndexData {
                         vec![]
                     }
                 }
+            }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support reverse scans with limit - use search() method instead
+                vec![]
             }
         }
     }

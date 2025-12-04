@@ -135,6 +135,10 @@ impl IndexData {
                     }
                 }
             }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support prefix scans - use search() method instead
+                vec![]
+            }
         }
     }
 
@@ -211,6 +215,10 @@ impl IndexData {
                         None
                     }
                 }
+            }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support prefix scans - use search() method instead
+                None
             }
         }
     }
@@ -321,6 +329,10 @@ impl IndexData {
                         vec![]
                     }
                 }
+            }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support prefix bounded scans - use search() method instead
+                vec![]
             }
         }
     }
@@ -485,6 +497,10 @@ impl IndexData {
                     }
                 }
             }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support prefix range scans - use search() method instead
+                vec![]
+            }
         }
     }
 
@@ -615,6 +631,10 @@ impl IndexData {
                     None if reverse => all_indices.into_iter().rev().collect(),
                     None => all_indices,
                 }
+            }
+            IndexData::IVFFlat { .. } => {
+                // IVFFlat indexes don't support prefix scan with limit - use search() method instead
+                vec![]
             }
         }
     }

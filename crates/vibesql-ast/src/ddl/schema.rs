@@ -202,6 +202,24 @@ pub enum IndexType {
     Fulltext,
     /// SPATIAL index for spatial/geometric data (R-tree)
     Spatial,
+    /// IVFFlat index for approximate nearest neighbor search on vectors
+    IVFFlat {
+        /// Distance metric to use for similarity calculations
+        metric: VectorDistanceMetric,
+        /// Number of clusters/lists for partitioning (default: 100)
+        lists: u32,
+    },
+}
+
+/// Distance metric for vector index operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VectorDistanceMetric {
+    /// Euclidean distance (L2 norm)
+    L2,
+    /// Cosine similarity (1 - cosine distance)
+    Cosine,
+    /// Inner product (dot product) - negative for similarity
+    InnerProduct,
 }
 
 /// Index column specification

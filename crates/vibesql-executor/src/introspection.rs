@@ -266,6 +266,7 @@ impl<'a> IntrospectionExecutor<'a> {
                     IndexType::Hash => "HASH",
                     IndexType::RTree => "RTREE",
                     IndexType::Fulltext => "FULLTEXT",
+                    IndexType::IVFFlat { .. } => "IVFFLAT",
                 };
 
                 rows.push(Row::new(vec![
