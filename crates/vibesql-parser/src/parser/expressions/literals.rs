@@ -39,6 +39,7 @@ impl Parser {
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)))
             }
             // Typed literals: DATE 'string', TIME 'string', TIMESTAMP 'string'
+            // If not followed by a string literal, treat as column name (SQLite compatibility)
             Token::Keyword(Keyword::Date) => {
                 self.advance();
                 match self.peek() {
@@ -54,9 +55,13 @@ impl Parser {
                             }),
                         }
                     }
-                    _ => Err(ParseError {
-                        message: "Expected string literal after DATE keyword".to_string(),
-                    }),
+                    _ => {
+                        // Treat DATE as column name when not followed by string literal
+                        Ok(Some(vibesql_ast::Expression::ColumnRef {
+                            table: None,
+                            column: "DATE".to_string(),
+                        }))
+                    }
                 }
             }
             Token::Keyword(Keyword::Time) => {
@@ -74,9 +79,13 @@ impl Parser {
                             }),
                         }
                     }
-                    _ => Err(ParseError {
-                        message: "Expected string literal after TIME keyword".to_string(),
-                    }),
+                    _ => {
+                        // Treat TIME as column name when not followed by string literal
+                        Ok(Some(vibesql_ast::Expression::ColumnRef {
+                            table: None,
+                            column: "TIME".to_string(),
+                        }))
+                    }
                 }
             }
             Token::Keyword(Keyword::Timestamp) => {
@@ -94,9 +103,13 @@ impl Parser {
                             }),
                         }
                     }
-                    _ => Err(ParseError {
-                        message: "Expected string literal after TIMESTAMP keyword".to_string(),
-                    }),
+                    _ => {
+                        // Treat TIMESTAMP as column name when not followed by string literal
+                        Ok(Some(vibesql_ast::Expression::ColumnRef {
+                            table: None,
+                            column: "TIMESTAMP".to_string(),
+                        }))
+                    }
                 }
             }
             Token::Keyword(Keyword::Interval) => {

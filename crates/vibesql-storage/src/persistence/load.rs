@@ -57,7 +57,7 @@ pub fn read_sql_dump<P: AsRef<Path>>(path: P) -> Result<String, StorageError> {
 /// Parse SQL dump content into individual statements
 ///
 /// Handles:
-/// - Comments (lines starting with --)
+/// - Comments (lines starting with -- or inline -- comments)
 /// - Multi-line statements
 /// - Statement termination by semicolon
 /// - String literals (preserves content within quotes)
@@ -74,17 +74,28 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Skip comments and empty lines
+        // Skip full-line comments and empty lines
         if trimmed.starts_with("--") || trimmed.is_empty() {
             continue;
         }
 
-        // Process line character by character to handle string literals
-        for ch in line.chars() {
+        // Process line character by character to handle string literals and inline comments
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let ch = chars[i];
+
             if escape_next {
                 current_statement.push(ch);
                 escape_next = false;
+                i += 1;
                 continue;
+            }
+
+            // Check for inline comment (-- outside of string)
+            if !in_string && ch == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
+                // Skip rest of line (inline comment)
+                break;
             }
 
             match ch {
@@ -113,6 +124,7 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
                     current_statement.push(ch);
                 }
             }
+            i += 1;
         }
 
         // Add space between lines (preserves SQL readability)
@@ -181,5 +193,45 @@ mod tests {
         assert_eq!(statements.len(), 1);
         assert!(statements[0].contains("id INTEGER"));
         assert!(statements[0].contains("name VARCHAR"));
+    }
+
+    #[test]
+    fn test_inline_comments() {
+        let content = r#"
+            CREATE TABLE test_files (
+                file_path VARCHAR(500) PRIMARY KEY,
+                category VARCHAR(50) NOT NULL,
+                status VARCHAR(20) NOT NULL,  -- 'PASS', 'FAIL', 'TIMEOUT', 'UNTESTED'
+                last_tested TIMESTAMP
+            );
+        "#;
+
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 1);
+        assert!(statements[0].contains("file_path VARCHAR(500) PRIMARY KEY"));
+        assert!(statements[0].contains("status VARCHAR(20) NOT NULL"));
+        // The inline comment should NOT be included
+        assert!(!statements[0].contains("PASS"));
+        assert!(!statements[0].contains("FAIL"));
+    }
+
+    #[test]
+    fn test_inline_comments_preserve_strings_with_dashes() {
+        // Ensure -- inside string literals is NOT treated as a comment
+        let content = r#"INSERT INTO users VALUES (1, 'test--value');"#;
+
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 1);
+        assert!(statements[0].contains("test--value"));
+    }
+
+    #[test]
+    fn test_inline_comment_after_insert() {
+        let content = r#"INSERT INTO users VALUES (1, 'Alice'); -- Add first user"#;
+
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 1);
+        assert!(statements[0].contains("'Alice'"));
+        assert!(!statements[0].contains("Add first user"));
     }
 }

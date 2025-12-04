@@ -547,6 +547,7 @@ impl<'arena> ArenaParser<'arena> {
                 Some(Expression::Default)
             }
             // Typed literals: DATE 'string', TIME 'string', TIMESTAMP 'string'
+            // If not followed by a string literal, treat as column name (SQLite compatibility)
             Token::Keyword(Keyword::Date) => {
                 self.advance();
                 match self.peek() {
@@ -563,8 +564,10 @@ impl<'arena> ArenaParser<'arena> {
                         }
                     }
                     _ => {
-                        return Err(ParseError {
-                            message: "Expected string literal after DATE keyword".to_string(),
+                        // Treat DATE as column name when not followed by string literal
+                        Some(Expression::ColumnRef {
+                            table: None,
+                            column: self.interner.intern("DATE"),
                         })
                     }
                 }
@@ -585,8 +588,10 @@ impl<'arena> ArenaParser<'arena> {
                         }
                     }
                     _ => {
-                        return Err(ParseError {
-                            message: "Expected string literal after TIME keyword".to_string(),
+                        // Treat TIME as column name when not followed by string literal
+                        Some(Expression::ColumnRef {
+                            table: None,
+                            column: self.interner.intern("TIME"),
                         })
                     }
                 }
@@ -607,8 +612,10 @@ impl<'arena> ArenaParser<'arena> {
                         }
                     }
                     _ => {
-                        return Err(ParseError {
-                            message: "Expected string literal after TIMESTAMP keyword".to_string(),
+                        // Treat TIMESTAMP as column name when not followed by string literal
+                        Some(Expression::ColumnRef {
+                            table: None,
+                            column: self.interner.intern("TIMESTAMP"),
                         })
                     }
                 }

@@ -34,38 +34,73 @@ pub fn handle_replace_conflicts(
         }
     }
 
-    // Delete conflicting rows using delete_where with a predicate
-    let table_mut = db
-        .get_table_mut(table_name)
+    // First, find conflicting rows and their indices (read-only pass)
+    let table = db
+        .get_table(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
-    let deleted = table_mut.delete_where(|row| {
+    let mut rows_to_delete: Vec<(usize, vibesql_storage::Row)> = Vec::new();
+
+    for (row_index, row) in table.scan().iter().enumerate() {
+        let mut should_delete = false;
+
         // Check if this row matches the PRIMARY KEY
         if let Some(ref pk_values) = pk_match {
             if let Some(ref pk_idx) = pk_indices {
                 let row_pk_values: Vec<vibesql_types::SqlValue> =
                     pk_idx.iter().map(|&idx| row.values[idx].clone()).collect();
                 if &row_pk_values == pk_values {
-                    return true; // Delete this row (early return for performance)
+                    should_delete = true;
                 }
             }
         }
 
         // Check if this row matches any UNIQUE constraint
-        for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
-            if let Some(unique_values) = unique_matches.get(constraint_idx).and_then(|v| v.as_ref()) {
-                let row_unique_values: Vec<vibesql_types::SqlValue> =
-                    unique_indices.iter().map(|&idx| row.values[idx].clone()).collect();
-                if row_unique_values == *unique_values {
-                    return true; // Delete this row (early return for performance)
+        if !should_delete {
+            for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
+                if let Some(unique_values) =
+                    unique_matches.get(constraint_idx).and_then(|v| v.as_ref())
+                {
+                    let row_unique_values: Vec<vibesql_types::SqlValue> =
+                        unique_indices.iter().map(|&idx| row.values[idx].clone()).collect();
+                    if row_unique_values == *unique_values {
+                        should_delete = true;
+                        break;
+                    }
                 }
             }
         }
 
-        false // Don't delete this row
-    });
+        if should_delete {
+            rows_to_delete.push((row_index, row.clone()));
+        }
+    }
 
-    // Return success (deleted count not needed, conflicts resolved)
-    let _ = deleted; // Explicitly acknowledge we don't use the count
+    // If no conflicts, nothing to delete
+    if rows_to_delete.is_empty() {
+        return Ok(());
+    }
+
+    // Remove entries from user-defined indexes BEFORE deleting rows
+    // (while row indices are still valid)
+    for (row_index, row) in &rows_to_delete {
+        db.update_indexes_for_delete(table_name, row, *row_index);
+    }
+
+    // Collect indices for deletion
+    let mut deleted_indices: Vec<usize> = rows_to_delete.iter().map(|(idx, _)| *idx).collect();
+    deleted_indices.sort_unstable();
+
+    // Delete the conflicting rows using the fast path
+    let table_mut = db
+        .get_table_mut(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    table_mut.delete_by_indices(&deleted_indices);
+
+    // Adjust remaining user-defined index entries
+    // (entries pointing to indices > deleted need to be decremented)
+    db.adjust_indexes_after_delete(table_name, &deleted_indices);
+
     Ok(())
 }
