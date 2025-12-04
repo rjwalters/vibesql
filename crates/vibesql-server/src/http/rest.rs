@@ -25,9 +25,10 @@ pub struct HttpState {
 
 /// Create the HTTP API router
 pub fn create_http_router(db: Arc<Database>) -> Router {
-    let state = HttpState { db };
+    let state = HttpState { db: db.clone() };
 
-    Router::new()
+    // Create main router with state
+    let main_router = Router::new()
         .route("/health", get(health_check))
         .route("/api/query", post(execute_query))
         .route("/api/subscribe", get(subscribe_stream))
@@ -40,7 +41,13 @@ pub fn create_http_router(db: Arc<Database>) -> Router {
         .route("/api/tables/:table_name/rows/:id", put(super::crud::update_row))
         .route("/api/tables/:table_name/rows/:id", patch(super::crud::patch_row))
         .route("/api/tables/:table_name/rows/:id", delete(super::crud::delete_row))
-        .with_state(state)
+        .with_state(state);
+
+    // Create storage sub-router with its own state
+    // We nest it after the main router is state-resolved
+    let storage_router = super::storage::create_storage_router(db);
+
+    main_router.nest("/api/storage", storage_router)
 }
 
 /// Health check endpoint
