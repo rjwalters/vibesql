@@ -11,6 +11,7 @@ import {
 } from './types/index';
 import { Connection } from './connection';
 import { SubscriptionManager } from './subscription/manager';
+import { HttpStorageClient, type StorageClient } from './storage/index';
 
 /**
  * Main VibeSql client class
@@ -21,10 +22,44 @@ export class VibeSqlClient {
   private isConnected = false;
   private reconnectAttempts = 0;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private _storage: StorageClient;
+
+  /**
+   * Storage client for blob operations
+   *
+   * @example
+   * ```typescript
+   * // Upload a file
+   * const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+   * const storageId = await db.storage.upload(file);
+   *
+   * // Get URL
+   * const url = db.storage.getUrl(storageId);
+   *
+   * // Download
+   * const blob = await db.storage.download(storageId);
+   *
+   * // Get metadata
+   * const meta = await db.storage.getMetadata(storageId);
+   *
+   * // Delete
+   * await db.storage.delete(storageId);
+   * ```
+   */
+  get storage(): StorageClient {
+    return this._storage;
+  }
 
   constructor(private options: VibeSqlClientOptions) {
     this.connection = new Connection(options);
     this.subscriptionManager = new SubscriptionManager(this.connection);
+
+    // Initialize storage client with base URL from options
+    const storageBaseUrl = this.buildStorageBaseUrl();
+    this._storage = new HttpStorageClient({
+      baseUrl: storageBaseUrl,
+      headers: this.options.storage?.headers,
+    });
 
     // Setup reconnection handler
     if (this.options.reconnect?.enabled !== false) {
@@ -158,5 +193,21 @@ export class VibeSqlClient {
     return new Promise(resolve => {
       this.reconnectTimeout = setTimeout(resolve, ms);
     });
+  }
+
+  /**
+   * Build the base URL for storage API from client options
+   */
+  private buildStorageBaseUrl(): string {
+    if (this.options.storage?.baseUrl) {
+      return this.options.storage.baseUrl;
+    }
+
+    // Build URL from connection options
+    const protocol = this.options.ssl ? 'https' : 'http';
+    const host = this.options.host;
+    const port = this.options.httpPort ?? 8080;
+
+    return `${protocol}://${host}:${port}`;
   }
 }
