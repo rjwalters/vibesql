@@ -234,6 +234,10 @@ impl IndexManager {
                                 // IVFFlat indexes don't support unique constraints
                                 // Vector indexes are for similarity search, not uniqueness
                             }
+                            IndexData::Hnsw { .. } => {
+                                // HNSW indexes don't support unique constraints
+                                // Vector indexes are for similarity search, not uniqueness
+                            }
                         }
                     }
                 }
@@ -347,6 +351,12 @@ impl IndexManager {
             IndexData::IVFFlat { .. } => {
                 // IVFFlat indexes can't be spilled to disk-backed B-tree format
                 // They have a different structure (inverted lists + centroids)
+                self.index_data.insert(index_name.to_string(), index_data);
+                return Ok(());
+            }
+            IndexData::Hnsw { .. } => {
+                // HNSW indexes can't be spilled to disk-backed B-tree format
+                // They have a different structure (multi-layer proximity graph)
                 self.index_data.insert(index_name.to_string(), index_data);
                 return Ok(());
             }

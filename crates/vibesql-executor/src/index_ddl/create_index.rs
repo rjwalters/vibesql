@@ -334,6 +334,84 @@ impl CreateIndexExecutor {
                     index_name, qualified_table_name, column_name
                 ))
             }
+            vibesql_ast::IndexType::Hnsw { metric, m, ef_construction } => {
+                // HNSW index validation: must be exactly 1 column (vector column)
+                if stmt.columns.len() != 1 {
+                    return Err(ExecutorError::InvalidIndexDefinition(
+                        "HNSW indexes must be defined on exactly one vector column".to_string(),
+                    ));
+                }
+
+                let column_name = &stmt.columns[0].column_name;
+
+                // Get the column index and validate it's a vector type
+                let col_idx = table_schema
+                    .get_column_index(column_name)
+                    .ok_or_else(|| ExecutorError::ColumnNotFound {
+                        column_name: column_name.clone(),
+                        table_name: qualified_table_name.clone(),
+                        searched_tables: vec![qualified_table_name.clone()],
+                        available_columns: table_schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    })?;
+
+                // Validate column type is VECTOR
+                let col_type = &table_schema.columns[col_idx].data_type;
+                let dimensions = match col_type {
+                    vibesql_types::DataType::Vector { dimensions } => *dimensions as usize,
+                    _ => {
+                        return Err(ExecutorError::InvalidIndexDefinition(format!(
+                            "HNSW indexes can only be created on VECTOR columns, but '{}' has type {:?}",
+                            column_name, col_type
+                        )));
+                    }
+                };
+
+                // Convert AST metric to catalog metric
+                let catalog_metric = match metric {
+                    vibesql_ast::VectorDistanceMetric::L2 => vibesql_catalog::VectorDistanceMetric::L2,
+                    vibesql_ast::VectorDistanceMetric::Cosine => vibesql_catalog::VectorDistanceMetric::Cosine,
+                    vibesql_ast::VectorDistanceMetric::InnerProduct => vibesql_catalog::VectorDistanceMetric::InnerProduct,
+                };
+
+                // Add to catalog first
+                let index_metadata = vibesql_catalog::IndexMetadata::new(
+                    index_name.clone(),
+                    table_name.clone(),
+                    vibesql_catalog::IndexType::Hnsw {
+                        metric: catalog_metric,
+                        m: *m,
+                        ef_construction: *ef_construction,
+                    },
+                    vec![vibesql_catalog::IndexedColumn {
+                        column_name: column_name.clone(),
+                        order: vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
+                        prefix_length: None,
+                    }],
+                    false, // HNSW indexes are never unique
+                );
+                database.catalog.add_index(index_metadata)?;
+
+                // Create the HNSW index in storage
+                database.create_hnsw_index(
+                    index_name.clone(),
+                    table_name.clone(),
+                    column_name.clone(),
+                    col_idx,
+                    dimensions,
+                    *m,
+                    *ef_construction,
+                    *metric,
+                )?;
+
+                Ok(format!(
+                    "HNSW index '{}' created successfully on table '{}' column '{}'",
+                    index_name, qualified_table_name, column_name
+                ))
+            }
         }
     }
 }

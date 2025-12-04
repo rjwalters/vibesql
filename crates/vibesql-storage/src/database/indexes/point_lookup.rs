@@ -50,6 +50,10 @@ impl IndexData {
                 // IVFFlat indexes don't support point lookups - use search() method instead
                 None
             }
+            IndexData::Hnsw { .. } => {
+                // HNSW indexes don't support point lookups - use search() method instead
+                None
+            }
         }
     }
 
@@ -90,6 +94,10 @@ impl IndexData {
             }
             IndexData::IVFFlat { .. } => {
                 // IVFFlat indexes don't support contains_key - use search() method instead
+                false
+            }
+            IndexData::Hnsw { .. } => {
+                // HNSW indexes don't support contains_key - use search() method instead
                 false
             }
         }
@@ -155,6 +163,10 @@ impl IndexData {
                 // IVFFlat indexes don't support multi_lookup - use search() method instead
                 vec![]
             }
+            IndexData::Hnsw { .. } => {
+                // HNSW indexes don't support multi_lookup - use search() method instead
+                vec![]
+            }
         }
     }
 
@@ -186,6 +198,10 @@ impl IndexData {
             }
             IndexData::IVFFlat { .. } => {
                 // IVFFlat indexes don't support iteration - use search() method instead
+                Box::new(std::iter::empty())
+            }
+            IndexData::Hnsw { .. } => {
+                // HNSW indexes don't support iteration - use search() method instead
                 Box::new(std::iter::empty())
             }
         }
@@ -228,6 +244,11 @@ impl IndexData {
             }
             IndexData::IVFFlat { index } => {
                 // Return all row IDs stored in the IVFFlat index
+                let all_row_ids: Vec<usize> = index.all_row_ids();
+                Box::new(std::iter::once(all_row_ids))
+            }
+            IndexData::Hnsw { index } => {
+                // Return all row IDs stored in the HNSW index
                 let all_row_ids: Vec<usize> = index.all_row_ids();
                 Box::new(std::iter::once(all_row_ids))
             }

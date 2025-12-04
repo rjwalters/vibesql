@@ -215,6 +215,9 @@ fn test_in_memory_index_for_small_tables() {
         IndexData::IVFFlat { .. } => {
             panic!("Expected InMemory variant for small table, got IVFFlat");
         }
+        IndexData::Hnsw { .. } => {
+            panic!("Expected InMemory variant for small table, got Hnsw");
+        }
     }
 }
 
@@ -573,6 +576,9 @@ fn test_index_scan_after_database_reset() {
             },
             crate::database::indexes::IndexData::IVFFlat { .. } => {
                 panic!("Expected in-memory index for small table, got IVFFlat");
+            },
+            crate::database::indexes::IndexData::Hnsw { .. } => {
+                panic!("Expected in-memory index for small table, got Hnsw");
             },
         };
         eprintln!("  Index contains {} row references", all_indices.len());
