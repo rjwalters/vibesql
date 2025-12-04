@@ -115,6 +115,9 @@ pub struct Subscription {
     pub tables: HashSet<String>,
     /// Hash of the last result set (for change detection)
     pub last_result_hash: u64,
+    /// Last result set (for delta computation)
+    /// This stores the previous result to enable computing deltas on change.
+    pub last_result: Option<Vec<crate::Row>>,
     /// Channel to send updates to the subscriber
     pub notify_tx: mpsc::Sender<SubscriptionUpdate>,
 }
@@ -131,6 +134,7 @@ impl Subscription {
             query,
             tables,
             last_result_hash: 0,
+            last_result: None,
             notify_tx,
         }
     }
@@ -156,17 +160,17 @@ pub enum SubscriptionUpdate {
         rows: Vec<crate::Row>,
     },
 
-    /// Incremental delta (future optimization)
+    /// Incremental delta update
     ///
     /// Contains only the changes since the last update. More efficient
-    /// for large result sets with small changes.
-    #[allow(dead_code)]
+    /// for large result sets with small changes. Sent when the change
+    /// can be expressed as a set of inserts, updates, and deletes.
     Delta {
-        /// Newly inserted rows
+        /// Newly inserted rows (in new result, not in previous)
         inserts: Vec<crate::Row>,
-        /// Updated rows (old value, new value)
+        /// Updated rows (old value, new value) - rows with same identity but different content
         updates: Vec<(crate::Row, crate::Row)>,
-        /// Deleted rows
+        /// Deleted rows (in previous result, not in new)
         deletes: Vec<crate::Row>,
     },
 
@@ -240,6 +244,101 @@ pub fn hash_rows(rows: &[crate::Row]) -> u64 {
     hasher.finish()
 }
 
+/// Compute a hash for a single row (for delta computation)
+fn hash_row(row: &crate::Row) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+
+    let mut hasher = DefaultHasher::new();
+    for value in &row.values {
+        value.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Compute delta between old and new result sets
+///
+/// This function compares two result sets and produces a delta update
+/// containing the inserts, updates, and deletes needed to transform
+/// the old result into the new result.
+///
+/// # Algorithm
+///
+/// Uses row hashing to efficiently detect changes:
+/// - Rows in new but not in old are inserts
+/// - Rows in old but not in new are deletes
+/// - Updates are not detected in this implementation (would appear as delete + insert)
+///
+/// For proper update detection, primary key information would be needed.
+///
+/// # Returns
+///
+/// Returns `Some(SubscriptionUpdate::Delta)` if there are changes,
+/// or `None` if the result sets are identical.
+pub fn compute_delta(
+    old: &[crate::Row],
+    new: &[crate::Row],
+) -> Option<SubscriptionUpdate> {
+    use std::collections::HashMap;
+
+    // Build hash maps for efficient lookup
+    // Map from row hash -> (count, row reference)
+    // We use count to handle duplicate rows correctly
+    let mut old_map: HashMap<u64, Vec<&crate::Row>> = HashMap::new();
+    for row in old {
+        let hash = hash_row(row);
+        old_map.entry(hash).or_default().push(row);
+    }
+
+    let mut new_map: HashMap<u64, Vec<&crate::Row>> = HashMap::new();
+    for row in new {
+        let hash = hash_row(row);
+        new_map.entry(hash).or_default().push(row);
+    }
+
+    let mut inserts = Vec::new();
+    let mut deletes = Vec::new();
+
+    // Find inserts: rows in new but not in old (or with higher count in new)
+    for (hash, new_rows) in &new_map {
+        let old_rows = old_map.get(hash).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        // For each row in new that exceeds the count in old, it's an insert
+        if new_rows.len() > old_rows.len() {
+            for row in new_rows.iter().skip(old_rows.len()) {
+                inserts.push((*row).clone());
+            }
+        }
+    }
+
+    // Find deletes: rows in old but not in new (or with higher count in old)
+    for (hash, old_rows) in &old_map {
+        let new_rows = new_map.get(hash).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        // For each row in old that exceeds the count in new, it's a delete
+        if old_rows.len() > new_rows.len() {
+            for row in old_rows.iter().skip(new_rows.len()) {
+                deletes.push((*row).clone());
+            }
+        }
+    }
+
+    // If no changes, return None
+    if inserts.is_empty() && deletes.is_empty() {
+        return None;
+    }
+
+    // Updates are not detected in this implementation
+    // A row update would appear as a delete of the old row + insert of the new row
+    // This is semantically correct, just not optimal for clients that could patch in place
+    let updates = Vec::new();
+
+    Some(SubscriptionUpdate::Delta {
+        inserts,
+        updates,
+        deletes,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +406,239 @@ mod tests {
 
         // Same content should produce same hash
         assert_eq!(hash1, hash2);
+    }
+
+    // ========================================================================
+    // Tests for compute_delta
+    // ========================================================================
+
+    #[test]
+    fn test_compute_delta_no_changes() {
+        use vibesql_types::SqlValue;
+
+        let rows = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+
+        // Same old and new should return None
+        let delta = compute_delta(&rows, &rows);
+        assert!(delta.is_none());
+    }
+
+    #[test]
+    fn test_compute_delta_single_insert() {
+        use vibesql_types::SqlValue;
+
+        let old = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+
+        let new = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+
+        let delta = compute_delta(&old, &new);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta {
+                inserts,
+                updates,
+                deletes,
+            } => {
+                assert_eq!(inserts.len(), 1);
+                assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
+                assert_eq!(
+                    inserts[0].values[1],
+                    SqlValue::Varchar("Bob".to_string())
+                );
+                assert!(updates.is_empty());
+                assert!(deletes.is_empty());
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_single_delete() {
+        use vibesql_types::SqlValue;
+
+        let old = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+
+        let new = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+
+        let delta = compute_delta(&old, &new);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta {
+                inserts,
+                updates,
+                deletes,
+            } => {
+                assert!(inserts.is_empty());
+                assert!(updates.is_empty());
+                assert_eq!(deletes.len(), 1);
+                assert_eq!(deletes[0].values[0], SqlValue::Integer(2));
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_insert_and_delete() {
+        use vibesql_types::SqlValue;
+
+        let old = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+
+        let new = vec![crate::Row {
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+        }];
+
+        let delta = compute_delta(&old, &new);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta {
+                inserts,
+                updates,
+                deletes,
+            } => {
+                assert_eq!(inserts.len(), 1);
+                assert_eq!(deletes.len(), 1);
+                assert!(updates.is_empty());
+                // The old row was deleted, new row was inserted
+                assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
+                assert_eq!(deletes[0].values[0], SqlValue::Integer(1));
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_empty_to_rows() {
+        use vibesql_types::SqlValue;
+
+        let old: Vec<crate::Row> = vec![];
+        let new = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+
+        let delta = compute_delta(&old, &new);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta {
+                inserts,
+                updates,
+                deletes,
+            } => {
+                assert_eq!(inserts.len(), 2);
+                assert!(updates.is_empty());
+                assert!(deletes.is_empty());
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_rows_to_empty() {
+        use vibesql_types::SqlValue;
+
+        let old = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+        let new: Vec<crate::Row> = vec![];
+
+        let delta = compute_delta(&old, &new);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta {
+                inserts,
+                updates,
+                deletes,
+            } => {
+                assert!(inserts.is_empty());
+                assert!(updates.is_empty());
+                assert_eq!(deletes.len(), 2);
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_duplicate_rows() {
+        use vibesql_types::SqlValue;
+
+        // Test handling of duplicate rows
+        let old = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1)],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(1)],
+            },
+        ];
+
+        let new = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1)],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(1)],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(1)],
+            },
+        ];
+
+        let delta = compute_delta(&old, &new);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta {
+                inserts,
+                updates,
+                deletes,
+            } => {
+                // One additional duplicate row was inserted
+                assert_eq!(inserts.len(), 1);
+                assert!(updates.is_empty());
+                assert!(deletes.is_empty());
+            }
+            _ => panic!("Expected Delta update"),
+        }
     }
 }
