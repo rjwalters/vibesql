@@ -15,7 +15,8 @@ use vibesql_storage::Database;
 use vibesql_storage::change_events::RecvError;
 
 use super::{
-    compute_delta, extract_table_refs, hash_rows, Subscription, SubscriptionConfig, SubscriptionError, SubscriptionId,
+    classify_error_str, compute_delta, extract_table_refs, hash_rows, Subscription,
+    SubscriptionConfig, SubscriptionError, SubscriptionErrorKind, SubscriptionId,
     SubscriptionUpdate,
 };
 
@@ -288,118 +289,197 @@ impl SubscriptionManager {
 
         let subscription = sub_ref.value_mut();
 
+        // Try to execute with retry logic
+        self.execute_with_retry(subscription, db, id).await;
+    }
+
+    /// Execute query with retry logic for transient errors
+    async fn execute_with_retry(
+        &self,
+        subscription: &mut Subscription,
+        db: &Database,
+        id: SubscriptionId,
+    ) {
+        loop {
+            // Parse and execute the query
+            let result = self.execute_subscription_query(subscription, db, id).await;
+
+            match result {
+                Ok(rows) => {
+                    // Successful execution - reset retry count
+                    subscription.retry_count = 0;
+
+                    // Convert to Row format
+                    let result_rows: Vec<crate::Row> = rows
+                        .iter()
+                        .map(|r| crate::Row {
+                            values: r.values.clone(),
+                        })
+                        .collect();
+
+                    // Hash results for comparison
+                    let new_hash = hash_rows(&result_rows);
+
+                    if new_hash != subscription.last_result_hash {
+                        debug!(
+                            subscription_id = %id,
+                            old_hash = subscription.last_result_hash,
+                            new_hash = new_hash,
+                            row_count = result_rows.len(),
+                            "Results changed, notifying subscriber"
+                        );
+
+                        // Determine whether to send Delta or Full update
+                        let update = if let Some(ref old_rows) = subscription.last_result {
+                            // We have previous results - compute delta
+                            if let Some(delta) = compute_delta(old_rows, &result_rows) {
+                                // Log delta statistics
+                                if let SubscriptionUpdate::Delta {
+                                    ref inserts,
+                                    ref updates,
+                                    ref deletes,
+                                } = delta
+                                {
+                                    debug!(
+                                        subscription_id = %id,
+                                        inserts = inserts.len(),
+                                        updates = updates.len(),
+                                        deletes = deletes.len(),
+                                        "Sending delta update"
+                                    );
+                                }
+                                delta
+                            } else {
+                                // No delta (shouldn't happen if hash changed, but be safe)
+                                SubscriptionUpdate::Full {
+                                    rows: result_rows.clone(),
+                                }
+                            }
+                        } else {
+                            // No previous results - send full (first update after initial)
+                            debug!(
+                                subscription_id = %id,
+                                "No previous result, sending full update"
+                            );
+                            SubscriptionUpdate::Full {
+                                rows: result_rows.clone(),
+                            }
+                        };
+
+                        // Update stored state
+                        subscription.last_result_hash = new_hash;
+                        subscription.last_result = Some(result_rows);
+
+                        // Send update - ignore errors (channel may be closed)
+                        if subscription.notify_tx.send(update).await.is_err() {
+                            trace!(
+                                subscription_id = %id,
+                                "Notification channel closed, subscription will be cleaned up"
+                            );
+                        }
+                    } else {
+                        trace!(
+                            subscription_id = %id,
+                            "Results unchanged, no notification needed"
+                        );
+                    }
+                    return;
+                }
+                Err(error_msg) => {
+                    // Classify the error to determine retry strategy
+                    let error_kind = classify_error_str(&error_msg);
+
+                    match error_kind {
+                        SubscriptionErrorKind::Permanent => {
+                            // Permanent error - don't retry, notify subscriber and stop
+                            debug!(
+                                subscription_id = %id,
+                                error = %error_msg,
+                                "Permanent error, not retrying"
+                            );
+                            let _ = subscription
+                                .notify_tx
+                                .send(SubscriptionUpdate::Error {
+                                    message: format!(
+                                        "Query execution failed: {} (error will not be retried)",
+                                        error_msg
+                                    ),
+                                })
+                                .await;
+                            return;
+                        }
+                        SubscriptionErrorKind::Transient | SubscriptionErrorKind::Unknown => {
+                            // Transient error - may retry
+                            subscription.retry_count += 1;
+
+                            if subscription.retry_count > subscription.retry_policy.max_retries {
+                                // Exceeded max retries - circuit breaker
+                                warn!(
+                                    subscription_id = %id,
+                                    retry_count = subscription.retry_count,
+                                    max_retries = subscription.retry_policy.max_retries,
+                                    error = %error_msg,
+                                    "Subscription failed after max retries"
+                                );
+                                let _ = subscription
+                                    .notify_tx
+                                    .send(SubscriptionUpdate::Error {
+                                        message: format!(
+                                            "Subscription failed after {} retries: {}",
+                                            subscription.retry_policy.max_retries, error_msg
+                                        ),
+                                    })
+                                    .await;
+                                return;
+                            }
+
+                            // Calculate backoff and retry
+                            let backoff = subscription
+                                .retry_policy
+                                .calculate_backoff(subscription.retry_count - 1);
+
+                            warn!(
+                                subscription_id = %id,
+                                retry_attempt = subscription.retry_count,
+                                backoff_ms = backoff.as_millis(),
+                                error_kind = %error_kind,
+                                error = %error_msg,
+                                "Retrying subscription query after transient error"
+                            );
+
+                            tokio::time::sleep(backoff).await;
+                            // Loop continues to retry
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Execute the subscription query and return rows or error message
+    async fn execute_subscription_query(
+        &self,
+        subscription: &Subscription,
+        db: &Database,
+        id: SubscriptionId,
+    ) -> Result<Vec<vibesql_storage::Row>, String> {
         // Re-execute the query
         let executor = vibesql_executor::SelectExecutor::new(db);
 
         // Parse and execute the query
-        let result = match vibesql_parser::Parser::parse_sql(&subscription.query) {
-            Ok(vibesql_ast::Statement::Select(select)) => executor.execute(&select),
+        match vibesql_parser::Parser::parse_sql(&subscription.query) {
+            Ok(vibesql_ast::Statement::Select(select)) => {
+                executor.execute(&select).map_err(|e| e.to_string())
+            }
             Ok(_) => {
                 // Not a SELECT - shouldn't happen for subscriptions
                 warn!(
                     subscription_id = %id,
                     "Subscription query is not a SELECT"
                 );
-                return;
+                Err("Subscription query is not a SELECT".to_string())
             }
-            Err(e) => {
-                // Query parse error - notify subscriber
-                let _ = subscription
-                    .notify_tx
-                    .send(SubscriptionUpdate::Error {
-                        message: format!("Failed to parse query: {}", e),
-                    })
-                    .await;
-                return;
-            }
-        };
-
-        match result {
-            Ok(rows) => {
-                // Convert to Row format
-                let result_rows: Vec<crate::Row> = rows
-                    .iter()
-                    .map(|r| crate::Row {
-                        values: r.values.clone(),
-                    })
-                    .collect();
-
-                // Hash results for comparison
-                let new_hash = hash_rows(&result_rows);
-
-                if new_hash != subscription.last_result_hash {
-                    debug!(
-                        subscription_id = %id,
-                        old_hash = subscription.last_result_hash,
-                        new_hash = new_hash,
-                        row_count = result_rows.len(),
-                        "Results changed, notifying subscriber"
-                    );
-
-                    // Determine whether to send Delta or Full update
-                    let update = if let Some(ref old_rows) = subscription.last_result {
-                        // We have previous results - compute delta
-                        if let Some(delta) = compute_delta(old_rows, &result_rows) {
-                            // Log delta statistics
-                            if let SubscriptionUpdate::Delta {
-                                ref inserts,
-                                ref updates,
-                                ref deletes,
-                            } = delta
-                            {
-                                debug!(
-                                    subscription_id = %id,
-                                    inserts = inserts.len(),
-                                    updates = updates.len(),
-                                    deletes = deletes.len(),
-                                    "Sending delta update"
-                                );
-                            }
-                            delta
-                        } else {
-                            // No delta (shouldn't happen if hash changed, but be safe)
-                            SubscriptionUpdate::Full {
-                                rows: result_rows.clone(),
-                            }
-                        }
-                    } else {
-                        // No previous results - send full (first update after initial)
-                        debug!(
-                            subscription_id = %id,
-                            "No previous result, sending full update"
-                        );
-                        SubscriptionUpdate::Full {
-                            rows: result_rows.clone(),
-                        }
-                    };
-
-                    // Update stored state
-                    subscription.last_result_hash = new_hash;
-                    subscription.last_result = Some(result_rows);
-
-                    // Send update - ignore errors (channel may be closed)
-                    if subscription.notify_tx.send(update).await.is_err() {
-                        trace!(
-                            subscription_id = %id,
-                            "Notification channel closed, subscription will be cleaned up"
-                        );
-                    }
-                } else {
-                    trace!(
-                        subscription_id = %id,
-                        "Results unchanged, no notification needed"
-                    );
-                }
-            }
-            Err(e) => {
-                // Query execution error - notify subscriber
-                let _ = subscription
-                    .notify_tx
-                    .send(SubscriptionUpdate::Error {
-                        message: format!("Query execution failed: {}", e),
-                    })
-                    .await;
-            }
+            Err(e) => Err(format!("Failed to parse query: {}", e)),
         }
     }
 
@@ -1031,5 +1111,72 @@ mod tests {
 
         // Metrics should reflect the result set exceeded event
         assert_eq!(manager.result_set_exceeded_count(), 1);
+    }
+
+    #[test]
+    fn test_retry_policy_backoff_calculation() {
+        use crate::subscription::SubscriptionRetryPolicy;
+
+        let policy = SubscriptionRetryPolicy {
+            max_retries: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30000,
+            backoff_multiplier: 2.0,
+        };
+
+        // First retry: 1000ms
+        let backoff0 = policy.calculate_backoff(0);
+        assert_eq!(backoff0.as_millis(), 1000);
+
+        // Second retry: 2000ms
+        let backoff1 = policy.calculate_backoff(1);
+        assert_eq!(backoff1.as_millis(), 2000);
+
+        // Third retry: 4000ms
+        let backoff2 = policy.calculate_backoff(2);
+        assert_eq!(backoff2.as_millis(), 4000);
+
+        // Fourth retry: 8000ms
+        let backoff3 = policy.calculate_backoff(3);
+        assert_eq!(backoff3.as_millis(), 8000);
+
+        // High attempt should be capped at max_delay_ms
+        let backoff10 = policy.calculate_backoff(10);
+        assert_eq!(backoff10.as_millis(), 30000);
+    }
+
+    #[test]
+    fn test_subscription_retry_count_initialization() {
+        let (tx, _rx) = mpsc::channel(16);
+        let tables: std::collections::HashSet<_> = vec!["users".to_string()].into_iter().collect();
+
+        let sub = Subscription::new("SELECT * FROM users".to_string(), tables, tx);
+        assert_eq!(sub.retry_count, 0);
+    }
+
+    #[test]
+    fn test_subscription_with_custom_policy() {
+        use crate::subscription::SubscriptionRetryPolicy;
+
+        let (tx, _rx) = mpsc::channel(16);
+        let tables: std::collections::HashSet<_> = vec!["users".to_string()].into_iter().collect();
+
+        let policy = SubscriptionRetryPolicy {
+            max_retries: 5,
+            base_delay_ms: 500,
+            max_delay_ms: 60000,
+            backoff_multiplier: 3.0,
+        };
+
+        let sub = Subscription::with_policy(
+            "SELECT * FROM users".to_string(),
+            tables,
+            tx,
+            policy.clone(),
+        );
+
+        assert_eq!(sub.retry_count, 0);
+        assert_eq!(sub.retry_policy.max_retries, 5);
+        assert_eq!(sub.retry_policy.base_delay_ms, 500);
     }
 }

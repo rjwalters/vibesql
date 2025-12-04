@@ -47,9 +47,11 @@ mod router;
 pub mod session;
 mod table_dependencies;
 mod table_extract;
+pub mod error;
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -59,6 +61,7 @@ pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
 pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager};
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
+pub use error::{SubscriptionErrorKind, classify_error, classify_error_str};
 
 // ============================================================================
 // Subscription Configuration
@@ -165,6 +168,72 @@ impl std::fmt::Display for SubscriptionId {
 }
 
 // ============================================================================
+// Retry Policy
+// ============================================================================
+
+/// Configuration for subscription query retry behavior
+///
+/// When a subscription query fails during re-execution, it may be automatically
+/// retried with exponential backoff if the error is classified as transient.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubscriptionRetryPolicy {
+    /// Maximum number of retry attempts after initial failure
+    ///
+    /// Default: 3
+    /// Once retries are exhausted, the subscription enters a failed state
+    /// and the error is sent to the client.
+    pub max_retries: u32,
+
+    /// Base delay for the first retry in milliseconds
+    ///
+    /// Default: 1000 (1 second)
+    /// Used as the starting point for exponential backoff calculation.
+    pub base_delay_ms: u64,
+
+    /// Maximum delay between retries in milliseconds
+    ///
+    /// Default: 30000 (30 seconds)
+    /// Exponential backoff is capped at this duration to prevent excessive delays.
+    pub max_delay_ms: u64,
+
+    /// Multiplier for exponential backoff
+    ///
+    /// Default: 2.0
+    /// Delay for retry N = base_delay * (multiplier ^ N), capped at max_delay
+    pub backoff_multiplier: f64,
+}
+
+impl Default for SubscriptionRetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30000,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+impl SubscriptionRetryPolicy {
+    /// Calculate the backoff delay for a given retry attempt
+    ///
+    /// # Arguments
+    ///
+    /// * `attempt` - The retry attempt number (0-indexed, so first retry is 0)
+    ///
+    /// # Returns
+    ///
+    /// Duration to wait before the next retry
+    fn calculate_backoff(&self, attempt: u32) -> Duration {
+        let backoff_ms = self.base_delay_ms as f64
+            * self.backoff_multiplier.powi(attempt as i32);
+
+        let capped_ms = backoff_ms.min(self.max_delay_ms as f64);
+        Duration::from_millis(capped_ms as u64)
+    }
+}
+
+// ============================================================================
 // Subscription
 // ============================================================================
 
@@ -186,6 +255,10 @@ pub struct Subscription {
     pub last_result: Option<Vec<crate::Row>>,
     /// Channel to send updates to the subscriber
     pub notify_tx: mpsc::Sender<SubscriptionUpdate>,
+    /// Retry policy for handling transient errors
+    pub retry_policy: SubscriptionRetryPolicy,
+    /// Current retry attempt count (resets on successful execution)
+    pub retry_count: u32,
 }
 
 impl Subscription {
@@ -195,6 +268,16 @@ impl Subscription {
         tables: HashSet<String>,
         notify_tx: mpsc::Sender<SubscriptionUpdate>,
     ) -> Self {
+        Self::with_policy(query, tables, notify_tx, SubscriptionRetryPolicy::default())
+    }
+
+    /// Create a new subscription with a custom retry policy
+    pub fn with_policy(
+        query: String,
+        tables: HashSet<String>,
+        notify_tx: mpsc::Sender<SubscriptionUpdate>,
+        retry_policy: SubscriptionRetryPolicy,
+    ) -> Self {
         Self {
             id: SubscriptionId::new(),
             query,
@@ -202,6 +285,8 @@ impl Subscription {
             last_result_hash: 0,
             last_result: None,
             notify_tx,
+            retry_policy,
+            retry_count: 0,
         }
     }
 }
