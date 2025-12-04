@@ -70,12 +70,12 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::hint::black_box;
+use std::sync::Arc;
 use std::time::Duration;
 use sysbench::schema::load_vibesql;
 use sysbench::SysbenchData;
-use vibesql_executor::SelectExecutor;
-use vibesql_parser::Parser;
-use vibesql_storage::{Database as VibeDB, Row};
+use vibesql_executor::{PreparedStatement, PreparedStatementCache, Session, SessionMut};
+use vibesql_storage::Database as VibeDB;
 use vibesql_types::SqlValue;
 
 #[cfg(feature = "benchmark-comparison")]
@@ -84,6 +84,56 @@ use duckdb::Connection as DuckDBConn;
 use rusqlite::Connection as SqliteConn;
 #[cfg(feature = "benchmark-comparison")]
 use sysbench::schema::{load_duckdb, load_sqlite};
+
+// =============================================================================
+// Prepared Statement Holder for VibeSQL
+// =============================================================================
+
+/// Pre-prepared statements for fair comparison with SQLite/DuckDB
+///
+/// SQLite and DuckDB use `prepare_cached()` which caches parsed statements.
+/// This struct holds pre-prepared statements for VibeSQL to ensure fair comparison
+/// without SQL parsing overhead in the benchmark hot path.
+struct VibesqlPreparedStatements {
+    /// SELECT c FROM sbtest1 WHERE id = ?
+    point_select: Arc<PreparedStatement>,
+    /// SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?
+    simple_range: Arc<PreparedStatement>,
+    /// SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?
+    sum_range: Arc<PreparedStatement>,
+    /// SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c
+    order_range: Arc<PreparedStatement>,
+    /// SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c
+    distinct_range: Arc<PreparedStatement>,
+    /// DELETE FROM sbtest1 WHERE id = ?
+    delete: Arc<PreparedStatement>,
+    /// INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)
+    insert: Arc<PreparedStatement>,
+    /// UPDATE sbtest1 SET c = ? WHERE id = ?
+    update_non_index: Arc<PreparedStatement>,
+    /// Shared cache for all statements
+    cache: Arc<PreparedStatementCache>,
+}
+
+impl VibesqlPreparedStatements {
+    fn new(db: &VibeDB) -> Self {
+        let cache = Arc::new(PreparedStatementCache::default_cache());
+        let session = Session::with_shared_cache(db, Arc::clone(&cache));
+
+        Self {
+            point_select: session.prepare("SELECT c FROM sbtest1 WHERE id = ?").unwrap(),
+            simple_range: session.prepare("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap(),
+            sum_range: session.prepare("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap(),
+            order_range: session.prepare("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap(),
+            distinct_range: session.prepare("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap(),
+            delete: session.prepare("DELETE FROM sbtest1 WHERE id = ?").unwrap(),
+            // Note: column is named "padding" because PAD is a SQL keyword
+            insert: session.prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)").unwrap(),
+            update_non_index: session.prepare("UPDATE sbtest1 SET c = ? WHERE id = ?").unwrap(),
+            cache,
+        }
+    }
+}
 
 /// Default table size for sysbench tests
 const TABLE_SIZE: usize = 10_000;
@@ -98,55 +148,50 @@ const POINT_SELECTS_PER_TXN: usize = 10;
 const RANDOM_POINTS_COUNT: usize = 10;
 
 // =============================================================================
-// Helper Functions - VibeSQL
+// Helper Functions - VibeSQL (using prepared statements for fair comparison)
 // =============================================================================
 
-/// Execute a point select query on VibeSQL (SQL path - includes parsing overhead)
-fn vibesql_point_select(db: &VibeDB, id: i64) -> usize {
-    let sql = format!("SELECT c FROM sbtest1 WHERE id = {}", id);
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Select(select) = stmt {
-        let executor = SelectExecutor::new(db);
-        let result = executor.execute(&select).unwrap();
-        result.len()
-    } else {
-        0
-    }
+/// Execute a point select query on VibeSQL using prepared statement
+///
+/// This uses pre-prepared statements to avoid SQL parsing overhead in the hot path,
+/// providing a fair comparison with SQLite's `prepare_cached()`.
+fn vibesql_point_select(session: &Session, stmt: &PreparedStatement, id: i64) -> usize {
+    let result = session
+        .execute_prepared(stmt, &[SqlValue::Integer(id)])
+        .unwrap();
+    result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute a point select using direct PK lookup (bypasses SQL parsing)
-/// This is the optimized path that should be used for point SELECT performance
-fn vibesql_point_select_direct(db: &VibeDB, id: i64) -> usize {
-    // Column index 2 is 'c' (after id=0, k=1, c=2, pad=3)
-    match db.get_column_by_pk("SBTEST1", &SqlValue::Integer(id), 2) {
-        Ok(Some(_)) => 1,
-        _ => 0,
-    }
+/// Execute an insert on VibeSQL using prepared statement
+fn vibesql_insert(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, k: i64, c: &str, pad: &str) {
+    session
+        .execute_prepared_mut(
+            stmt,
+            &[
+                SqlValue::Integer(id),
+                SqlValue::Integer(k),
+                SqlValue::Varchar(c.to_string()),
+                SqlValue::Varchar(pad.to_string()),
+            ],
+        )
+        .unwrap();
 }
 
-/// Execute an insert on VibeSQL using direct API (avoids SQL parsing overhead)
-fn vibesql_insert(db: &mut VibeDB, id: i64, k: i64, c: &str, pad: &str) {
-    let row = Row::new(vec![
-        SqlValue::Integer(id),
-        SqlValue::Integer(k),
-        SqlValue::Varchar(c.to_string()),
-        SqlValue::Varchar(pad.to_string()),
-    ]);
-    db.insert_row("SBTEST1", row).unwrap();
-}
-
-/// Execute an update query on VibeSQL (update non-indexed column)
-fn vibesql_update_non_index(db: &mut VibeDB, id: i64, c: &str) {
-    // Use direct API (bypasses SQL parsing for fair comparison with prepared statements)
-    db.update_row_by_pk(
-        "SBTEST1",
-        SqlValue::Integer(id),
-        vec![("c", SqlValue::Varchar(c.to_string()))],
-    )
-    .unwrap();
+/// Execute an update query on VibeSQL (update non-indexed column) using prepared statement
+fn vibesql_update_non_index(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, c: &str) {
+    session
+        .execute_prepared_mut(
+            stmt,
+            &[SqlValue::Varchar(c.to_string()), SqlValue::Integer(id)],
+        )
+        .unwrap();
 }
 
 /// Execute an update query on VibeSQL (update indexed column k)
+///
+/// Uses direct API for k = k + 1 operation since it requires read-modify-write.
+/// This is a fair comparison as the operation itself is equivalent to
+/// SQLite's prepared UPDATE sbtest1 SET k = k + 1 WHERE id = ?
 fn vibesql_update_index(db: &mut VibeDB, id: i64) {
     // For k = k + 1, we need to read current value first then update
     // Use PK index for O(1) lookup
@@ -178,74 +223,43 @@ fn vibesql_update_index(db: &mut VibeDB, id: i64) {
     db.invalidate_columnar_cache("SBTEST1");
 }
 
-/// Execute a delete query on VibeSQL
-fn vibesql_delete(db: &mut VibeDB, id: i64) {
-    let sql = format!("DELETE FROM sbtest1 WHERE id = {}", id);
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Delete(delete) = stmt {
-        vibesql_executor::DeleteExecutor::execute(&delete, db).unwrap();
-    }
+/// Execute a delete query on VibeSQL using prepared statement
+fn vibesql_delete(session: &mut SessionMut, stmt: &PreparedStatement, id: i64) {
+    session
+        .execute_prepared_mut(stmt, &[SqlValue::Integer(id)])
+        .unwrap();
 }
 
-/// Execute a simple range query on VibeSQL
-fn vibesql_simple_range(db: &VibeDB, start: i64, end: i64) -> usize {
-    let sql = format!("SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {}", start, end);
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Select(select) = stmt {
-        let executor = SelectExecutor::new(db);
-        let result = executor.execute(&select).unwrap();
-        result.len()
-    } else {
-        0
-    }
+/// Execute a simple range query on VibeSQL using prepared statement
+fn vibesql_simple_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
+    let result = session
+        .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
+        .unwrap();
+    result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute a sum range query on VibeSQL
-fn vibesql_sum_range(db: &VibeDB, start: i64, end: i64) -> usize {
-    let sql = format!(
-        "SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN {} AND {}",
-        start, end
-    );
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Select(select) = stmt {
-        let executor = SelectExecutor::new(db);
-        let result = executor.execute(&select).unwrap();
-        result.len()
-    } else {
-        0
-    }
+/// Execute a sum range query on VibeSQL using prepared statement
+fn vibesql_sum_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
+    let result = session
+        .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
+        .unwrap();
+    result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute an order range query on VibeSQL
-fn vibesql_order_range(db: &VibeDB, start: i64, end: i64) -> usize {
-    let sql = format!(
-        "SELECT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
-        start, end
-    );
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Select(select) = stmt {
-        let executor = SelectExecutor::new(db);
-        let result = executor.execute(&select).unwrap();
-        result.len()
-    } else {
-        0
-    }
+/// Execute an order range query on VibeSQL using prepared statement
+fn vibesql_order_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
+    let result = session
+        .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
+        .unwrap();
+    result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute a distinct range query on VibeSQL
-fn vibesql_distinct_range(db: &VibeDB, start: i64, end: i64) -> usize {
-    let sql = format!(
-        "SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN {} AND {} ORDER BY c",
-        start, end
-    );
-    let stmt = Parser::parse_sql(&sql).unwrap();
-    if let vibesql_ast::Statement::Select(select) = stmt {
-        let executor = SelectExecutor::new(db);
-        let result = executor.execute(&select).unwrap();
-        result.len()
-    } else {
-        0
-    }
+/// Execute a distinct range query on VibeSQL using prepared statement
+fn vibesql_distinct_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
+    let result = session
+        .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
+        .unwrap();
+    result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
 // =============================================================================
@@ -491,42 +505,25 @@ fn generate_pad_string() -> String {
 // Point Select Benchmarks
 // =============================================================================
 
-/// Benchmark oltp_point_select on VibeSQL (SQL path with parsing)
+/// Benchmark oltp_point_select on VibeSQL using prepared statements
 ///
 /// This test measures single-row lookup by primary key, which is the most
 /// common OLTP operation. It tests index lookup performance.
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_point_select_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_point_select");
     group.measurement_time(Duration::from_secs(10));
 
     let db = load_vibesql(TABLE_SIZE);
+    let stmts = VibesqlPreparedStatements::new(&db);
+    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
     let mut rng = ChaCha8Rng::seed_from_u64(42);
 
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter(|| {
             let id = rng.random_range(1..=TABLE_SIZE as i64);
-            black_box(vibesql_point_select(&db, id))
-        })
-    });
-
-    group.finish();
-}
-
-/// Benchmark oltp_point_select on VibeSQL using direct PK lookup (no SQL parsing)
-///
-/// This test measures the optimized path that bypasses SQL parsing entirely,
-/// providing a fair comparison with SQLite's prepared statement cache.
-fn benchmark_point_select_vibesql_direct(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_point_select");
-    group.measurement_time(Duration::from_secs(10));
-
-    let db = load_vibesql(TABLE_SIZE);
-    let mut rng = ChaCha8Rng::seed_from_u64(42);
-
-    group.bench_function(BenchmarkId::new("vibesql_direct", TABLE_SIZE), |b| {
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
-            black_box(vibesql_point_select_direct(&db, id))
+            black_box(vibesql_point_select(&session, &stmts.point_select, id))
         })
     });
 
@@ -573,10 +570,12 @@ fn benchmark_point_select_duckdb(c: &mut Criterion) {
 // Insert Benchmarks
 // =============================================================================
 
-/// Benchmark oltp_insert on VibeSQL
+/// Benchmark oltp_insert on VibeSQL using prepared statements
 ///
 /// This test measures single-row insert performance. Each iteration inserts
 /// a new row with a unique ID.
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_insert_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_insert");
     group.measurement_time(Duration::from_secs(10));
@@ -587,6 +586,8 @@ fn benchmark_insert_vibesql(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
             let mut db = load_vibesql(TABLE_SIZE);
+            let stmts = VibesqlPreparedStatements::new(&db);
+            let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
             let mut data_gen = SysbenchData::new(TABLE_SIZE);
             let mut next_id = (TABLE_SIZE + 1) as i64;
 
@@ -595,7 +596,7 @@ fn benchmark_insert_vibesql(c: &mut Criterion) {
                 let k = data_gen.random_k();
                 let c = generate_c_string();
                 let pad = generate_pad_string();
-                vibesql_insert(&mut db, next_id, k, &c, &pad);
+                vibesql_insert(&mut session, &stmts.insert, next_id, k, &c, &pad);
                 next_id += 1;
             }
             start.elapsed()
@@ -663,12 +664,14 @@ fn benchmark_insert_duckdb(c: &mut Criterion) {
 // Delete Benchmarks
 // =============================================================================
 
-/// Benchmark oltp_delete on VibeSQL
+/// Benchmark oltp_delete on VibeSQL using prepared statements
 ///
 /// This test measures DELETE by primary key performance. Uses iter_batched
 /// to set up a fresh database for each iteration batch since deletes modify state.
 ///
 /// Sysbench equivalent: DELETE FROM sbtest1 WHERE id = ?
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_delete_vibesql(c: &mut Criterion) {
     use criterion::BatchSize;
 
@@ -679,15 +682,17 @@ fn benchmark_delete_vibesql(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter_batched(
             || {
-                // Setup: create fresh database
+                // Setup: create fresh database and prepared statements
                 let db = load_vibesql(TABLE_SIZE);
+                let stmts = VibesqlPreparedStatements::new(&db);
                 let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
                 let id = rng.random_range(1..=TABLE_SIZE as i64);
-                (db, id)
+                (db, stmts, id)
             },
-            |(mut db, id)| {
-                // Delete single row
-                vibesql_delete(&mut db, id);
+            |(mut db, stmts, id)| {
+                // Delete single row using prepared statement
+                let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
+                vibesql_delete(&mut session, &stmts.delete, id);
             },
             BatchSize::LargeInput,
         );
@@ -815,24 +820,28 @@ fn benchmark_update_index_duckdb(c: &mut Criterion) {
 // Update Non-Index Benchmarks
 // =============================================================================
 
-/// Benchmark oltp_update_non_index on VibeSQL
+/// Benchmark oltp_update_non_index on VibeSQL using prepared statements
 ///
 /// This test measures UPDATE performance on a non-indexed column (c).
 /// This avoids index maintenance overhead, measuring pure row update performance.
 ///
 /// Sysbench equivalent: UPDATE sbtest1 SET c = ? WHERE id = ?
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_update_non_index_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_update_non_index");
     group.measurement_time(Duration::from_secs(10));
 
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         let mut db = load_vibesql(TABLE_SIZE);
+        let stmts = VibesqlPreparedStatements::new(&db);
+        let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
         b.iter(|| {
             let id = rng.random_range(1..=TABLE_SIZE as i64);
             let c = generate_c_string();
-            vibesql_update_non_index(&mut db, id, &c);
+            vibesql_update_non_index(&mut session, &stmts.update_non_index, id, &c);
         });
     });
 
@@ -881,7 +890,7 @@ fn benchmark_update_non_index_duckdb(c: &mut Criterion) {
 // Write-Only Benchmarks
 // =============================================================================
 
-/// Benchmark oltp_write_only on VibeSQL
+/// Benchmark oltp_write_only on VibeSQL using prepared statements
 ///
 /// This test simulates a write-heavy OLTP workload per transaction:
 /// - 1 index update (UPDATE sbtest1 SET k = k + 1 WHERE id = ?)
@@ -891,6 +900,8 @@ fn benchmark_update_non_index_duckdb(c: &mut Criterion) {
 ///
 /// The delete uses a random existing ID, the insert uses a new ID.
 /// This measures write throughput without read operations.
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_write_only_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_write_only");
     group.measurement_time(Duration::from_secs(10));
@@ -899,6 +910,8 @@ fn benchmark_write_only_vibesql(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
             let mut db = load_vibesql(TABLE_SIZE);
+            let stmts = VibesqlPreparedStatements::new(&db);
+            let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
             let mut rng = ChaCha8Rng::seed_from_u64(42);
             let mut data_gen = SysbenchData::new(TABLE_SIZE);
             let mut next_id = (TABLE_SIZE + 1) as i64;
@@ -908,22 +921,22 @@ fn benchmark_write_only_vibesql(c: &mut Criterion) {
                 // Pick a random ID for updates
                 let update_id = rng.random_range(1..=TABLE_SIZE as i64);
 
-                // 1 index update (SET k = k + 1)
-                vibesql_update_index(&mut db, update_id);
+                // 1 index update (SET k = k + 1) - uses direct API
+                vibesql_update_index(session.database_mut(), update_id);
 
                 // 1 non-index update (SET c = ?)
                 let c = generate_c_string();
-                vibesql_update_non_index(&mut db, update_id, &c);
+                vibesql_update_non_index(&mut session, &stmts.update_non_index, update_id, &c);
 
                 // 1 delete (random existing row)
                 let delete_id = rng.random_range(1..=next_id - 1);
-                vibesql_delete(&mut db, delete_id);
+                vibesql_delete(&mut session, &stmts.delete, delete_id);
 
                 // 1 insert (new row with new ID)
                 let k = data_gen.random_k();
                 let new_c = generate_c_string();
                 let pad = generate_pad_string();
-                vibesql_insert(&mut db, next_id, k, &new_c, &pad);
+                vibesql_insert(&mut session, &stmts.insert, next_id, k, &new_c, &pad);
                 next_id += 1;
             }
             start.elapsed()
@@ -1023,13 +1036,15 @@ fn benchmark_write_only_duckdb(c: &mut Criterion) {
 // Read-Write Mixed Workload Benchmarks
 // =============================================================================
 
-/// Benchmark oltp_read_write on VibeSQL
+/// Benchmark oltp_read_write on VibeSQL using prepared statements
 ///
 /// This test simulates a mixed OLTP workload with:
 /// - 10 point select queries
 /// - 1 update (non-indexed column)
 ///
 /// This ratio is based on typical OLTP workloads where reads dominate.
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_read_write_vibesql(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_read_write");
     group.measurement_time(Duration::from_secs(10));
@@ -1038,20 +1053,23 @@ fn benchmark_read_write_vibesql(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter_custom(|iters| {
             let mut db = load_vibesql(TABLE_SIZE);
+            let stmts = VibesqlPreparedStatements::new(&db);
+            let mut session_mut = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
             let mut rng = ChaCha8Rng::seed_from_u64(42);
 
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                // 10 point selects
+                // 10 point selects (use read-only session via database reference)
                 for _ in 0..10 {
                     let id = rng.random_range(1..=TABLE_SIZE as i64);
-                    black_box(vibesql_point_select(&db, id));
+                    let read_session = Session::with_shared_cache(session_mut.database(), Arc::clone(&stmts.cache));
+                    black_box(vibesql_point_select(&read_session, &stmts.point_select, id));
                 }
 
                 // 1 update (non-indexed column)
                 let id = rng.random_range(1..=TABLE_SIZE as i64);
                 let c = generate_c_string();
-                vibesql_update_non_index(&mut db, id, &c);
+                vibesql_update_non_index(&mut session_mut, &stmts.update_non_index, id, &c);
             }
             start.elapsed()
         })
@@ -1126,14 +1144,18 @@ fn benchmark_read_write_duckdb(c: &mut Criterion) {
 // oltp_read_only Benchmark
 // =============================================================================
 
-/// Standard sysbench read-only transaction:
+/// Standard sysbench read-only transaction using prepared statements:
 /// - 10 point selects
 /// - 1 simple range query
 /// - 1 sum range query
 /// - 1 order range query
 /// - 1 distinct range query
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_oltp_read_only_vibesql(c: &mut Criterion) {
     let db = load_vibesql(TABLE_SIZE);
+    let stmts = VibesqlPreparedStatements::new(&db);
+    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
     let mut data = SysbenchData::new(TABLE_SIZE);
 
     let mut group = c.benchmark_group("oltp_read_only");
@@ -1146,24 +1168,24 @@ fn benchmark_oltp_read_only_vibesql(c: &mut Criterion) {
             // 10 point selects
             let ids = data.random_ids(POINT_SELECTS_PER_TXN);
             for id in ids {
-                total += vibesql_point_select(&db, id);
+                total += vibesql_point_select(&session, &stmts.point_select, id);
             }
 
             // 1 simple range query
             let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_simple_range(&db, start, end);
+            total += vibesql_simple_range(&session, &stmts.simple_range, start, end);
 
             // 1 sum range query
             let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_sum_range(&db, start, end);
+            total += vibesql_sum_range(&session, &stmts.sum_range, start, end);
 
             // 1 order range query
             let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_order_range(&db, start, end);
+            total += vibesql_order_range(&session, &stmts.order_range, start, end);
 
             // 1 distinct range query
             let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_distinct_range(&db, start, end);
+            total += vibesql_distinct_range(&session, &stmts.distinct_range, start, end);
 
             black_box(total);
         });
@@ -1259,8 +1281,12 @@ fn benchmark_oltp_read_only_duckdb(c: &mut Criterion) {
 // =============================================================================
 
 /// Multiple random point selects - tests index lookup throughput.
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_select_random_points_vibesql(c: &mut Criterion) {
     let db = load_vibesql(TABLE_SIZE);
+    let stmts = VibesqlPreparedStatements::new(&db);
+    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
     let mut data = SysbenchData::new(TABLE_SIZE);
 
     let mut group = c.benchmark_group("select_random_points");
@@ -1271,7 +1297,7 @@ fn benchmark_select_random_points_vibesql(c: &mut Criterion) {
             let ids = data.random_ids(RANDOM_POINTS_COUNT);
             let mut total = 0;
             for id in ids {
-                total += vibesql_point_select(&db, id);
+                total += vibesql_point_select(&session, &stmts.point_select, id);
             }
             black_box(total);
         });
@@ -1329,8 +1355,12 @@ fn benchmark_select_random_points_duckdb(c: &mut Criterion) {
 // =============================================================================
 
 /// Range queries with BETWEEN clause - tests range scan performance.
+///
+/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_select_random_ranges_vibesql(c: &mut Criterion) {
     let db = load_vibesql(TABLE_SIZE);
+    let stmts = VibesqlPreparedStatements::new(&db);
+    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
     let mut data = SysbenchData::new(TABLE_SIZE);
 
     let mut group = c.benchmark_group("select_random_ranges");
@@ -1339,7 +1369,7 @@ fn benchmark_select_random_ranges_vibesql(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         b.iter(|| {
             let (start, end) = data.random_range(RANGE_SIZE);
-            black_box(vibesql_simple_range(&db, start, end));
+            black_box(vibesql_simple_range(&session, &stmts.simple_range, start, end));
         });
     });
 
@@ -1390,7 +1420,6 @@ fn benchmark_select_random_ranges_duckdb(c: &mut Criterion) {
 criterion_group!(
     benches,
     benchmark_point_select_vibesql,
-    benchmark_point_select_vibesql_direct,
     benchmark_insert_vibesql,
     benchmark_delete_vibesql,
     benchmark_update_index_vibesql,
@@ -1407,7 +1436,6 @@ criterion_group!(
 criterion_group!(
     benches,
     benchmark_point_select_vibesql,
-    benchmark_point_select_vibesql_direct,
     benchmark_point_select_sqlite,
     benchmark_point_select_duckdb,
     benchmark_insert_vibesql,

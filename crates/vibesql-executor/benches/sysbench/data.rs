@@ -7,14 +7,14 @@
 //!   id INTEGER PRIMARY KEY,
 //!   k INTEGER NOT NULL DEFAULT 0,
 //!   c CHAR(120) NOT NULL DEFAULT '',
-//!   pad CHAR(60) NOT NULL DEFAULT ''
+//!   padding CHAR(60) NOT NULL DEFAULT ''  -- Note: renamed from 'pad' (SQL keyword)
 //! );
 //! CREATE INDEX k_1 ON sbtest1(k);
 //!
 //! - `id`: Sequential primary key
 //! - `k`: Random integer (used for secondary index lookups)
 //! - `c`: String of 120 chars with format "###-###-...-###"
-//! - `pad`: String of 60 chars with format "###-###-...-###"
+//! - `padding`: String of 60 chars with format "###-###-...-###"
 
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;

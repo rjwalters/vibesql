@@ -677,4 +677,26 @@ mod tests {
         let bound = stmt.bind(&[SqlValue::Integer(99)]).unwrap();
         assert!(matches!(bound, Statement::Delete(_)));
     }
+
+    #[test]
+    fn test_arena_parse_sysbench_insert() {
+        // Test the exact SQL that the sysbench benchmark uses
+        let cache = PreparedStatementCache::new(10);
+
+        // Test 3 columns
+        let sql3 = "INSERT INTO test (a, b, c) VALUES (?, ?, ?)";
+        let stmt3 = cache.get_or_prepare(sql3);
+        assert!(stmt3.is_ok(), "3-column INSERT failed: {:?}", stmt3.err());
+
+        // Test 4 columns with generic names
+        let sql4_gen = "INSERT INTO test (a, b, c, d) VALUES (?, ?, ?, ?)";
+        let stmt4_gen = cache.get_or_prepare(sql4_gen);
+        assert!(stmt4_gen.is_ok(), "4-column INSERT (generic) failed: {:?}", stmt4_gen.err());
+
+        // Test 4 columns with sysbench names (using "padding" instead of "pad" which is a keyword)
+        let sql4 = "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)";
+        let stmt4 = cache.get_or_prepare(sql4);
+        assert!(stmt4.is_ok(), "4-column INSERT (sysbench) failed: {:?}", stmt4.err());
+        assert_eq!(stmt4.unwrap().param_count(), 4);
+    }
 }
