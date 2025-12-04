@@ -7,6 +7,7 @@
 //! - `numeric`: Mathematical operations (ABS, ROUND, POWER, SIN, etc.)
 //! - `datetime`: Date/time operations (CURRENT_DATE, YEAR, DATE_ADD, etc.)
 //! - `control`: Control flow (IF)
+//! - `vector`: Vector operations (COSINE_DISTANCE, L2_DISTANCE, INNER_PRODUCT, etc.)
 //! - `spatial`: Spatial/geometric functions (ST_GeomFromText, ST_Contains, ST_Intersects, etc.)
 //!
 //! ## Usage
@@ -24,6 +25,7 @@ mod null_handling;
 mod numeric;
 pub(crate) mod string;
 mod system;
+mod vector;
 #[cfg(feature = "spatial")]
 pub(crate) mod spatial;
 
@@ -86,6 +88,13 @@ pub(super) fn eval_scalar_function(
         "GREATEST" => numeric::greatest(args),
         "LEAST" => numeric::least(args),
         "FORMAT" => numeric::format(args),
+
+        // Vector functions
+        "COSINE_DISTANCE" => vector::cosine_distance(args),
+        "L2_DISTANCE" => vector::l2_distance(args),
+        "INNER_PRODUCT" => vector::inner_product(args),
+        "VECTOR_NORM" => vector::vector_norm(args),
+        "VECTOR_DIMS" => vector::vector_dims(args),
 
         // Date/time functions
         "CURRENT_DATE" | "CURDATE" => datetime::current_date(args),
