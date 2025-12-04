@@ -8,11 +8,13 @@
 //! - **cursor**: Cursor operations (DECLARE/OPEN/FETCH/CLOSE)
 //! - **prepared**: Prepared statement operations (PREPARE/EXECUTE/DEALLOCATE)
 //! - **advanced**: Advanced SQL:1999 objects (SEQUENCE, TYPE, DOMAIN, COLLATION, etc.)
+//! - **schedule**: Scheduled functions and cron jobs
 
 // Declare modules
 pub mod advanced;
 pub mod cursor;
 pub mod prepared;
+pub mod schedule;
 pub mod schema;
 pub mod table;
 pub mod transaction;
@@ -21,6 +23,7 @@ pub mod transaction;
 pub use advanced::*;
 pub use cursor::*;
 pub use prepared::*;
+pub use schedule::*;
 pub use schema::*;
 pub use table::*;
 pub use transaction::*;
