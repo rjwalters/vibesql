@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 use vibesql_server::auth::PasswordStore;
 use vibesql_server::config::Config;
 use vibesql_server::connection::ConnectionHandler;
+use vibesql_server::http::create_http_router;
 use vibesql_server::observability::ObservabilityProvider;
 use vibesql_server::protocol::BackendMessage;
 use vibesql_server::subscription::SubscriptionManager;
@@ -43,10 +44,17 @@ async fn main() -> Result<()> {
 
     info!("Starting VibeSQL Server v{}", env!("CARGO_PKG_VERSION"));
     info!("Configuration:");
-    info!("  Host: {}", config.server.host);
-    info!("  Port: {}", config.server.port);
-    info!("  Max connections: {}", config.server.max_connections);
-    info!("  SSL enabled: {}", config.server.ssl_enabled);
+    info!("  PostgreSQL Wire Protocol:");
+    info!("    Host: {}", config.server.host);
+    info!("    Port: {}", config.server.port);
+    info!("    Max connections: {}", config.server.max_connections);
+    info!("    SSL enabled: {}", config.server.ssl_enabled);
+    info!("  HTTP REST API:");
+    info!("    Enabled: {}", config.http.enabled);
+    if config.http.enabled {
+        info!("    Host: {}", config.http.host);
+        info!("    Port: {}", config.http.port);
+    }
     info!("  Auth method: {}", config.auth.method);
     info!("  Observability enabled: {}", config.observability.enabled);
 
@@ -109,6 +117,24 @@ async fn main() -> Result<()> {
         subscription_manager_for_loop.run_event_loop(change_rx, db_for_subscription_task).await;
         info!("Subscription manager event loop stopped");
     });
+
+    // Spawn HTTP server if enabled
+    if config.http.enabled {
+        let http_addr: SocketAddr =
+            format!("{}:{}", config.http.host, config.http.port).parse().expect("Invalid HTTP address");
+        let db_for_http = Arc::clone(&db);
+
+        tokio::spawn(async move {
+            let app = create_http_router(db_for_http);
+            let listener = tokio::net::TcpListener::bind(&http_addr)
+                .await
+                .expect("Failed to bind HTTP server");
+
+            info!("HTTP REST API listening on http://{}", http_addr);
+
+            axum::serve(listener, app).await.expect("HTTP server error");
+        });
+    }
 
     loop {
         // Accept new connections

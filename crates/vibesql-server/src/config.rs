@@ -12,6 +12,8 @@ pub struct Config {
     pub auth: AuthConfig,
     pub logging: LoggingConfig,
     #[serde(default)]
+    pub http: HttpConfig,
+    #[serde(default)]
     pub observability: ObservabilityConfig,
 }
 
@@ -47,6 +49,26 @@ pub struct LoggingConfig {
     pub file: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpConfig {
+    /// Enable HTTP REST API (default: true)
+    pub enabled: bool,
+    /// HTTP server host (default: 0.0.0.0)
+    pub host: String,
+    /// HTTP server port (default: 8080)
+    pub port: u16,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -66,6 +88,7 @@ impl Default for Config {
                 level: "info".to_string(),
                 file: None,
             },
+            http: HttpConfig::default(),
             observability: ObservabilityConfig::default(),
         }
     }
