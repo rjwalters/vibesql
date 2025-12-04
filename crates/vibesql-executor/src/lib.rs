@@ -21,6 +21,7 @@ pub mod evaluator;
 mod explain;
 mod grant;
 pub mod index_ddl;
+pub mod information_schema;
 mod insert;
 mod introspection;
 pub mod limits;
