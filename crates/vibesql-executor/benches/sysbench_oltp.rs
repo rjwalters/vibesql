@@ -8,6 +8,13 @@
 //!
 //! All measurements are done in-memory with no Python/FFI overhead.
 //!
+//! ## MySQL Benchmarks
+//!
+//! For MySQL comparison benchmarks, use the standalone runner `sysbench_benchmark.rs`
+//! which supports MySQL via the `MYSQL_URL` environment variable. MySQL cannot be
+//! integrated into this criterion-based benchmark because MySQL's `&mut self` query
+//! API is incompatible with criterion's `iter_batched` pattern.
+//!
 //! ## Test Categories
 //!
 //! **Read Tests:**
@@ -76,14 +83,7 @@ use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
 #[cfg(feature = "benchmark-comparison")]
-#[allow(unused_imports)]
-use mysql::prelude::*;
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-use mysql::PooledConn as MysqlConn;
-#[cfg(feature = "benchmark-comparison")]
-#[allow(unused_imports)]
-use sysbench::schema::{load_duckdb, load_mysql, load_sqlite};
+use sysbench::schema::{load_duckdb, load_sqlite};
 
 /// Default table size for sysbench tests
 const TABLE_SIZE: usize = 10_000;
@@ -448,97 +448,6 @@ fn duckdb_distinct_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
         count += 1;
     }
     count
-}
-
-// =============================================================================
-// Helper Functions - MySQL
-// NOTE: These functions are not yet used in benchmark groups because MySQL
-// requires &mut self for queries, making it incompatible with criterion's
-// iter_batched API. They are provided for future use when MySQL benchmarks
-// are added separately (similar to TPC-C/TPC-H).
-// =============================================================================
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_point_select(conn: &mut MysqlConn, id: i64) -> usize {
-    let result: Option<(String,)> = conn
-        .exec_first("SELECT c FROM sbtest1 WHERE id = ?", (id,))
-        .ok()
-        .flatten();
-    if result.is_some() { 1 } else { 0 }
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_insert(conn: &mut MysqlConn, id: i64, k: i64, c: &str, pad: &str) {
-    conn.exec_drop(
-        "INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)",
-        (id, k, c, pad),
-    ).unwrap();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_update_non_index(conn: &mut MysqlConn, id: i64, c: &str) {
-    conn.exec_drop(
-        "UPDATE sbtest1 SET c = ? WHERE id = ?",
-        (c, id),
-    ).unwrap();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_update_index(conn: &mut MysqlConn, id: i64) {
-    conn.exec_drop(
-        "UPDATE sbtest1 SET k = k + 1 WHERE id = ?",
-        (id,),
-    ).unwrap();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_delete(conn: &mut MysqlConn, id: i64) {
-    conn.exec_drop(
-        "DELETE FROM sbtest1 WHERE id = ?",
-        (id,),
-    ).unwrap();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_simple_range(conn: &mut MysqlConn, start: i64, end: i64) -> usize {
-    let result: Vec<(String,)> = conn
-        .exec("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?", (start, end))
-        .unwrap_or_default();
-    result.len()
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_sum_range(conn: &mut MysqlConn, start: i64, end: i64) -> usize {
-    let _result: Option<(Option<i64>,)> = conn
-        .exec_first("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?", (start, end))
-        .ok()
-        .flatten();
-    1
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_order_range(conn: &mut MysqlConn, start: i64, end: i64) -> usize {
-    let result: Vec<(String,)> = conn
-        .exec("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c", (start, end))
-        .unwrap_or_default();
-    result.len()
-}
-
-#[cfg(feature = "benchmark-comparison")]
-#[allow(dead_code)]
-fn mysql_distinct_range(conn: &mut MysqlConn, start: i64, end: i64) -> usize {
-    let result: Vec<(String,)> = conn
-        .exec("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c", (start, end))
-        .unwrap_or_default();
-    result.len()
 }
 
 // =============================================================================
