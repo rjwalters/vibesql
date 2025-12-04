@@ -517,6 +517,13 @@ impl TPCDSData {
         self.rng.random_range(min..=max)
     }
 
+    /// Generate a random decimal value rounded to 2 decimal places
+    /// Used for prices, costs, and monetary values
+    pub fn random_decimal(&mut self, min: f64, max: f64) -> f64 {
+        let value = self.rng.random_range(min..=max);
+        (value * 100.0).round() / 100.0
+    }
+
     pub fn random_bool(&mut self) -> bool {
         self.rng.random_bool(0.5)
     }
