@@ -235,3 +235,44 @@ fn test_cte_used_multiple_times() {
 
     assert_eq!(results.len(), 1); // User 1 joined with user 3
 }
+
+/// Test for issue #3563: CTE visibility in IN subqueries
+///
+/// CTEs should be visible within IN subqueries in the WHERE clause.
+/// Previously this failed with TableNotFound error because the CTE context
+/// was not propagated to the predicate evaluation.
+#[test]
+fn test_cte_visible_in_in_subquery() {
+    let db = create_test_database();
+
+    // Query pattern similar to TPC-DS Q95:
+    // WITH cte AS (...) SELECT ... WHERE col IN (SELECT col FROM cte)
+    let results = execute_query(
+        &db,
+        "WITH high_orders AS (SELECT user_id FROM orders WHERE amount >= 150) \
+         SELECT name FROM users WHERE id IN (SELECT user_id FROM high_orders);",
+    )
+    .unwrap();
+
+    // Users 1 and 2 have orders >= 150 (101->100, 102->200, 103->150)
+    // User 1: orders 101 (100) and 103 (150) - has order >= 150
+    // User 2: order 102 (200) - has order >= 150
+    assert_eq!(results.len(), 2);
+}
+
+/// Test CTE visibility in NOT IN subquery
+#[test]
+fn test_cte_visible_in_not_in_subquery() {
+    let db = create_test_database();
+
+    let results = execute_query(
+        &db,
+        "WITH big_spenders AS (SELECT user_id FROM orders WHERE amount >= 200) \
+         SELECT name FROM users WHERE id NOT IN (SELECT user_id FROM big_spenders);",
+    )
+    .unwrap();
+
+    // User 2 has an order of 200, so they are a big spender
+    // Users 1 and 3 should be returned (3 has no orders)
+    assert_eq!(results.len(), 2);
+}

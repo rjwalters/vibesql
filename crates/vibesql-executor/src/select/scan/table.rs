@@ -75,6 +75,7 @@ pub(crate) fn execute_table_scan(
 
             // Must clone rows for filtering (copy-on-write semantics)
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
+            // Pass CTE context for WHERE clauses with IN subqueries referencing CTEs (#3563)
             let rows = apply_table_local_predicates(
                 cte_rows.as_ref().clone(),
                 schema.clone(),
@@ -83,6 +84,7 @@ pub(crate) fn execute_table_scan(
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
+                Some(cte_results),
             )?;
             return Ok(super::FromResult::from_rows(schema, rows));
         }
@@ -174,6 +176,7 @@ pub(crate) fn execute_table_scan(
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
+            // Pass CTE context for WHERE clauses with IN subqueries referencing CTEs (#3563)
             rows = apply_table_local_predicates(
                 rows,
                 schema.clone(),
@@ -182,6 +185,7 @@ pub(crate) fn execute_table_scan(
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
+                Some(cte_results),
             )?;
         }
 
@@ -292,6 +296,7 @@ pub(crate) fn execute_table_scan(
             }
             // Fall back to generic predicate evaluation for complex expressions
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
+            // Pass CTE context for WHERE clauses with IN subqueries referencing CTEs (#3563)
             let filtered_rows = apply_table_local_predicates_ref(
                 row_slice,
                 schema.clone(),
@@ -300,6 +305,7 @@ pub(crate) fn execute_table_scan(
                 database,
                 None,  // No outer context for predicate pushdown
                 None,
+                Some(cte_results),
             )?;
             return Ok(super::FromResult::from_rows(schema, filtered_rows));
         }
