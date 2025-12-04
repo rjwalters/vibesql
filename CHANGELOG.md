@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2024-12-04
+
+### Added
+
+#### Vector Search
+- **Distance operators** - `<->` (L2/Euclidean), `<#>` (inner product), `<=>` (cosine)
+- **Distance functions** - `l2_distance()`, `inner_product()`, `cosine_distance()`, `cosine_similarity()`
+- **IVFFlat index** - Inverted file index for approximate nearest neighbor search
+- **HNSW index** - Hierarchical Navigable Small World graph for high-performance ANN
+
+#### HTTP Server & API
+- **REST API** - Auto-generated CRUD endpoints for all tables
+- **GraphQL endpoint** - Full query support with schema introspection
+- **Relationship resolution** - Nested queries following foreign key relationships
+- **Authentication** - API key and token-based HTTP authentication
+- **SSE subscriptions** - Real-time data streaming with Server-Sent Events
+- **Delta updates** - Efficient change notifications for subscriptions
+- **Backpressure handling** - Configurable channel buffers and rate limiting
+- **Subscription limits** - Per-connection and global quotas
+- **Retry with exponential backoff** - Automatic recovery from transient errors
+- **Pagination** - `limit` and `offset` query parameters
+
+#### Blob Storage
+- **SQL integration** - `vibesql_storage` system table for blob metadata
+- **HTTP endpoints** - Upload and download blobs via REST API
+- **OpenDAL integration** - Cloud storage backends (S3, GCS, Azure, local filesystem)
+- **TypeScript SDK** - Storage methods in `@vibesql/client`
+
+#### SDK & Tooling
+- **Drizzle ORM adapter** - `@vibesql/drizzle` package using sqlite-proxy driver
+- **TypeScript codegen** - `vibesql-cli codegen` command for type-safe database access
+
+#### Scheduled Functions
+- **Cron scheduling** - Execute SQL statements on a schedule
+- **Job management** - Create, list, pause, resume scheduled jobs
+
+### Changed
+
+- Unified benchmark CLI (`scripts/bench`) with consistent interface
+- Consolidated benchmark result processing into `process_results.py`
+- Improved SQLite dialect compatibility for dogfooding scenarios
+
+### Fixed
+
+- Clippy warning for approximate PI constant in tests
+- WASM UUID generation with `js` feature for RNG support
+
+---
+
 ## [0.1.0] - Unreleased
 
 ### Added
