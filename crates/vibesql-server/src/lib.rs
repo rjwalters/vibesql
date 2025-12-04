@@ -8,6 +8,7 @@ pub mod config;
 pub mod connection;
 pub mod observability;
 pub mod protocol;
+pub mod scheduler;
 pub mod session;
 pub mod subscription;
 
@@ -18,6 +19,7 @@ pub use observability::ObservabilityProvider;
 pub use protocol::{
     BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
 };
+pub use scheduler::{ScheduleExecutor, ScheduleExecutorConfig, SchedulerManager, SchedulerManagerConfig};
 pub use session::{Column, ExecutionResult, Row, Session};
 pub use subscription::{
     extract_table_dependencies, extract_table_refs, SessionSubscription,
