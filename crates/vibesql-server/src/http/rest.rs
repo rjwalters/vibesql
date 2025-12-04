@@ -85,10 +85,22 @@ pub fn create_http_router(db: Arc<Database>) -> Router {
 
 /// GraphQL endpoint handler
 async fn graphql_handler(
-    State(_state): State<HttpState>,
+    State(state): State<HttpState>,
     Json(req): Json<graphql::GraphQLRequest>,
 ) -> impl IntoResponse {
     debug!("Received GraphQL request: {}", req.query);
+
+    // First, try to handle introspection queries
+    if let Some(introspection_result) = graphql::try_introspection_query(&state.db, &req.query) {
+        return (
+            StatusCode::OK,
+            Json(graphql::GraphQLResponse {
+                data: Some(introspection_result),
+                errors: None,
+            }),
+        )
+            .into_response();
+    }
 
     // Parse the GraphQL query
     let query_info = match graphql::parse_graphql_query(&req.query) {
@@ -451,9 +463,9 @@ pub struct SseEvent {
 }
 
 /// Server-Sent Events subscription endpoint
-/// 
+///
 /// GET /api/subscribe?query=SELECT%20*%20FROM%20users
-/// 
+///
 /// Returns a text/event-stream response with real-time updates
 async fn subscribe_stream(
     State(_state): State<HttpState>,
@@ -493,13 +505,13 @@ async fn subscribe_stream(
                 new: None,
                 error: Some(format!("Failed to create session: {}", e)),
             }).unwrap_or_default();
-            
+
             let stream = futures::stream::once(async move {
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
                     Event::default().data(event_data)
                 )
             });
-            
+
             return Sse::new(stream)
                 .keep_alive(KeepAlive::default())
                 .into_response();
@@ -532,13 +544,13 @@ async fn subscribe_stream(
                 new: None,
                 error: Some("Subscription query must be a SELECT statement".to_string()),
             }).unwrap_or_default();
-            
+
             let stream = futures::stream::once(async move {
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
                     Event::default().data(event_data)
                 )
             });
-            
+
             return Sse::new(stream)
                 .keep_alive(KeepAlive::default())
                 .into_response();
@@ -553,13 +565,13 @@ async fn subscribe_stream(
                 new: None,
                 error: Some(format!("Query execution failed: {}", e)),
             }).unwrap_or_default();
-            
+
             let stream = futures::stream::once(async move {
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
                     Event::default().data(event_data)
                 )
             });
-            
+
             return Sse::new(stream)
                 .keep_alive(KeepAlive::default())
                 .into_response();
@@ -580,11 +592,11 @@ async fn subscribe_stream(
     let stream = {
         let initial = Event::default().data(initial_event_data);
         let mut events = vec![Ok::<_, Box<dyn std::error::Error + Send + Sync>>(initial)];
-        
+
         // For now, add a placeholder keepalive. Real implementation would subscribe
         // to changes and stream updates continuously
         events.push(Ok(Event::default().comment("TODO: add real-time updates")));
-        
+
         futures::stream::iter(events)
     };
 
