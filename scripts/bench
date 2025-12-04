@@ -270,13 +270,6 @@ def run_tpch_criterion(config: BenchConfig) -> int:
         print("❌ Build failed")
         return 1
 
-    # Build filter for specific queries if requested
-    filter_args = []
-    if config.queries:
-        # Convert Q1,Q6 to criterion filter format
-        filters = [f"tpch_q{q.replace('Q', '')}".lower() for q in config.queries]
-        filter_args = ["--", " ".join(filters)]
-
     # Run the Criterion benchmark
     print("\nRunning TPC-H benchmarks (all engines)...")
     cmd = [
