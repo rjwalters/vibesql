@@ -44,6 +44,7 @@ impl Drop for TestServer {
 }
 
 /// Start a test server with trust authentication on a random port
+#[allow(dead_code)]
 pub async fn start_test_server() -> TestServer {
     start_test_server_with_config(test_config()).await
 }
@@ -262,6 +263,7 @@ impl TestClient {
     }
 
     /// Send a terminate message
+    #[allow(dead_code)]
     pub async fn send_terminate(&mut self) -> std::io::Result<()> {
         self.write_buf.clear();
 
@@ -360,11 +362,13 @@ impl TestClient {
     }
 
     /// Write all bytes to the stream directly
+    #[allow(dead_code)]
     pub async fn stream_write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         self.stream.write_all(buf).await
     }
 
     /// Flush the stream
+    #[allow(dead_code)]
     pub async fn stream_flush(&mut self) -> std::io::Result<()> {
         self.stream.flush().await
     }
@@ -395,6 +399,7 @@ fn contains_message_type(data: &[u8], msg_type: u8) -> bool {
 }
 
 /// Parse backend messages from raw bytes
+#[allow(dead_code)]
 pub fn parse_backend_messages(data: &[u8]) -> Vec<ParsedMessage> {
     let mut messages = Vec::new();
     let mut pos = 0;

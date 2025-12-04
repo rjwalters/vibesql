@@ -216,7 +216,7 @@ mod tests {
 
         // Verify data was inserted
         let session_guard = session.lock().await;
-        let select_result = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+        let _select_result = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
         drop(session_guard);
 
         let mut verify_session = session.lock().await;

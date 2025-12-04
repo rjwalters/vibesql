@@ -387,7 +387,7 @@ fn test_vector_distance_similarity_search() {
     .unwrap();
 
     // Find documents similar to first document (should be ordered by cosine distance)
-    let results = execute_select(
+    let _results = execute_select(
         &db,
         "SELECT ID, COSINE_DISTANCE(EMBEDDING, VECTOR(CAST(1.0 AS REAL), CAST(0.0 AS REAL), CAST(0.0 AS REAL))) AS dist FROM DOCUMENTS ORDER BY dist",
     );
