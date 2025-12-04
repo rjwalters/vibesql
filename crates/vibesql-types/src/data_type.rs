@@ -44,6 +44,9 @@ pub enum DataType {
     BinaryLargeObject,             // BLOB
     Bit { length: Option<usize> }, // BIT or BIT(n), MySQL compatibility, default length is 1
 
+    // Vector types (for AI/ML workloads)
+    Vector { dimensions: u32 },
+
     // User-defined types (SQL:1999)
     UserDefined { type_name: String },
 
@@ -106,6 +109,9 @@ impl DataType {
             DataType::Varchar { .. } => 81,
             DataType::Name => 81, // NAME is equivalent to VARCHAR
             DataType::CharacterLargeObject => 82,
+
+            // Vector types (specialized for AI/ML operations, don't coerce with other types)
+            DataType::Vector { .. } => 65,
 
             // User-defined types don't participate in implicit coercion
             DataType::UserDefined { .. } => 255,
@@ -211,6 +217,9 @@ impl DataType {
             // Intervals with different fields can coerce if compatible
             (DataType::Interval { .. }, DataType::Interval { .. }) => true,
 
+            // Vectors with matching dimensions can coerce
+            (DataType::Vector { dimensions: d1 }, DataType::Vector { dimensions: d2 }) => d1 == d2,
+
             // User-defined types only coerce to themselves (checked above with ==)
             // All other combinations cannot coerce
             _ => false,
@@ -278,6 +287,13 @@ impl DataType {
                     (Some(a), Some(b)) => Some((*a).max(*b)),
                 };
                 Some(DataType::Bit { length: max_length })
+            }
+
+            // Vectors with matching dimensions coerce to themselves
+            (DataType::Vector { dimensions: d1 }, DataType::Vector { dimensions: d2 })
+                if d1 == d2 =>
+            {
+                Some(self.clone())
             }
 
             // For all other cases, choose the type with higher precedence

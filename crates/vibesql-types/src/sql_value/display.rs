@@ -83,6 +83,11 @@ impl fmt::Display for SqlValue {
             SqlValue::Time(s) => write!(f, "{}", s),
             SqlValue::Timestamp(s) => write!(f, "{}", s),
             SqlValue::Interval(s) => write!(f, "{}", s),
+            SqlValue::Vector(v) => {
+                // Format vector as space-separated f32 values
+                let formatted: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+                write!(f, "[{}]", formatted.join(", "))
+            }
             SqlValue::Null => write!(f, "NULL"),
         }
     }

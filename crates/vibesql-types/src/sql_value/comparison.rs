@@ -215,6 +215,7 @@ impl Ord for SqlValue {
                         Time(_) => 13,
                         Timestamp(_) => 14,
                         Interval(_) => 15,
+                        Vector(_) => 16,
                         Null => 0, // Already handled above, but for completeness
                     }
                 }
