@@ -135,12 +135,14 @@ impl SelectExecutor<'_> {
 
         // Execute FROM clause WITHOUT applying WHERE clause
         // The columnar module will apply the WHERE clause using SIMD-accelerated filtering
+        // Note: Table elimination requires WHERE clause, so pass None for select_list too
         let from_result = self.execute_from_with_where(
             from_clause,
             cte_results,
             None, // Don't filter here - columnar module will handle it with SIMD
             None, // ORDER BY applied after aggregation
             None, // LIMIT applied after aggregation
+            None, // No table elimination when WHERE is deferred
         )?;
 
         // Extract schema before accessing rows (to avoid borrow checker issues)
