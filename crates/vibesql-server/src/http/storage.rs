@@ -30,19 +30,22 @@ pub struct StorageState {
 impl StorageState {
     /// Create storage state from database
     pub fn new(db: Arc<Database>) -> Self {
+        // Create blob service with the database reference
+        let blob_service = Arc::new(BlobStorageService::new_default(db.clone()));
         // Wrap Database in RwLock for safe concurrent access
         let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
         let db = Arc::new(RwLock::new(db_inner));
-        let blob_service = Arc::new(BlobStorageService::new_default());
         Self { db, blob_service }
     }
 
     /// Create storage state with custom config
     #[allow(dead_code)]
     pub fn with_config(config: BlobStorageConfig, db: Arc<Database>) -> Self {
+        // Create blob service with the database reference
+        let blob_service = Arc::new(BlobStorageService::new(config, db.clone()));
+        // Wrap Database in RwLock for safe concurrent access
         let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
         let db = Arc::new(RwLock::new(db_inner));
-        let blob_service = Arc::new(BlobStorageService::new(config));
         Self { db, blob_service }
     }
 }
@@ -86,10 +89,7 @@ async fn upload_blob(
         size, content_type
     );
 
-    // Get write lock on database for store operation
-    let mut db = state.db.write().await;
-
-    match state.blob_service.store(&mut db, body, content_type.clone()).await {
+    match state.blob_service.store(body, content_type.clone()).await {
         Ok(blob_id) => {
             let url = state.blob_service.get_url(&blob_id);
             let response = BlobUploadResponse {
@@ -134,11 +134,8 @@ async fn download_blob(
 
     debug!("Downloading blob: {}", id);
 
-    // Get read lock on database for metadata lookup
-    let db = state.db.read().await;
-
     // Get metadata first to determine content type
-    let content_type = match state.blob_service.get_metadata(&db, &id).await {
+    let content_type = match state.blob_service.get_metadata(&id).await {
         Ok(metadata) => metadata.content_type,
         Err(e) => {
             debug!("Failed to get metadata for blob {}, using default content-type: {}", id, e);
@@ -197,10 +194,7 @@ async fn get_blob_metadata(
 
     debug!("Getting metadata for blob: {}", id);
 
-    // Get read lock on database for metadata lookup
-    let db = state.db.read().await;
-
-    match state.blob_service.get_metadata(&db, &id).await {
+    match state.blob_service.get_metadata(&id).await {
         Ok(metadata) => {
             let response = BlobMetadataResponse {
                 id: metadata.id.to_string(),
@@ -244,10 +238,7 @@ async fn delete_blob(
 
     debug!("Deleting blob: {}", id);
 
-    // Get write lock on database for delete operation
-    let mut db = state.db.write().await;
-
-    match state.blob_service.delete(&mut db, &id).await {
+    match state.blob_service.delete(&id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             error!("Failed to delete blob {}: {}", id, e);

@@ -1,6 +1,7 @@
 //! HTTP REST and GraphQL API endpoints for VibeSQL
 
 pub mod crud;
+pub mod graphql;
 pub mod rest;
 pub mod storage;
 pub mod types;
