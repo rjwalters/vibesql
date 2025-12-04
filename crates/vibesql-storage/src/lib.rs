@@ -6,6 +6,7 @@
 #![cfg_attr(test, allow(clippy::approx_constant))]
 
 pub mod backend;
+pub mod blob;
 pub mod btree;
 pub mod buffer;
 pub mod change_events;
@@ -22,6 +23,7 @@ pub mod statistics;
 pub mod table;
 
 pub use backend::{StorageBackend, StorageFile};
+pub use blob::{BlobId, BlobMetadata, BlobStorageConfig, BlobStorageService};
 pub use buffer::{BufferPool, BufferPoolStats};
 pub use change_events::{
     channel as change_event_channel, ChangeEvent, ChangeEventReceiver, ChangeEventSender,
@@ -33,7 +35,7 @@ pub use database::{
     Database, DatabaseConfig, IndexData, IndexManager, IndexMetadata, SpillPolicy,
     SpatialIndexMetadata, TransactionState,
 };
-pub use error::StorageError;
+pub use error::{StorageError, StorageResult};
 pub use query_buffer_pool::{QueryBufferPool, QueryBufferPoolStats, RowBufferGuard, ValueBufferGuard};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};
 pub use persistence::load::{parse_sql_statements, read_sql_dump};

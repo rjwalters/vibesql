@@ -23,6 +23,7 @@ pub(crate) mod datetime;
 mod null_handling;
 mod numeric;
 pub(crate) mod string;
+mod storage;
 mod system;
 #[cfg(feature = "spatial")]
 pub(crate) mod spatial;
@@ -118,6 +119,10 @@ pub(super) fn eval_scalar_function(
         "VERSION" => system::version(args),
         "DATABASE" | "SCHEMA" => system::database(args, name),
         "USER" | "CURRENT_USER" => system::user(args, name),
+
+        // Storage/Blob functions
+        "STORAGE_URL" => storage::eval_storage_url(args),
+        "STORAGE_SIZE" => storage::eval_storage_size(args),
 
         // Spatial/Geometric functions
         #[cfg(feature = "spatial")]

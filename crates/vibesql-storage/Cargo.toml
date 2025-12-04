@@ -13,6 +13,8 @@ categories = ["database"]
 default = ["compression"]
 # zstd compression for binary persistence (disabled in WASM where browsers provide compression)
 compression = ["zstd"]
+# OpenDAL for multi-backend storage support
+opendal = ["dep:opendal", "dep:tokio"]
 
 [dependencies]
 vibesql-types = { version = "0.1.1", path = "../vibesql-types" }
@@ -27,6 +29,10 @@ lru = "0.16"
 log = "0.4"
 rand = "0.9"  # For statistical sampling (Phase 5.2)
 instant = { version = "0.1", features = ["wasm-bindgen"] }  # WASM-compatible time primitives
+uuid = { version = "1.6", features = ["v4", "serde"] }
+bytes = "1.5"
+tokio = { version = "1", features = ["rt", "sync"], optional = true }
+opendal = { version = "0.45", optional = true }
 
 # Use parking_lot for native builds, std::sync for WASM
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
