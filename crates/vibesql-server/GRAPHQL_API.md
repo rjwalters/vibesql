@@ -97,6 +97,121 @@ Response:
 }
 ```
 
+## Nested Queries (Relationship Resolution)
+
+VibeSQL automatically detects foreign key relationships between tables and allows nested queries to traverse these relationships. This avoids N+1 query problems by using batched queries.
+
+### One-to-Many Relationships
+
+Query a parent table with its related child records:
+
+```json
+{
+  "query": "{ users { id name posts { id title } } }"
+}
+```
+
+Response (each user includes their posts as a nested array):
+
+```json
+{
+  "data": {
+    "data": [
+      {
+        "id": 1,
+        "name": "Alice",
+        "posts": [
+          { "id": 1, "title": "First Post" },
+          { "id": 2, "title": "Second Post" }
+        ]
+      },
+      {
+        "id": 2,
+        "name": "Bob",
+        "posts": []
+      }
+    ]
+  }
+}
+```
+
+### Many-to-One Relationships
+
+Query a child table with its related parent record:
+
+```json
+{
+  "query": "{ posts { id title user { id name } } }"
+}
+```
+
+Response (each post includes its author as a nested object):
+
+```json
+{
+  "data": {
+    "data": [
+      {
+        "id": 1,
+        "title": "First Post",
+        "user": { "id": 1, "name": "Alice" }
+      },
+      {
+        "id": 2,
+        "title": "Second Post",
+        "user": { "id": 1, "name": "Alice" }
+      }
+    ]
+  }
+}
+```
+
+### Deep Nesting (3+ Levels)
+
+Nested queries can be arbitrarily deep:
+
+```json
+{
+  "query": "{ users { id name posts { id title comments { id body } } } }"
+}
+```
+
+### Pagination on Nested Queries
+
+Apply limits to nested queries using the `limit` and `offset` parameters:
+
+```json
+{
+  "query": "{ users { id name posts(limit: 5, offset: 0) { id title } } }"
+}
+```
+
+### How It Works
+
+1. **Foreign Key Detection**: VibeSQL reads the schema to identify foreign key relationships
+2. **Relationship Direction**:
+   - **One-to-Many**: Parent table (e.g., `users`) → child table has FK (e.g., `posts.user_id`)
+   - **Many-to-One**: Child table (e.g., `posts`) → parent table is referenced
+3. **Batched Queries**: Nested data is fetched using `WHERE IN (...)` clauses to avoid N+1 problems
+4. **Result Structuring**: Results are grouped and attached to parent records
+
+### Schema Requirements
+
+For relationship resolution to work, your schema must have defined foreign key constraints:
+
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR(255)
+);
+
+CREATE TABLE posts (
+    id INTEGER PRIMARY KEY,
+    title VARCHAR(255),
+    user_id INTEGER REFERENCES users(id)
+);
+```
+
 ## Mutations
 
 ### INSERT Mutation
@@ -198,10 +313,8 @@ The current GraphQL implementation has the following limitations:
 
 1. **Limited type system** - No schema introspection
 2. **Simple WHERE clauses** - Only string-based conditions
-3. **No pagination** - Use raw SQL queries for large result sets
-4. **No relationships** - Foreign key relationships not auto-resolved
-5. **No subscriptions** - Use REST `/api/subscribe` for real-time updates
-6. **No aliases or fragments** - Basic queries only
+3. **No subscriptions** - Use REST `/api/subscribe` for real-time updates
+4. **No aliases or fragments** - Basic queries only
 
 For more complex operations, use the REST `/api/query` endpoint with raw SQL.
 
@@ -242,10 +355,12 @@ curl -X POST http://localhost:8080/api/graphql \
 | Feature | GraphQL API | REST API |
 |---------|-------------|----------|
 | Query Language | GraphQL-like syntax | Raw SQL |
-| Data Format | JSON objects | JSON arrays |
+| Data Format | JSON objects with nested relations | JSON arrays |
 | Error Handling | GraphQL errors | HTTP status codes |
-| Complexity | Simple queries | Complex SQL |
-| Relationships | Not auto-resolved | Not supported |
+| Complexity | Simple to moderate queries | Complex SQL |
+| Relationships | Auto-resolved via foreign keys | Manual JOINs required |
+| Nested Data | Built-in support | Not supported |
+| Pagination | Supported on nested queries | Via LIMIT/OFFSET in SQL |
 | Real-time Updates | Via REST API | `/api/subscribe` endpoint |
 
 ## Migration Guide: REST to GraphQL
@@ -315,9 +430,10 @@ The parser is intentionally simple to keep the implementation lightweight. For p
 Potential features for future versions:
 
 - [ ] Full GraphQL schema introspection
-- [ ] Relationship traversal via foreign keys
-- [ ] Pagination with limit/offset
+- [x] Relationship traversal via foreign keys
+- [x] Pagination with limit/offset on nested queries
 - [ ] Aliases and query fragments
 - [ ] GraphQL subscriptions via WebSocket
 - [ ] Query batching
 - [ ] Result caching
+- [ ] DataLoader pattern for complex relationship queries

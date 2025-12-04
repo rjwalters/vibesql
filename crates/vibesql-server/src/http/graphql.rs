@@ -3,6 +3,7 @@
 //! This provides a lightweight GraphQL-like interface over HTTP without a full GraphQL library.
 //! It supports queries and mutations on database tables with structured filtering,
 //! as well as schema introspection (__schema, __type queries).
+//! Supports nested queries with automatic relationship resolution via foreign keys.
 //!
 //! # WHERE Clause Operators
 //!
@@ -52,11 +53,13 @@
 //! }
 //! ```
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
+use vibesql_catalog::TableSchema;
 use vibesql_storage::Database;
 
 use super::types::json_to_sql_value;
@@ -677,7 +680,10 @@ pub fn parse_graphql_query(query_str: &str) -> Result<GraphQLQueryInfo, String> 
 pub enum GraphQLQueryInfo {
     Query {
         table_name: String,
+        /// Simple field names (backwards compatible)
         fields: Vec<String>,
+        /// Nested field structure for relationship queries
+        nested_fields: Vec<GraphQLField>,
         /// Structured WHERE clause with operators
         where_clause: Option<WhereClause>,
         /// Legacy string-based WHERE clause (for backwards compatibility)
@@ -703,11 +709,124 @@ pub enum MutationType {
     Delete,
 }
 
+/// A field in a GraphQL selection set, which may have nested selections
+#[derive(Debug, Clone)]
+pub struct GraphQLField {
+    /// The field name (column name or relationship name)
+    pub name: String,
+    /// Nested field selections (for relationships)
+    pub nested: Option<Vec<GraphQLField>>,
+    /// WHERE clause for this level (for filtering nested relations)
+    pub where_clause: Option<String>,
+    /// Limit for nested queries
+    pub limit: Option<usize>,
+    /// Offset for nested queries
+    pub offset: Option<usize>,
+}
+
+impl GraphQLField {
+    /// Create a simple field without nesting
+    pub fn simple(name: String) -> Self {
+        Self {
+            name,
+            nested: None,
+            where_clause: None,
+            limit: None,
+            offset: None,
+        }
+    }
+
+    /// Create a nested field with sub-selections
+    pub fn nested(name: String, fields: Vec<GraphQLField>) -> Self {
+        Self {
+            name,
+            nested: Some(fields),
+            where_clause: None,
+            limit: None,
+            offset: None,
+        }
+    }
+}
+
+/// Describes a relationship between two tables
+#[derive(Debug, Clone)]
+pub struct TableRelationship {
+    /// The related table name
+    pub related_table: String,
+    /// The foreign key column(s) in the child table
+    pub fk_columns: Vec<String>,
+    /// The referenced column(s) in the parent table
+    pub pk_columns: Vec<String>,
+    /// Direction of the relationship from the perspective of the current table
+    pub direction: RelationshipDirection,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RelationshipDirection {
+    /// Current table has FK pointing to related table (many-to-one)
+    ManyToOne,
+    /// Related table has FK pointing to current table (one-to-many)
+    OneToMany,
+}
+
+/// Build a relationship map from all table schemas
+/// Returns a map where key is table name, value is list of relationships
+pub fn build_relationship_map(
+    schemas: &HashMap<String, TableSchema>,
+) -> HashMap<String, Vec<TableRelationship>> {
+    let mut relationships: HashMap<String, Vec<TableRelationship>> = HashMap::new();
+
+    for (table_name, schema) in schemas {
+        // Initialize entry for this table
+        relationships.entry(table_name.clone()).or_default();
+
+        // Process foreign keys in this table (many-to-one relationships)
+        for fk in &schema.foreign_keys {
+            // This table has FK -> many-to-one relationship to parent
+            let rel = TableRelationship {
+                related_table: fk.parent_table.clone(),
+                fk_columns: fk.column_names.clone(),
+                pk_columns: fk.parent_column_names.clone(),
+                direction: RelationshipDirection::ManyToOne,
+            };
+            relationships.entry(table_name.clone()).or_default().push(rel);
+
+            // Parent table has one-to-many relationship back to this table
+            let reverse_rel = TableRelationship {
+                related_table: table_name.clone(),
+                fk_columns: fk.column_names.clone(),
+                pk_columns: fk.parent_column_names.clone(),
+                direction: RelationshipDirection::OneToMany,
+            };
+            relationships
+                .entry(fk.parent_table.clone())
+                .or_default()
+                .push(reverse_rel);
+        }
+    }
+
+    relationships
+}
+
+/// Find a relationship between two tables
+pub fn find_relationship(
+    relationships: &HashMap<String, Vec<TableRelationship>>,
+    from_table: &str,
+    to_table: &str,
+) -> Option<TableRelationship> {
+    relationships
+        .get(from_table)?
+        .iter()
+        .find(|r| r.related_table.eq_ignore_ascii_case(to_table))
+        .cloned()
+}
+
 /// Parse a GraphQL select-style query
 fn parse_graphql_select_query(query: &str) -> Result<GraphQLQueryInfo, String> {
     // Simple parser for: { users { id name email } }
     // Or with filters: { users(where: {id: 1}) { id name } }
     // Or with string filter: { users(where: "id = 1") { id name } }
+    // Or with nested: { users { id name posts { id title } } }
 
     let start = query.find('{').ok_or("Missing opening brace")?;
     let content = &query[start + 1..];
@@ -722,16 +841,54 @@ fn parse_graphql_select_query(query: &str) -> Result<GraphQLQueryInfo, String> {
         .to_string();
 
     // Try to find fields between inner braces
-    let fields_start = content.find('{').ok_or("Missing field list")?;
-    let fields_end = content[fields_start + 1..]
-        .find('}')
-        .ok_or("Missing closing brace for fields")?;
+    // Need to skip any braces inside the args (e.g., WHERE clause JSON)
+    // Look for the field list brace after the args (after the closing paren)
+    let fields_start = if let Some(args_start) = content.find('(') {
+        // Has args, find the matching close paren first
+        let mut paren_count = 0;
+        let mut in_string = false;
+        let mut escape_next = false;
+        let mut close_paren_idx = None;
+        for (i, ch) in content[args_start..].char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+            match ch {
+                '\\' => escape_next = true,
+                '"' => in_string = !in_string,
+                '(' if !in_string => paren_count += 1,
+                ')' if !in_string => {
+                    paren_count -= 1;
+                    if paren_count == 0 {
+                        close_paren_idx = Some(args_start + i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Find the field list brace after the close paren
+        if let Some(close_idx) = close_paren_idx {
+            content[close_idx..].find('{').map(|i| close_idx + i)
+        } else {
+            content.find('{')
+        }
+    } else {
+        content.find('{')
+    }.ok_or("Missing field list")?;
 
-    let fields_content = &content[fields_start + 1..fields_start + 1 + fields_end];
-    let fields: Vec<String> = fields_content
-        .split(',')
-        .map(|f| f.trim().to_string())
-        .filter(|f| !f.is_empty())
+    // Find the matching closing brace for the field list
+    let fields_content = find_matching_braces(&content[fields_start..])?;
+
+    // Parse fields (may include nested selections)
+    let nested_fields = parse_field_selections(&fields_content)?;
+
+    // Extract simple field names for backwards compatibility
+    let fields: Vec<String> = nested_fields
+        .iter()
+        .filter(|f| f.nested.is_none())
+        .map(|f| f.name.clone())
         .collect();
 
     // Try to extract structured where clause (JSON object)
@@ -744,6 +901,7 @@ fn parse_graphql_select_query(query: &str) -> Result<GraphQLQueryInfo, String> {
     Ok(GraphQLQueryInfo::Query {
         table_name,
         fields,
+        nested_fields,
         where_clause,
         where_clause_raw,
         limit,
@@ -764,6 +922,115 @@ fn extract_numeric_param(query: &str, param_name: &str) -> Option<usize> {
         return None;
     }
     content[..end].parse().ok()
+}
+
+/// Find content between matching braces, handling nested braces
+fn find_matching_braces(content: &str) -> Result<String, String> {
+    if !content.starts_with('{') {
+        return Err("Expected opening brace".to_string());
+    }
+
+    let mut brace_count = 0;
+    let mut end_idx = 0;
+
+    for (i, ch) in content.char_indices() {
+        match ch {
+            '{' => brace_count += 1,
+            '}' => {
+                brace_count -= 1;
+                if brace_count == 0 {
+                    end_idx = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if brace_count != 0 {
+        return Err("Unmatched braces".to_string());
+    }
+
+    // Return content between the braces (excluding the braces themselves)
+    Ok(content[1..end_idx].to_string())
+}
+
+/// Parse field selections, supporting nested queries
+fn parse_field_selections(content: &str) -> Result<Vec<GraphQLField>, String> {
+    let mut fields = Vec::new();
+    let mut current_field = String::new();
+    let bytes = content.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        let ch = bytes[idx] as char;
+
+        match ch {
+            '{' => {
+                // Start of nested selection
+                let field_name = current_field.trim().to_string();
+                if field_name.is_empty() {
+                    return Err("Nested selection without field name".to_string());
+                }
+
+                // Find the matching closing brace
+                let nested_content = find_matching_braces(&content[idx..])?;
+                let nested_fields = parse_field_selections(&nested_content)?;
+
+                fields.push(GraphQLField::nested(field_name, nested_fields));
+                current_field.clear();
+
+                // Skip past the closing brace
+                idx += nested_content.len() + 2; // +2 for { and }
+            }
+            ',' | '\n' => {
+                // Explicit field separator
+                let field_name = current_field.trim().to_string();
+                if !field_name.is_empty() {
+                    fields.push(GraphQLField::simple(field_name));
+                    current_field.clear();
+                }
+                idx += 1;
+            }
+            ' ' | '\t' => {
+                // Whitespace - could be separator or just before a nested selection
+                // Look ahead to see if next non-whitespace is '{'
+                let mut lookahead = idx + 1;
+                while lookahead < bytes.len() && (bytes[lookahead] == b' ' || bytes[lookahead] == b'\t') {
+                    lookahead += 1;
+                }
+
+                if lookahead < bytes.len() && bytes[lookahead] == b'{' {
+                    // Next is '{', so this field will become nested - don't commit yet
+                    idx += 1;
+                } else {
+                    // Not followed by '{', so whitespace is a separator
+                    let field_name = current_field.trim().to_string();
+                    if !field_name.is_empty() {
+                        fields.push(GraphQLField::simple(field_name));
+                        current_field.clear();
+                    }
+                    idx += 1;
+                }
+            }
+            '}' => {
+                // Should not happen at this level (handled by find_matching_braces)
+                break;
+            }
+            _ => {
+                current_field.push(ch);
+                idx += 1;
+            }
+        }
+    }
+
+    // Handle last field
+    let field_name = current_field.trim().to_string();
+    if !field_name.is_empty() {
+        fields.push(GraphQLField::simple(field_name));
+    }
+
+    Ok(fields)
 }
 
 /// Parse a GraphQL mutation
@@ -931,7 +1198,7 @@ fn extract_where_clauses(query: &str) -> Result<(Option<WhereClause>, Option<Str
     }
 }
 
-/// Convert GraphQL query info to SQL
+/// Convert GraphQL query info to SQL (simple version without relationships)
 pub fn graphql_to_sql(
     query_info: &GraphQLQueryInfo,
 ) -> Result<(String, Vec<vibesql_types::SqlValue>), String> {
@@ -939,12 +1206,13 @@ pub fn graphql_to_sql(
         GraphQLQueryInfo::Query {
             table_name,
             fields,
+            nested_fields: _,
             where_clause,
             where_clause_raw,
             limit,
             offset,
         } => {
-            let select_list = if fields.contains(&"*".to_string()) {
+            let select_list = if fields.is_empty() || fields.contains(&"*".to_string()) {
                 "*".to_string()
             } else {
                 fields
@@ -1077,19 +1345,313 @@ pub fn graphql_to_sql(
     }
 }
 
+/// Context for executing GraphQL queries with relationship resolution
+pub struct GraphQLExecutionContext<'a> {
+    /// Relationship map built from all table schemas
+    pub relationships: HashMap<String, Vec<TableRelationship>>,
+    /// Table schemas for column validation
+    pub schemas: &'a HashMap<String, TableSchema>,
+}
+
+impl<'a> GraphQLExecutionContext<'a> {
+    /// Create a new execution context from table schemas
+    pub fn new(schemas: &'a HashMap<String, TableSchema>) -> Self {
+        let relationships = build_relationship_map(schemas);
+        Self { relationships, schemas }
+    }
+
+    /// Check if a field is a relationship (refers to another table)
+    pub fn is_relationship(&self, table: &str, field: &str) -> bool {
+        find_relationship(&self.relationships, table, field).is_some()
+    }
+
+    /// Get the relationship for a field if it exists
+    pub fn get_relationship(&self, table: &str, field: &str) -> Option<TableRelationship> {
+        find_relationship(&self.relationships, table, field)
+    }
+}
+
+/// Information about a nested query to execute
+#[derive(Debug, Clone)]
+pub struct NestedQueryInfo {
+    /// The nested field name (relationship name)
+    pub field_name: String,
+    /// The related table name
+    pub related_table: String,
+    /// Columns to select from the related table
+    pub select_columns: Vec<String>,
+    /// The FK columns in the child table
+    pub fk_columns: Vec<String>,
+    /// The PK columns in the parent table
+    pub pk_columns: Vec<String>,
+    /// Direction of the relationship
+    pub direction: RelationshipDirection,
+    /// Further nested queries
+    pub nested: Vec<NestedQueryInfo>,
+    /// Optional WHERE clause for filtering
+    pub where_clause: Option<String>,
+    /// Optional limit
+    pub limit: Option<usize>,
+    /// Optional offset
+    pub offset: Option<usize>,
+}
+
+/// Build the list of nested queries from parsed fields
+pub fn build_nested_queries(
+    ctx: &GraphQLExecutionContext,
+    table_name: &str,
+    fields: &[GraphQLField],
+) -> Vec<NestedQueryInfo> {
+    let mut nested_queries = Vec::new();
+
+    for field in fields {
+        if field.nested.is_some() {
+            // This is a relationship field
+            if let Some(rel) = ctx.get_relationship(table_name, &field.name) {
+                let sub_fields = field.nested.as_ref().unwrap();
+                let select_columns: Vec<String> = sub_fields
+                    .iter()
+                    .filter(|f| f.nested.is_none())
+                    .map(|f| f.name.clone())
+                    .collect();
+
+                // Recursively build nested queries for deeper levels
+                let deeper_nested = build_nested_queries(ctx, &rel.related_table, sub_fields);
+
+                nested_queries.push(NestedQueryInfo {
+                    field_name: field.name.clone(),
+                    related_table: rel.related_table.clone(),
+                    select_columns,
+                    fk_columns: rel.fk_columns.clone(),
+                    pk_columns: rel.pk_columns.clone(),
+                    direction: rel.direction.clone(),
+                    nested: deeper_nested,
+                    where_clause: field.where_clause.clone(),
+                    limit: field.limit,
+                    offset: field.offset,
+                });
+            }
+        }
+    }
+
+    nested_queries
+}
+
+/// Generate SQL for the main query (without JOINs - we'll use separate queries for nested data)
+pub fn generate_main_query_sql(
+    query_info: &GraphQLQueryInfo,
+) -> Result<(String, Vec<vibesql_types::SqlValue>), String> {
+    // Just delegate to the simple version for the main query
+    graphql_to_sql(query_info)
+}
+
+/// Generate SQL for a nested query based on parent row values
+/// Uses IN clause for batching to avoid N+1 problem
+pub fn generate_nested_query_sql(
+    nested: &NestedQueryInfo,
+    parent_values: &[JsonValue],
+) -> Result<String, String> {
+    if parent_values.is_empty() {
+        return Ok(String::new());
+    }
+
+    // Build select list - include FK/PK columns for grouping
+    let mut select_columns = nested.select_columns.clone();
+
+    // For one-to-many, include FK column if not already present
+    if nested.direction == RelationshipDirection::OneToMany {
+        for fk_col in &nested.fk_columns {
+            if !select_columns.iter().any(|c| c.eq_ignore_ascii_case(fk_col)) {
+                select_columns.push(fk_col.clone());
+            }
+        }
+    }
+
+    let select_list = if select_columns.is_empty() {
+        "*".to_string()
+    } else {
+        select_columns.join(", ")
+    };
+
+    let mut sql = format!("SELECT {} FROM {}", select_list, nested.related_table);
+
+    // Build WHERE clause based on relationship direction
+    let where_column = match nested.direction {
+        RelationshipDirection::OneToMany => {
+            // Child table has FK pointing to parent
+            // WHERE child.fk_col IN (parent_pk_values)
+            nested.fk_columns.first().ok_or("Missing FK column")?
+        }
+        RelationshipDirection::ManyToOne => {
+            // Parent table has PK that child FK points to
+            // WHERE parent.pk_col IN (child_fk_values)
+            nested.pk_columns.first().ok_or("Missing PK column")?
+        }
+    };
+
+    // Extract values for IN clause
+    let values: Vec<String> = parent_values
+        .iter()
+        .filter_map(|v| match v {
+            JsonValue::Number(n) => Some(n.to_string()),
+            JsonValue::String(s) => Some(format!("'{}'", s.replace('\'', "''"))),
+            _ => None,
+        })
+        .collect();
+
+    if !values.is_empty() {
+        sql.push_str(&format!(" WHERE {} IN ({})", where_column, values.join(", ")));
+
+        // Add any additional WHERE clause from the nested query
+        if let Some(where_clause) = &nested.where_clause {
+            sql.push_str(&format!(" AND ({})", where_clause));
+        }
+    }
+
+    // Add limit/offset if specified
+    if let Some(limit) = nested.limit {
+        sql.push_str(&format!(" LIMIT {}", limit));
+    }
+    if let Some(offset) = nested.offset {
+        sql.push_str(&format!(" OFFSET {}", offset));
+    }
+
+    Ok(sql)
+}
+
+/// Group nested query results by their parent FK value
+pub fn group_nested_results(
+    rows: Vec<serde_json::Map<String, JsonValue>>,
+    nested: &NestedQueryInfo,
+) -> HashMap<String, Vec<serde_json::Map<String, JsonValue>>> {
+    let mut grouped: HashMap<String, Vec<serde_json::Map<String, JsonValue>>> = HashMap::new();
+
+    let group_column = match nested.direction {
+        RelationshipDirection::OneToMany => {
+            // Group by FK column in child rows
+            nested.fk_columns.first().map(|s| s.as_str())
+        }
+        RelationshipDirection::ManyToOne => {
+            // Group by PK column in parent rows
+            nested.pk_columns.first().map(|s| s.as_str())
+        }
+    };
+
+    if let Some(col) = group_column {
+        for row in rows {
+            // Find the grouping value (case-insensitive)
+            let key = row
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(col))
+                .map(|(_, v)| value_to_string(v))
+                .unwrap_or_default();
+
+            grouped.entry(key).or_default().push(row);
+        }
+    }
+
+    grouped
+}
+
+/// Convert a JSON value to a string key for grouping
+fn value_to_string(v: &JsonValue) -> String {
+    match v {
+        JsonValue::Number(n) => n.to_string(),
+        JsonValue::String(s) => s.clone(),
+        JsonValue::Bool(b) => b.to_string(),
+        JsonValue::Null => "null".to_string(),
+        _ => format!("{}", v),
+    }
+}
+
+/// Attach nested results to parent rows
+pub fn attach_nested_results(
+    parent_rows: &mut Vec<serde_json::Map<String, JsonValue>>,
+    nested: &NestedQueryInfo,
+    nested_grouped: HashMap<String, Vec<serde_json::Map<String, JsonValue>>>,
+) {
+    let key_column = match nested.direction {
+        RelationshipDirection::OneToMany => {
+            // Parent's PK matches child's FK
+            nested.pk_columns.first().map(|s| s.as_str())
+        }
+        RelationshipDirection::ManyToOne => {
+            // Parent's FK matches child's PK
+            nested.fk_columns.first().map(|s| s.as_str())
+        }
+    };
+
+    if let Some(col) = key_column {
+        for row in parent_rows.iter_mut() {
+            // Find the key value in the parent row (case-insensitive)
+            let key = row
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(col))
+                .map(|(_, v)| value_to_string(v))
+                .unwrap_or_default();
+
+            // Get the nested rows for this key
+            let nested_rows = nested_grouped.get(&key).cloned().unwrap_or_default();
+
+            // Attach based on relationship direction
+            match nested.direction {
+                RelationshipDirection::OneToMany => {
+                    // One parent has many children - attach as array
+                    let nested_array: Vec<JsonValue> = nested_rows
+                        .into_iter()
+                        .map(JsonValue::Object)
+                        .collect();
+                    row.insert(nested.field_name.clone(), JsonValue::Array(nested_array));
+                }
+                RelationshipDirection::ManyToOne => {
+                    // Many children have one parent - attach as single object or null
+                    let nested_value = nested_rows
+                        .into_iter()
+                        .next()
+                        .map(JsonValue::Object)
+                        .unwrap_or(JsonValue::Null);
+                    row.insert(nested.field_name.clone(), nested_value);
+                }
+            }
+        }
+    }
+}
+
+/// Check if a query has nested fields that need relationship resolution
+pub fn has_nested_fields(query_info: &GraphQLQueryInfo) -> bool {
+    match query_info {
+        GraphQLQueryInfo::Query { nested_fields, .. } => {
+            nested_fields.iter().any(|f| f.nested.is_some())
+        }
+        GraphQLQueryInfo::Mutation { .. } => false,
+    }
+}
+
+/// Get simple column names from nested fields (excluding relationship fields)
+pub fn get_simple_columns(fields: &[GraphQLField]) -> Vec<String> {
+    fields
+        .iter()
+        .filter(|f| f.nested.is_none())
+        .map(|f| f.name.clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vibesql_catalog::ForeignKeyConstraint;
 
     #[test]
     fn test_parse_simple_query() {
         let query = "{ users { id, name } }";
         let result = parse_graphql_query(query);
         assert!(result.is_ok());
-        if let GraphQLQueryInfo::Query { table_name, fields, .. } = result.unwrap() {
+        if let GraphQLQueryInfo::Query { table_name, fields, nested_fields, .. } = result.unwrap() {
             assert_eq!(table_name, "users");
             assert!(fields.contains(&"id".to_string()));
             assert!(fields.contains(&"name".to_string()));
+            assert_eq!(nested_fields.len(), 2);
+            assert!(nested_fields.iter().all(|f| f.nested.is_none()));
         }
     }
 
@@ -1100,6 +1662,27 @@ mod tests {
         assert!(result.is_ok());
         if let GraphQLQueryInfo::Query { where_clause_raw, .. } = result.unwrap() {
             assert_eq!(where_clause_raw, Some("id = 1".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_query() {
+        let query = "{ users { id name posts { id title } } }";
+        let result = parse_graphql_query(query);
+        assert!(result.is_ok());
+
+        if let GraphQLQueryInfo::Query { nested_fields, .. } = result.unwrap() {
+            // Should have 3 fields: id, name, posts
+            assert_eq!(nested_fields.len(), 3);
+
+            // Find the posts field
+            let posts_field = nested_fields.iter().find(|f| f.name == "posts").unwrap();
+            assert!(posts_field.nested.is_some());
+
+            let posts_nested = posts_field.nested.as_ref().unwrap();
+            assert_eq!(posts_nested.len(), 2);
+            assert_eq!(posts_nested[0].name, "id");
+            assert_eq!(posts_nested[1].name, "title");
         }
     }
 
@@ -1484,5 +2067,112 @@ mod tests {
         assert_eq!(result["__type"]["kind"], "SCALAR");
         assert_eq!(result["__type"]["name"], "Int");
         assert!(result["__type"]["fields"].is_null());
+    }
+
+    // Nested query tests (relationship resolution)
+    #[test]
+    fn test_parse_deep_nested_query() {
+        let query = "{ users { id posts { id comments { id body } } } }";
+        let result = parse_graphql_query(query);
+        assert!(result.is_ok());
+
+        if let GraphQLQueryInfo::Query { nested_fields, .. } = result.unwrap() {
+            let posts_field = nested_fields.iter().find(|f| f.name == "posts").unwrap();
+            let posts_nested = posts_field.nested.as_ref().unwrap();
+
+            let comments_field = posts_nested.iter().find(|f| f.name == "comments").unwrap();
+            assert!(comments_field.nested.is_some());
+
+            let comments_nested = comments_field.nested.as_ref().unwrap();
+            assert_eq!(comments_nested.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_build_relationship_map() {
+        use vibesql_catalog::{ColumnSchema, ReferentialAction};
+        use vibesql_types::DataType;
+
+        let mut schemas = HashMap::new();
+
+        // Create users table
+        let users_schema = TableSchema::new(
+            "users".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+            ],
+        );
+        schemas.insert("users".to_string(), users_schema);
+
+        // Create posts table with FK to users
+        let mut posts_schema = TableSchema::new(
+            "posts".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("title".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+                ColumnSchema::new("user_id".to_string(), DataType::Integer, false),
+            ],
+        );
+        posts_schema.foreign_keys.push(ForeignKeyConstraint {
+            name: Some("fk_posts_user".to_string()),
+            column_names: vec!["user_id".to_string()],
+            column_indices: vec![2],
+            parent_table: "users".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+        });
+        schemas.insert("posts".to_string(), posts_schema);
+
+        let relationships = build_relationship_map(&schemas);
+
+        // Users should have one-to-many relationship to posts
+        let user_rels = relationships.get("users").unwrap();
+        assert_eq!(user_rels.len(), 1);
+        assert_eq!(user_rels[0].related_table, "posts");
+        assert_eq!(user_rels[0].direction, RelationshipDirection::OneToMany);
+
+        // Posts should have many-to-one relationship to users
+        let post_rels = relationships.get("posts").unwrap();
+        assert_eq!(post_rels.len(), 1);
+        assert_eq!(post_rels[0].related_table, "users");
+        assert_eq!(post_rels[0].direction, RelationshipDirection::ManyToOne);
+    }
+
+    #[test]
+    fn test_generate_nested_query_sql() {
+        let nested = NestedQueryInfo {
+            field_name: "posts".to_string(),
+            related_table: "posts".to_string(),
+            select_columns: vec!["id".to_string(), "title".to_string()],
+            fk_columns: vec!["user_id".to_string()],
+            pk_columns: vec!["id".to_string()],
+            direction: RelationshipDirection::OneToMany,
+            nested: vec![],
+            where_clause: None,
+            limit: None,
+            offset: None,
+        };
+
+        let parent_values = vec![
+            JsonValue::Number(serde_json::Number::from(1)),
+            JsonValue::Number(serde_json::Number::from(2)),
+            JsonValue::Number(serde_json::Number::from(3)),
+        ];
+
+        let sql = generate_nested_query_sql(&nested, &parent_values).unwrap();
+        assert!(sql.contains("SELECT id, title, user_id FROM posts"));
+        assert!(sql.contains("WHERE user_id IN (1, 2, 3)"));
+    }
+
+    #[test]
+    fn test_has_nested_fields() {
+        let simple_query = parse_graphql_query("{ users { id name } }").unwrap();
+        assert!(!has_nested_fields(&simple_query));
+
+        let nested_query = parse_graphql_query("{ users { id posts { id } } }").unwrap();
+        assert!(has_nested_fields(&nested_query));
     }
 }
