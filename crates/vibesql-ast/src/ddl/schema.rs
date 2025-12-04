@@ -209,6 +209,15 @@ pub enum IndexType {
         /// Number of clusters/lists for partitioning (default: 100)
         lists: u32,
     },
+    /// HNSW index for high-performance approximate nearest neighbor search
+    Hnsw {
+        /// Distance metric to use for similarity calculations
+        metric: VectorDistanceMetric,
+        /// Maximum number of connections per node (default: 16)
+        m: u32,
+        /// Size of dynamic candidate list during construction (default: 64)
+        ef_construction: u32,
+    },
 }
 
 /// Distance metric for vector index operations

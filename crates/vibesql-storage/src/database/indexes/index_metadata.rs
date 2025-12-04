@@ -19,6 +19,7 @@ use crate::page::PageManager;
 use crate::StorageError;
 
 use super::ivfflat::IVFFlatIndex;
+use super::hnsw::HnswIndex;
 
 /// Normalize an index name to uppercase for case-insensitive comparison
 /// This follows SQL standard identifier rules
@@ -98,5 +99,9 @@ pub enum IndexData {
     /// IVFFlat index for approximate nearest neighbor search on vectors
     IVFFlat {
         index: IVFFlatIndex,
+    },
+    /// HNSW index for high-performance approximate nearest neighbor search
+    Hnsw {
+        index: HnswIndex,
     },
 }

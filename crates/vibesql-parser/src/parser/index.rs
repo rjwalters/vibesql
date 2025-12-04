@@ -89,10 +89,13 @@ impl Parser {
             if self.peek_keyword(Keyword::Ivfflat) {
                 self.advance(); // consume IVFFLAT
                 return self.parse_ivfflat_index(if_not_exists, index_name, table_name);
+            } else if self.peek_keyword(Keyword::Hnsw) {
+                self.advance(); // consume HNSW
+                return self.parse_hnsw_index(if_not_exists, index_name, table_name);
             } else {
                 // Unknown index method - could extend for BTREE, HASH, etc.
                 return Err(ParseError {
-                    message: "Unsupported index method. Supported: IVFFLAT".to_string(),
+                    message: "Unsupported index method. Supported: IVFFLAT, HNSW".to_string(),
                 });
             }
         }
@@ -214,6 +217,133 @@ impl Parser {
             index_name,
             table_name,
             index_type: vibesql_ast::IndexType::IVFFlat { metric, lists },
+            columns,
+        })
+    }
+
+    /// Parse HNSW index specifics
+    ///
+    /// Syntax: USING hnsw (column [vector_l2_ops|vector_cosine_ops|vector_ip_ops]) [WITH (m = N, ef_construction = N)]
+    fn parse_hnsw_index(
+        &mut self,
+        if_not_exists: bool,
+        index_name: String,
+        table_name: String,
+    ) -> Result<vibesql_ast::CreateIndexStmt, ParseError> {
+        // Expect opening parenthesis
+        self.expect_token(Token::LParen)?;
+
+        // Parse column name
+        let column_name = self.parse_identifier()?;
+
+        // Parse optional operator class (vector_l2_ops, vector_cosine_ops, vector_ip_ops)
+        let metric = if let Token::Identifier(ident) = self.peek().clone() {
+            let upper = ident.to_uppercase();
+            match upper.as_str() {
+                "VECTOR_L2_OPS" => {
+                    self.advance();
+                    vibesql_ast::VectorDistanceMetric::L2
+                }
+                "VECTOR_COSINE_OPS" => {
+                    self.advance();
+                    vibesql_ast::VectorDistanceMetric::Cosine
+                }
+                "VECTOR_IP_OPS" => {
+                    self.advance();
+                    vibesql_ast::VectorDistanceMetric::InnerProduct
+                }
+                _ => vibesql_ast::VectorDistanceMetric::Cosine, // Default to Cosine for HNSW
+            }
+        } else {
+            vibesql_ast::VectorDistanceMetric::Cosine // Default to Cosine for HNSW
+        };
+
+        // Expect closing parenthesis
+        self.expect_token(Token::RParen)?;
+
+        // Parse optional WITH clause for index parameters
+        let mut m = 16u32; // Default m
+        let mut ef_construction = 64u32; // Default ef_construction
+
+        if self.peek_keyword(Keyword::With) {
+            self.advance(); // consume WITH
+            self.expect_token(Token::LParen)?;
+
+            loop {
+                // Check for M parameter
+                if self.peek_keyword(Keyword::M) {
+                    self.advance(); // consume M
+                    self.expect_token(Token::Symbol('='))?;
+                    m = self.parse_positive_integer()? as u32;
+                }
+                // Check for EF_CONSTRUCTION parameter
+                else if self.peek_keyword(Keyword::EfConstruction) {
+                    self.advance(); // consume EF_CONSTRUCTION
+                    self.expect_token(Token::Symbol('='))?;
+                    ef_construction = self.parse_positive_integer()? as u32;
+                }
+                // Also accept lowercase/mixed case identifiers
+                else if let Token::Identifier(ident) = self.peek().clone() {
+                    let upper = ident.to_uppercase();
+                    match upper.as_str() {
+                        "M" => {
+                            self.advance();
+                            self.expect_token(Token::Symbol('='))?;
+                            m = self.parse_positive_integer()? as u32;
+                        }
+                        "EF_CONSTRUCTION" => {
+                            self.advance();
+                            self.expect_token(Token::Symbol('='))?;
+                            ef_construction = self.parse_positive_integer()? as u32;
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: format!("Unknown HNSW parameter: {}. Valid parameters: m, ef_construction", ident),
+                            });
+                        }
+                    }
+                } else {
+                    break;
+                }
+
+                // Check for comma to continue
+                if self.peek() == &Token::Comma {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            self.expect_token(Token::RParen)?;
+        }
+
+        // Validate parameters
+        if m < 2 {
+            return Err(ParseError {
+                message: "HNSW 'm' parameter must be at least 2".to_string(),
+            });
+        }
+        if ef_construction < 1 {
+            return Err(ParseError {
+                message: "HNSW 'ef_construction' parameter must be at least 1".to_string(),
+            });
+        }
+
+        let columns = vec![vibesql_ast::IndexColumn {
+            column_name,
+            direction: vibesql_ast::OrderDirection::Asc, // Not meaningful for vector indexes
+            prefix_length: None,
+        }];
+
+        Ok(vibesql_ast::CreateIndexStmt {
+            if_not_exists,
+            index_name,
+            table_name,
+            index_type: vibesql_ast::IndexType::Hnsw {
+                metric,
+                m,
+                ef_construction,
+            },
             columns,
         })
     }

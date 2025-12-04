@@ -259,6 +259,15 @@ impl IndexManager {
                             );
                             let _ = index; // Suppress unused warning
                         }
+                        IndexData::Hnsw { index } => {
+                            // HNSW indexes support incremental inserts
+                            // The index is self-organizing and doesn't require rebuilding
+                            log::debug!(
+                                "HNSW index '{}' does not support incremental inserts via standard index maintenance. Use search_hnsw_index API.",
+                                index_name
+                            );
+                            let _ = index; // Suppress unused warning
+                        }
                     }
                 }
             }
@@ -352,6 +361,14 @@ impl IndexManager {
                                 );
                                 let _ = index; // Suppress unused warning
                             }
+                            IndexData::Hnsw { index } => {
+                                // HNSW indexes would need remove + insert for updates
+                                log::debug!(
+                                    "HNSW index '{}' does not support incremental updates. Consider rebuilding after bulk operations.",
+                                    index_name
+                                );
+                                let _ = index; // Suppress unused warning
+                            }
                         }
                     }
                     // If keys are the same, no change needed
@@ -418,6 +435,15 @@ impl IndexManager {
                             // Incremental deletes would require re-clustering which is expensive
                             log::debug!(
                                 "IVFFlat index '{}' does not support incremental deletes. Consider rebuilding after bulk operations.",
+                                index_name
+                            );
+                            let _ = index; // Suppress unused warning
+                        }
+                        IndexData::Hnsw { index } => {
+                            // HNSW indexes support incremental deletes
+                            // But we're not tracking which row maps to which vector
+                            log::debug!(
+                                "HNSW index '{}' does not support incremental deletes. Consider rebuilding after bulk operations.",
                                 index_name
                             );
                             let _ = index; // Suppress unused warning
@@ -534,6 +560,15 @@ impl IndexManager {
                             );
                             let _ = index; // Suppress unused warning
                         }
+                        IndexData::Hnsw { index } => {
+                            // HNSW indexes need to be rebuilt via build()
+                            // This requires extracting vectors from the table
+                            log::debug!(
+                                "HNSW index rebuild not yet implemented. Index '{}' needs manual rebuild.",
+                                index_name
+                            );
+                            let _ = index; // Suppress unused warning
+                        }
                     }
                 }
             }
@@ -595,6 +630,15 @@ impl IndexManager {
                         // This would require iterating through all lists and adjusting row IDs
                         log::debug!(
                             "IVFFlat index '{}' row ID adjustment not yet implemented. Consider rebuilding.",
+                            index_name
+                        );
+                        let _ = index; // Suppress unused warning
+                    }
+                    IndexData::Hnsw { index } => {
+                        // HNSW indexes store row IDs in the proximity graph
+                        // This would require iterating through all nodes and adjusting row IDs
+                        log::debug!(
+                            "HNSW index '{}' row ID adjustment not yet implemented. Consider rebuilding.",
                             index_name
                         );
                         let _ = index; // Suppress unused warning
@@ -860,6 +904,170 @@ impl IndexManager {
             }
             _ => Err(StorageError::Other(format!(
                 "Index '{}' is not an IVFFlat index",
+                index_name
+            ))),
+        }
+    }
+
+    // ============================================================================
+    // HNSW Index Methods
+    // ============================================================================
+
+    /// Create an HNSW index with pre-extracted vectors
+    ///
+    /// This is the main entry point for creating HNSW indexes when the
+    /// table rows have already been accessed by the caller (executor layer).
+    pub fn create_hnsw_index_with_vectors(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        column_name: String,
+        dimensions: usize,
+        m: u32,
+        ef_construction: u32,
+        metric: vibesql_ast::VectorDistanceMetric,
+        vectors: Vec<(usize, Vec<f64>)>,
+    ) -> Result<(), StorageError> {
+        use super::hnsw::HnswIndex;
+
+        // Normalize index name for case-insensitive comparison
+        let normalized_name = normalize_index_name(&index_name);
+
+        // Check if index already exists
+        if self.indexes.contains_key(&normalized_name) {
+            return Err(StorageError::IndexAlreadyExists(index_name));
+        }
+
+        // Create HNSW index
+        let mut hnsw = HnswIndex::new(dimensions, m, ef_construction, metric);
+
+        let vector_count = vectors.len();
+
+        // Build the index
+        hnsw.build(vectors)
+            .map_err(|e| StorageError::IoError(format!("Failed to build HNSW index: {}", e)))?;
+
+        // Store index metadata
+        let metadata = IndexMetadata {
+            index_name: index_name.clone(),
+            table_name: table_name.clone(),
+            unique: false, // HNSW indexes are never unique
+            columns: vec![vibesql_ast::IndexColumn {
+                column_name,
+                direction: vibesql_ast::OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        };
+
+        self.indexes.insert(normalized_name.clone(), metadata);
+
+        // Store index data
+        self.index_data.insert(normalized_name.clone(), IndexData::Hnsw { index: hnsw });
+
+        // Register with resource tracker (estimate memory based on vector count and dimensions)
+        // HNSW has more overhead due to graph structure: ~m*2 neighbors per node
+        let estimated_memory = vector_count * (dimensions * std::mem::size_of::<f64>() + m as usize * 2 * std::mem::size_of::<usize>());
+        self.resource_tracker.register_index(
+            normalized_name,
+            estimated_memory,
+            0,
+            crate::database::IndexBackend::InMemory,
+        );
+
+        Ok(())
+    }
+
+    /// Search an HNSW index for approximate nearest neighbors
+    ///
+    /// # Arguments
+    /// * `index_name` - Name of the HNSW index
+    /// * `query_vector` - The query vector (f64)
+    /// * `k` - Maximum number of nearest neighbors to return
+    ///
+    /// # Returns
+    /// * `Ok(Vec<(usize, f64)>)` - Vector of (row_id, distance) pairs, ordered by distance
+    /// * `Err(StorageError)` - If index not found or not an HNSW index
+    pub fn search_hnsw_index(
+        &self,
+        index_name: &str,
+        query_vector: &[f64],
+        k: usize,
+    ) -> Result<Vec<(usize, f64)>, StorageError> {
+        let normalized_name = normalize_index_name(index_name);
+
+        let index_data = self.index_data.get(&normalized_name).ok_or_else(|| {
+            StorageError::IndexNotFound(index_name.to_string())
+        })?;
+
+        match index_data {
+            IndexData::Hnsw { index } => {
+                index.search(query_vector, k).map_err(|e| {
+                    StorageError::Other(format!("HNSW search error: {}", e))
+                })
+            }
+            _ => Err(StorageError::Other(format!(
+                "Index '{}' is not an HNSW index",
+                index_name
+            ))),
+        }
+    }
+
+    /// Get all HNSW indexes for a specific table
+    ///
+    /// Returns index metadata and access to search for each HNSW index on the table.
+    pub fn get_hnsw_indexes_for_table(&self, table_name: &str) -> Vec<(&IndexMetadata, &super::hnsw::HnswIndex)> {
+        let search_name_upper = table_name.to_uppercase();
+        let search_table_only = search_name_upper
+            .rsplit('.')
+            .next()
+            .unwrap_or(&search_name_upper);
+
+        self.indexes
+            .iter()
+            .filter_map(|(normalized_name, metadata)| {
+                let stored_upper = metadata.table_name.to_uppercase();
+                let stored_table_only = stored_upper
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&stored_upper);
+
+                // Check if table matches
+                if stored_upper != search_name_upper && stored_table_only != search_table_only {
+                    return None;
+                }
+
+                // Check if it's an HNSW index
+                if let Some(IndexData::Hnsw { index }) = self.index_data.get(normalized_name) {
+                    Some((metadata, index))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Set the ef_search parameter for an HNSW index
+    ///
+    /// ef_search controls the search accuracy/speed tradeoff.
+    /// Higher values improve recall but increase search time.
+    pub fn set_hnsw_ef_search(
+        &mut self,
+        index_name: &str,
+        ef_search: usize,
+    ) -> Result<(), StorageError> {
+        let normalized_name = normalize_index_name(index_name);
+
+        let index_data = self.index_data.get_mut(&normalized_name).ok_or_else(|| {
+            StorageError::IndexNotFound(index_name.to_string())
+        })?;
+
+        match index_data {
+            IndexData::Hnsw { index } => {
+                index.set_ef_search(ef_search);
+                Ok(())
+            }
+            _ => Err(StorageError::Other(format!(
+                "Index '{}' is not an HNSW index",
                 index_name
             ))),
         }
