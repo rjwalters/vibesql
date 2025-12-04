@@ -27,12 +27,12 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 # - parallel: Single-threaded WASM doesn't benefit from rayon
 # - spatial: Reduces ~400-600 KB by excluding geo/wkt/rstar
 # - compression: Reduces ~200-300 KB by excluding zstd (browsers have native compression)
-vibesql-types = { version = "0.1.0", path = "../vibesql-types" }
-vibesql-ast = { version = "0.1.0", path = "../vibesql-ast" }
-vibesql-parser = { version = "0.1.0", path = "../vibesql-parser" }
-vibesql-executor = { version = "0.1.0", path = "../vibesql-executor", default-features = false }
-vibesql-storage = { version = "0.1.0", path = "../vibesql-storage", default-features = false }
-vibesql-catalog = { version = "0.1.0", path = "../vibesql-catalog" }
+vibesql-types = { version = "0.1.1", path = "../vibesql-types" }
+vibesql-ast = { version = "0.1.1", path = "../vibesql-ast" }
+vibesql-parser = { version = "0.1.1", path = "../vibesql-parser" }
+vibesql-executor = { version = "0.1.1", path = "../vibesql-executor", default-features = false }
+vibesql-storage = { version = "0.1.1", path = "../vibesql-storage", default-features = false }
+vibesql-catalog = { version = "0.1.1", path = "../vibesql-catalog" }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
