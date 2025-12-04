@@ -90,18 +90,19 @@ pub enum PersistenceFormat {
 fn detect_format<P: AsRef<Path>>(path: P) -> Result<PersistenceFormat, crate::StorageError> {
     let path_ref = path.as_ref();
 
-    // First try extension-based detection
+    // For .vbsqlz, we know it's compressed
     if let Some(ext) = path_ref.extension() {
         match ext.to_str() {
             Some("vbsqlz") => return Ok(PersistenceFormat::BinaryCompressed),
-            Some("vbsql") => return Ok(PersistenceFormat::Binary),
             Some("json") => return Ok(PersistenceFormat::Json),
             Some("sql") => return Ok(PersistenceFormat::Sql),
             _ => {}
         }
     }
 
-    // If extension doesn't match, check magic number
+    // For .vbsql or unknown extensions, check magic number to distinguish
+    // between compressed and uncompressed binary formats
+    // (save() with compression feature creates compressed content even with .vbsql extension)
     let mut file = fs::File::open(path_ref).map_err(|e| {
         crate::StorageError::NotImplemented(format!("Failed to open file {:?}: {}", path_ref, e))
     })?;
