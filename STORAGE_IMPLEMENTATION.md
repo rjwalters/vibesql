@@ -61,7 +61,7 @@ Added to `crates/vibesql-storage/Cargo.toml`:
 - `tokio` - For async operations (optional, behind feature flag)
 - `opendal` - For multi-backend storage abstraction (optional, behind feature flag)
 
-## Phase 2: System Table
+## Phase 2: System Table (#3482)
 
 ### vibesql_storage Table
 System table for storing blob metadata:
@@ -81,7 +81,7 @@ To be implemented:
 - Cleanup when blob is deleted
 - Query for size/metadata lookups
 
-## Phase 3: HTTP API Endpoints
+## Phase 3: HTTP API Endpoints (#3483)
 
 To be implemented:
 - `POST /api/storage/upload` - Upload blob, returns blob ID
@@ -89,7 +89,7 @@ To be implemented:
 - Content-Type and size headers
 - Support for multipart uploads
 
-## Phase 4: TypeScript SDK
+## Phase 4: TypeScript SDK (#3484)
 
 To be implemented:
 ```typescript
@@ -106,7 +106,7 @@ await db.query(
 const url = await db.storage.getUrl(storageId);
 ```
 
-## Phase 5: Full OpenDAL Integration
+## Phase 5: Full OpenDAL Integration (#3485)
 
 To be implemented:
 - Enable OpenDAL feature flag
