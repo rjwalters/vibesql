@@ -8,9 +8,10 @@
 #   ./scripts/bench-tpch.sh [--mode MODE] [--timeout SECS] [--output FILE]
 #
 # Modes:
-#   standard      Run all queries together (default)
+#   standard      Run VibeSQL profiling benchmark (default, detailed timing)
+#   engines       Run all 4 engines (VibeSQL, SQLite, DuckDB, MySQL) via Criterion
 #   isolated      Run each query in separate subprocess
-#   compare       Full comparison with SQLite and DuckDB
+#   compare       Full Criterion comparison with all engines (same as engines)
 #   quick-compare Single-run comparison (much faster)
 #   analyze       Analyze previous results
 #   web-demo      Generate web demo format (JSON)
@@ -18,6 +19,7 @@
 # Examples:
 #   ./scripts/bench-tpch.sh                              # Standard run, 30s timeout
 #   ./scripts/bench-tpch.sh --timeout 60                 # Standard run, 60s timeout
+#   ./scripts/bench-tpch.sh --mode engines               # All 4 engines comparison
 #   ./scripts/bench-tpch.sh --mode isolated --timeout 30 # Isolated run
 #   ./scripts/bench-tpch.sh --mode compare               # Full comparison
 #   ./scripts/bench-tpch.sh --mode quick-compare         # Quick comparison
@@ -481,11 +483,12 @@ case "$MODE" in
     standard)
         run_standard_mode
         ;;
+    engines|compare)
+        # Both 'engines' and 'compare' run all 4 engines via Criterion
+        run_compare_mode
+        ;;
     isolated)
         run_isolated_mode
-        ;;
-    compare)
-        run_compare_mode
         ;;
     quick-compare)
         run_quick_compare_mode
@@ -498,7 +501,7 @@ case "$MODE" in
         ;;
     *)
         echo -e "${RED}Error: Unknown mode '$MODE'${NC}"
-        echo "Valid modes: standard, isolated, compare, quick-compare, analyze, web-demo"
+        echo "Valid modes: standard, engines, isolated, compare, quick-compare, analyze, web-demo"
         exit 1
         ;;
 esac
