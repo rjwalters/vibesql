@@ -266,6 +266,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires opendal feature with storage backend configured"]
     async fn test_upload_blob_success() {
         // Test that blob upload succeeds and returns CREATED status
         let router = create_test_router();

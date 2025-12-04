@@ -48,7 +48,7 @@ pub fn eval_storage_size(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
-        SqlValue::Varchar(blob_id_str) => {
+        SqlValue::Varchar(_blob_id_str) => {
             // Query vibesql_storage table for size metadata
             // This would normally be done via database lookup, but for now we return NULL
             // as the function doesn't have access to the database context
