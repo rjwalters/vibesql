@@ -3,6 +3,7 @@
 use super::SubscriptionId;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
+use tracing::warn;
 use vibesql_storage::{ChangeEvent, ChangeEventReceiver};
 
 /// Update notification for a subscription
@@ -116,9 +117,25 @@ impl ChangeRouter {
 
                 // Send to all registered session channels
                 // Note: In a real implementation, we'd know which session owns which subscription
-                for sender in self.session_senders.values() {
-                    // Ignore errors (session may have disconnected)
-                    let _ = sender.try_send(update.clone());
+                for (session_id, sender) in &self.session_senders {
+                    // Use try_send with backpressure detection
+                    match sender.try_send(update.clone()) {
+                        Ok(()) => {
+                            // Successfully sent
+                        }
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            warn!(
+                                subscription_id = %subscription_id,
+                                session_id = %session_id,
+                                table = %table,
+                                "Session channel full, dropping update. \
+                                 Consider increasing channel buffer size or client is consuming too slowly."
+                            );
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            // Session disconnected, will be cleaned up
+                        }
+                    }
                 }
             }
         }

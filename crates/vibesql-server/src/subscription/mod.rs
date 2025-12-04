@@ -62,6 +62,7 @@ pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptio
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
 pub use error::{SubscriptionErrorKind, classify_error, classify_error_str};
+// SubscriptionMetrics is defined inline in this module and exported directly
 
 // ============================================================================
 // Subscription Configuration
@@ -147,6 +148,29 @@ impl Default for SubscriptionConfig {
             slow_consumer_threshold_percent: default_slow_consumer_threshold_percent(),
         }
     }
+}
+
+// ============================================================================
+// Subscription Metrics
+// ============================================================================
+
+/// Metrics for a single subscription
+///
+/// Provides observability into subscription health and backpressure.
+#[derive(Debug, Clone, Default)]
+pub struct SubscriptionMetrics {
+    /// Subscription ID
+    pub subscription_id: Option<SubscriptionId>,
+    /// Total updates successfully sent to this subscription
+    pub updates_sent: u64,
+    /// Total updates dropped due to channel being full
+    pub updates_dropped: u64,
+    /// Configured channel buffer size
+    pub channel_buffer_size: usize,
+    /// Current channel capacity (available slots)
+    pub channel_capacity: usize,
+    /// Slow consumer threshold percentage
+    pub slow_consumer_threshold_percent: u8,
 }
 
 // ============================================================================
