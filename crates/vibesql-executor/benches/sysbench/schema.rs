@@ -136,8 +136,9 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
             },
+            // Note: renamed from "pad" to "padding" because PAD is a SQL keyword
             ColumnSchema {
-                name: "pad".to_string(),
+                name: "padding".to_string(),
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: false,
                 default_value: None,
@@ -182,12 +183,12 @@ fn load_sbtest_vibesql(db: &mut VibeDB, data: &mut SysbenchData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    while let Some((id, k, c, pad)) = data.next_row() {
+    while let Some((id, k, c, padding)) = data.next_row() {
         let row = Row::new(vec![
             SqlValue::Integer(id),
             SqlValue::Integer(k),
             SqlValue::Varchar(c),
-            SqlValue::Varchar(pad),
+            SqlValue::Varchar(padding),
         ]);
         db.insert_row("SBTEST1", row).unwrap();
     }
@@ -205,7 +206,7 @@ fn create_sbtest_schema_sqlite(conn: &SqliteConn) {
             id INTEGER PRIMARY KEY,
             k INTEGER NOT NULL DEFAULT 0,
             c CHAR(120) NOT NULL DEFAULT '',
-            pad CHAR(60) NOT NULL DEFAULT ''
+            padding CHAR(60) NOT NULL DEFAULT ''
         );
         CREATE INDEX k_1 ON sbtest1(k);
         "#,
@@ -216,11 +217,11 @@ fn create_sbtest_schema_sqlite(conn: &SqliteConn) {
 #[cfg(feature = "benchmark-comparison")]
 fn load_sbtest_sqlite(conn: &SqliteConn, data: &mut SysbenchData) {
     let mut stmt = conn
-        .prepare("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
+        .prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)")
         .unwrap();
 
-    while let Some((id, k, c, pad)) = data.next_row() {
-        stmt.execute(rusqlite::params![id, k, c, pad]).unwrap();
+    while let Some((id, k, c, padding)) = data.next_row() {
+        stmt.execute(rusqlite::params![id, k, c, padding]).unwrap();
     }
 }
 
@@ -236,7 +237,7 @@ fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
             id INTEGER PRIMARY KEY,
             k INTEGER NOT NULL DEFAULT 0,
             c VARCHAR(120) NOT NULL DEFAULT '',
-            pad VARCHAR(60) NOT NULL DEFAULT ''
+            padding VARCHAR(60) NOT NULL DEFAULT ''
         );
         CREATE INDEX k_1 ON sbtest1(k);
         "#,
@@ -247,11 +248,11 @@ fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
 #[cfg(feature = "benchmark-comparison")]
 fn load_sbtest_duckdb(conn: &DuckDBConn, data: &mut SysbenchData) {
     let mut stmt = conn
-        .prepare("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
+        .prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)")
         .unwrap();
 
-    while let Some((id, k, c, pad)) = data.next_row() {
-        stmt.execute(duckdb::params![id, k, c, pad]).unwrap();
+    while let Some((id, k, c, padding)) = data.next_row() {
+        stmt.execute(duckdb::params![id, k, c, padding]).unwrap();
     }
 }
 
@@ -270,7 +271,7 @@ fn create_sbtest_schema_mysql(conn: &mut PooledConn) {
             id INTEGER PRIMARY KEY,
             k INTEGER NOT NULL DEFAULT 0,
             c VARCHAR(120) NOT NULL DEFAULT '',
-            pad VARCHAR(60) NOT NULL DEFAULT ''
+            padding VARCHAR(60) NOT NULL DEFAULT ''
         ) ENGINE=InnoDB
     "#,
     )
@@ -282,10 +283,10 @@ fn create_sbtest_schema_mysql(conn: &mut PooledConn) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_sbtest_mysql(conn: &mut PooledConn, data: &mut SysbenchData) {
-    while let Some((id, k, c, pad)) = data.next_row() {
+    while let Some((id, k, c, padding)) = data.next_row() {
         conn.exec_drop(
-            "INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)",
-            (id, k, &c, &pad),
+            "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)",
+            (id, k, &c, &padding),
         )
         .unwrap();
     }

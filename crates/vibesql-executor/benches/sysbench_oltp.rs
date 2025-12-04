@@ -127,7 +127,8 @@ impl VibesqlPreparedStatements {
             order_range: session.prepare("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap(),
             distinct_range: session.prepare("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap(),
             delete: session.prepare("DELETE FROM sbtest1 WHERE id = ?").unwrap(),
-            insert: session.prepare("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)").unwrap(),
+            // Note: column is named "padding" because PAD is a SQL keyword
+            insert: session.prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)").unwrap(),
             update_non_index: session.prepare("UPDATE sbtest1 SET c = ? WHERE id = ?").unwrap(),
             cache,
         }
