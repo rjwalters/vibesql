@@ -17,7 +17,7 @@ pub struct QueryRequest {
 impl QueryRequest {
     /// Convert JSON parameters to SqlValue
     pub fn to_sql_values(&self) -> Result<Vec<SqlValue>, String> {
-        self.params.iter().map(|v| json_to_sql_value(v)).collect()
+        self.params.iter().map(json_to_sql_value).collect()
     }
 }
 

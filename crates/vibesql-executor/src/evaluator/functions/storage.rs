@@ -1,8 +1,7 @@
 /// Storage-related SQL functions
-/// 
+///
 /// Functions for working with blob/file storage:
 /// - STORAGE_URL(blob_id) - Generate URL for accessing a blob
-
 use vibesql_types::SqlValue;
 use crate::errors::ExecutorError;
 

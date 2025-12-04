@@ -1,8 +1,7 @@
 /// Blob storage identifier
-/// 
+///
 /// Unique identifier for stored blobs, based on UUID v4.
 /// Can be converted to/from string paths for storage backends.
-
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
@@ -23,7 +22,7 @@ impl BlobId {
     }
 
     /// Create from string representation
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Uuid::parse_str(s).ok().map(Self)
     }
 
@@ -103,7 +102,7 @@ mod tests {
     fn test_blob_id_roundtrip() {
         let id1 = BlobId::new();
         let str_repr = id1.to_string();
-        let id2 = BlobId::from_str(&str_repr).unwrap();
+        let id2 = BlobId::parse(&str_repr).unwrap();
         assert_eq!(id1, id2);
     }
 

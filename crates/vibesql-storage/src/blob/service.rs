@@ -1,8 +1,7 @@
 /// Blob storage service
-/// 
+///
 /// Manages storing and retrieving blobs with support for multiple backends
 /// via OpenDAL abstraction layer.
-
 use super::{BlobId, BlobMetadata, BlobStorageConfig};
 use crate::database::Database;
 use crate::error::{StorageError, StorageResult};
@@ -57,7 +56,7 @@ impl BlobStorageService {
     }
 
     /// Delete a blob
-    pub async fn delete(&self, id: &BlobId) -> StorageResult<()> {
+    pub async fn delete(&self, _id: &BlobId) -> StorageResult<()> {
         // TODO: Delete from backend
         // op.delete(&id.to_path()).await?;
 

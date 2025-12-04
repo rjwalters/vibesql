@@ -1,8 +1,7 @@
 /// Blob/file storage module for VibeSql
-/// 
+///
 /// This module provides abstraction for storing and retrieving binary data
 /// with metadata tracking in the database.
-
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
