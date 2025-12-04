@@ -15,7 +15,7 @@ declare const Chart: any;
 /**
  * Benchmark suite types
  */
-type BenchmarkSuite = 'tpch' | 'tpcc' | 'sysbench' | 'footprint';
+type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench' | 'footprint';
 
 /**
  * Suite configuration
@@ -91,6 +91,140 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
         <strong>Note:</strong> TPC-H queries test different aspects of SQL performance:
         simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15),
         and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
+      </p>
+    `,
+  },
+  tpcds: {
+    id: 'tpcds',
+    name: 'TPC-DS',
+    dataFile: 'tpcds_results.json',
+    opsLabel: 'TPC-DS queries',
+    descriptions: {
+      'q1': 'Q1 - Store returns analysis with date filtering',
+      'q2': 'Q2 - Catalog and web sales comparison',
+      'q3': 'Q3 - Brand sales by date',
+      'q4': 'Q4 - Customer lifetime value comparison',
+      'q5': 'Q5 - Web and catalog page sales',
+      'q6': 'Q6 - State-based customer analysis',
+      'q7': 'Q7 - Promotion effect analysis',
+      'q8': 'Q8 - Customer zip code analysis',
+      'q9': 'Q9 - Reason-based returns analysis',
+      'q10': 'Q10 - Customer demographics from catalog',
+      'q11': 'Q11 - Customer lifetime value (web vs store)',
+      'q12': 'Q12 - Web sales by category',
+      'q13': 'Q13 - Store sales demographics',
+      'q14': 'Q14 - Cross-channel brand affinity',
+      'q15': 'Q15 - Catalog sales by zip code',
+      'q16': 'Q16 - Catalog returns analysis',
+      'q17': 'Q17 - Store-catalog cross-sell',
+      'q18': 'Q18 - Catalog sales demographics',
+      'q19': 'Q19 - Store sales by manufacturer',
+      'q20': 'Q20 - Catalog sales analysis',
+      'q21': 'Q21 - Inventory analysis',
+      'q22': 'Q22 - Inventory monthly rollup',
+      'q23': 'Q23 - Frequent customer sales',
+      'q24': 'Q24 - Store sales by color',
+      'q25': 'Q25 - Store-catalog-web returns',
+      'q26': 'Q26 - Promotion ROI analysis',
+      'q27': 'Q27 - Store profit analysis',
+      'q28': 'Q28 - Store sales price ranges',
+      'q29': 'Q29 - Store-catalog order analysis',
+      'q30': 'Q30 - Web returns by state',
+      'q31': 'Q31 - Web-catalog geographic analysis',
+      'q32': 'Q32 - Catalog excess inventory',
+      'q33': 'Q33 - Manufacturer brand analysis',
+      'q34': 'Q34 - Store sales by county',
+      'q35': 'Q35 - Customer demographics analysis',
+      'q36': 'Q36 - Store sales profit ranking',
+      'q37': 'Q37 - Inventory planning',
+      'q38': 'Q38 - Customer count analysis',
+      'q39': 'Q39 - Inventory variance',
+      'q40': 'Q40 - Catalog sales with warehouse',
+      'q41': 'Q41 - Manufacturing item analysis',
+      'q42': 'Q42 - Web sales by date',
+      'q43': 'Q43 - Store sales by day of week',
+      'q44': 'Q44 - Store sales top-N items',
+      'q45': 'Q45 - Web sales by customer',
+      'q46': 'Q46 - Store customer demographics',
+      'q47': 'Q47 - Store sales monthly analysis',
+      'q48': 'Q48 - Store sales price analysis',
+      'q49': 'Q49 - Cross-channel returns analysis',
+      'q50': 'Q50 - Store returns timing analysis',
+      'q51': 'Q51 - Web-store sales window analysis',
+      'q52': 'Q52 - Web sales by category hierarchy',
+      'q53': 'Q53 - Store sales by manufacturer',
+      'q54': 'Q54 - Cross-channel customer analysis',
+      'q55': 'Q55 - Brand-manager sales analysis',
+      'q56': 'Q56 - Multi-channel color analysis',
+      'q57': 'Q57 - Catalog sales monthly analysis',
+      'q58': 'Q58 - Cross-channel item sales',
+      'q59': 'Q59 - Store sales weekly rollup',
+      'q60': 'Q60 - Multi-channel category analysis',
+      'q61': 'Q61 - Store promotion analysis',
+      'q62': 'Q62 - Web sales shipping analysis',
+      'q63': 'Q63 - Store manager sales analysis',
+      'q64': 'Q64 - Cross-channel product analysis',
+      'q65': 'Q65 - Store revenue analysis',
+      'q66': 'Q66 - Web-catalog sales by warehouse',
+      'q67': 'Q67 - Store sales ranking',
+      'q68': 'Q68 - Store customer household analysis',
+      'q69': 'Q69 - Customer demographics comparison',
+      'q70': 'Q70 - Store sales rollup analysis',
+      'q71': 'Q71 - Multi-channel time analysis',
+      'q72': 'Q72 - Catalog warehouse analysis',
+      'q73': 'Q73 - Store customer count analysis',
+      'q74': 'Q74 - Store-web customer comparison',
+      'q75': 'Q75 - Cross-channel brand returns',
+      'q76': 'Q76 - Multi-channel null channel analysis',
+      'q77': 'Q77 - Store-catalog-web profit analysis',
+      'q78': 'Q78 - Cross-channel customer value',
+      'q79': 'Q79 - Store customer spend analysis',
+      'q80': 'Q80 - Multi-channel profit analysis',
+      'q81': 'Q81 - Catalog returns by state',
+      'q82': 'Q82 - Inventory demographics',
+      'q83': 'Q83 - Cross-channel returns by week',
+      'q84': 'Q84 - Store customer income analysis',
+      'q85': 'Q85 - Web returns reason analysis',
+      'q86': 'Q86 - Web sales rollup',
+      'q87': 'Q87 - Cross-channel customer count',
+      'q88': 'Q88 - Store sales time analysis',
+      'q89': 'Q89 - Store sales by class',
+      'q90': 'Q90 - Web sales time of day',
+      'q91': 'Q91 - Call center returns analysis',
+      'q92': 'Q92 - Web sales discount analysis',
+      'q93': 'Q93 - Store returns reason analysis',
+      'q94': 'Q94 - Web sales shipping exception',
+      'q95': 'Q95 - Web sales duplicate analysis',
+      'q96': 'Q96 - Store sales staff analysis',
+      'q97': 'Q97 - Store-catalog sales distinct',
+      'q98': 'Q98 - Store sales category analysis',
+      'q99': 'Q99 - Multi-channel shipping analysis',
+    },
+    methodology: `
+      <h3 class="text-lg font-semibold text-foreground mb-2">TPC-DS Decision Support Benchmark</h3>
+      <p class="text-muted mb-4">
+        <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model
+        a modern decision support system with significantly more complex query patterns
+        including multiple fact tables, snow-flake schema, and advanced SQL features.
+      </p>
+
+      <ul class="space-y-2 text-muted">
+        <li><strong>Schema:</strong> 24 tables with star/snowflake schema design</li>
+        <li><strong>Query Count:</strong> 99 queries (currently 88/99 passing)</li>
+        <li><strong>Scale Factor:</strong> SF 0.001 (development/testing scale)</li>
+        <li><strong>Query Types:</strong> Reporting, ad-hoc, data mining patterns</li>
+        <li><strong>SQL Features:</strong> Window functions, CTEs, complex subqueries, ROLLUP/CUBE</li>
+      </ul>
+
+      <p class="mt-4 text-muted">
+        TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features
+        like window functions, common table expressions (WITH clause), and complex join patterns
+        across multiple fact and dimension tables.
+      </p>
+
+      <p class="mt-2 text-muted text-sm">
+        <strong>Note:</strong> Some queries require GROUPING() function which is not yet implemented.
+        Results are automatically updated when CI runs the TPC-DS benchmark suite.
       </p>
     `,
   },
@@ -310,6 +444,18 @@ function parseBenchmarkName(name: string, suite: BenchmarkSuite): { operation: s
 
     // Operation name is everything except "tpch_", query number, and database
     // e.g., "tpch_q1_pricing_summary_report_vibesql" -> "pricing_summary_report"
+    const operation = parts.slice(2, -1).join('_');
+
+    return { operation, database, queryNum, description };
+  }
+
+  // TPC-DS format: "tpcds_q1_vibesql" or "tpcds_q1_store_returns_vibesql"
+  if (name.startsWith('tpcds_')) {
+    // Extract query number (q1, q2, etc.)
+    const queryNum = parts[1]; // e.g., "q1"
+    const description = config.descriptions[queryNum];
+
+    // Operation name is everything except "tpcds_", query number, and database
     const operation = parts.slice(2, -1).join('_');
 
     return { operation, database, queryNum, description };
