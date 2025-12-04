@@ -14,8 +14,11 @@
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
 - **100% SQLLogicTest conformance** - 624 files (~5.9M tests)
 - **Real-time subscriptions** - Convex-like reactivity with delta updates
+- **HTTP REST & GraphQL API** - Full CRUD and query endpoints
+- **Vector search** - AI/ML embeddings with similarity search
+- **File storage** - Blob storage with SQL integration
 - **Full-featured CLI** with PostgreSQL-compatible commands
-- **TypeScript SDK** with React hooks
+- **TypeScript SDK** with React hooks and Drizzle ORM adapter
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
 - **215,000+ lines** of Rust across 11 crates
@@ -136,6 +139,8 @@ function ChatRoom({ channelId }) {
 - Spatial functions (ST_* library)
 - Triggers (BEFORE/AFTER)
 - [Scheduled functions](docs/scheduled-functions.md) (SCHEDULE AFTER/AT, CREATE CRON)
+- [Vector types](docs/vector-search.md) for AI embeddings (VECTOR(n), distance functions)
+- [Blob storage](docs/file-storage.md) with STORAGE_URL/STORAGE_SIZE functions
 
 ### Performance
 
@@ -166,9 +171,13 @@ make help           # Show all targets
 | Guide | Description |
 |-------|-------------|
 | [TypeScript SDK](packages/vibesql-client-ts/README.md) | Real-time subscriptions & React hooks |
+| [Drizzle ORM](packages/vibesql-drizzle/README.md) | Type-safe queries with Drizzle adapter |
+| [HTTP API](docs/http-api.md) | REST, GraphQL, and SSE endpoints |
 | [CLI Guide](docs/CLI_GUIDE.md) | Command-line interface |
 | [Python Bindings](docs/PYTHON_BINDINGS.md) | Python API reference |
 | [Scheduled Functions](docs/scheduled-functions.md) | Cron jobs and scheduled tasks |
+| [Vector Search](docs/vector-search.md) | AI/ML embeddings and similarity search |
+| [File Storage](docs/file-storage.md) | Blob storage with SQL integration |
 | [ODBC/JDBC](docs/ODBC_JDBC_CONNECTIVITY.md) | Database connectivity |
 | [Roadmap](docs/ROADMAP.md) | Future plans |
 | [History](docs/HISTORY.md) | Development timeline |

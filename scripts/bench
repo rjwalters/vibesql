@@ -205,6 +205,22 @@ def run_tpch(config: BenchConfig) -> int:
 
     timeout = config.timeout or 30
 
+    # Determine which benchmark to run based on engine selection
+    # If only vibesql, use the profiling benchmark (faster, detailed timing)
+    # If multiple engines, use the Criterion benchmark with all engines
+    use_criterion = len(config.engines) > 1 or config.engines != ["vibesql"]
+
+    if use_criterion:
+        return run_tpch_criterion(config)
+    else:
+        return run_tpch_profiling(config, timeout)
+
+
+def run_tpch_profiling(config: BenchConfig, timeout: int) -> int:
+    """Run TPC-H with profiling benchmark (VibeSQL only, detailed timing)."""
+    print(f"Mode: Profiling (VibeSQL only, detailed timing breakdown)")
+    print(f"Timeout: {timeout}s per query")
+
     # Set up environment with query filter
     env = os.environ.copy()
     if config.queries:
@@ -212,7 +228,7 @@ def run_tpch(config: BenchConfig) -> int:
         print(f"Query filter: {env['QUERY_FILTER']}")
 
     # Run the existing bench-tpch.sh script
-    cmd = ["./scripts/bench-tpch.sh", "--timeout", str(timeout)]
+    cmd = ["./scripts/bench-tpch.sh", "--mode", "standard", "--timeout", str(timeout)]
 
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=Path(__file__).parent.parent, env=env)
@@ -224,11 +240,81 @@ def run_tpch(config: BenchConfig) -> int:
     # Process results into database
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_benchmark_results.py", "--input", "/tmp/tpch_results.txt", "--timeout", str(timeout)],
+        ["./scripts/process_results.py", "--type=tpch", "--input", "/tmp/tpch_results.txt", "--timeout", str(timeout)],
         cwd=Path(__file__).parent.parent
     )
 
     return result.returncode
+
+
+def run_tpch_criterion(config: BenchConfig) -> int:
+    """Run TPC-H with Criterion benchmark (multi-engine comparison)."""
+    print(f"Mode: Criterion (engine comparison)")
+    print(f"Engines: {', '.join(config.engines)}")
+
+    # Set up environment
+    env = os.environ.copy()
+
+    # Try to start MySQL if needed
+    if "mysql" in config.engines:
+        print("\nStarting MySQL Docker container...")
+        result = subprocess.run(
+            ["./scripts/ensure-mysql-docker.sh"],
+            cwd=Path(__file__).parent.parent,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            mysql_url = result.stdout.strip()
+            if mysql_url:
+                env["MYSQL_URL"] = mysql_url
+                print(f"✓ MySQL ready: {mysql_url}")
+        else:
+            print("⚠ MySQL unavailable (Docker not available)")
+            if len(config.engines) == 1:
+                return 1
+            # Continue without MySQL
+            config.engines = [e for e in config.engines if e != "mysql"]
+
+    # Build the benchmark binary
+    print("\nBuilding benchmark...")
+    build_result = subprocess.run(
+        ["cargo", "bench", "--package", "vibesql-executor", "--bench", "tpch_benchmark",
+         "--features", "benchmark-comparison", "--no-run"],
+        cwd=Path(__file__).parent.parent
+    )
+
+    if build_result.returncode != 0:
+        print("❌ Build failed")
+        return 1
+
+    # Run the Criterion benchmark
+    print("\nRunning TPC-H benchmarks (all engines)...")
+    cmd = [
+        "cargo", "bench",
+        "--package", "vibesql-executor",
+        "--bench", "tpch_benchmark",
+        "--features", "benchmark-comparison",
+        "--", "--noplot"
+    ]
+
+    # Add query filter if specified
+    if config.queries:
+        filters = "|".join([f"tpch_q{q.replace('Q', '')}".lower() for q in config.queries])
+        cmd.append(filters)
+
+    result = subprocess.run(
+        cmd,
+        cwd=Path(__file__).parent.parent,
+        env=env
+    )
+
+    if result.returncode != 0:
+        print("⚠ TPC-H benchmark completed with warnings")
+    else:
+        print("✓ TPC-H benchmark completed")
+
+    return 0
 
 
 def run_tpcc(config: BenchConfig) -> int:
@@ -315,11 +401,11 @@ def run_tpcc(config: BenchConfig) -> int:
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_tpcc_results.py", "--input", "/tmp/tpcc_results.txt",
+        ["./scripts/process_results.py", "--type=tpcc", "--input", "/tmp/tpcc_results.txt",
          "--scale-factor", str(config.scale or 1), "--duration", str(duration)],
         cwd=Path(__file__).parent.parent
     )
-    
+
     return result.returncode
 
 
@@ -349,9 +435,8 @@ def run_tpcds(config: BenchConfig) -> int:
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_tpcds_results.py", "--stdin"],
-        cwd=Path(__file__).parent.parent,
-        stdin=open("/tmp/tpcds_results.txt")
+        ["./scripts/process_results.py", "--type=tpcds", "--input", "/tmp/tpcds_results.txt"],
+        cwd=Path(__file__).parent.parent
     )
 
     return 0  # Don't fail on process errors
@@ -403,10 +488,10 @@ def run_sysbench(config: BenchConfig) -> int:
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_sysbench_results.py", "--criterion-dir", "target/criterion"],
+        ["./scripts/process_results.py", "--type=sysbench", "--criterion-dir", "target/criterion"],
         cwd=Path(__file__).parent.parent
     )
-    
+
     return 0
 
 

@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting benchmark benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting benchmark benchmark-quick benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -76,12 +76,15 @@ help:
 	@echo "  make test-sqllogictest-halting - Run SQLLogicTest, stop on first failure"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  make benchmark          - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
-	@echo "  make benchmark-tpch     - Run TPC-H benchmark suite (30s timeout)"
-	@echo "  make benchmark-tpcc     - Run TPC-C benchmark suite (60s duration)"
-	@echo "  make benchmark-tpcds    - Run TPC-DS benchmark suite (isolated, memory-safe)"
+	@echo "  make benchmark           - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
+	@echo "  make benchmark-quick     - Quick CI-friendly subset (VibeSQL only)"
+	@echo "  make benchmark-tpch      - Run TPC-H (all 4 engines: VibeSQL, SQLite, DuckDB, MySQL)"
+	@echo "  make benchmark-tpch-quick - Run TPC-H (VibeSQL only - fast iteration)"
+	@echo "  make benchmark-tpch-profile - Run TPC-H profiling (detailed timing breakdown)"
+	@echo "  make benchmark-tpcc      - Run TPC-C benchmark suite (60s duration)"
+	@echo "  make benchmark-tpcds     - Run TPC-DS benchmark suite (isolated, memory-safe)"
 	@echo "  make benchmark-tpcds-all - Run TPC-DS with all engines simultaneously (may OOM)"
-	@echo "  make benchmark-sysbench - Run Sysbench OLTP benchmarks"
+	@echo "  make benchmark-sysbench  - Run Sysbench OLTP benchmarks"
 	@echo ""
 	@echo "Profiling targets:"
 	@echo "  make flamegraph-tpch    - Generate flamegraph for TPC-H queries"
@@ -195,6 +198,41 @@ benchmark:
 # Quick benchmark subset for CI (fast, no comparisons)
 benchmark-quick:
 	@./scripts/bench --quick
+
+#
+# Individual Benchmark Targets
+#
+
+# Run TPC-H benchmark (all 4 engines: VibeSQL, SQLite, DuckDB, MySQL)
+benchmark-tpch:
+	@echo "Running TPC-H benchmarks (all engines)..."
+	@./scripts/bench --test=tpch --engine=all
+
+# Run TPC-H benchmark (VibeSQL only - fast iteration)
+benchmark-tpch-quick:
+	@echo "Running TPC-H benchmarks (VibeSQL only)..."
+	@./scripts/bench --test=tpch --engine=vibesql
+
+# Run TPC-H profiling (detailed timing breakdown per phase)
+benchmark-tpch-profile:
+	@echo "Running TPC-H profiling (detailed timing)..."
+	@./scripts/bench-tpch.sh --mode standard --timeout 30
+
+# Run TPC-C benchmark (OLTP workload)
+benchmark-tpcc:
+	@./scripts/bench --test=tpcc
+
+# Run TPC-DS benchmark (decision support queries)
+benchmark-tpcds:
+	@./scripts/bench --test=tpcds
+
+# Run TPC-DS benchmark with all engines (may require significant memory)
+benchmark-tpcds-all:
+	@./scripts/bench --test=tpcds --engine=all
+
+# Run Sysbench OLTP benchmark
+benchmark-sysbench:
+	@./scripts/bench --test=sysbench
 
 #
 # Analysis Targets

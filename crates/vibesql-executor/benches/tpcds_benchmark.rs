@@ -163,6 +163,10 @@ fn print_query_summary() {
 #[cfg(feature = "benchmark-comparison")]
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
+use mysql::prelude::*;
+#[cfg(feature = "benchmark-comparison")]
+use mysql::PooledConn as MySqlConn;
+#[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
 
 use std::time::Duration;
@@ -180,7 +184,11 @@ use tpcds::schema::*;
 // environment variable to only load specific engines:
 //   - TPCDS_ENGINE=sqlite  - Load VibeSQL + SQLite only
 //   - TPCDS_ENGINE=duckdb  - Load VibeSQL + DuckDB only
-//   - TPCDS_ENGINE=all (or unset) - Load all engines (may cause memory pressure)
+//   - TPCDS_ENGINE=mysql   - Load VibeSQL + MySQL only (requires MYSQL_URL env var)
+//   - TPCDS_ENGINE=all (or unset) - Load all embedded engines (SQLite, DuckDB)
+//
+// Note: MySQL requires an external server and MYSQL_URL environment variable.
+// It is not included in "all" to avoid requiring a MySQL server for default runs.
 //
 // The isolated benchmark script (scripts/bench-tpcds-isolated.sh) runs each
 // engine in a separate process to avoid memory exhaustion from loading all
@@ -215,6 +223,15 @@ fn duckdb_enabled() -> bool {
         Some(ref e) if e == "all" => true,               // Explicit all
         Some(ref e) if e == "duckdb" => true,            // DuckDB only
         _ => false,
+    }
+}
+
+/// Check if MySQL comparison should be enabled
+#[cfg(feature = "benchmark-comparison")]
+fn mysql_enabled() -> bool {
+    match get_comparison_engine() {
+        Some(ref e) if e == "mysql" => true,             // MySQL only
+        _ => false,                                      // Not included in default/all (requires external server)
     }
 }
 
@@ -270,6 +287,30 @@ fn get_duckdb_conn() -> Option<&'static Mutex<DuckDBConn>> {
         eprintln!("DuckDB database loaded in {:?}", start.elapsed());
         Mutex::new(conn)
     }))
+}
+
+#[cfg(feature = "benchmark-comparison")]
+static MYSQL_CONN: OnceLock<Option<Mutex<MySqlConn>>> = OnceLock::new();
+
+#[cfg(feature = "benchmark-comparison")]
+fn get_mysql_conn() -> Option<&'static Mutex<MySqlConn>> {
+    if !mysql_enabled() {
+        return None;
+    }
+    MYSQL_CONN.get_or_init(|| {
+        eprintln!("Loading TPC-DS MySQL database (scale factor {})...", SCALE_FACTOR);
+        let start = std::time::Instant::now();
+        match load_mysql(SCALE_FACTOR) {
+            Some(conn) => {
+                eprintln!("MySQL database loaded in {:?}", start.elapsed());
+                Some(Mutex::new(conn))
+            }
+            None => {
+                eprintln!("MySQL database not available (MYSQL_URL not set or connection failed)");
+                None
+            }
+        }
+    }).as_ref()
 }
 
 // =============================================================================
@@ -343,6 +384,13 @@ fn benchmark_duckdb_query(conn: &DuckDBConn, sql: &str) -> usize {
         count += 1;
     }
     count
+}
+
+/// Helper function to benchmark a query on MySQL
+#[cfg(feature = "benchmark-comparison")]
+fn benchmark_mysql_query(conn: &mut MySqlConn, sql: &str) -> usize {
+    let result: Vec<mysql::Row> = conn.query(sql).unwrap();
+    result.len()
 }
 
 // =============================================================================
@@ -426,6 +474,9 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
             group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
                 b.iter(|| black_box(0));
             });
+            group.bench_function(BenchmarkId::new("mysql", *name), |b| {
+                b.iter(|| black_box(0));
+            });
         }
         group.finish();
         return;
@@ -433,6 +484,7 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
 
     let sqlite_conn = get_sqlite_conn();  // Returns None if SQLite disabled
     let duckdb_conn = get_duckdb_conn();  // Returns None if DuckDB disabled
+    let mysql_conn = get_mysql_conn();    // Returns None if MySQL disabled or unavailable
 
     // Log which engines are enabled
     if let Some(engine) = get_comparison_engine() {
@@ -481,6 +533,17 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
                 b.iter(|| {
                     let conn = duckdb.lock().unwrap();
                     let count = benchmark_duckdb_query(&conn, sql);
+                    black_box(count);
+                });
+            });
+        }
+
+        // MySQL benchmark (only if enabled)
+        if let Some(mysql) = mysql_conn {
+            group.bench_function(BenchmarkId::new("mysql", *name), |b| {
+                b.iter(|| {
+                    let mut conn = mysql.lock().unwrap();
+                    let count = benchmark_mysql_query(&mut conn, sql);
                     black_box(count);
                 });
             });
