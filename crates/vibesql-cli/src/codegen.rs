@@ -1,0 +1,646 @@
+//! TypeScript code generation from database schema
+//!
+//! This module generates TypeScript type definitions from VibeSQL database schemas,
+//! enabling type-safe database interactions in TypeScript projects.
+
+use std::fs;
+use std::path::Path;
+
+use anyhow::Result;
+use vibesql_catalog::TableSchema;
+use vibesql_parser::Parser;
+use vibesql_storage::Database;
+use vibesql_types::DataType;
+
+/// Configuration for TypeScript code generation
+#[derive(Debug, Clone)]
+pub struct CodegenConfig {
+    /// Output file path (stored for informational purposes)
+    #[allow(dead_code)]
+    pub output: String,
+    /// Whether to generate table metadata objects
+    pub include_metadata: bool,
+    /// Whether to use camelCase for property names
+    pub camel_case: bool,
+}
+
+impl Default for CodegenConfig {
+    fn default() -> Self {
+        CodegenConfig {
+            output: "types.ts".to_string(),
+            include_metadata: true,
+            camel_case: false,
+        }
+    }
+}
+
+/// Generate TypeScript types from a database
+pub fn generate_from_database(db: &Database, config: &CodegenConfig) -> Result<String> {
+    let tables = db.list_tables();
+    let mut schemas: Vec<&TableSchema> = Vec::new();
+
+    for table_name in &tables {
+        if let Some(table) = db.get_table(table_name) {
+            schemas.push(&table.schema);
+        }
+    }
+
+    generate_typescript(&schemas, config)
+}
+
+/// Generate TypeScript types from a SQL schema file
+pub fn generate_from_schema_file(path: &str, config: &CodegenConfig) -> Result<String> {
+    let sql = fs::read_to_string(path)?;
+    generate_from_sql(&sql, config)
+}
+
+/// Generate TypeScript types from SQL DDL statements
+pub fn generate_from_sql(sql: &str, config: &CodegenConfig) -> Result<String> {
+    let mut db = Database::new();
+
+    // Pre-process SQL to strip comments before splitting
+    let sql = strip_sql_comments(sql);
+
+    // Split and execute each statement
+    for stmt_sql in split_statements(&sql) {
+        let trimmed = stmt_sql.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Only process CREATE TABLE statements
+        if trimmed.to_uppercase().starts_with("CREATE TABLE") {
+            match Parser::parse_sql(trimmed) {
+                Ok(vibesql_ast::Statement::CreateTable(create_stmt)) => {
+                    if let Err(e) =
+                        vibesql_executor::CreateTableExecutor::execute(&create_stmt, &mut db)
+                    {
+                        eprintln!("Warning: Failed to execute CREATE TABLE: {}", e);
+                    }
+                }
+                Ok(_) => {
+                    // Not a CREATE TABLE, skip
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to parse statement: {}", e);
+                }
+            }
+        }
+    }
+
+    generate_from_database(&db, config)
+}
+
+/// Strip SQL comments from a string
+///
+/// Handles:
+/// - Single-line comments starting with --
+/// - Multi-line comments /* ... */
+fn strip_sql_comments(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    let mut in_string = false;
+    let mut string_char = '"';
+
+    while let Some(ch) = chars.next() {
+        // Track if we're inside a string literal
+        if (ch == '\'' || ch == '"') && !in_string {
+            in_string = true;
+            string_char = ch;
+            result.push(ch);
+            continue;
+        }
+
+        if in_string {
+            result.push(ch);
+            if ch == string_char {
+                in_string = false;
+            }
+            continue;
+        }
+
+        // Handle single-line comments (--)
+        if ch == '-' && chars.peek() == Some(&'-') {
+            chars.next(); // consume second -
+            // Skip until end of line
+            for c in chars.by_ref() {
+                if c == '\n' {
+                    result.push('\n'); // Preserve line breaks
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // Handle multi-line comments (/* ... */)
+        if ch == '/' && chars.peek() == Some(&'*') {
+            chars.next(); // consume *
+            // Skip until */
+            while let Some(c) = chars.next() {
+                if c == '*' && chars.peek() == Some(&'/') {
+                    chars.next(); // consume /
+                    break;
+                }
+            }
+            continue;
+        }
+
+        result.push(ch);
+    }
+
+    result
+}
+
+/// Split SQL into individual statements
+fn split_statements(sql: &str) -> Vec<&str> {
+    sql.split(';').filter(|s| !s.trim().is_empty()).collect()
+}
+
+/// Generate TypeScript code from table schemas
+fn generate_typescript(schemas: &[&TableSchema], config: &CodegenConfig) -> Result<String> {
+    let mut output = String::new();
+
+    // Header
+    output.push_str("// Auto-generated by vibesql codegen - DO NOT EDIT\n");
+    output.push_str("// Generated from VibeSQL database schema\n\n");
+
+    // Sort tables alphabetically for consistent output
+    let mut sorted_schemas: Vec<&&TableSchema> = schemas.iter().collect();
+    sorted_schemas.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // Generate interfaces for each table
+    for schema in &sorted_schemas {
+        output.push_str(&generate_interface(schema, config));
+        output.push('\n');
+    }
+
+    // Generate table metadata if requested
+    if config.include_metadata {
+        output.push_str(&generate_metadata(&sorted_schemas, config));
+    }
+
+    Ok(output)
+}
+
+/// Generate a TypeScript interface for a table
+fn generate_interface(schema: &TableSchema, config: &CodegenConfig) -> String {
+    let mut output = String::new();
+
+    // Interface name is PascalCase version of table name
+    let interface_name = to_pascal_case(&schema.name);
+
+    output.push_str(&format!("export interface {} {{\n", interface_name));
+
+    for column in &schema.columns {
+        let prop_name = if config.camel_case {
+            to_camel_case(&column.name)
+        } else {
+            column.name.to_lowercase()
+        };
+
+        let ts_type = sql_type_to_typescript(&column.data_type);
+        let nullable_suffix = if column.nullable { " | null" } else { "" };
+
+        output.push_str(&format!("  {}: {}{};\n", prop_name, ts_type, nullable_suffix));
+    }
+
+    output.push_str("}\n");
+    output
+}
+
+/// Generate table metadata object
+fn generate_metadata(schemas: &[&&TableSchema], config: &CodegenConfig) -> String {
+    let mut output = String::new();
+
+    output.push_str("// Table metadata for runtime use\n");
+    output.push_str("export const tables = {\n");
+
+    for (i, schema) in schemas.iter().enumerate() {
+        let table_key = if config.camel_case {
+            to_camel_case(&schema.name)
+        } else {
+            schema.name.to_lowercase()
+        };
+
+        output.push_str(&format!("  {}: {{\n", table_key));
+        output.push_str(&format!("    name: '{}',\n", schema.name));
+
+        // Columns array
+        let columns: Vec<String> = schema
+            .columns
+            .iter()
+            .map(|c| {
+                if config.camel_case {
+                    format!("'{}'", to_camel_case(&c.name))
+                } else {
+                    format!("'{}'", c.name.to_lowercase())
+                }
+            })
+            .collect();
+        output.push_str(&format!("    columns: [{}],\n", columns.join(", ")));
+
+        // Primary key
+        if let Some(pk) = &schema.primary_key {
+            if pk.len() == 1 {
+                let pk_name = if config.camel_case {
+                    to_camel_case(&pk[0])
+                } else {
+                    pk[0].to_lowercase()
+                };
+                output.push_str(&format!("    primaryKey: '{}',\n", pk_name));
+            } else {
+                let pk_names: Vec<String> = pk
+                    .iter()
+                    .map(|p| {
+                        if config.camel_case {
+                            format!("'{}'", to_camel_case(p))
+                        } else {
+                            format!("'{}'", p.to_lowercase())
+                        }
+                    })
+                    .collect();
+                output.push_str(&format!("    primaryKey: [{}],\n", pk_names.join(", ")));
+            }
+        }
+
+        // Column types mapping
+        output.push_str("    columnTypes: {\n");
+        for column in &schema.columns {
+            let col_name = if config.camel_case {
+                to_camel_case(&column.name)
+            } else {
+                column.name.to_lowercase()
+            };
+            let sql_type = format_sql_type(&column.data_type);
+            output.push_str(&format!("      {}: '{}',\n", col_name, sql_type));
+        }
+        output.push_str("    },\n");
+
+        // Nullable columns
+        let nullable_cols: Vec<String> = schema
+            .columns
+            .iter()
+            .filter(|c| c.nullable)
+            .map(|c| {
+                if config.camel_case {
+                    format!("'{}'", to_camel_case(&c.name))
+                } else {
+                    format!("'{}'", c.name.to_lowercase())
+                }
+            })
+            .collect();
+        output.push_str(&format!("    nullable: [{}],\n", nullable_cols.join(", ")));
+
+        if i < schemas.len() - 1 {
+            output.push_str("  },\n");
+        } else {
+            output.push_str("  },\n");
+        }
+    }
+
+    output.push_str("} as const;\n\n");
+
+    // Generate type helpers
+    output.push_str("// Type helper for table names\n");
+    output.push_str("export type TableName = keyof typeof tables;\n\n");
+
+    // Generate row types
+    output.push_str("// Row type mapping\n");
+    output.push_str("export type TableRow<T extends TableName> = \n");
+    for (i, schema) in schemas.iter().enumerate() {
+        let table_key = if config.camel_case {
+            to_camel_case(&schema.name)
+        } else {
+            schema.name.to_lowercase()
+        };
+        let interface_name = to_pascal_case(&schema.name);
+        if i == 0 {
+            output.push_str(&format!("  T extends '{}' ? {} :\n", table_key, interface_name));
+        } else if i == schemas.len() - 1 {
+            output.push_str(&format!("  T extends '{}' ? {} :\n", table_key, interface_name));
+            output.push_str("  never;\n");
+        } else {
+            output.push_str(&format!("  T extends '{}' ? {} :\n", table_key, interface_name));
+        }
+    }
+
+    output
+}
+
+/// Convert SQL data type to TypeScript type
+fn sql_type_to_typescript(data_type: &DataType) -> &'static str {
+    match data_type {
+        // Numeric types -> number
+        DataType::Integer
+        | DataType::Smallint
+        | DataType::Bigint
+        | DataType::Unsigned
+        | DataType::Real
+        | DataType::Float { .. }
+        | DataType::DoublePrecision => "number",
+
+        // Decimal/Numeric -> string (for precision)
+        DataType::Decimal { .. } | DataType::Numeric { .. } => "string",
+
+        // String types -> string
+        DataType::Character { .. }
+        | DataType::Varchar { .. }
+        | DataType::CharacterLargeObject
+        | DataType::Name => "string",
+
+        // Boolean -> boolean
+        DataType::Boolean => "boolean",
+
+        // Date/time types -> Date
+        DataType::Date | DataType::Time { .. } | DataType::Timestamp { .. } => "Date",
+
+        // Interval -> string representation
+        DataType::Interval { .. } => "string",
+
+        // Binary types -> Uint8Array
+        DataType::BinaryLargeObject | DataType::Bit { .. } => "Uint8Array",
+
+        // Vector -> number[]
+        DataType::Vector { .. } => "number[]",
+
+        // User-defined types -> unknown
+        DataType::UserDefined { .. } => "unknown",
+
+        // NULL type -> null
+        DataType::Null => "null",
+    }
+}
+
+/// Format SQL type as string for metadata
+fn format_sql_type(data_type: &DataType) -> String {
+    match data_type {
+        DataType::Integer => "INTEGER".to_string(),
+        DataType::Smallint => "SMALLINT".to_string(),
+        DataType::Bigint => "BIGINT".to_string(),
+        DataType::Unsigned => "UNSIGNED BIGINT".to_string(),
+        DataType::Real => "REAL".to_string(),
+        DataType::Float { precision } => format!("FLOAT({})", precision),
+        DataType::DoublePrecision => "DOUBLE PRECISION".to_string(),
+        DataType::Decimal { precision, scale } => format!("DECIMAL({}, {})", precision, scale),
+        DataType::Numeric { precision, scale } => format!("NUMERIC({}, {})", precision, scale),
+        DataType::Character { length } => format!("CHAR({})", length),
+        DataType::Varchar { max_length } => {
+            if let Some(len) = max_length {
+                format!("VARCHAR({})", len)
+            } else {
+                "VARCHAR".to_string()
+            }
+        }
+        DataType::CharacterLargeObject => "CLOB".to_string(),
+        DataType::Name => "NAME".to_string(),
+        DataType::Boolean => "BOOLEAN".to_string(),
+        DataType::Date => "DATE".to_string(),
+        DataType::Time { with_timezone } => {
+            if *with_timezone {
+                "TIME WITH TIME ZONE".to_string()
+            } else {
+                "TIME".to_string()
+            }
+        }
+        DataType::Timestamp { with_timezone } => {
+            if *with_timezone {
+                "TIMESTAMP WITH TIME ZONE".to_string()
+            } else {
+                "TIMESTAMP".to_string()
+            }
+        }
+        DataType::Interval { start_field, end_field } => {
+            if let Some(end) = end_field {
+                format!("INTERVAL {:?} TO {:?}", start_field, end)
+            } else {
+                format!("INTERVAL {:?}", start_field)
+            }
+        }
+        DataType::BinaryLargeObject => "BLOB".to_string(),
+        DataType::Bit { length } => {
+            if let Some(len) = length {
+                format!("BIT({})", len)
+            } else {
+                "BIT".to_string()
+            }
+        }
+        DataType::Vector { dimensions } => format!("VECTOR({})", dimensions),
+        DataType::UserDefined { type_name } => type_name.clone(),
+        DataType::Null => "NULL".to_string(),
+    }
+}
+
+/// Convert snake_case or UPPER_CASE to PascalCase
+fn to_pascal_case(s: &str) -> String {
+    s.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars.flat_map(|c| c.to_lowercase())).collect(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Convert snake_case or UPPER_CASE to camelCase
+fn to_camel_case(s: &str) -> String {
+    let pascal = to_pascal_case(s);
+    let mut chars = pascal.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// Write generated TypeScript to a file
+pub fn write_to_file(typescript: &str, path: &str) -> Result<()> {
+    let path = Path::new(path);
+
+    // Create parent directories if needed
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    fs::write(path, typescript)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_catalog::ColumnSchema;
+
+    fn create_test_schema() -> TableSchema {
+        let columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new("created_at".to_string(), DataType::Timestamp { with_timezone: false }, false),
+            ColumnSchema::new("balance".to_string(), DataType::Decimal { precision: 10, scale: 2 }, true),
+            ColumnSchema::new("is_active".to_string(), DataType::Boolean, false),
+        ];
+        TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()])
+    }
+
+    #[test]
+    fn test_to_pascal_case() {
+        assert_eq!(to_pascal_case("users"), "Users");
+        assert_eq!(to_pascal_case("user_posts"), "UserPosts");
+        assert_eq!(to_pascal_case("USER_POSTS"), "UserPosts");
+        assert_eq!(to_pascal_case("USERS"), "Users");
+    }
+
+    #[test]
+    fn test_to_camel_case() {
+        assert_eq!(to_camel_case("users"), "users");
+        assert_eq!(to_camel_case("user_posts"), "userPosts");
+        assert_eq!(to_camel_case("USER_POSTS"), "userPosts");
+        assert_eq!(to_camel_case("USERS"), "users");
+    }
+
+    #[test]
+    fn test_sql_type_to_typescript() {
+        assert_eq!(sql_type_to_typescript(&DataType::Integer), "number");
+        assert_eq!(sql_type_to_typescript(&DataType::Bigint), "number");
+        assert_eq!(sql_type_to_typescript(&DataType::Varchar { max_length: Some(255) }), "string");
+        assert_eq!(sql_type_to_typescript(&DataType::Boolean), "boolean");
+        assert_eq!(sql_type_to_typescript(&DataType::Timestamp { with_timezone: false }), "Date");
+        assert_eq!(sql_type_to_typescript(&DataType::Decimal { precision: 10, scale: 2 }), "string");
+        assert_eq!(sql_type_to_typescript(&DataType::Vector { dimensions: 128 }), "number[]");
+    }
+
+    #[test]
+    fn test_generate_interface() {
+        let schema = create_test_schema();
+        let config = CodegenConfig::default();
+        let result = generate_interface(&schema, &config);
+
+        assert!(result.contains("export interface Users {"));
+        assert!(result.contains("id: number;"));
+        assert!(result.contains("email: string;"));
+        assert!(result.contains("name: string | null;"));
+        assert!(result.contains("created_at: Date;"));
+        assert!(result.contains("balance: string | null;")); // Decimal -> string
+        assert!(result.contains("is_active: boolean;"));
+    }
+
+    #[test]
+    fn test_generate_interface_camel_case() {
+        let schema = create_test_schema();
+        let config = CodegenConfig { camel_case: true, ..Default::default() };
+        let result = generate_interface(&schema, &config);
+
+        assert!(result.contains("createdAt: Date;"));
+        assert!(result.contains("isActive: boolean;"));
+    }
+
+    #[test]
+    fn test_generate_from_sql() {
+        let sql = r#"
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email VARCHAR(255) NOT NULL,
+                name VARCHAR(100)
+            );
+
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                content TEXT,
+                published BOOLEAN DEFAULT FALSE
+            );
+        "#;
+
+        let config = CodegenConfig::default();
+        let result = generate_from_sql(sql, &config).unwrap();
+
+        assert!(result.contains("export interface Users {"));
+        assert!(result.contains("export interface Posts {"));
+        assert!(result.contains("export const tables = {"));
+    }
+
+    #[test]
+    fn test_generate_metadata() {
+        let schema = create_test_schema();
+        let schemas: Vec<&TableSchema> = vec![&schema];
+        let schema_refs: Vec<&&TableSchema> = schemas.iter().collect();
+        let config = CodegenConfig::default();
+        let result = generate_metadata(&schema_refs, &config);
+
+        assert!(result.contains("export const tables = {"));
+        assert!(result.contains("users: {"));
+        assert!(result.contains("name: 'users'"));
+        assert!(result.contains("primaryKey: 'id'"));
+        assert!(result.contains("columns: ["));
+        assert!(result.contains("columnTypes: {"));
+        assert!(result.contains("nullable: ["));
+        assert!(result.contains("export type TableName = keyof typeof tables;"));
+        assert!(result.contains("export type TableRow<T extends TableName>"));
+    }
+
+    #[test]
+    fn test_strip_sql_comments_single_line() {
+        let sql = "-- This is a comment\nCREATE TABLE users (id INT);";
+        let result = strip_sql_comments(sql);
+        assert!(!result.contains("This is a comment"));
+        assert!(result.contains("CREATE TABLE users"));
+    }
+
+    #[test]
+    fn test_strip_sql_comments_multi_line() {
+        let sql = "/* Multi\nline\ncomment */\nCREATE TABLE users (id INT);";
+        let result = strip_sql_comments(sql);
+        assert!(!result.contains("Multi"));
+        assert!(!result.contains("line"));
+        assert!(!result.contains("comment"));
+        assert!(result.contains("CREATE TABLE users"));
+    }
+
+    #[test]
+    fn test_strip_sql_comments_inline() {
+        let sql = "CREATE TABLE users (id INT); -- inline comment\nCREATE TABLE posts (id INT);";
+        let result = strip_sql_comments(sql);
+        assert!(!result.contains("inline comment"));
+        assert!(result.contains("CREATE TABLE users"));
+        assert!(result.contains("CREATE TABLE posts"));
+    }
+
+    #[test]
+    fn test_strip_sql_comments_preserves_strings() {
+        let sql = "CREATE TABLE users (name VARCHAR(100) DEFAULT '--not a comment');";
+        let result = strip_sql_comments(sql);
+        assert!(result.contains("'--not a comment'"));
+    }
+
+    #[test]
+    fn test_generate_from_sql_with_comments() {
+        let sql = r#"
+            -- Database schema for application
+            /*
+             * User management tables
+             */
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email VARCHAR(255) NOT NULL -- User's email
+            );
+
+            -- Posts table
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL
+            );
+        "#;
+
+        let config = CodegenConfig::default();
+        let result = generate_from_sql(sql, &config).unwrap();
+
+        assert!(result.contains("export interface Users {"));
+        assert!(result.contains("export interface Posts {"));
+        assert!(!result.contains("Database schema for application"));
+        assert!(!result.contains("User management tables"));
+    }
+}

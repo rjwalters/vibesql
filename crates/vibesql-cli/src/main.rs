@@ -1,5 +1,6 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
+mod codegen;
 mod commands;
 mod config;
 mod data_io;
@@ -24,6 +25,7 @@ USAGE MODES:
   Execute Command:     vibesql -c \"SELECT * FROM users\"
   Execute File:        vibesql -f script.sql
   Execute from stdin:  cat data.sql | vibesql
+  Generate Types:      vibesql codegen --schema schema.sql --output types.ts
 
 INTERACTIVE REPL:
   When started without -c, -f, or piped input, VibeSQL enters an interactive
@@ -33,6 +35,9 @@ INTERACTIVE REPL:
     \\f <format> - Set output format
     \\copy       - Import/export CSV/JSON
     \\help       - Show all REPL commands
+
+SUBCOMMANDS:
+  codegen           Generate TypeScript types from database schema
 
 CONFIGURATION:
   Settings can be configured in ~/.vibesqlrc (TOML format):
@@ -67,10 +72,16 @@ EXAMPLES:
   echo \"\\\\copy users FROM 'data.csv'\" | vibesql --database mydata.db
 
   # Export query results as JSON
-  vibesql -d mydata.db -c \"SELECT * FROM users\" --format json")]
+  vibesql -d mydata.db -c \"SELECT * FROM users\" --format json
+
+  # Generate TypeScript types from a schema file
+  vibesql codegen --schema schema.sql --output src/types.ts
+
+  # Generate TypeScript types from a running database
+  vibesql codegen --database mydata.db --output src/types.ts")]
 struct Args {
     /// Database file path (if not specified, uses in-memory database)
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(short, long, value_name = "FILE", global = true)]
     database: Option<String>,
 
     /// Execute SQL commands from file
@@ -92,10 +103,72 @@ struct Args {
     /// Output format for query results
     #[arg(long, value_parser = ["table", "json", "csv", "markdown", "html"], value_name = "FORMAT")]
     format: Option<String>,
+
+    #[command(subcommand)]
+    subcommand: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Generate TypeScript type definitions from database schema
+    #[command(
+        about = "Generate TypeScript types from database schema",
+        long_about = "Generate TypeScript type definitions from a VibeSQL database schema.
+
+This command creates TypeScript interfaces for all tables in the database,
+along with metadata objects for runtime type checking and IDE support.
+
+INPUT SOURCES:
+  --database <FILE>  Generate from an existing database file
+  --schema <FILE>    Generate from a SQL schema file (CREATE TABLE statements)
+
+OUTPUT:
+  --output <FILE>    Write generated types to this file (default: types.ts)
+
+OPTIONS:
+  --camel-case       Convert column names to camelCase
+  --no-metadata      Skip generating the tables metadata object
+
+EXAMPLES:
+  # From a database file
+  vibesql codegen --database mydata.db --output src/db/types.ts
+
+  # From a SQL schema file
+  vibesql codegen --schema schema.sql --output src/db/types.ts
+
+  # With camelCase property names
+  vibesql codegen --schema schema.sql --output types.ts --camel-case"
+    )]
+    Codegen {
+        /// SQL schema file containing CREATE TABLE statements
+        #[arg(short, long, value_name = "FILE")]
+        schema: Option<String>,
+
+        /// Output file path for generated TypeScript
+        #[arg(short, long, value_name = "FILE", default_value = "types.ts")]
+        output: String,
+
+        /// Convert column names to camelCase
+        #[arg(long)]
+        camel_case: bool,
+
+        /// Skip generating table metadata object
+        #[arg(long)]
+        no_metadata: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // Handle subcommands first
+    if let Some(cmd) = args.subcommand {
+        return match cmd {
+            Commands::Codegen { schema, output, camel_case, no_metadata } => {
+                run_codegen(args.database, schema, output, camel_case, no_metadata)
+            }
+        };
+    }
 
     // Load configuration from ~/.vibesqlrc
     let config = Config::load().unwrap_or_else(|e| {
@@ -124,6 +197,43 @@ fn main() -> anyhow::Result<()> {
         let mut repl = Repl::new(database, format)?;
         repl.run()?;
     }
+
+    Ok(())
+}
+
+fn run_codegen(
+    database: Option<String>,
+    schema: Option<String>,
+    output: String,
+    camel_case: bool,
+    no_metadata: bool,
+) -> anyhow::Result<()> {
+    let config = codegen::CodegenConfig {
+        output: output.clone(),
+        include_metadata: !no_metadata,
+        camel_case,
+    };
+
+    let typescript = if let Some(schema_path) = schema {
+        // Generate from schema file
+        println!("Generating TypeScript types from schema file: {}", schema_path);
+        codegen::generate_from_schema_file(&schema_path, &config)?
+    } else if let Some(db_path) = database {
+        // Generate from database file
+        println!("Generating TypeScript types from database: {}", db_path);
+        let db = vibesql_executor::load_sql_dump(&db_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))?;
+        codegen::generate_from_database(&db, &config)?
+    } else {
+        return Err(anyhow::anyhow!(
+            "Either --database or --schema must be specified.\n\
+             Use 'vibesql codegen --help' for usage information."
+        ));
+    };
+
+    // Write to output file
+    codegen::write_to_file(&typescript, &output)?;
+    println!("TypeScript types written to: {}", output);
 
     Ok(())
 }
