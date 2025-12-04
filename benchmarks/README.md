@@ -47,20 +47,28 @@ benchmarks/
 
 ### TPC-H Benchmarks (Recommended - Pure SQL Engine Performance)
 
-Run industry-standard TPC-H queries:
+Run industry-standard TPC-H queries using the consolidated benchmark script:
 
 ```bash
-# Quick mode (3 queries: Q1, Q3, Q6)
-python3 scripts/run_tpch_benchmarks.py --quick
+# Standard mode (all 22 queries together, fastest)
+./scripts/bench-tpch.sh
 
-# Full mode (all 22 TPC-H queries)
-python3 scripts/run_tpch_benchmarks.py
+# Isolated mode (each query in separate subprocess, more reliable)
+./scripts/bench-tpch.sh --mode isolated
 
-# Or run directly with Criterion
-cargo bench --bench tpch_benchmark --features benchmark-comparison
+# Quick comparison across VibeSQL, SQLite, DuckDB
+./scripts/bench-tpch.sh --mode quick-compare
+
+# Full comparison (with statistical significance)
+./scripts/bench-tpch.sh --mode compare
+
+# Web demo format (JSON for dashboard integration)
+./scripts/bench-tpch.sh --mode web-demo --output benchmark_results.json
 ```
 
 **Use this for**: Measuring SQL engine performance, comparing to other databases, web demo updates
+
+**Note**: For full documentation of all modes and options, see [docs/benchmarks/TPC-H_BENCHMARKING.md](../docs/benchmarks/TPC-H_BENCHMARKING.md)
 
 ### Python Binding Benchmarks (PyO3 Overhead Measurement)
 
