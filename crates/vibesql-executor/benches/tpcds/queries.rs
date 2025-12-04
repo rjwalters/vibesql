@@ -134,21 +134,21 @@ LIMIT 100
 // =============================================================================
 // TPC-DS Q3: Report sales by brand for a given year and month
 // =============================================================================
-// Original: Uses catalog_sales. Adapted to use store_sales.
+// Canonical TPC-DS Q3: Analyzes store sales discounts by brand.
 // Tests: 3-way join, date filtering, aggregation, ordering
 pub const TPCDS_Q3: &str = r#"
 SELECT
-    d_year,
-    i_brand_id,
-    i_brand,
-    SUM(ss_ext_sales_price) as sum_sales
-FROM date_dim, store_sales, item
-WHERE d_date_sk = ss_sold_date_sk
-    AND ss_item_sk = i_item_sk
-    AND i_manufact_id = 1
-    AND d_moy = 11
-GROUP BY d_year, i_brand_id, i_brand
-ORDER BY d_year, sum_sales DESC, i_brand_id
+    dt.d_year,
+    item.i_brand_id brand_id,
+    item.i_brand brand,
+    SUM(ss_ext_discount_amt) sum_agg
+FROM date_dim dt, store_sales, item
+WHERE dt.d_date_sk = store_sales.ss_sold_date_sk
+    AND store_sales.ss_item_sk = item.i_item_sk
+    AND item.i_manufact_id = 427
+    AND dt.d_moy = 11
+GROUP BY dt.d_year, item.i_brand, item.i_brand_id
+ORDER BY dt.d_year, sum_agg DESC, brand_id
 LIMIT 100
 "#;
 
@@ -440,21 +440,25 @@ LIMIT 100
 // =============================================================================
 // TPC-DS Q7: Promotion impact analysis
 // =============================================================================
-// Original: Uses customer_demographics. Simplified to use base tables.
-// Tests: 4-way join, aggregation with multiple measures, filtering
+// Canonical TPC-DS Q7: Analyzes sales metrics by item filtered by demographics and promotions.
+// Tests: 5-way join with customer_demographics and promotion, aggregation with multiple measures
 pub const TPCDS_Q7: &str = r#"
 SELECT
     i_item_id,
-    AVG(ss_quantity) as avg_quantity,
-    AVG(ss_list_price) as avg_list_price,
-    AVG(ss_coupon_amt) as avg_coupon_amt,
-    AVG(ss_sales_price) as avg_sales_price
-FROM store_sales, customer, date_dim, item
+    AVG(ss_quantity) agg1,
+    AVG(ss_list_price) agg2,
+    AVG(ss_coupon_amt) agg3,
+    AVG(ss_sales_price) agg4
+FROM store_sales, customer_demographics, date_dim, item, promotion
 WHERE ss_sold_date_sk = d_date_sk
     AND ss_item_sk = i_item_sk
-    AND ss_customer_sk = c_customer_sk
-    AND c_birth_year BETWEEN 1970 AND 1980
-    AND d_year = 2000
+    AND ss_cdemo_sk = cd_demo_sk
+    AND ss_promo_sk = p_promo_sk
+    AND cd_gender = 'F'
+    AND cd_marital_status = 'W'
+    AND cd_education_status = '2 yr Degree'
+    AND (p_channel_email = 'N' OR p_channel_event = 'N')
+    AND d_year = 1998
 GROUP BY i_item_id
 ORDER BY i_item_id
 LIMIT 100
@@ -886,24 +890,26 @@ LIMIT 100
 // =============================================================================
 // TPC-DS Q19: Store sales by customer location
 // =============================================================================
-// Original: Uses catalog_returns. Adapted to store_sales only.
-// Tests: 5-way join, geographic filtering, aggregation
+// Canonical TPC-DS Q19: Analyzes sales by brand where customer zip differs from store zip.
+// Tests: 6-way join with store, geographic filtering (zip code mismatch), aggregation
 pub const TPCDS_Q19: &str = r#"
 SELECT
-    i_brand_id,
-    i_brand,
+    i_brand_id brand_id,
+    i_brand brand,
     i_manufact_id,
     i_manufact,
-    SUM(ss_ext_sales_price) as ext_price
-FROM date_dim, store_sales, item, customer, customer_address
+    SUM(ss_ext_sales_price) ext_price
+FROM date_dim, store_sales, item, customer, customer_address, store
 WHERE d_date_sk = ss_sold_date_sk
     AND ss_item_sk = i_item_sk
+    AND i_manager_id = 38
+    AND d_moy = 12
+    AND d_year = 1998
     AND ss_customer_sk = c_customer_sk
     AND c_current_addr_sk = ca_address_sk
-    AND d_moy = 11
-    AND d_year = 1999
-    AND ca_state = 'CA'
-GROUP BY i_brand_id, i_brand, i_manufact_id, i_manufact
+    AND SUBSTR(ca_zip, 1, 5) <> SUBSTR(s_zip, 1, 5)
+    AND ss_store_sk = s_store_sk
+GROUP BY i_brand, i_brand_id, i_manufact_id, i_manufact
 ORDER BY ext_price DESC, i_brand, i_brand_id, i_manufact_id, i_manufact
 LIMIT 100
 "#;
@@ -931,43 +937,44 @@ LIMIT 100
 "#;
 
 // =============================================================================
-// TPC-DS Q52: Weekly store sales
+// TPC-DS Q52: Weekly store sales by brand
 // =============================================================================
-// Original: Uses brand filtering. Adapted to match our data.
-// Tests: 3-way join, date arithmetic with week, aggregation
+// Canonical TPC-DS Q52: Analyzes sales by brand and year with manager filtering.
+// Tests: 3-way join, brand filtering by manager, aggregation
 pub const TPCDS_Q52: &str = r#"
 SELECT
-    d_year,
-    d_week_seq,
-    SUM(ss_ext_sales_price) as weekly_sales
-FROM date_dim, store_sales, item
-WHERE d_date_sk = ss_sold_date_sk
-    AND ss_item_sk = i_item_sk
-    AND i_category_id = 1
-    AND d_year = 2000
-GROUP BY d_year, d_week_seq
-ORDER BY d_year, d_week_seq, weekly_sales
+    dt.d_year,
+    item.i_brand_id brand_id,
+    item.i_brand brand,
+    SUM(ss_ext_sales_price) ext_price
+FROM date_dim dt, store_sales, item
+WHERE dt.d_date_sk = store_sales.ss_sold_date_sk
+    AND store_sales.ss_item_sk = item.i_item_sk
+    AND item.i_manager_id = 1
+    AND dt.d_moy = 11
+    AND dt.d_year = 1999
+GROUP BY dt.d_year, item.i_brand, item.i_brand_id
+ORDER BY dt.d_year, ext_price DESC, brand_id
 LIMIT 100
 "#;
 
 // =============================================================================
-// TPC-DS Q55: Brand sales by store
+// TPC-DS Q55: Brand sales analysis
 // =============================================================================
-// Adapted from original. Uses store dimension.
-// Tests: 4-way join with store, month filtering
+// Canonical TPC-DS Q55: Analyzes sales by brand with manager filtering.
+// Tests: 3-way join, month filtering, aggregation
 pub const TPCDS_Q55: &str = r#"
 SELECT
-    i_brand_id,
-    i_brand,
-    SUM(ss_ext_sales_price) as ext_price
-FROM date_dim, store_sales, item, store
+    i_brand_id brand_id,
+    i_brand brand,
+    SUM(ss_ext_sales_price) ext_price
+FROM date_dim, store_sales, item
 WHERE d_date_sk = ss_sold_date_sk
     AND ss_item_sk = i_item_sk
-    AND ss_store_sk = s_store_sk
-    AND i_manager_id = 5
-    AND d_moy = 11
-    AND d_year = 2000
-GROUP BY i_brand_id, i_brand
+    AND i_manager_id = 33
+    AND d_moy = 12
+    AND d_year = 1998
+GROUP BY i_brand, i_brand_id
 ORDER BY ext_price DESC, i_brand_id
 LIMIT 100
 "#;
@@ -975,74 +982,122 @@ LIMIT 100
 // =============================================================================
 // TPC-DS Q68: Store sales by customer demographics
 // =============================================================================
-// Adapted to use customer birth year instead of demographics table.
-// Tests: Multiple aggregations, customer filtering
+// Canonical TPC-DS Q68: Analyzes store sales by ticket with household demographics.
+// Tests: Subquery with aggregation, household_demographics filtering, city comparison
 pub const TPCDS_Q68: &str = r#"
 SELECT
     c_last_name,
     c_first_name,
     ca_city,
-    c_birth_year,
-    SUM(ss_ext_sales_price) as total_sales,
-    SUM(ss_ext_list_price - ss_ext_discount_amt) as total_paid,
-    SUM(ss_quantity) as items_bought
-FROM store_sales, date_dim, customer, customer_address
-WHERE ss_sold_date_sk = d_date_sk
-    AND ss_customer_sk = c_customer_sk
-    AND c_current_addr_sk = ca_address_sk
-    AND d_year = 2000
-    AND c_birth_year BETWEEN 1960 AND 1970
-GROUP BY c_last_name, c_first_name, ca_city, c_birth_year
-ORDER BY total_sales DESC, c_last_name, c_first_name
+    bought_city,
+    ss_ticket_number,
+    extended_price,
+    extended_tax,
+    list_price
+FROM (
+    SELECT
+        ss_ticket_number,
+        ss_customer_sk,
+        ca_city bought_city,
+        SUM(ss_ext_sales_price) extended_price,
+        SUM(ss_ext_list_price) list_price,
+        SUM(ss_ext_tax) extended_tax
+    FROM store_sales, date_dim, store, household_demographics, customer_address
+    WHERE store_sales.ss_sold_date_sk = date_dim.d_date_sk
+        AND store_sales.ss_store_sk = store.s_store_sk
+        AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+        AND store_sales.ss_addr_sk = customer_address.ca_address_sk
+        AND date_dim.d_dom BETWEEN 1 AND 2
+        AND (household_demographics.hd_dep_count = 8
+             OR household_demographics.hd_vehicle_count = 3)
+        AND date_dim.d_year IN (1998, 1999, 2000)
+        AND store.s_city IN ('Fairview', 'Midway')
+    GROUP BY ss_ticket_number, ss_customer_sk, ss_addr_sk, ca_city
+) dn, customer, customer_address current_addr
+WHERE ss_customer_sk = c_customer_sk
+    AND customer.c_current_addr_sk = current_addr.ca_address_sk
+    AND current_addr.ca_city <> bought_city
+ORDER BY c_last_name, ss_ticket_number
 LIMIT 100
 "#;
 
 // =============================================================================
 // TPC-DS Q73: Store ticket analysis
 // =============================================================================
-// Adapted to use store table.
-// Tests: Ticket-level grouping, HAVING clause
+// Canonical TPC-DS Q73: Analyzes store tickets with household demographics filtering.
+// Tests: Subquery with ticket grouping, household_demographics, county filtering
 pub const TPCDS_Q73: &str = r#"
 SELECT
     c_last_name,
     c_first_name,
-    c_customer_id,
-    COUNT(*) as cnt
-FROM store_sales, customer, store, date_dim
+    c_salutation,
+    c_preferred_cust_flag,
+    ss_ticket_number,
+    cnt
+FROM (
+    SELECT
+        ss_ticket_number,
+        ss_customer_sk,
+        COUNT(*) cnt
+    FROM store_sales, date_dim, store, household_demographics
+    WHERE store_sales.ss_sold_date_sk = date_dim.d_date_sk
+        AND store_sales.ss_store_sk = store.s_store_sk
+        AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+        AND date_dim.d_dom BETWEEN 1 AND 2
+        AND (household_demographics.hd_buy_potential = '>10000'
+             OR household_demographics.hd_buy_potential = '0-500')
+        AND household_demographics.hd_vehicle_count > 0
+        AND CASE
+            WHEN household_demographics.hd_vehicle_count > 0
+            THEN household_demographics.hd_dep_count / household_demographics.hd_vehicle_count
+            ELSE NULL
+        END > 1
+        AND date_dim.d_year IN (2000, 2001, 2002)
+        AND store.s_county IN ('Williamson County')
+    GROUP BY ss_ticket_number, ss_customer_sk
+) dj, customer
 WHERE ss_customer_sk = c_customer_sk
-    AND ss_sold_date_sk = d_date_sk
-    AND ss_store_sk = s_store_sk
-    AND d_year BETWEEN 1999 AND 2001
-GROUP BY c_last_name, c_first_name, c_customer_id
-HAVING COUNT(*) > 5
-ORDER BY cnt DESC, c_last_name, c_first_name
+    AND cnt BETWEEN 1 AND 5
+ORDER BY cnt DESC, c_last_name ASC
 LIMIT 100
 "#;
 
 // =============================================================================
 // TPC-DS Q89: Store profit analysis by category
 // =============================================================================
-// Simplified version testing profit calculations.
-// Tests: Complex expressions in SELECT, profit margin calculation
+// Canonical TPC-DS Q89: Analyzes monthly sales variance from average.
+// Tests: Window function (AVG OVER), subquery, CASE expression, category/class filtering
 pub const TPCDS_Q89: &str = r#"
-SELECT
-    i_category,
-    i_class,
-    i_brand,
-    s_store_name,
-    s_company_name,
-    d_moy,
-    SUM(ss_sales_price) as sum_sales,
-    SUM(ss_net_profit) as sum_profit,
-    AVG(ss_net_profit) as avg_profit
-FROM store_sales, date_dim, item, store
-WHERE ss_sold_date_sk = d_date_sk
-    AND ss_item_sk = i_item_sk
-    AND ss_store_sk = s_store_sk
-    AND d_year = 2000
-GROUP BY i_category, i_class, i_brand, s_store_name, s_company_name, d_moy
-HAVING SUM(ss_sales_price) > 1000
-ORDER BY sum_profit DESC, i_category, i_class
+SELECT *
+FROM (
+    SELECT
+        i_category,
+        i_class,
+        i_brand,
+        s_store_name,
+        s_company_name,
+        d_moy,
+        SUM(ss_sales_price) sum_sales,
+        AVG(SUM(ss_sales_price)) OVER (
+            PARTITION BY i_category, i_brand, s_store_name, s_company_name
+        ) avg_monthly_sales
+    FROM item, store_sales, date_dim, store
+    WHERE ss_item_sk = i_item_sk
+        AND ss_sold_date_sk = d_date_sk
+        AND ss_store_sk = s_store_sk
+        AND d_year IN (2002)
+        AND ((i_category IN ('Home', 'Men', 'Sports')
+              AND i_class IN ('paint', 'accessories', 'fitness'))
+             OR (i_category IN ('Shoes', 'Jewelry', 'Women')
+                 AND i_class IN ('mens', 'pendants', 'swimwear')))
+    GROUP BY i_category, i_class, i_brand, s_store_name, s_company_name, d_moy
+) tmp1
+WHERE CASE
+    WHEN (avg_monthly_sales <> 0)
+    THEN (ABS(sum_sales - avg_monthly_sales) / avg_monthly_sales)
+    ELSE NULL
+END > 0.1
+ORDER BY sum_sales - avg_monthly_sales, s_store_name
 LIMIT 100
 "#;
 
