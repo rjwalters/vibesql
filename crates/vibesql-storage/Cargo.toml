@@ -37,7 +37,7 @@ lru = "0.16"
 log = "0.4"
 rand = "0.9"  # For statistical sampling (Phase 5.2)
 instant = { version = "0.1", features = ["wasm-bindgen"] }  # WASM-compatible time primitives
-uuid = { version = "1.6", features = ["v4", "serde"] }
+# uuid is specified per-target below to add "js" feature for WASM
 bytes = "1.5"
 tokio = { version = "1", features = ["rt", "sync"], optional = true }
 opendal = { version = "0.55", optional = true }
@@ -45,12 +45,14 @@ opendal = { version = "0.55", optional = true }
 # Use parking_lot for native builds, std::sync for WASM
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 parking_lot = "0.12"
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # WASM-specific dependencies for browser storage
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
+uuid = { version = "1.6", features = ["v4", "serde", "js"] }  # "js" feature for WASM RNG support
 web-sys = { version = "0.3", features = [
     "File",
     "FileSystemDirectoryHandle",
