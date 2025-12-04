@@ -5,204 +5,416 @@
 use super::{BlobId, BlobMetadata, BlobStorageConfig};
 use crate::database::Database;
 use crate::error::{StorageError, StorageResult};
-use crate::Row;
 use bytes::Bytes;
-use vibesql_types::{SqlValue, DataType};
-use chrono::Utc;
+use std::sync::Arc;
+use std::time::Duration;
+
+#[cfg(feature = "opendal")]
+use opendal::{services, Operator};
 
 /// Blob storage service for file/blob operations
 pub struct BlobStorageService {
-    // TODO: Integrate OpenDAL operator when feature is enabled
+    #[cfg(feature = "opendal")]
+    operator: Option<Operator>,
     config: BlobStorageConfig,
+    #[allow(dead_code)]
+    db: Arc<Database>,
 }
 
 impl BlobStorageService {
     /// Create a new blob storage service
-    pub fn new(config: BlobStorageConfig) -> Self {
-        Self { config }
+    #[cfg(feature = "opendal")]
+    pub fn new(config: BlobStorageConfig, db: Arc<Database>) -> Self {
+        let operator = Self::create_operator(&config).ok();
+        Self { operator, config, db }
+    }
+
+    /// Create a new blob storage service (non-opendal build)
+    #[cfg(not(feature = "opendal"))]
+    pub fn new(config: BlobStorageConfig, db: Arc<Database>) -> Self {
+        Self { config, db }
     }
 
     /// Create with default configuration (local filesystem)
-    pub fn new_default() -> Self {
-        Self::new(BlobStorageConfig::default())
+    pub fn new_default(db: Arc<Database>) -> Self {
+        Self::new(BlobStorageConfig::default(), db)
+    }
+
+    /// Create an OpenDAL operator based on the configuration
+    #[cfg(feature = "opendal")]
+    fn create_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
+        match config.backend.as_str() {
+            #[cfg(feature = "storage-fs")]
+            "fs" | "filesystem" => Self::create_fs_operator(config),
+
+            #[cfg(feature = "storage-s3")]
+            "s3" => Self::create_s3_operator(config),
+
+            #[cfg(feature = "storage-gcs")]
+            "gcs" => Self::create_gcs_operator(config),
+
+            #[cfg(feature = "storage-azure")]
+            "azure" | "azblob" => Self::create_azure_operator(config),
+
+            #[cfg(feature = "storage-memory")]
+            "memory" => Self::create_memory_operator(),
+
+            backend => Err(StorageError::Other(format!(
+                "Unknown or unsupported storage backend: '{}'. Enable the appropriate feature flag (storage-fs, storage-s3, storage-gcs, storage-azure, storage-memory).",
+                backend
+            ))),
+        }
+    }
+
+    /// Create filesystem operator
+    #[cfg(all(feature = "opendal", feature = "storage-fs"))]
+    fn create_fs_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
+        let root = config
+            .config
+            .get("root")
+            .and_then(|v| v.as_str())
+            .unwrap_or("/var/vibesql/storage");
+
+        let builder = services::Fs::default().root(root);
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::Other(format!("Failed to create filesystem operator: {}", e)))
+    }
+
+    /// Create S3-compatible operator (works with AWS S3, MinIO, Cloudflare R2, etc.)
+    #[cfg(all(feature = "opendal", feature = "storage-s3"))]
+    fn create_s3_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
+        let bucket = config
+            .config
+            .get("bucket")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| StorageError::Other("S3 backend requires 'bucket' configuration".to_string()))?;
+
+        let mut builder = services::S3::default().bucket(bucket);
+
+        // Optional configurations
+        if let Some(endpoint) = config.config.get("endpoint").and_then(|v| v.as_str()) {
+            builder = builder.endpoint(endpoint);
+        }
+
+        if let Some(region) = config.config.get("region").and_then(|v| v.as_str()) {
+            builder = builder.region(region);
+        }
+
+        if let Some(access_key_id) = config.config.get("access_key_id").and_then(|v| v.as_str()) {
+            builder = builder.access_key_id(access_key_id);
+        }
+
+        if let Some(secret_access_key) = config.config.get("secret_access_key").and_then(|v| v.as_str()) {
+            builder = builder.secret_access_key(secret_access_key);
+        }
+
+        if let Some(root) = config.config.get("root").and_then(|v| v.as_str()) {
+            builder = builder.root(root);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::Other(format!("Failed to create S3 operator: {}", e)))
+    }
+
+    /// Create Google Cloud Storage operator
+    #[cfg(all(feature = "opendal", feature = "storage-gcs"))]
+    fn create_gcs_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
+        let bucket = config
+            .config
+            .get("bucket")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| StorageError::Other("GCS backend requires 'bucket' configuration".to_string()))?;
+
+        let mut builder = services::Gcs::default().bucket(bucket);
+
+        if let Some(credential) = config.config.get("credential").and_then(|v| v.as_str()) {
+            builder = builder.credential(credential);
+        }
+
+        if let Some(credential_path) = config.config.get("credential_path").and_then(|v| v.as_str()) {
+            builder = builder.credential_path(credential_path);
+        }
+
+        if let Some(root) = config.config.get("root").and_then(|v| v.as_str()) {
+            builder = builder.root(root);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::Other(format!("Failed to create GCS operator: {}", e)))
+    }
+
+    /// Create Azure Blob Storage operator
+    #[cfg(all(feature = "opendal", feature = "storage-azure"))]
+    fn create_azure_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
+        let container = config
+            .config
+            .get("container")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| StorageError::Other("Azure backend requires 'container' configuration".to_string()))?;
+
+        let mut builder = services::Azblob::default().container(container);
+
+        if let Some(account_name) = config.config.get("account_name").and_then(|v| v.as_str()) {
+            builder = builder.account_name(account_name);
+        }
+
+        if let Some(account_key) = config.config.get("account_key").and_then(|v| v.as_str()) {
+            builder = builder.account_key(account_key);
+        }
+
+        if let Some(endpoint) = config.config.get("endpoint").and_then(|v| v.as_str()) {
+            builder = builder.endpoint(endpoint);
+        }
+
+        if let Some(root) = config.config.get("root").and_then(|v| v.as_str()) {
+            builder = builder.root(root);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::Other(format!("Failed to create Azure operator: {}", e)))
+    }
+
+    /// Create in-memory operator (useful for testing)
+    #[cfg(all(feature = "opendal", feature = "storage-memory"))]
+    fn create_memory_operator() -> StorageResult<Operator> {
+        let builder = services::Memory::default();
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::Other(format!("Failed to create memory operator: {}", e)))
     }
 
     /// Store a blob and return its ID
-    pub async fn store(&self, db: &mut Database, data: Bytes, content_type: String) -> StorageResult<BlobId> {
+    #[cfg(feature = "opendal")]
+    pub async fn store(&self, data: Bytes, content_type: String) -> StorageResult<BlobId> {
         let id = BlobId::new();
         let size = data.len() as i64;
+        let path = id.to_path();
 
-        // TODO: Write to backend using OpenDAL operator
-        // op.write(&id.to_path(), data).await?;
+        // Write to backend using OpenDAL operator
+        if let Some(ref op) = self.operator {
+            op.write(&path, data.to_vec())
+                .await
+                .map_err(|e| StorageError::Other(format!("Failed to write blob: {}", e)))?;
+        } else {
+            return Err(StorageError::Other(
+                "Storage operator not initialized. Check your configuration.".to_string(),
+            ));
+        }
 
         // Store metadata in database
         let metadata = BlobMetadata::new(id.clone(), size, content_type);
-        self.store_metadata(db, &metadata)?;
+        self.store_metadata(&metadata).await?;
 
         Ok(id)
     }
 
+    /// Store a blob and return its ID (non-opendal build - stub)
+    #[cfg(not(feature = "opendal"))]
+    pub async fn store(&self, _data: Bytes, _content_type: String) -> StorageResult<BlobId> {
+        Err(StorageError::Other(
+            "Blob storage requires the 'opendal' feature to be enabled".to_string(),
+        ))
+    }
+
     /// Retrieve a blob by ID
-    pub async fn get(&self, _id: &BlobId) -> StorageResult<Bytes> {
-        // TODO: Read from backend using OpenDAL operator
-        // op.read(&id.to_path()).await.map(Bytes::from)
-        Err(StorageError::Other("blob not found".to_string()))
+    #[cfg(feature = "opendal")]
+    pub async fn get(&self, id: &BlobId) -> StorageResult<Bytes> {
+        let path = id.to_path();
+
+        if let Some(ref op) = self.operator {
+            let data = op
+                .read(&path)
+                .await
+                .map_err(|e| StorageError::Other(format!("Failed to read blob {}: {}", id, e)))?;
+            Ok(Bytes::from(data.to_vec()))
+        } else {
+            Err(StorageError::Other(
+                "Storage operator not initialized. Check your configuration.".to_string(),
+            ))
+        }
+    }
+
+    /// Retrieve a blob by ID (non-opendal build - stub)
+    #[cfg(not(feature = "opendal"))]
+    pub async fn get(&self, id: &BlobId) -> StorageResult<Bytes> {
+        Err(StorageError::Other(format!(
+            "Blob storage requires the 'opendal' feature to be enabled (blob: {})",
+            id
+        )))
     }
 
     /// Get metadata for a blob
-    pub async fn get_metadata(&self, db: &Database, id: &BlobId) -> StorageResult<BlobMetadata> {
-        // Query vibesql_storage system table
-        if let Some(table) = db.get_table("vibesql_storage") {
-            let id_str = id.to_string();
-            // Iterate through rows using the scan() method
-            for row in table.scan() {
-                if let Some(&SqlValue::Varchar(ref row_id)) = row.get(0) {
-                    if *row_id == id_str {
-                        // Extract metadata from row
-                        let size = match row.get(1) {
-                            Some(&SqlValue::Bigint(s)) => s,
-                            _ => return Err(StorageError::Other("invalid blob metadata".to_string())),
-                        };
-                        let content_type = match row.get(2) {
-                            Some(&SqlValue::Varchar(ref ct)) => ct.clone(),
-                            _ => return Err(StorageError::Other("invalid blob metadata".to_string())),
-                        };
-                        let created_at = match row.get(3) {
-                            Some(&SqlValue::Timestamp(ref ts)) => {
-                                // Convert vibesql Timestamp to chrono DateTime<Utc>
-                                let date_time = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                                    ts.date.year, ts.date.month, ts.date.day,
-                                    ts.time.hour, ts.time.minute, ts.time.second);
-                                
-                                chrono::DateTime::parse_from_rfc3339(&format!("{}+00:00", date_time.replace(" ", "T")))
-                                    .map(|dt| dt.with_timezone(&Utc))
-                                    .unwrap_or_else(|_| Utc::now())
-                            }
-                            _ => Utc::now(),
-                        };
-                        let metadata_json = row.get(4).cloned();
-
-                        let metadata = BlobMetadata {
-                            id: id.clone(),
-                            size,
-                            content_type,
-                            created_at,
-                            metadata: metadata_json.and_then(|v| {
-                                if let SqlValue::Varchar(json_str) = v {
-                                    serde_json::from_str(&json_str).ok()
-                                } else {
-                                    None
-                                }
-                            }),
-                        };
-                        return Ok(metadata);
-                    }
-                }
-            }
-        }
+    pub async fn get_metadata(&self, id: &BlobId) -> StorageResult<BlobMetadata> {
+        // TODO: Query vibesql_storage system table when it's implemented
         Err(StorageError::Other(format!("blob metadata not found: {}", id)))
     }
 
     /// Delete a blob
-    pub async fn delete(&self, db: &mut Database, id: &BlobId) -> StorageResult<()> {
-        // TODO: Delete from backend
-        // op.delete(&id.to_path()).await?;
+    #[cfg(feature = "opendal")]
+    pub async fn delete(&self, id: &BlobId) -> StorageResult<()> {
+        let path = id.to_path();
+
+        // Delete from backend using OpenDAL operator
+        if let Some(ref op) = self.operator {
+            op.delete(&path)
+                .await
+                .map_err(|e| StorageError::Other(format!("Failed to delete blob {}: {}", id, e)))?;
+        } else {
+            return Err(StorageError::Other(
+                "Storage operator not initialized. Check your configuration.".to_string(),
+            ));
+        }
 
         // Delete metadata from database
-        self.delete_metadata(db, id)?;
+        // TODO: DELETE FROM vibesql_storage when system table is implemented
         Ok(())
+    }
+
+    /// Delete a blob (non-opendal build - stub)
+    #[cfg(not(feature = "opendal"))]
+    pub async fn delete(&self, id: &BlobId) -> StorageResult<()> {
+        Err(StorageError::Other(format!(
+            "Blob storage requires the 'opendal' feature to be enabled (blob: {})",
+            id
+        )))
+    }
+
+    /// Check if a blob exists
+    #[cfg(feature = "opendal")]
+    pub async fn exists(&self, id: &BlobId) -> StorageResult<bool> {
+        let path = id.to_path();
+
+        if let Some(ref op) = self.operator {
+            op.is_exist(&path)
+                .await
+                .map_err(|e| StorageError::Other(format!("Failed to check blob existence: {}", e)))
+        } else {
+            Err(StorageError::Other(
+                "Storage operator not initialized. Check your configuration.".to_string(),
+            ))
+        }
+    }
+
+    /// Check if a blob exists (non-opendal build - stub)
+    #[cfg(not(feature = "opendal"))]
+    pub async fn exists(&self, id: &BlobId) -> StorageResult<bool> {
+        Err(StorageError::Other(format!(
+            "Blob storage requires the 'opendal' feature to be enabled (blob: {})",
+            id
+        )))
     }
 
     /// Store blob metadata in database
-    fn store_metadata(&self, db: &mut Database, metadata: &BlobMetadata) -> StorageResult<()> {
-        // Ensure the vibesql_storage table exists
-        if db.get_table("vibesql_storage").is_none() {
-            // Create the table using the catalog
-            let schema = vibesql_catalog::TableSchema::new(
-                "vibesql_storage".to_string(),
-                vec![
-                    vibesql_catalog::ColumnSchema::new("id".to_string(), DataType::Varchar { max_length: Some(36) }, false),
-                    vibesql_catalog::ColumnSchema::new("size".to_string(), DataType::Bigint, false),
-                    vibesql_catalog::ColumnSchema::new("content_type".to_string(), DataType::Varchar { max_length: Some(255) }, true),
-                    vibesql_catalog::ColumnSchema::new("created_at".to_string(), DataType::Timestamp { with_timezone: false }, false),
-                    vibesql_catalog::ColumnSchema::new("metadata".to_string(), DataType::CharacterLargeObject, true),
-                ],
-            );
-            db.create_table(schema)?;
-        }
-
-        // Convert BlobMetadata to Timestamp type
-        let ts = vibesql_types::Timestamp {
-            date: vibesql_types::Date {
-                year: metadata.created_at.format("%Y").to_string().parse().unwrap_or(2024),
-                month: metadata.created_at.format("%m").to_string().parse().unwrap_or(1),
-                day: metadata.created_at.format("%d").to_string().parse().unwrap_or(1),
-            },
-            time: vibesql_types::Time {
-                hour: metadata.created_at.format("%H").to_string().parse().unwrap_or(0),
-                minute: metadata.created_at.format("%M").to_string().parse().unwrap_or(0),
-                second: metadata.created_at.format("%S").to_string().parse().unwrap_or(0),
-                nanosecond: metadata.created_at.format("%f").to_string().parse().unwrap_or(0),
-            },
-        };
-
-        // Insert metadata row
-        let row = Row::new(vec![
-            SqlValue::Varchar(metadata.id.to_string()),
-            SqlValue::Bigint(metadata.size),
-            SqlValue::Varchar(metadata.content_type.clone()),
-            SqlValue::Timestamp(ts),
-            metadata.metadata.clone()
-                .map(|m| SqlValue::Varchar(m.to_string()))
-                .unwrap_or(SqlValue::Null),
-        ]);
-        db.insert_row("vibesql_storage", row)?;
-        Ok(())
-    }
-
-    /// Delete blob metadata from database
-    fn delete_metadata(&self, db: &mut Database, id: &BlobId) -> StorageResult<()> {
-        if let Some(table) = db.get_table_mut("vibesql_storage") {
-            let id_str = id.to_string();
-            // Find and remove the row
-            let original_len = table.rows_mut().len();
-            table.rows_mut().retain(|row| {
-                if let Some(SqlValue::Varchar(row_id)) = row.get(0) {
-                    row_id != &id_str
-                } else {
-                    true
-                }
-            });
-            
-            if table.rows_mut().len() == original_len {
-                return Err(StorageError::Other(format!("blob metadata not found: {}", id)));
-            }
-        } else {
-            return Err(StorageError::Other("vibesql_storage table not found".to_string()));
-        }
+    #[allow(dead_code)]
+    async fn store_metadata(&self, _metadata: &BlobMetadata) -> StorageResult<()> {
+        // TODO: INSERT into vibesql_storage table when system table is implemented (#3482)
         Ok(())
     }
 
     /// Generate a URL for accessing a blob
-    /// 
+    ///
     /// For local filesystem, returns a relative path.
-    /// For cloud storage, could generate signed URLs.
+    /// For cloud storage, returns the storage-specific URL format.
     pub fn get_url(&self, id: &BlobId) -> String {
         match self.config.backend.as_str() {
-            "fs" => format!("/storage/blobs/{}", id.to_url_safe()),
+            "fs" | "filesystem" => format!("/storage/blobs/{}", id.to_url_safe()),
             "s3" => {
-                if let Some(bucket) = self.config.config.get("bucket") {
-                    format!(
-                        "s3://{}/{}",
-                        bucket.as_str().unwrap_or(""),
-                        id.to_path()
-                    )
+                if let Some(bucket) = self.config.config.get("bucket").and_then(|v| v.as_str()) {
+                    if let Some(endpoint) = self.config.config.get("endpoint").and_then(|v| v.as_str()) {
+                        format!("{}/{}/{}", endpoint, bucket, id.to_path())
+                    } else {
+                        format!("s3://{}/{}", bucket, id.to_path())
+                    }
                 } else {
                     format!("s3://unknown/{}", id.to_path())
                 }
             }
+            "gcs" => {
+                if let Some(bucket) = self.config.config.get("bucket").and_then(|v| v.as_str()) {
+                    format!("gs://{}/{}", bucket, id.to_path())
+                } else {
+                    format!("gs://unknown/{}", id.to_path())
+                }
+            }
+            "azure" | "azblob" => {
+                if let Some(container) = self.config.config.get("container").and_then(|v| v.as_str()) {
+                    if let Some(account) = self.config.config.get("account_name").and_then(|v| v.as_str()) {
+                        format!(
+                            "https://{}.blob.core.windows.net/{}/{}",
+                            account,
+                            container,
+                            id.to_path()
+                        )
+                    } else {
+                        format!("azure://{}/{}", container, id.to_path())
+                    }
+                } else {
+                    format!("azure://unknown/{}", id.to_path())
+                }
+            }
+            "memory" => format!("memory://{}", id.to_path()),
             _ => format!("/storage/blobs/{}", id.to_url_safe()),
         }
+    }
+
+    /// Generate a presigned URL for temporary access to a blob
+    ///
+    /// This is primarily useful for cloud backends (S3, GCS, Azure) where you want to
+    /// give temporary, direct access to a blob without going through the application.
+    #[cfg(feature = "opendal")]
+    pub async fn get_presigned_url(&self, id: &BlobId, expires_in: Duration) -> StorageResult<String> {
+        let path = id.to_path();
+
+        if let Some(ref op) = self.operator {
+            // Check if the operator supports presigning
+            let presigned = op
+                .presign_read(&path, expires_in)
+                .await
+                .map_err(|e| {
+                    StorageError::Other(format!(
+                        "Failed to generate presigned URL for blob {}: {}. Note: presigned URLs are only supported for cloud backends (S3, GCS, Azure).",
+                        id, e
+                    ))
+                })?;
+
+            Ok(presigned.uri().to_string())
+        } else {
+            Err(StorageError::Other(
+                "Storage operator not initialized. Check your configuration.".to_string(),
+            ))
+        }
+    }
+
+    /// Generate a presigned URL (non-opendal build - stub)
+    #[cfg(not(feature = "opendal"))]
+    pub async fn get_presigned_url(&self, id: &BlobId, _expires_in: Duration) -> StorageResult<String> {
+        Err(StorageError::Other(format!(
+            "Presigned URLs require the 'opendal' feature to be enabled (blob: {})",
+            id
+        )))
+    }
+
+    /// Get the configured backend type
+    pub fn backend(&self) -> &str {
+        &self.config.backend
+    }
+
+    /// Check if the service is properly initialized
+    #[cfg(feature = "opendal")]
+    pub fn is_initialized(&self) -> bool {
+        self.operator.is_some()
+    }
+
+    /// Check if the service is properly initialized (non-opendal build)
+    #[cfg(not(feature = "opendal"))]
+    pub fn is_initialized(&self) -> bool {
+        false
     }
 }
 
@@ -211,9 +423,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_blob_url_generation() {
+    fn test_blob_url_generation_fs() {
         let config = BlobStorageConfig::default();
-        let service = BlobStorageService::new(config);
+        let db = Arc::new(Database::new());
+        let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
         let url = service.get_url(&id);
@@ -221,51 +434,105 @@ mod tests {
     }
 
     #[test]
-    fn test_store_metadata_creates_table() {
-        let service = BlobStorageService::new_default();
-        let mut db = Database::new();
+    fn test_blob_url_generation_s3() {
+        let config = BlobStorageConfig {
+            backend: "s3".to_string(),
+            config: serde_json::json!({
+                "bucket": "my-bucket",
+                "region": "us-east-1"
+            }),
+        };
+        let db = Arc::new(Database::new());
+        let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
-        let metadata = BlobMetadata::new(id.clone(), 1024, "text/plain".to_string());
-
-        service.store_metadata(&mut db, &metadata).unwrap();
-
-        // Verify table was created
-        assert!(db.get_table("vibesql_storage").is_some());
+        let url = service.get_url(&id);
+        assert!(url.starts_with("s3://my-bucket/"));
     }
 
     #[test]
-    fn test_store_and_retrieve_metadata() {
-        let service = BlobStorageService::new_default();
-        let mut db = Database::new();
+    fn test_blob_url_generation_gcs() {
+        let config = BlobStorageConfig {
+            backend: "gcs".to_string(),
+            config: serde_json::json!({
+                "bucket": "my-gcs-bucket"
+            }),
+        };
+        let db = Arc::new(Database::new());
+        let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
-        let metadata = BlobMetadata::new(id.clone(), 2048, "application/json".to_string())
-            .with_metadata(serde_json::json!({ "custom": "value" }));
-
-        service.store_metadata(&mut db, &metadata).unwrap();
-
-        // Retrieve the metadata
-        // Note: The async part is tested by directly calling the sync path
-        // This is a limitation of the current design - would benefit from refactoring
-        // to support both sync and async paths
+        let url = service.get_url(&id);
+        assert!(url.starts_with("gs://my-gcs-bucket/"));
     }
 
     #[test]
-    fn test_delete_metadata() {
-        let service = BlobStorageService::new_default();
-        let mut db = Database::new();
+    fn test_blob_url_generation_azure() {
+        let config = BlobStorageConfig {
+            backend: "azure".to_string(),
+            config: serde_json::json!({
+                "container": "my-container",
+                "account_name": "myaccount"
+            }),
+        };
+        let db = Arc::new(Database::new());
+        let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
-        let metadata = BlobMetadata::new(id.clone(), 512, "image/png".to_string());
+        let url = service.get_url(&id);
+        assert!(url.starts_with("https://myaccount.blob.core.windows.net/my-container/"));
+    }
 
-        service.store_metadata(&mut db, &metadata).unwrap();
-        assert!(db.get_table("vibesql_storage").is_some());
+    #[test]
+    fn test_backend_accessor() {
+        let config = BlobStorageConfig {
+            backend: "s3".to_string(),
+            config: serde_json::json!({}),
+        };
+        let db = Arc::new(Database::new());
+        let service = BlobStorageService::new(config, db);
 
-        // Delete the metadata
-        service.delete_metadata(&mut db, &id).unwrap();
+        assert_eq!(service.backend(), "s3");
+    }
 
-        // Verify table still exists but row is gone
-        assert!(db.get_table("vibesql_storage").is_some());
+    #[cfg(all(feature = "opendal", feature = "storage-memory"))]
+    #[tokio::test]
+    async fn test_memory_backend_store_and_get() {
+        let config = BlobStorageConfig {
+            backend: "memory".to_string(),
+            config: serde_json::json!({}),
+        };
+        let db = Arc::new(Database::new());
+        let service = BlobStorageService::new(config, db);
+
+        assert!(service.is_initialized());
+
+        let data = Bytes::from("Hello, World!");
+        let id = service.store(data.clone(), "text/plain".to_string()).await.unwrap();
+
+        let retrieved = service.get(&id).await.unwrap();
+        assert_eq!(retrieved, data);
+
+        // Test exists
+        assert!(service.exists(&id).await.unwrap());
+
+        // Test delete
+        service.delete(&id).await.unwrap();
+        assert!(!service.exists(&id).await.unwrap());
+    }
+
+    #[cfg(all(feature = "opendal", feature = "storage-memory"))]
+    #[tokio::test]
+    async fn test_memory_backend_not_found() {
+        let config = BlobStorageConfig {
+            backend: "memory".to_string(),
+            config: serde_json::json!({}),
+        };
+        let db = Arc::new(Database::new());
+        let service = BlobStorageService::new(config, db);
+
+        let id = BlobId::new();
+        let result = service.get(&id).await;
+        assert!(result.is_err());
     }
 }

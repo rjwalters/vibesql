@@ -13,8 +13,16 @@ categories = ["database"]
 default = ["compression"]
 # zstd compression for binary persistence (disabled in WASM where browsers provide compression)
 compression = ["zstd"]
-# OpenDAL for multi-backend storage support
+# OpenDAL for multi-backend storage support (base feature)
 opendal = ["dep:opendal", "dep:tokio"]
+# Storage backend features - each enables opendal with the specific service
+storage-fs = ["opendal", "opendal/services-fs"]
+storage-s3 = ["opendal", "opendal/services-s3"]
+storage-gcs = ["opendal", "opendal/services-gcs"]
+storage-azure = ["opendal", "opendal/services-azblob"]
+storage-memory = ["opendal", "opendal/services-memory"]
+# Convenience feature for all storage backends
+storage-all = ["storage-fs", "storage-s3", "storage-gcs", "storage-azure", "storage-memory"]
 
 [dependencies]
 vibesql-types = { version = "0.1.1", path = "../vibesql-types" }
@@ -60,6 +68,7 @@ web-sys = { version = "0.3", features = [
 vibesql-parser = { version = "0.1.1", path = "../vibesql-parser" }
 tempfile = "3.8"
 criterion = { version = "0.8", features = ["html_reports"] }
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
