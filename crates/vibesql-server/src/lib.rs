@@ -6,13 +6,14 @@
 pub mod auth;
 pub mod config;
 pub mod connection;
+pub mod http;
 pub mod observability;
 pub mod protocol;
 pub mod session;
 pub mod subscription;
 
 pub use auth::PasswordStore;
-pub use config::{AuthConfig, Config, LoggingConfig, ServerConfig};
+pub use config::{AuthConfig, Config, HttpConfig, LoggingConfig, ServerConfig};
 pub use connection::ConnectionHandler;
 pub use observability::ObservabilityProvider;
 pub use protocol::{
