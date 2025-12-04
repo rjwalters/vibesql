@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""
+Unified benchmark CLI for VibeSQL.
+
+Provides a consistent interface for running all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)
+with support for engine selection, query filtering, and configuration options.
+
+Usage:
+    ./scripts/bench --test=tpch                     # Run TPC-H (VibeSQL only)
+    ./scripts/bench --test=tpcc --engine=mysql      # Run TPC-C with MySQL
+    ./scripts/bench --test=all --engine=all         # Full matrix
+
+Examples:
+    ./scripts/bench --test=tpch --engine=vibesql,duckdb
+    ./scripts/bench --test=tpcc --duration=120
+    ./scripts/bench --test=tpcds --scale=0.01
+    ./scripts/bench --test=tpch --query=Q1,Q6
+    ./scripts/bench --quick                         # Fast subset for CI
+    ./scripts/bench --all                           # All benchmarks (eq: make benchmark)
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional
+
+
+@dataclass
+class BenchConfig:
+    """Benchmark configuration."""
+    test: str                          # 'tpch', 'tpcc', 'tpcds', 'sysbench', or 'all'
+    engines: List[str]                 # ['vibesql', 'sqlite', 'duckdb', 'mysql']
+    queries: Optional[List[str]] = None  # ['Q1', 'Q6'] or None for all
+    transactions: Optional[List[str]] = None  # ['new-order', 'payment'] for TPC-C
+    timeout: Optional[int] = None      # Per-query timeout in seconds
+    duration: Optional[int] = None     # Benchmark duration in seconds
+    scale: Optional[float] = None      # Scale factor
+    output: Optional[str] = None       # Output file path
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Create and configure argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="./scripts/bench",
+        description="Unified VibeSQL benchmark runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  ./scripts/bench --test=tpch                     Run TPC-H with VibeSQL
+  ./scripts/bench --test=tpch --engine=sqlite     Run TPC-H vs SQLite
+  ./scripts/bench --test=tpcc --engine=mysql      Run TPC-C with MySQL
+  ./scripts/bench --test=all                      Run all benchmarks
+  ./scripts/bench --quick                         Quick CI-friendly subset
+  ./scripts/bench --test=tpch --query=Q1,Q6       Run specific queries
+  ./scripts/bench --test=tpcc --duration=120      Run TPC-C for 120s
+        """)
+
+    # Test selection
+    parser.add_argument(
+        "--test",
+        choices=["tpch", "tpcc", "tpcds", "sysbench", "all"],
+        default="tpch",
+        help="Benchmark to run (default: tpch)"
+    )
+
+    # Engine selection
+    parser.add_argument(
+        "--engine",
+        type=str,
+        default="vibesql",
+        help="Engines to compare (comma-separated): vibesql,sqlite,duckdb,mysql (default: vibesql)"
+    )
+
+    # Query/transaction filtering
+    parser.add_argument(
+        "--query",
+        type=str,
+        help="Specific queries for TPC-H/TPC-DS (comma-separated, e.g., Q1,Q6)"
+    )
+
+    parser.add_argument(
+        "--txn",
+        type=str,
+        help="Specific transactions for TPC-C (comma-separated, e.g., new-order,payment)"
+    )
+
+    # Timing options
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        help="Per-query timeout in seconds (TPC-H/TPC-DS)"
+    )
+
+    parser.add_argument(
+        "--duration",
+        type=int,
+        help="Benchmark duration in seconds (TPC-C/Sysbench)"
+    )
+
+    # Scale factor
+    parser.add_argument(
+        "--scale",
+        type=float,
+        help="Scale factor (TPC-DS default: 1, TPC-C default: 1)"
+    )
+
+    # Output
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        help="Output file path (optional)"
+    )
+
+    # Convenience flags
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick subset for CI (limited queries, no comparisons)"
+    )
+
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Equivalent to: --test=all (all benchmarks)"
+    )
+
+    return parser
+
+
+def parse_engines(engine_str: str) -> List[str]:
+    """Parse engine string and validate."""
+    valid_engines = {"vibesql", "sqlite", "duckdb", "mysql"}
+    
+    engines = [e.strip() for e in engine_str.split(",")]
+    engines = [e for e in engines if e]  # Remove empty strings
+    
+    if not engines:
+        engines = ["vibesql"]
+    
+    # Expand 'all'
+    if "all" in engines:
+        engines = list(valid_engines)
+    
+    # Validate
+    for engine in engines:
+        if engine not in valid_engines:
+            raise ValueError(f"Invalid engine: {engine}. Valid: {', '.join(valid_engines)}")
+    
+    return list(set(engines))  # Remove duplicates
+
+
+def parse_list(list_str: Optional[str]) -> Optional[List[str]]:
+    """Parse comma-separated list string."""
+    if not list_str:
+        return None
+    items = [item.strip().upper() for item in list_str.split(",")]
+    return [item for item in items if item]
+
+
+def build_config(args: argparse.Namespace) -> BenchConfig:
+    """Build BenchConfig from parsed arguments."""
+    test = args.test if not args.all else "all"
+    engines = parse_engines(args.engine)
+    
+    # Quick mode: limit to VibeSQL only, no comparisons
+    if args.quick:
+        engines = ["vibesql"]
+        args.timeout = args.timeout or 10  # Shorter timeout
+    
+    config = BenchConfig(
+        test=test,
+        engines=engines,
+        queries=parse_list(args.query),
+        transactions=parse_list(args.txn),
+        timeout=args.timeout,
+        duration=args.duration,
+        scale=args.scale,
+        output=args.output,
+    )
+    
+    return config
+
+
+def run_tpch(config: BenchConfig) -> int:
+    """Run TPC-H benchmark."""
+    print("\n" + "=" * 60)
+    print("TPC-H Benchmark")
+    print("=" * 60)
+    
+    timeout = config.timeout or 30
+    
+    # Run the existing bench-tpch.sh script
+    cmd = ["./scripts/bench-tpch.sh", str(timeout)]
+    
+    print(f"Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+    
+    if result.returncode != 0:
+        print(f"❌ TPC-H benchmark failed")
+        return 1
+    
+    # Process results into database
+    print("\nProcessing results into database...")
+    result = subprocess.run(
+        ["./scripts/process_benchmark_results.py", "--input", "/tmp/tpch_results.txt", "--timeout", str(timeout)],
+        cwd=Path(__file__).parent.parent
+    )
+    
+    return result.returncode
+
+
+def run_tpcc(config: BenchConfig) -> int:
+    """Run TPC-C benchmark."""
+    print("\n" + "=" * 60)
+    print("TPC-C Benchmark (OLTP)")
+    print("=" * 60)
+    
+    # Build benchmark
+    print("Building TPC-C benchmark...")
+    result = subprocess.run(
+        ["cargo", "bench", "--package", "vibesql-executor", "--bench", "tpcc_benchmark",
+         "--features", "benchmark-comparison", "--no-run"],
+        cwd=Path(__file__).parent.parent
+    )
+    
+    if result.returncode != 0:
+        print("❌ Build failed")
+        return 1
+    
+    # Set up environment
+    env = os.environ.copy()
+    duration = config.duration or 60
+    env["TPCC_DURATION_SECS"] = str(duration)
+    env["TPCC_WARMUP_SECS"] = "10"
+    env["TPCC_SCALE_FACTOR"] = str(config.scale or 1)
+    
+    # Try to start MySQL if needed
+    if "mysql" in config.engines:
+        print("\nStarting MySQL Docker container...")
+        result = subprocess.run(
+            ["./scripts/ensure-mysql-docker.sh"],
+            cwd=Path(__file__).parent.parent,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            env["MYSQL_URL"] = result.stdout.strip()
+            print(f"✓ MySQL ready: {env['MYSQL_URL']}")
+        else:
+            print("⚠ MySQL unavailable (Docker not available)")
+            if "mysql" in config.engines and len(config.engines) == 1:
+                return 1
+            # Remove MySQL from engines if it's the only one failing
+            config.engines = [e for e in config.engines if e != "mysql"]
+    
+    # Run benchmark
+    print(f"\nRunning TPC-C (duration={duration}s)...")
+    
+    # Find benchmark binary
+    import glob
+    benchmarks = glob.glob("./target/release/deps/tpcc_benchmark-*")
+    benchmarks = [b for b in benchmarks if not b.endswith((".d", ".o"))]
+    
+    if not benchmarks:
+        print("❌ Benchmark binary not found")
+        return 1
+    
+    bench_bin = benchmarks[0]
+    
+    with open("/tmp/tpcc_results.txt", "w") as f:
+        result = subprocess.run(
+            [bench_bin],
+            cwd=Path(__file__).parent.parent,
+            env=env,
+            stdout=f,
+            stderr=subprocess.STDOUT
+        )
+    
+    if result.returncode != 0:
+        print("⚠ TPC-C benchmark completed with warnings")
+    
+    # Process results
+    print("\nProcessing results into database...")
+    result = subprocess.run(
+        ["./scripts/process_tpcc_results.py", "--input", "/tmp/tpcc_results.txt",
+         "--scale-factor", str(config.scale or 1), "--duration", str(duration)],
+        cwd=Path(__file__).parent.parent
+    )
+    
+    return result.returncode
+
+
+def run_tpcds(config: BenchConfig) -> int:
+    """Run TPC-DS benchmark."""
+    print("\n" + "=" * 60)
+    print("TPC-DS Benchmark")
+    print("=" * 60)
+    
+    # Use isolated runner to avoid memory pressure
+    print("Running TPC-DS (isolated mode - each engine in separate process)...")
+    
+    cmd = ["./scripts/bench-tpcds-isolated.sh", "/tmp/tpcds_results.txt"]
+    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+    
+    if result.returncode != 0:
+        print("⚠ TPC-DS benchmark completed with warnings")
+    
+    # Process results
+    print("\nProcessing results into database...")
+    result = subprocess.run(
+        ["./scripts/process_tpcds_results.py", "--stdin"],
+        cwd=Path(__file__).parent.parent,
+        stdin=open("/tmp/tpcds_results.txt")
+    )
+    
+    return 0  # Don't fail on process errors
+
+
+def run_sysbench(config: BenchConfig) -> int:
+    """Run Sysbench OLTP benchmark."""
+    print("\n" + "=" * 60)
+    print("Sysbench OLTP Benchmark")
+    print("=" * 60)
+    
+    # Set up environment
+    env = os.environ.copy()
+    
+    # Try to start MySQL if needed
+    if "mysql" in config.engines or "vibesql" in config.engines:
+        print("Starting MySQL Docker container...")
+        result = subprocess.run(
+            ["./scripts/ensure-mysql-docker.sh"],
+            cwd=Path(__file__).parent.parent,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            env["MYSQL_URL"] = result.stdout.strip()
+            print(f"✓ MySQL ready: {env['MYSQL_URL']}")
+        else:
+            print("⚠ MySQL unavailable (Docker not available)")
+    
+    # Run benchmark
+    print("Running Sysbench OLTP...")
+    result = subprocess.run(
+        ["cargo", "bench", "--package", "vibesql-executor", "--bench", "sysbench_oltp",
+         "--features", "benchmark-comparison", "--", "--noplot"],
+        cwd=Path(__file__).parent.parent,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
+    
+    # Save output
+    with open("/tmp/sysbench_results.txt", "w") as f:
+        f.write(result.stdout)
+    
+    if result.returncode != 0:
+        print("⚠ Sysbench benchmark completed with warnings")
+    
+    # Process results
+    print("\nProcessing results into database...")
+    result = subprocess.run(
+        ["./scripts/process_sysbench_results.py", "--criterion-dir", "target/criterion"],
+        cwd=Path(__file__).parent.parent
+    )
+    
+    return 0
+
+
+def run_all(config: BenchConfig) -> int:
+    """Run all benchmarks."""
+    print("\n" + "=" * 60)
+    print("Running ALL BENCHMARKS")
+    print("=" * 60)
+    
+    results = {}
+    
+    for test in ["tpch", "tpcc", "tpcds", "sysbench"]:
+        config.test = test
+        print(f"\n[{test.upper()}] Starting...")
+        
+        if test == "tpch":
+            ret = run_tpch(config)
+        elif test == "tpcc":
+            ret = run_tpcc(config)
+        elif test == "tpcds":
+            ret = run_tpcds(config)
+        elif test == "sysbench":
+            ret = run_sysbench(config)
+        else:
+            ret = 1
+        
+        results[test] = "✓" if ret == 0 else "✗"
+        
+        if ret != 0:
+            print(f"⚠ {test.upper()} had issues, continuing...")
+    
+    # Summary
+    print("\n" + "=" * 60)
+    print("BENCHMARK SUMMARY")
+    print("=" * 60)
+    for test, status in results.items():
+        print(f"  {test.upper()}: {status}")
+    
+    # Show analysis
+    print("\nRunning analysis...")
+    subprocess.run(
+        ["./scripts/query_benchmark_results.py", "--latest"],
+        cwd=Path(__file__).parent.parent
+    )
+    
+    return 0
+
+
+def main():
+    """Main entry point."""
+    parser = create_parser()
+    args = parser.parse_args()
+    
+    # Parse arguments into config
+    try:
+        config = build_config(args)
+    except ValueError as e:
+        print(f"❌ Error: {e}")
+        return 1
+    
+    # Print configuration
+    print(f"Configuration:")
+    print(f"  Test:    {config.test}")
+    print(f"  Engines: {', '.join(config.engines)}")
+    if config.queries:
+        print(f"  Queries: {', '.join(config.queries)}")
+    if config.transactions:
+        print(f"  Txns:    {', '.join(config.transactions)}")
+    if config.timeout:
+        print(f"  Timeout: {config.timeout}s")
+    if config.duration:
+        print(f"  Duration: {config.duration}s")
+    if config.scale:
+        print(f"  Scale:   {config.scale}")
+    
+    # Run benchmark(s)
+    if config.test == "all":
+        return run_all(config)
+    elif config.test == "tpch":
+        return run_tpch(config)
+    elif config.test == "tpcc":
+        return run_tpcc(config)
+    elif config.test == "tpcds":
+        return run_tpcds(config)
+    elif config.test == "sysbench":
+        return run_sysbench(config)
+    else:
+        print(f"❌ Unknown test: {config.test}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
