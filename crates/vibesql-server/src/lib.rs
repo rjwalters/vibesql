@@ -14,7 +14,10 @@ pub mod session;
 pub mod subscription;
 
 pub use auth::PasswordStore;
-pub use config::{AuthConfig, Config, HttpConfig, LoggingConfig, ServerConfig};
+pub use config::{
+    ApiKeyConfig, AuthConfig, Config, HttpAuthConfig, HttpAuthMethod, HttpConfig, JwtConfig,
+    LoggingConfig, ServerConfig,
+};
 pub use connection::ConnectionHandler;
 pub use observability::ObservabilityProvider;
 pub use protocol::{
