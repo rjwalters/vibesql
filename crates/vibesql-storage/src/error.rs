@@ -2,6 +2,9 @@
 // Errors
 // ============================================================================
 
+/// Result type for storage operations
+pub type StorageResult<T> = Result<T, StorageError>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageError {
     TableNotFound(String),
