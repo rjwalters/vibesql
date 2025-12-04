@@ -15,7 +15,8 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 /// Version history:
 /// - v1: Initial binary format
 /// - v2: Added sequence persistence and column default_value expressions
-pub const VERSION: u8 = 2;
+/// - v3: Added primary key and unique constraints persistence
+pub const VERSION: u8 = 3;
 
 /// Type tags for binary serialization
 #[repr(u8)]

@@ -75,6 +75,15 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                     super::expression::write_expression(writer, default_expr)?;
                 }
             }
+
+            // Write primary key columns (v3+)
+            write_bool(writer, table.schema.primary_key.is_some())?;
+            if let Some(pk_cols) = &table.schema.primary_key {
+                write_u32(writer, pk_cols.len() as u32)?;
+                for col in pk_cols {
+                    write_string(writer, col)?;
+                }
+            }
         }
     }
 
@@ -291,12 +300,33 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             });
         }
 
-        table_schemas.push((table_name, columns));
+        // Read primary key columns (v3+)
+        let primary_key = if version >= 3 {
+            let has_pk = read_bool(reader)?;
+            if has_pk {
+                let pk_count = read_u32(reader)?;
+                let mut pk_cols = Vec::new();
+                for _ in 0..pk_count {
+                    pk_cols.push(read_string(reader)?);
+                }
+                Some(pk_cols)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        table_schemas.push((table_name, columns, primary_key));
     }
 
     // Create tables
-    for (table_name, columns) in table_schemas {
-        let schema = vibesql_catalog::TableSchema::new(table_name, columns);
+    for (table_name, columns, primary_key) in table_schemas {
+        let schema = if let Some(pk_cols) = primary_key {
+            vibesql_catalog::TableSchema::with_primary_key(table_name, columns, pk_cols)
+        } else {
+            vibesql_catalog::TableSchema::new(table_name, columns)
+        };
 
         db.create_table(schema)
             .map_err(|e| StorageError::NotImplemented(format!("Failed to create table: {}", e)))?;

@@ -469,3 +469,161 @@ fn test_load_auto_detects_compressed_format() {
     std::fs::remove_file(compressed_file).unwrap();
     std::fs::remove_file(uncompressed_file).unwrap();
 }
+
+#[test]
+fn test_primary_key_persistence() {
+    let temp_file = "/tmp/test_db_primary_key.vbsql";
+
+    // Clean up any existing test file
+    let _ = std::fs::remove_file(temp_file);
+
+    // Create database with a primary key
+    let mut db = Database::new();
+
+    let schema = TableSchema::with_primary_key(
+        "orders".to_string(),
+        vec![
+            ColumnSchema::new("order_id".to_string(), DataType::Integer, false),
+            ColumnSchema::new(
+                "customer".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                false,
+            ),
+            ColumnSchema::new("total".to_string(), DataType::DoublePrecision, false),
+        ],
+        vec!["order_id".to_string()],
+    );
+
+    db.create_table(schema).unwrap();
+
+    // Verify primary key is set before save
+    let table_before = db.get_table("orders").unwrap();
+    assert_eq!(
+        table_before.schema.primary_key,
+        Some(vec!["order_id".to_string()]),
+        "Primary key should be set before save"
+    );
+
+    // Insert some test data
+    let table = db.get_table_mut("orders").unwrap();
+    table
+        .insert(vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Varchar("Alice".to_string()),
+            vibesql_types::SqlValue::Double(99.99),
+        ]))
+        .unwrap();
+    table
+        .insert(vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Varchar("Bob".to_string()),
+            vibesql_types::SqlValue::Double(149.99),
+        ]))
+        .unwrap();
+
+    // Save to binary format
+    db.save_binary(temp_file).unwrap();
+
+    // Load from binary format
+    let db2 = Database::load_binary(temp_file).unwrap();
+
+    // Verify primary key was preserved
+    let table_after = db2.get_table("orders").unwrap();
+    assert_eq!(
+        table_after.schema.primary_key,
+        Some(vec!["order_id".to_string()]),
+        "Primary key should be preserved after load"
+    );
+
+    // Verify data was preserved
+    assert_eq!(table_after.row_count(), 2);
+    let rows = table_after.scan();
+    assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(1));
+    assert_eq!(rows[1].values[0], vibesql_types::SqlValue::Integer(2));
+
+    // Clean up
+    std::fs::remove_file(temp_file).unwrap();
+}
+
+#[test]
+fn test_composite_primary_key_persistence() {
+    let temp_file = "/tmp/test_db_composite_pk.vbsql";
+
+    // Clean up
+    let _ = std::fs::remove_file(temp_file);
+
+    // Create database with composite primary key
+    let mut db = Database::new();
+
+    let schema = TableSchema::with_primary_key(
+        "order_items".to_string(),
+        vec![
+            ColumnSchema::new("order_id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("line_number".to_string(), DataType::Integer, false),
+            ColumnSchema::new("product".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+            ColumnSchema::new("quantity".to_string(), DataType::Integer, false),
+        ],
+        vec!["order_id".to_string(), "line_number".to_string()],
+    );
+
+    db.create_table(schema).unwrap();
+
+    // Verify composite PK before save
+    let table_before = db.get_table("order_items").unwrap();
+    assert_eq!(
+        table_before.schema.primary_key,
+        Some(vec!["order_id".to_string(), "line_number".to_string()]),
+        "Composite primary key should be set before save"
+    );
+
+    // Save and reload
+    db.save_binary(temp_file).unwrap();
+    let db2 = Database::load_binary(temp_file).unwrap();
+
+    // Verify composite PK was preserved
+    let table_after = db2.get_table("order_items").unwrap();
+    assert_eq!(
+        table_after.schema.primary_key,
+        Some(vec!["order_id".to_string(), "line_number".to_string()]),
+        "Composite primary key should be preserved after load"
+    );
+
+    // Clean up
+    std::fs::remove_file(temp_file).unwrap();
+}
+
+#[test]
+fn test_no_primary_key_persistence() {
+    let temp_file = "/tmp/test_db_no_pk.vbsql";
+
+    // Clean up
+    let _ = std::fs::remove_file(temp_file);
+
+    // Create database without primary key
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "logs".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("message".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+    );
+
+    db.create_table(schema).unwrap();
+
+    // Verify no primary key before save
+    let table_before = db.get_table("logs").unwrap();
+    assert_eq!(table_before.schema.primary_key, None, "No primary key should be set");
+
+    // Save and reload
+    db.save_binary(temp_file).unwrap();
+    let db2 = Database::load_binary(temp_file).unwrap();
+
+    // Verify no primary key after load
+    let table_after = db2.get_table("logs").unwrap();
+    assert_eq!(table_after.schema.primary_key, None, "No primary key should be preserved as None");
+
+    // Clean up
+    std::fs::remove_file(temp_file).unwrap();
+}
