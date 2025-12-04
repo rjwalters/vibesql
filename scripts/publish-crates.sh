@@ -11,6 +11,7 @@ echo "Mode: $DRY_RUN"
 echo
 
 # Array of crates in dependency order (bottom-up)
+# Note: vibesql-sqllogictest has publish = false (test harness only)
 CRATES=(
     "vibesql-types"
     "vibesql-ast"
@@ -20,6 +21,7 @@ CRATES=(
     "vibesql-executor"
     "vibesql"
     "vibesql-cli"
+    "vibesql-server"
     "vibesql-wasm-bindings"
     "vibesql-python-bindings"
 )

@@ -1,64 +1,202 @@
-# Publishing Checklist for v0.1.0
+# VibeSQL Release Guide
 
-## Pre-Publication Checklist
+This document describes the release process for VibeSQL across all distribution channels.
 
-### Completed
+## Distribution Channels
 
-- [x] Rename all crates with `vibesql-*` namespace
-- [x] Add version requirements to all internal dependencies
-- [x] Add publishing metadata to all Cargo.toml files
-- [x] Update main crate documentation (src/lib.rs)
-- [x] Verify all crate names available on crates.io
-- [x] Create publish script (`scripts/publish-crates.sh`)
-- [x] LICENSE-MIT and LICENSE-APACHE files exist
-- [x] CHANGELOG.md exists
-- [x] README.md is comprehensive
+| Channel | Packages | Current Version |
+|---------|----------|-----------------|
+| **crates.io** | 11 Rust crates | 0.1.1 |
+| **npm** | `@vibesql/client`, `@vibesql/drizzle` | 0.1.1, 0.1.0 |
 
-### Before Publishing
+## Pre-Release Checklist
 
-- [ ] Run full test suite: `cargo test --all`
-- [ ] Run clippy: `cargo clippy --all-targets`
-- [ ] Build documentation: `cargo doc --no-deps`
-- [ ] Verify examples compile: `cargo build --examples`
-- [ ] Dry-run publish: `./scripts/publish-crates.sh`
+### Code Quality
 
-### Optional
+- [ ] All tests pass: `cargo test --release`
+- [ ] No clippy warnings: `cargo clippy --all-targets`
+- [ ] Documentation builds: `cargo doc --no-deps`
+- [ ] Examples compile: `cargo build --examples`
 
-- [ ] SECURITY.md - vulnerability reporting process
-- [ ] CONTRIBUTING.md - contributor guidelines
+### Version Updates
 
-## Publishing Process
+- [ ] Update version in root `Cargo.toml` (workspace.package.version)
+- [ ] Update `packages/vibesql-client-ts/package.json`
+- [ ] Update `packages/vibesql-drizzle/package.json`
+- [ ] Update CHANGELOG.md with release notes
 
-1. **Commit all changes and ensure clean working tree**
+### Documentation
 
-2. **Create and push git tag:**
-   ```bash
-   git tag -a v0.1.0 -m "Release v0.1.0"
-   git push origin v0.1.0
-   ```
+- [ ] CHANGELOG.md has entry for new version
+- [ ] README.md is up to date
+- [ ] Any new features are documented
 
-3. **Get crates.io API token:**
-   - Visit https://crates.io/settings/tokens
-   - Create new token
-   - Run: `cargo login <token>`
+## Release Process
 
-4. **Publish to crates.io:**
-   ```bash
-   ./scripts/publish-crates.sh --publish
-   ```
+### Step 1: Prepare the Release
 
-5. **Create GitHub Release:**
-   - Go to: https://github.com/rjwalters/vibesql/releases/new
-   - Select tag: v0.1.0
-   - Add release notes from CHANGELOG.md
+```bash
+# Ensure clean working tree
+git status
+
+# Run full test suite
+cargo test --release
+
+# Dry-run crates.io publish to catch issues
+./scripts/publish-crates.sh
+```
+
+### Step 2: Update Versions
+
+Edit `Cargo.toml` (root):
+```toml
+[workspace.package]
+version = "0.1.2"  # Update this
+```
+
+Edit `packages/vibesql-client-ts/package.json`:
+```json
+{
+  "version": "0.1.2"
+}
+```
+
+Edit `packages/vibesql-drizzle/package.json`:
+```json
+{
+  "version": "0.1.2"
+}
+```
+
+### Step 3: Update CHANGELOG
+
+Add entry to CHANGELOG.md:
+```markdown
+## [0.1.2] - YYYY-MM-DD
+
+### Added
+- ...
+
+### Changed
+- ...
+
+### Fixed
+- ...
+```
+
+### Step 4: Commit and Tag
+
+```bash
+git add -A
+git commit -m "Release v0.1.2"
+git tag -a v0.1.2 -m "Release v0.1.2"
+git push origin main
+git push origin v0.1.2
+```
+
+### Step 5: Publish to crates.io
+
+**First time setup:**
+```bash
+# Get API token from https://crates.io/settings/tokens
+cargo login <token>
+```
+
+**Publish:**
+```bash
+./scripts/publish-crates.sh --publish
+```
+
+This publishes 11 crates in dependency order:
+1. vibesql-types
+2. vibesql-ast
+3. vibesql-catalog
+4. vibesql-parser
+5. vibesql-storage
+6. vibesql-executor
+7. vibesql (main crate)
+8. vibesql-cli
+9. vibesql-server
+10. vibesql-wasm-bindings
+11. vibesql-python-bindings
+
+Note: `vibesql-sqllogictest` is not published (test harness only).
+
+### Step 6: Publish to npm
+
+**First time setup:**
+```bash
+# Login to npm
+npm login
+# Or for scoped packages with 2FA:
+npm login --scope=@vibesql
+```
+
+**Publish TypeScript client:**
+```bash
+cd packages/vibesql-client-ts
+pnpm build
+npm publish --access public
+```
+
+**Publish Drizzle adapter:**
+```bash
+cd packages/vibesql-drizzle
+pnpm build
+npm publish --access public
+```
+
+### Step 7: Create GitHub Release
+
+1. Go to: https://github.com/rjwalters/vibesql/releases/new
+2. Select tag: `v0.1.2`
+3. Title: `v0.1.2`
+4. Copy release notes from CHANGELOG.md
+5. Publish release
+
+## Post-Release
+
+- [ ] Verify crates appear on crates.io
+- [ ] Verify packages appear on npmjs.com
+- [ ] Verify docs.rs builds documentation
+- [ ] Update any version badges in README
+- [ ] Announce release (if applicable)
+
+## Troubleshooting
+
+### crates.io publish fails
+
+**"crate already exists"**: You cannot re-publish the same version. Bump the version number.
+
+**Dependency not found**: Crates must be published in dependency order. Wait 10-30 seconds between publishes (the script handles this).
+
+**Authentication error**: Run `cargo login <token>` with a fresh token.
+
+### npm publish fails
+
+**"You must be logged in"**: Run `npm login`
+
+**"403 Forbidden"**: For scoped packages (@vibesql/*), use `npm publish --access public`
+
+**"Version already exists"**: Bump the version in package.json
+
+### Yanking a bad release
+
+**crates.io:**
+```bash
+cargo yank --version 0.1.2 vibesql
+```
+
+**npm:**
+```bash
+npm deprecate @vibesql/client@0.1.2 "Critical bug, please upgrade"
+# Or unpublish within 72 hours:
+npm unpublish @vibesql/client@0.1.2
+```
 
 ## Important Notes
 
-- **Versions are permanent** - Once published, you cannot modify a version
-- **You can yank** - If there's a critical issue, yank the version
-- **Documentation is auto-generated** - docs.rs will build and host docs
-
-## Post-Publication
-
-- [ ] Update README badges with crates.io version
-- [ ] Announce release
+- **Versions are permanent** on crates.io - you cannot modify a published version
+- **npm has 72-hour window** to unpublish, after that only deprecation
+- **docs.rs** automatically builds documentation for crates.io releases
+- **Test before publishing** - dry-run everything first
