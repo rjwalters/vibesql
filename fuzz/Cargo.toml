@@ -15,6 +15,23 @@ arbitrary = { version = "1", features = ["derive"] }
 [dependencies.vibesql-parser]
 path = "../crates/vibesql-parser"
 
+[dependencies.vibesql-executor]
+path = "../crates/vibesql-executor"
+
+[dependencies.vibesql-storage]
+path = "../crates/vibesql-storage"
+
+[dependencies.vibesql-ast]
+path = "../crates/vibesql-ast"
+
+[dependencies.vibesql-types]
+path = "../crates/vibesql-types"
+
+# SQLite for differential testing
+[dependencies.rusqlite]
+version = "0.31"
+features = ["bundled"]
+
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
@@ -39,6 +56,27 @@ bench = false
 [[bin]]
 name = "type_convert"
 path = "fuzz_targets/type_convert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "query_executor"
+path = "fuzz_targets/query_executor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "type_coercion"
+path = "fuzz_targets/type_coercion.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "differential_sqlite"
+path = "fuzz_targets/differential_sqlite.rs"
 test = false
 doc = false
 bench = false

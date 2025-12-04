@@ -1,0 +1,1 @@
+SELECT ABS(-5), ROUND(3.7)

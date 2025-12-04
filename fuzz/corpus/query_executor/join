@@ -1,0 +1,1 @@
+SELECT t1.id, customers.name FROM t1 JOIN customers ON t1.id = customers.id

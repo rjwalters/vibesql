@@ -1,0 +1,1 @@
+SELECT COALESCE(a, 0) FROM nulls

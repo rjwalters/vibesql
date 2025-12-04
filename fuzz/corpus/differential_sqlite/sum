@@ -1,0 +1,1 @@
+SELECT SUM(value) FROM t1

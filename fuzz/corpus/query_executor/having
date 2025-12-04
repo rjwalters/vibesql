@@ -1,0 +1,1 @@
+SELECT name, COUNT(*) FROM t1 GROUP BY name HAVING COUNT(*) > 0
