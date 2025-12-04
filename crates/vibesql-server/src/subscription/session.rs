@@ -321,6 +321,7 @@ mod tests {
             max_global: 10000,
             max_result_rows: 10000,
             rate_limit_per_second: 100, // High rate limit to not interfere
+            ..Default::default()
         };
         let mut manager = SessionSubscriptionManager::with_config(config);
 
@@ -344,6 +345,7 @@ mod tests {
             max_global: 10000,
             max_result_rows: 10000,
             rate_limit_per_second: 2,
+            ..Default::default()
         };
         let mut manager = SessionSubscriptionManager::with_config(config);
 

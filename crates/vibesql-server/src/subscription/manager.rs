@@ -154,7 +154,7 @@ impl SubscriptionManager {
             ));
         }
 
-        // Create subscription
+        // Create subscription with default channel buffer size
         let subscription = Subscription::new(query.clone(), tables.clone(), notify_tx);
         let id = subscription.id;
 
@@ -1063,6 +1063,7 @@ mod tests {
             max_global: 2,
             max_result_rows: 10000,
             rate_limit_per_second: 100,
+            ..Default::default()
         };
         let manager = SubscriptionManager::with_config(config);
 
@@ -1090,6 +1091,7 @@ mod tests {
             max_global: 10000,
             max_result_rows: 0, // No rows allowed
             rate_limit_per_second: 100,
+            ..Default::default()
         };
         let manager = SubscriptionManager::with_config(config);
         let mut db = setup_test_db();
