@@ -16,6 +16,7 @@ use tracing::{debug, error};
 use vibesql_storage::Database;
 
 use super::types::*;
+use super::graphql;
 
 /// HTTP server state
 #[derive(Clone)]
@@ -41,6 +42,8 @@ pub fn create_http_router(db: Arc<Database>) -> Router {
         .route("/api/tables/:table_name/rows/:id", put(super::crud::update_row))
         .route("/api/tables/:table_name/rows/:id", patch(super::crud::patch_row))
         .route("/api/tables/:table_name/rows/:id", delete(super::crud::delete_row))
+        // GraphQL endpoint
+        .route("/api/graphql", post(graphql_handler))
         .with_state(state);
 
     // Create storage sub-router with its own state
@@ -48,6 +51,169 @@ pub fn create_http_router(db: Arc<Database>) -> Router {
     let storage_router = super::storage::create_storage_router(db);
 
     main_router.nest("/api/storage", storage_router)
+}
+
+/// GraphQL endpoint handler
+async fn graphql_handler(
+    State(_state): State<HttpState>,
+    Json(req): Json<graphql::GraphQLRequest>,
+) -> impl IntoResponse {
+    debug!("Received GraphQL request: {}", req.query);
+
+    // Parse the GraphQL query
+    let query_info = match graphql::parse_graphql_query(&req.query) {
+        Ok(info) => info,
+        Err(e) => {
+            error!("Failed to parse GraphQL query: {}", e);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(graphql::GraphQLResponse {
+                    data: None,
+                    errors: Some(vec![graphql::GraphQLError::new(format!(
+                        "GraphQL parse error: {}",
+                        e
+                    ))]),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // Convert to SQL
+    let (sql, params) = match graphql::graphql_to_sql(&query_info) {
+        Ok((sql, params)) => (sql, params),
+        Err(e) => {
+            error!("Failed to convert GraphQL to SQL: {}", e);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(graphql::GraphQLResponse {
+                    data: None,
+                    errors: Some(vec![graphql::GraphQLError::new(format!(
+                        "GraphQL conversion error: {}",
+                        e
+                    ))]),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    debug!("Generated SQL: {}", sql);
+
+    // Create a session and execute the query
+    let mut session = match crate::session::Session::new("graphql".to_string(), "graphql_user".to_string()) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to create session: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(graphql::GraphQLResponse {
+                    data: None,
+                    errors: Some(vec![graphql::GraphQLError::new(format!(
+                        "Failed to create session: {}",
+                        e
+                    ))]),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // Execute the query
+    let result = if params.is_empty() {
+        session.execute(&sql)
+    } else {
+        session.execute_with_params(&sql, &params)
+    };
+
+    match result {
+        Ok(exec_result) => {
+            match exec_result {
+                crate::session::ExecutionResult::Select { rows, columns } => {
+                    let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+                    let row_values: Vec<Vec<_>> = rows
+                        .iter()
+                        .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
+                        .collect();
+
+                    let rows_json: Vec<serde_json::Value> = row_values
+                        .iter()
+                        .map(|row| {
+                            let mut obj = serde_json::Map::new();
+                            for (col, val) in column_names.iter().zip(row.iter()) {
+                                obj.insert(col.clone(), val.clone());
+                            }
+                            serde_json::Value::Object(obj)
+                        })
+                        .collect();
+
+                    let response = graphql::GraphQLResponse {
+                        data: Some(json!({
+                            "data": rows_json
+                        })),
+                        errors: None,
+                    };
+
+                    (StatusCode::OK, Json(response)).into_response()
+                }
+                crate::session::ExecutionResult::Insert { rows_affected } => {
+                    let response = graphql::GraphQLResponse {
+                        data: Some(json!({
+                            "rowsAffected": rows_affected
+                        })),
+                        errors: None,
+                    };
+
+                    (StatusCode::OK, Json(response)).into_response()
+                }
+                crate::session::ExecutionResult::Update { rows_affected } => {
+                    let response = graphql::GraphQLResponse {
+                        data: Some(json!({
+                            "rowsAffected": rows_affected
+                        })),
+                        errors: None,
+                    };
+
+                    (StatusCode::OK, Json(response)).into_response()
+                }
+                crate::session::ExecutionResult::Delete { rows_affected } => {
+                    let response = graphql::GraphQLResponse {
+                        data: Some(json!({
+                            "rowsAffected": rows_affected
+                        })),
+                        errors: None,
+                    };
+
+                    (StatusCode::OK, Json(response)).into_response()
+                }
+                _ => {
+                    let response = graphql::GraphQLResponse {
+                        data: Some(json!({
+                            "status": "success",
+                            "message": format!("{:?}", exec_result)
+                        })),
+                        errors: None,
+                    };
+
+                    (StatusCode::OK, Json(response)).into_response()
+                }
+            }
+        }
+        Err(e) => {
+            error!("Query execution failed: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(graphql::GraphQLResponse {
+                    data: None,
+                    errors: Some(vec![graphql::GraphQLError::new(format!(
+                        "Query execution failed: {}",
+                        e
+                    ))]),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// Health check endpoint
