@@ -2,18 +2,20 @@
 //!
 //! This module provides a pluggable, testable operator system that replaces
 //! the monolithic match statement in the core evaluator. Each operator category
-//! (arithmetic, comparison, logical, string) is implemented in its own module
+//! (arithmetic, comparison, logical, string, vector) is implemented in its own module
 //! with dedicated logic and tests.
 
 mod arithmetic;
 mod comparison;
 mod logical;
 mod string;
+mod vector;
 
 use arithmetic::ArithmeticOps;
 use comparison::ComparisonOps;
 use logical::LogicalOps;
 use string::StringOps;
+use vector::VectorOps;
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
@@ -75,6 +77,11 @@ impl OperatorRegistry {
 
             // String operators
             Concat => StringOps::concat(left, right),
+
+            // Vector distance operators (pgvector compatible)
+            CosineDistance => VectorOps::cosine_distance(left, right),
+            NegativeInnerProduct => VectorOps::negative_inner_product(left, right),
+            L2Distance => VectorOps::l2_distance(left, right),
         }
     }
 }

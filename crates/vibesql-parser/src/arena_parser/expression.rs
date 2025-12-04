@@ -223,6 +223,9 @@ impl<'arena> ArenaParser<'arena> {
                     | MultiCharOperator::GreaterEqual
                     | MultiCharOperator::NotEqual
                     | MultiCharOperator::NotEqualAlt
+                    | MultiCharOperator::CosineDistance
+                    | MultiCharOperator::NegativeInnerProduct
+                    | MultiCharOperator::L2Distance
             ),
             _ => false,
         };
@@ -238,6 +241,10 @@ impl<'arena> ArenaParser<'arena> {
                     MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
                         BinaryOperator::NotEqual
                     }
+                    // Vector distance operators (pgvector compatible)
+                    MultiCharOperator::CosineDistance => BinaryOperator::CosineDistance,
+                    MultiCharOperator::NegativeInnerProduct => BinaryOperator::NegativeInnerProduct,
+                    MultiCharOperator::L2Distance => BinaryOperator::L2Distance,
                     _ => {
                         return Err(ParseError {
                             message: "Unexpected || operator in comparison".to_string(),

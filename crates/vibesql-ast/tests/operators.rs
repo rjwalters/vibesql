@@ -162,3 +162,54 @@ fn test_unary_plus_operator() {
         _ => panic!("Expected unary plus operation"),
     }
 }
+
+// ============================================================================
+// Vector Distance Operator Tests (pgvector compatible)
+// ============================================================================
+
+#[test]
+fn test_cosine_distance_operator() {
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::CosineDistance,
+        left: Box::new(Expression::Literal(SqlValue::Vector(vec![1.0, 0.0, 0.0]))),
+        right: Box::new(Expression::Literal(SqlValue::Vector(vec![0.0, 1.0, 0.0]))),
+    };
+    match expr {
+        Expression::BinaryOp { op: BinaryOperator::CosineDistance, .. } => {} // Success
+        _ => panic!("Expected cosine distance operation"),
+    }
+}
+
+#[test]
+fn test_negative_inner_product_operator() {
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::NegativeInnerProduct,
+        left: Box::new(Expression::Literal(SqlValue::Vector(vec![1.0, 2.0, 3.0]))),
+        right: Box::new(Expression::Literal(SqlValue::Vector(vec![4.0, 5.0, 6.0]))),
+    };
+    match expr {
+        Expression::BinaryOp { op: BinaryOperator::NegativeInnerProduct, .. } => {} // Success
+        _ => panic!("Expected negative inner product operation"),
+    }
+}
+
+#[test]
+fn test_l2_distance_operator() {
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::L2Distance,
+        left: Box::new(Expression::Literal(SqlValue::Vector(vec![0.0, 0.0]))),
+        right: Box::new(Expression::Literal(SqlValue::Vector(vec![3.0, 4.0]))),
+    };
+    match expr {
+        Expression::BinaryOp { op: BinaryOperator::L2Distance, .. } => {} // Success
+        _ => panic!("Expected L2 distance operation"),
+    }
+}
+
+#[test]
+fn test_vector_distance_operators_exist() {
+    let _cosine = BinaryOperator::CosineDistance;
+    let _neg_ip = BinaryOperator::NegativeInnerProduct;
+    let _l2 = BinaryOperator::L2Distance;
+    // If these compile, the operators exist
+}

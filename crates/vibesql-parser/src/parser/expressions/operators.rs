@@ -296,6 +296,14 @@ impl Parser {
                         MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
                             vibesql_ast::BinaryOperator::NotEqual
                         }
+                        // Vector distance operators (pgvector compatible)
+                        MultiCharOperator::CosineDistance => {
+                            vibesql_ast::BinaryOperator::CosineDistance
+                        }
+                        MultiCharOperator::NegativeInnerProduct => {
+                            vibesql_ast::BinaryOperator::NegativeInnerProduct
+                        }
+                        MultiCharOperator::L2Distance => vibesql_ast::BinaryOperator::L2Distance,
                         MultiCharOperator::Concat => {
                             return Err(ParseError {
                                 message: format!("Unexpected operator: {}", op),

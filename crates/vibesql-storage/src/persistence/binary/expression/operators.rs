@@ -27,6 +27,10 @@ impl_simple_enum_serialization!(
         BinaryOperator::And => 20,
         BinaryOperator::Or => 21,
         BinaryOperator::Concat => 30,
+        // Vector distance operators (pgvector compatible)
+        BinaryOperator::CosineDistance => 40,
+        BinaryOperator::NegativeInnerProduct => 41,
+        BinaryOperator::L2Distance => 42,
     }
 );
 
