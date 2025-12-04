@@ -187,7 +187,7 @@ benchmark: benchmark-tpch benchmark-tpcc benchmark-tpcds benchmark-sysbench anal
 # Run TPC-H benchmarks with 30s timeout per query and store results in database
 benchmark-tpch:
 	@echo "Running TPC-H benchmarks..."
-	./scripts/bench-tpch.sh 30
+	./scripts/bench-tpch.sh --mode standard --timeout 30
 	@echo ""
 	@echo "Processing benchmark results into database..."
 	./scripts/process_benchmark_results.py --input /tmp/tpch_results.txt --timeout 30
