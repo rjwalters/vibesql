@@ -12,7 +12,8 @@
 ## Highlights
 
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
-- **100% SQLLogicTest conformance** - 624 files (~5.9M tests)
+- **100% SQLLogicTest conformance** - 623 files (~7.4M tests)
+- **5,300+ unit tests** - comprehensive test coverage
 - **Real-time subscriptions** - Convex-like reactivity with delta updates
 - **HTTP REST & GraphQL API** - Full CRUD and query endpoints
 - **Vector search** - AI/ML embeddings with similarity search
@@ -21,7 +22,7 @@
 - **TypeScript SDK** with React hooks and Drizzle ORM adapter
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
-- **215,000+ lines** of Rust across 11 crates
+- **350,000+ lines** of Rust across 11 crates
 
 Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
 
@@ -149,6 +150,55 @@ function ChatRoom({ channelId }) {
 - Hash joins for equi-joins
 - Predicate pushdown
 - Expression caching
+
+## Benchmarks
+
+VibeSQL runs industry-standard database benchmarks. Performance optimization is ongoing.
+
+### Test Coverage
+
+| Suite | Coverage | Tests |
+|-------|----------|-------|
+| SQL:1999 Core | 100% | 739/739 sqltest |
+| SQLLogicTest | 100% | 623 files (~7.4M tests) |
+| Unit Tests | - | 5,391 tests |
+| TPC-DS | 89% | 88/99 queries |
+| TPC-H | 100% | 22/22 queries |
+| TPC-C | 100% | All transactions |
+
+### TPC-C (OLTP Transactions)
+
+| Database | TPS | Notes |
+|----------|-----|-------|
+| SQLite | 2,523 | Baseline |
+| DuckDB | 363 | 7x slower than SQLite |
+| **VibeSQL** | 68 | 37x slower than SQLite |
+
+*Scale Factor 1, 10-second duration. Primary bottleneck: composite index optimization ([details](docs/benchmarks/tpcc-oltp-analysis.md)).*
+
+### TPC-DS (Complex Analytics)
+
+88/99 queries passing at SF 0.001. Remaining gaps:
+- 3 queries need `GROUPING()` function
+- 2 queries have column resolution issues
+- 1 query exceeds memory limits
+
+*Average query time: 1.52s. See [full results](docs/benchmarks/TPCDS_RESULTS.md).*
+
+### TPC-H (Decision Support)
+
+All 22 queries passing. Performance varies by query complexity—active optimization target for columnar execution.
+
+### Running Benchmarks
+
+```bash
+make benchmark          # Run all (TPC-H, TPC-C, TPC-DS, Sysbench)
+make benchmark-tpch     # TPC-H only
+make benchmark-tpcc     # TPC-C only
+make benchmark-tpcds    # TPC-DS only
+```
+
+See [Benchmarking Guide](docs/development/BENCHMARKING.md) for details.
 
 ## Development
 
