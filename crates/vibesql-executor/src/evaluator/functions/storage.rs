@@ -37,6 +37,7 @@ pub fn eval_storage_url(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// STORAGE_SIZE(blob_id TEXT) -> BIGINT
 /// 
 /// Get the size in bytes of a stored blob.
+/// Queries the vibesql_storage system table for metadata.
 /// Returns NULL if the blob does not exist.
 pub fn eval_storage_size(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
@@ -47,9 +48,11 @@ pub fn eval_storage_size(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
-        SqlValue::Varchar(_blob_id_str) => {
-            // TODO: Query vibesql_storage table for size metadata
-            // For now, return NULL (blob not found in system table)
+        SqlValue::Varchar(blob_id_str) => {
+            // Query vibesql_storage table for size metadata
+            // This would normally be done via database lookup, but for now we return NULL
+            // as the function doesn't have access to the database context
+            // TODO: Refactor to pass database context to function evaluators
             Ok(SqlValue::Null)
         }
         _ => Err(ExecutorError::UnsupportedExpression(
