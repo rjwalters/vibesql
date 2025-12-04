@@ -83,7 +83,7 @@ pub fn create_http_router(db: Arc<Database>) -> Router {
     main_router.nest("/api/storage", storage_router)
 }
 
-/// GraphQL endpoint handler
+/// GraphQL endpoint handler with relationship resolution support
 async fn graphql_handler(
     State(state): State<HttpState>,
     Json(req): Json<graphql::GraphQLRequest>,
@@ -120,6 +120,9 @@ async fn graphql_handler(
                 .into_response();
         }
     };
+
+    // Check if we have nested fields that need relationship resolution
+    let has_nested = graphql::has_nested_fields(&query_info);
 
     // Convert to SQL
     let (sql, params) = match graphql::graphql_to_sql(&query_info) {
@@ -161,7 +164,7 @@ async fn graphql_handler(
         }
     };
 
-    // Execute the query
+    // Execute the main query
     let result = if params.is_empty() {
         session.execute(&sql)
     } else {
@@ -178,20 +181,45 @@ async fn graphql_handler(
                         .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
                         .collect();
 
-                    let rows_json: Vec<serde_json::Value> = row_values
+                    let mut rows_json: Vec<serde_json::Map<String, serde_json::Value>> = row_values
                         .iter()
                         .map(|row| {
                             let mut obj = serde_json::Map::new();
                             for (col, val) in column_names.iter().zip(row.iter()) {
                                 obj.insert(col.clone(), val.clone());
                             }
-                            serde_json::Value::Object(obj)
+                            obj
                         })
+                        .collect();
+
+                    // If we have nested fields, resolve relationships
+                    if has_nested {
+                        if let graphql::GraphQLQueryInfo::Query { table_name, nested_fields, .. } = &query_info {
+                            // Build schema map from database
+                            let schemas = build_schema_map(&state.db);
+
+                            if !schemas.is_empty() {
+                                let ctx = graphql::GraphQLExecutionContext::new(&schemas);
+                                let nested_queries = graphql::build_nested_queries(&ctx, table_name, nested_fields);
+
+                                // Execute nested queries and attach results
+                                for nested in &nested_queries {
+                                    if let Err(e) = execute_nested_query(&mut session, &mut rows_json, nested, &ctx) {
+                                        debug!("Warning: nested query failed: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let rows_json_values: Vec<serde_json::Value> = rows_json
+                        .into_iter()
+                        .map(serde_json::Value::Object)
                         .collect();
 
                     let response = graphql::GraphQLResponse {
                         data: Some(json!({
-                            "data": rows_json
+                            "data": rows_json_values
                         })),
                         errors: None,
                     };
@@ -256,6 +284,96 @@ async fn graphql_handler(
                 .into_response()
         }
     }
+}
+
+/// Build a map of table schemas from the database
+fn build_schema_map(db: &vibesql_storage::Database) -> std::collections::HashMap<String, vibesql_catalog::TableSchema> {
+    let mut schemas = std::collections::HashMap::new();
+    for table_name in db.list_tables() {
+        if let Some(table) = db.get_table(&table_name) {
+            schemas.insert(table_name, table.schema.clone());
+        }
+    }
+    schemas
+}
+
+/// Execute a nested query and attach results to parent rows
+fn execute_nested_query(
+    session: &mut crate::session::Session,
+    parent_rows: &mut Vec<serde_json::Map<String, serde_json::Value>>,
+    nested: &graphql::NestedQueryInfo,
+    ctx: &graphql::GraphQLExecutionContext,
+) -> Result<(), String> {
+    if parent_rows.is_empty() {
+        return Ok(());
+    }
+
+    // Get the key column from parent rows for the IN clause
+    let key_column = match nested.direction {
+        graphql::RelationshipDirection::OneToMany => {
+            nested.pk_columns.first().ok_or("Missing PK column")?
+        }
+        graphql::RelationshipDirection::ManyToOne => {
+            nested.fk_columns.first().ok_or("Missing FK column")?
+        }
+    };
+
+    // Extract key values from parent rows
+    let parent_values: Vec<serde_json::Value> = parent_rows
+        .iter()
+        .filter_map(|row| {
+            row.iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(key_column))
+                .map(|(_, v)| v.clone())
+        })
+        .collect();
+
+    if parent_values.is_empty() {
+        return Ok(());
+    }
+
+    // Generate and execute the nested query
+    let sql = graphql::generate_nested_query_sql(nested, &parent_values)?;
+    if sql.is_empty() {
+        return Ok(());
+    }
+
+    debug!("Executing nested query: {}", sql);
+
+    let result = session.execute(&sql).map_err(|e| format!("Nested query failed: {}", e))?;
+
+    // Convert results to JSON objects
+    let nested_rows: Vec<serde_json::Map<String, serde_json::Value>> = match result {
+        crate::session::ExecutionResult::Select { rows, columns } => {
+            let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+            rows.iter()
+                .map(|r| {
+                    let mut obj = serde_json::Map::new();
+                    for (col, val) in column_names.iter().zip(r.values.iter()) {
+                        obj.insert(col.clone(), super::types::sql_value_to_json(val));
+                    }
+                    obj
+                })
+                .collect()
+        }
+        _ => return Ok(()),
+    };
+
+    // Execute any deeper nested queries recursively
+    let mut nested_rows_mut = nested_rows;
+    for deeper_nested in &nested.nested {
+        if let Err(e) = execute_nested_query(session, &mut nested_rows_mut, deeper_nested, ctx) {
+            debug!("Warning: deeper nested query failed: {}", e);
+        }
+    }
+
+    // Group results by the key column
+    let grouped = graphql::group_nested_results(nested_rows_mut, nested);
+
+    // Attach to parent rows
+    graphql::attach_nested_results(parent_rows, nested, grouped);
+
+    Ok(())
 }
 
 /// Health check endpoint
