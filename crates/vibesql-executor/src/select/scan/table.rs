@@ -4,6 +4,7 @@
 //! - Regular database tables
 //! - CTEs (Common Table Expressions)
 //! - Views
+//! - Information schema virtual tables
 //! - Predicate pushdown optimization
 //! - SIMD-accelerated columnar filtering (#2972)
 
@@ -13,7 +14,9 @@ use std::collections::HashMap;
 
 use super::predicates::{apply_table_local_predicates, apply_table_local_predicates_ref};
 use crate::{
-    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::PredicatePlan,
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator,
+    information_schema::{execute_information_schema_query, get_information_schema_table_schema, parse_qualified_name},
+    optimizer::PredicatePlan,
     privilege_checker::PrivilegeChecker, schema::CombinedSchema, select::cte::CteResult,
     select::columnar::{ColumnarBatch, ColumnPredicate, simd_filter_batch},
 };
@@ -87,6 +90,22 @@ pub(crate) fn execute_table_scan(
         // No filtering needed - use zero-copy shared rows
         // This avoids O(n) cloning when CTE is referenced multiple times
         return Ok(super::FromResult::from_shared_rows(schema, cte_rows.clone()));
+    }
+
+    // Check if it's an information_schema table (e.g., "information_schema.tables")
+    let (schema_part, table_part) = parse_qualified_name(table_name);
+    if schema_part.eq_ignore_ascii_case("information_schema") {
+        // Execute information_schema query
+        let result = execute_information_schema_query(table_part, &database.catalog)?;
+
+        // Get the schema for this information_schema table
+        let table_schema = get_information_schema_table_schema(table_part)
+            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        let schema = CombinedSchema::from_table(effective_name, table_schema);
+
+        return Ok(super::FromResult::from_rows(schema, result.rows));
     }
 
     // Check if it's a view
