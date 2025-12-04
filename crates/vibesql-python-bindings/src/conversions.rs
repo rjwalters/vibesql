@@ -34,6 +34,10 @@ pub fn sqlvalue_to_py(py: Python, value: &vibesql_types::SqlValue) -> PyResult<P
         vibesql_types::SqlValue::Time(t) => t.to_string().into_pyobject(py)?.into_any().unbind(),
         vibesql_types::SqlValue::Timestamp(ts) => ts.to_string().into_pyobject(py)?.into_any().unbind(),
         vibesql_types::SqlValue::Interval(i) => i.to_string().into_pyobject(py)?.into_any().unbind(),
+        vibesql_types::SqlValue::Vector(v) => {
+            // Convert vector to Python list of floats
+            pyo3::types::PyList::new(py, v.iter().map(|f| *f as f64))?.into_any().unbind()
+        }
         vibesql_types::SqlValue::Null => py.None(),
     })
 }
@@ -160,6 +164,10 @@ pub fn substitute_placeholders(sql: &str, sql_values: &[vibesql_types::SqlValue]
                     vibesql_types::SqlValue::Time(s) => format!("TIME '{}'", s),
                     vibesql_types::SqlValue::Timestamp(s) => format!("TIMESTAMP '{}'", s),
                     vibesql_types::SqlValue::Interval(s) => format!("INTERVAL '{}'", s),
+                    vibesql_types::SqlValue::Vector(v) => {
+                        let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+                        format!("[{}]", formatted.join(", "))
+                    }
                     vibesql_types::SqlValue::Null => "NULL".to_string(),
                 };
                 result.push_str(&value_str);
