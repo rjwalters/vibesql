@@ -267,32 +267,30 @@ fuzz_target!(|data: &[u8]| {
         // Both succeeded - compare results
         (Some(sqlite_rows), Some(vibesql_rows)) => {
             // Compare row count
-            if sqlite_rows.len() != vibesql_rows.len() {
-                // Row count mismatch is interesting but might be due to ordering
-                // For now, just verify both return some rows or both return empty
-                if (sqlite_rows.is_empty()) != (vibesql_rows.is_empty()) {
-                    // One returned rows, other didn't - this is a bug
-                    // For fuzzing, we report this as a potential issue by panicking
-                    // In practice, you might want to log these instead
-                    // panic!(
-                    //     "Row count mismatch: SQLite={}, VibeSQL={} for query: {}",
-                    //     sqlite_rows.len(), vibesql_rows.len(), sql
-                    // );
-                }
-            }
+             if sqlite_rows.len() != vibesql_rows.len() {
+                 // Row count mismatch is interesting but might be due to ordering
+                 // For now, just verify both return some rows or both return empty
+                 if (sqlite_rows.is_empty()) != (vibesql_rows.is_empty()) {
+                     // One returned rows, other didn't - this is a bug
+                     panic!(
+                         "Row count mismatch: SQLite={}, VibeSQL={} for query: {}",
+                         sqlite_rows.len(), vibesql_rows.len(), sql
+                     );
+                 }
+             }
 
             // Compare column count for first row
-            if let (Some(sqlite_first), Some(vibesql_first)) =
-                (sqlite_rows.first(), vibesql_rows.first())
-            {
-                if sqlite_first.len() != vibesql_first.len() {
-                    // Column count mismatch - likely a semantic difference
-                    // panic!(
-                    //     "Column count mismatch: SQLite={}, VibeSQL={} for query: {}",
-                    //     sqlite_first.len(), vibesql_first.len(), sql
-                    // );
-                }
-            }
+             if let (Some(sqlite_first), Some(vibesql_first)) =
+                 (sqlite_rows.first(), vibesql_rows.first())
+             {
+                 if sqlite_first.len() != vibesql_first.len() {
+                     // Column count mismatch - likely a semantic difference
+                     panic!(
+                         "Column count mismatch: SQLite={}, VibeSQL={} for query: {}",
+                         sqlite_first.len(), vibesql_first.len(), sql
+                     );
+                 }
+             }
         }
 
         // Both failed - expected for invalid queries
