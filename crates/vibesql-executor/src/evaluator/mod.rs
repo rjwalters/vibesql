@@ -1,6 +1,5 @@
 // Module declarations
 pub mod arena;
-pub mod arena_eval;
 pub(crate) mod casting;
 pub mod coercion;
 mod combined;
