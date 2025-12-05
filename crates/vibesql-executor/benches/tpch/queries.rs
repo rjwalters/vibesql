@@ -126,7 +126,7 @@ pub const TPCH_Q7: &str = r#"
 SELECT
     n1.n_name as supp_nation,
     n2.n_name as cust_nation,
-    SUBSTR(l_shipdate, 1, 4) as l_year,
+    SUBSTR(CAST(l_shipdate AS VARCHAR), 1, 4) as l_year,
     SUM(l_extendedprice * (1 - l_discount)) as revenue
 FROM supplier, lineitem, orders, customer, nation n1, nation n2
 WHERE s_suppkey = l_suppkey
@@ -145,7 +145,7 @@ ORDER BY supp_nation, cust_nation, l_year
 // TPC-H Q8: National Market Share (8-way join)
 pub const TPCH_Q8: &str = r#"
 SELECT
-    SUBSTR(o_orderdate, 1, 4) as o_year,
+    SUBSTR(CAST(o_orderdate AS VARCHAR), 1, 4) as o_year,
     SUM(CASE WHEN n2.n_name = 'BRAZIL'
         THEN l_extendedprice * (1 - l_discount)
         ELSE 0 END) / SUM(l_extendedprice * (1 - l_discount)) as mkt_share
@@ -170,7 +170,7 @@ ORDER BY o_year
 pub const TPCH_Q9: &str = r#"
 SELECT
     n_name as nation,
-    SUBSTR(o_orderdate, 1, 4) as o_year,
+    SUBSTR(CAST(o_orderdate AS VARCHAR), 1, 4) as o_year,
     SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity) as sum_profit
 FROM part, supplier, lineitem, partsupp, orders, nation
 WHERE s_suppkey = l_suppkey
