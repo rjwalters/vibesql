@@ -251,9 +251,11 @@ async fn test_session_continues_after_error() {
     server.shutdown();
 }
 
-/// Test that new session after disconnect has clean state
+/// Test that sessions connecting to the same database share data
+/// This verifies the shared database behavior - tables created in one session
+/// are visible in subsequent sessions connecting to the same database name.
 #[tokio::test]
-async fn test_new_session_clean_state() {
+async fn test_shared_database_across_sessions() {
     let server = start_test_server().await;
 
     // First session creates a table
@@ -262,25 +264,43 @@ async fn test_new_session_clean_state() {
         client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
         let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
-        client.send_query("CREATE TABLE temp_table (id INT)").await.expect("Failed to CREATE");
+        client.send_query("CREATE TABLE shared_table (id INT)").await.expect("Failed to CREATE");
         let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
         client.send_terminate().await.expect("Failed to terminate");
     }
 
-    // New session should have clean state (table shouldn't exist)
+    // New session to SAME database should see the table (shared database)
     {
         let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
         client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
         let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
-        client.send_query("SELECT * FROM temp_table").await.expect("Failed to SELECT");
+        client.send_query("SELECT * FROM shared_table").await.expect("Failed to SELECT");
         let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
         let messages = parse_backend_messages(&data);
-        // Each session has its own database, so temp_table should not exist
+        // Table should exist since sessions share the same database
+        assert!(
+            !messages.iter().any(|m| m.is_error()),
+            "Table from previous session SHOULD exist in shared database"
+        );
+
+        client.send_terminate().await.expect("Failed to terminate");
+    }
+
+    // Session to DIFFERENT database should NOT see the table
+    {
+        let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
+        client.send_startup("testuser", "otherdb").await.expect("Failed to send startup");
+        let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+
+        client.send_query("SELECT * FROM shared_table").await.expect("Failed to SELECT");
+        let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+        let messages = parse_backend_messages(&data);
+        // Table should NOT exist in different database
         assert!(
             messages.iter().any(|m| m.is_error()),
-            "Table from previous session should not exist"
+            "Table should NOT exist in different database"
         );
 
         client.send_terminate().await.expect("Failed to terminate");

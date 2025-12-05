@@ -14,6 +14,7 @@ use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::http::create_http_router;
 use vibesql_server::observability::ObservabilityProvider;
 use vibesql_server::protocol::BackendMessage;
+use vibesql_server::registry::DatabaseRegistry;
 use vibesql_server::subscription::SubscriptionManager;
 use vibesql_storage::Database;
 
@@ -97,7 +98,12 @@ async fn main() -> Result<()> {
     // Track active connections
     let active_connections = Arc::new(AtomicUsize::new(0));
 
-    // Create a shared database and enable change events
+    // Create a shared database registry for wire protocol connections
+    // Each database name maps to a shared Database instance
+    let database_registry = DatabaseRegistry::new();
+
+    // Create a shared database for HTTP API and subscriptions
+    // TODO: Consider integrating HTTP database into the registry
     let mut db = Database::new();
     let change_rx = db.enable_change_events(1024);
     let db = Arc::new(db);
@@ -197,6 +203,9 @@ async fn main() -> Result<()> {
                                 metrics.record_connection();
                             }
 
+                            // Clone the database registry for this connection
+                            let database_registry = database_registry.clone();
+
                             // Spawn a new task for each connection
                             tokio::spawn(async move {
                                 let mut handler = ConnectionHandler::new(
@@ -206,6 +215,7 @@ async fn main() -> Result<()> {
                                     observability,
                                     password_store,
                                     active_connections,
+                                    database_registry,
                                     subscription_manager,
                                 );
                                 if let Err(e) = handler.handle().await {
