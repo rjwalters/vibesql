@@ -183,6 +183,16 @@ mod native {
         shutdown: Arc<Mutex<bool>>,
     }
 
+    impl std::fmt::Debug for PersistenceEngine {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("PersistenceEngine")
+                .field("next_lsn", &*self.next_lsn.lock())
+                .field("shutdown", &*self.shutdown.lock())
+                .field("stats", &*self.stats.lock())
+                .finish_non_exhaustive()
+        }
+    }
+
     impl PersistenceEngine {
         /// Create a new persistence engine writing to a file
         pub fn new<P: AsRef<Path>>(
@@ -562,6 +572,16 @@ mod wasm {
         next_lsn: Arc<Mutex<Lsn>>,
         /// Configuration
         config: PersistenceConfig,
+    }
+
+    impl std::fmt::Debug for PersistenceEngine {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("PersistenceEngine")
+                .field("next_lsn", &*self.next_lsn.lock().unwrap())
+                .field("buffer_len", &self.buffer.lock().unwrap().len())
+                .field("config", &self.config)
+                .finish_non_exhaustive()
+        }
     }
 
     impl PersistenceEngine {

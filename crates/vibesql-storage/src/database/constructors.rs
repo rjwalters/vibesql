@@ -33,6 +33,10 @@ impl Clone for Database {
             change_sender: None,
             // Clone resets last_insert_rowid - each database instance tracks independently
             last_insert_rowid: 0,
+            // Clone does not inherit persistence engine - cloned databases are independent
+            persistence_engine: None,
+            // Preserve table ID counter for consistency
+            next_table_id: self.next_table_id,
         }
     }
 }
@@ -54,6 +58,8 @@ impl Database {
             columnar_cache: Arc::new(ColumnarCache::new(DEFAULT_COLUMNAR_CACHE_BUDGET)),
             change_sender: None,
             last_insert_rowid: 0,
+            persistence_engine: None,
+            next_table_id: 1,
         }
     }
 
@@ -161,6 +167,7 @@ impl Database {
     /// Clears all tables, resets catalog to default state, and clears all indexes and transactions.
     /// Useful for test scenarios where you need to reuse a Database instance.
     /// Preserves database configuration (path, storage backend, memory budgets) across resets.
+    /// Note: Persistence engine is preserved (WAL remains active if enabled).
     pub fn reset(&mut self) {
         self.catalog = vibesql_catalog::Catalog::new();
         self.lifecycle.reset();
@@ -173,6 +180,9 @@ impl Database {
 
         // Clear the columnar cache
         self.columnar_cache.clear();
+
+        // Reset table ID counter
+        self.next_table_id = 1;
     }
 }
 
