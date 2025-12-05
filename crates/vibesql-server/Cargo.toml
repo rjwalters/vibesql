@@ -23,7 +23,7 @@ doc = false  # Binaries don't need documentation
 vibesql-types = { version = "0.1.1", path = "../vibesql-types" }
 vibesql-ast = { version = "0.1.1", path = "../vibesql-ast" }
 vibesql-catalog = { version = "0.1.1", path = "../vibesql-catalog" }
-vibesql-storage = { version = "0.1.1", path = "../vibesql-storage" }
+vibesql-storage = { version = "0.1.1", path = "../vibesql-storage", features = ["storage-all"] }
 vibesql-executor = { version = "0.1.1", path = "../vibesql-executor" }
 vibesql-parser = { version = "0.1.1", path = "../vibesql-parser" }
 
