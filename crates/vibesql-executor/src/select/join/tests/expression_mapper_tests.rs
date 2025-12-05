@@ -1,14 +1,12 @@
 use super::super::expression_mapper::*;
+use std::collections::HashSet;
+use vibesql_ast::{self, Expression};
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::DataType;
-use vibesql_ast::{self, Expression};
-use std::collections::HashSet;
 
 fn create_test_schema(name: &str, columns: Vec<(&str, DataType)>) -> TableSchema {
-    let cols = columns
-        .into_iter()
-        .map(|(n, t)| ColumnSchema::new(n.to_string(), t, false))
-        .collect();
+    let cols =
+        columns.into_iter().map(|(n, t)| ColumnSchema::new(n.to_string(), t, false)).collect();
     TableSchema::new(name.to_string(), cols)
 }
 
@@ -16,10 +14,8 @@ fn create_test_schema(name: &str, columns: Vec<(&str, DataType)>) -> TableSchema
 fn test_single_table_resolution() {
     let mut mapper = ExpressionMapper::new();
     let varchar_100 = DataType::Varchar { max_length: Some(100) };
-    let schema = create_test_schema(
-        "users",
-        vec![("id", DataType::Integer), ("name", varchar_100.clone())],
-    );
+    let schema =
+        create_test_schema("users", vec![("id", DataType::Integer), ("name", varchar_100.clone())]);
     mapper.add_table("users", &schema);
 
     assert_eq!(mapper.resolve_column(Some("users"), "id"), Some(0));
@@ -31,10 +27,8 @@ fn test_single_table_resolution() {
 fn test_single_table_unqualified_column() {
     let mut mapper = ExpressionMapper::new();
     let varchar_100 = DataType::Varchar { max_length: Some(100) };
-    let schema = create_test_schema(
-        "users",
-        vec![("id", DataType::Integer), ("name", varchar_100.clone())],
-    );
+    let schema =
+        create_test_schema("users", vec![("id", DataType::Integer), ("name", varchar_100.clone())]);
     mapper.add_table("users", &schema);
 
     // Unqualified columns should resolve to first match
@@ -86,7 +80,8 @@ fn test_total_columns() {
 
     assert_eq!(mapper.total_columns(), 0);
 
-    let schema1 = create_test_schema("t1", vec![("a", DataType::Integer), ("b", DataType::Integer)]);
+    let schema1 =
+        create_test_schema("t1", vec![("a", DataType::Integer), ("b", DataType::Integer)]);
     mapper.add_table("t1", &schema1);
     assert_eq!(mapper.total_columns(), 2);
 
@@ -99,7 +94,8 @@ fn test_total_columns() {
 fn test_table_offset() {
     let mut mapper = ExpressionMapper::new();
 
-    let schema1 = create_test_schema("t1", vec![("a", DataType::Integer), ("b", DataType::Integer)]);
+    let schema1 =
+        create_test_schema("t1", vec![("a", DataType::Integer), ("b", DataType::Integer)]);
     mapper.add_table("t1", &schema1);
 
     let schema2 = create_test_schema("t2", vec![("c", DataType::Integer)]);
@@ -116,10 +112,7 @@ fn test_expression_analysis_single_table() {
     mapper.add_table("users", &schema);
 
     // Single column reference
-    let expr = Expression::ColumnRef {
-        table: Some("users".to_string()),
-        column: "id".to_string(),
-    };
+    let expr = Expression::ColumnRef { table: Some("users".to_string()), column: "id".to_string() };
 
     let analysis = mapper.analyze_expression(&expr);
     assert!(analysis.all_resolvable);
@@ -130,14 +123,8 @@ fn test_expression_analysis_single_table() {
 #[test]
 fn test_expression_analysis_two_tables() {
     let mut mapper = ExpressionMapper::new();
-    mapper.add_table(
-        "users",
-        &create_test_schema("users", vec![("id", DataType::Integer)]),
-    );
-    mapper.add_table(
-        "orders",
-        &create_test_schema("orders", vec![("user_id", DataType::Integer)]),
-    );
+    mapper.add_table("users", &create_test_schema("users", vec![("id", DataType::Integer)]));
+    mapper.add_table("orders", &create_test_schema("orders", vec![("user_id", DataType::Integer)]));
 
     // Binary operation: users.id = orders.user_id
     let expr = Expression::BinaryOp {
@@ -163,10 +150,7 @@ fn test_expression_analysis_unresolvable() {
     let mapper = ExpressionMapper::new();
 
     // Try to reference non-existent column
-    let expr = Expression::ColumnRef {
-        table: Some("users".to_string()),
-        column: "id".to_string(),
-    };
+    let expr = Expression::ColumnRef { table: Some("users".to_string()), column: "id".to_string() };
 
     let analysis = mapper.analyze_expression(&expr);
     assert!(!analysis.all_resolvable);
@@ -175,18 +159,9 @@ fn test_expression_analysis_unresolvable() {
 #[test]
 fn test_expression_refs_only_tables() {
     let mut mapper = ExpressionMapper::new();
-    mapper.add_table(
-        "users",
-        &create_test_schema("users", vec![("id", DataType::Integer)]),
-    );
-    mapper.add_table(
-        "orders",
-        &create_test_schema("orders", vec![("user_id", DataType::Integer)]),
-    );
-    mapper.add_table(
-        "items",
-        &create_test_schema("items", vec![("order_id", DataType::Integer)]),
-    );
+    mapper.add_table("users", &create_test_schema("users", vec![("id", DataType::Integer)]));
+    mapper.add_table("orders", &create_test_schema("orders", vec![("user_id", DataType::Integer)]));
+    mapper.add_table("items", &create_test_schema("items", vec![("order_id", DataType::Integer)]));
 
     let expr = Expression::BinaryOp {
         op: vibesql_ast::BinaryOperator::Equal,

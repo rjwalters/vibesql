@@ -35,7 +35,11 @@ fn test_simple_join_with_group_by() {
         "CUSTOMERS".to_string(),
         vec![
             ColumnSchema::new("C_ID".to_string(), DataType::Integer, false),
-            ColumnSchema::new("C_NAME".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ColumnSchema::new(
+                "C_NAME".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
         ],
     );
     db.create_table(customers_schema).unwrap();
@@ -43,12 +47,32 @@ fn test_simple_join_with_group_by() {
     eprintln!("[TEST] Tables created");
 
     // Insert minimal data
-    db.insert_row("ORDERS", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100), SqlValue::Real(50.0)])).unwrap();
-    db.insert_row("ORDERS", Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(100), SqlValue::Real(75.0)])).unwrap();
-    db.insert_row("ORDERS", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(200), SqlValue::Real(100.0)])).unwrap();
+    db.insert_row(
+        "ORDERS",
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100), SqlValue::Real(50.0)]),
+    )
+    .unwrap();
+    db.insert_row(
+        "ORDERS",
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(100), SqlValue::Real(75.0)]),
+    )
+    .unwrap();
+    db.insert_row(
+        "ORDERS",
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(200), SqlValue::Real(100.0)]),
+    )
+    .unwrap();
 
-    db.insert_row("CUSTOMERS", Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar("Alice".to_string())])).unwrap();
-    db.insert_row("CUSTOMERS", Row::new(vec![SqlValue::Integer(200), SqlValue::Varchar("Bob".to_string())])).unwrap();
+    db.insert_row(
+        "CUSTOMERS",
+        Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar("Alice".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "CUSTOMERS",
+        Row::new(vec![SqlValue::Integer(200), SqlValue::Varchar("Bob".to_string())]),
+    )
+    .unwrap();
 
     eprintln!("[TEST] Data inserted");
 

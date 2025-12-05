@@ -29,7 +29,7 @@ fn test_procedure_not_found_error_message() {
 
     // Try to call non-existent procedure with similar name
     let call_stmt = CallStmt {
-        procedure_name: "my_proce".to_string(),  // Typo: should be "my_proc"
+        procedure_name: "my_proce".to_string(), // Typo: should be "my_proc"
         arguments: vec![],
     };
 
@@ -94,8 +94,8 @@ fn test_parameter_count_mismatch_error_message() {
 
 #[test]
 fn test_variable_not_found_error_message() {
-    use crate::procedural::ExecutionContext;
     use crate::procedural::executor::execute_procedural_statement;
+    use crate::procedural::ExecutionContext;
 
     let mut db = setup_test_db();
     let mut ctx = ExecutionContext::new();
@@ -107,7 +107,7 @@ fn test_variable_not_found_error_message() {
 
     // Try to reference non-existent variable
     let set_stmt = ProceduralStatement::Set {
-        name: "result".to_string(),  // Variable doesn't exist
+        name: "result".to_string(), // Variable doesn't exist
         value: Box::new(Expression::Literal(SqlValue::Integer(42))),
     };
 

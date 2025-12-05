@@ -1,9 +1,11 @@
 //! Tests for WHEN clause conditional trigger execution
 
-use vibesql_ast::{CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+use super::{count_audit_rows, create_audit_table};
+use crate::{CreateTableExecutor, InsertExecutor};
+use vibesql_ast::{
+    CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
+};
 use vibesql_storage::Database;
-use crate::{InsertExecutor, CreateTableExecutor};
-use super::{create_audit_table, count_audit_rows};
 
 #[test]
 fn test_when_clause_filters_firing() {
@@ -33,7 +35,8 @@ fn test_when_clause_filters_firing() {
         table_constraints: vec![],
         table_options: vec![],
     };
-    CreateTableExecutor::execute(&table_stmt, &mut db).expect("Failed to create transactions table");
+    CreateTableExecutor::execute(&table_stmt, &mut db)
+        .expect("Failed to create transactions table");
     create_audit_table(&mut db);
 
     // Create trigger with WHEN (amount > 100) condition
@@ -49,7 +52,9 @@ fn test_when_clause_filters_firing() {
                 column: "amount".to_string(),
                 table: None,
             }),
-            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100))),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                100,
+            ))),
         })),
         triggered_action: TriggerAction::RawSql(
             "INSERT INTO audit_log (event) VALUES ('High amount')".to_string(),

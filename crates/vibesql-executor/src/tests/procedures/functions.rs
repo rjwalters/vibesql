@@ -42,10 +42,7 @@ fn test_drop_function_simple() {
     advanced_objects::execute_create_function(&create_func, &mut db).unwrap();
     assert!(db.catalog.function_exists("test_func"));
 
-    let drop_func = DropFunctionStmt {
-        function_name: "test_func".to_string(),
-        if_exists: false,
-    };
+    let drop_func = DropFunctionStmt { function_name: "test_func".to_string(), if_exists: false };
 
     let result = advanced_objects::execute_drop_function(&drop_func, &mut db);
     assert!(result.is_ok());

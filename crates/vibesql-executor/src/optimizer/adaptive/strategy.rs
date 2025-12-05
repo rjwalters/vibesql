@@ -115,10 +115,7 @@ pub struct StrategyScore {
 impl StrategyScore {
     /// Create a new strategy score
     pub fn new(reason: StrategyReason) -> Self {
-        Self {
-            reason,
-            details: None,
-        }
+        Self { reason, details: None }
     }
 
     /// Add details to the score
@@ -183,11 +180,7 @@ impl<'a> StrategyContext<'a> {
         cte_results: &'a HashMap<String, CteResult>,
         native_columnar_enabled: bool,
     ) -> Self {
-        Self {
-            stmt,
-            cte_results,
-            native_columnar_enabled,
-        }
+        Self { stmt, cte_results, native_columnar_enabled }
     }
 }
 
@@ -235,15 +228,8 @@ pub fn choose_execution_strategy(ctx: &StrategyContext<'_>) -> ExecutionStrategy
 
     // Check 2: Has CTEs or set operations → Row-oriented (columnar paths don't support these yet)
     if !ctx.cte_results.is_empty() || stmt.set_operation.is_some() {
-        let reason = if !ctx.cte_results.is_empty() {
-            "CTEs"
-        } else {
-            "set operations"
-        };
-        return make_row_oriented(
-            stmt,
-            StrategyReason::UnsupportedFeature(reason.to_string()),
-        );
+        let reason = if !ctx.cte_results.is_empty() { "CTEs" } else { "set operations" };
+        return make_row_oriented(stmt, StrategyReason::UnsupportedFeature(reason.to_string()));
     }
 
     // Check 3: Try NativeColumnar (highest priority columnar path)
@@ -349,7 +335,11 @@ mod tests {
             select_list: vec![SelectItem::Wildcard { alias: None }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: table.to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: table.to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -384,7 +374,11 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: table.to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: table.to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -441,10 +435,7 @@ mod tests {
         let strategy = choose_execution_strategy(&ctx);
 
         // Should choose NativeColumnar when feature is enabled and query has analytical pattern
-        assert!(matches!(
-            strategy,
-            ExecutionStrategy::NativeColumnar { .. }
-        ));
+        assert!(matches!(strategy, ExecutionStrategy::NativeColumnar { .. }));
     }
 
     #[test]
@@ -455,10 +446,7 @@ mod tests {
         let strategy = choose_execution_strategy(&ctx);
 
         // Should choose StandardColumnar when native is disabled but query has analytical pattern
-        assert!(matches!(
-            strategy,
-            ExecutionStrategy::StandardColumnar { .. }
-        ));
+        assert!(matches!(strategy, ExecutionStrategy::StandardColumnar { .. }));
     }
 
     #[test]
@@ -491,10 +479,7 @@ mod tests {
         let ctx = StrategyContext::new(&stmt, &cte_results, true);
         let strategy = choose_execution_strategy(&ctx);
 
-        assert!(matches!(
-            strategy,
-            ExecutionStrategy::NativeColumnar { .. }
-        ));
+        assert!(matches!(strategy, ExecutionStrategy::NativeColumnar { .. }));
     }
 
     #[test]

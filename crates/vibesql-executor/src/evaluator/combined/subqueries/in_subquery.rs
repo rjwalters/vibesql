@@ -10,12 +10,14 @@
 //! critical for queries like TPC-H Q18 where the IN subquery contains GROUP BY/HAVING
 //! and must be evaluated many times against different outer rows.
 
-use crate::evaluator::caching::compute_subquery_hash;
-use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row, compute_select_list_column_count};
 use super::super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator};
+use super::schema_utils::{
+    build_merged_outer_row, build_merged_outer_schema, compute_select_list_column_count,
+};
 use crate::errors::ExecutorError;
-use std::collections::HashSet;
+use crate::evaluator::caching::compute_subquery_hash;
 use std::cell::RefCell;
+use std::collections::HashSet;
 
 /// Cached HashSet entry for IN subquery optimization
 /// Built once from subquery rows, then reused for O(1) membership checks
@@ -179,9 +181,7 @@ impl CombinedExpressionEvaluator<'_> {
                 // Pass CTE context for queries referencing CTEs from outer scope (#3044)
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_cte_and_depth(
-                        database,
-                        cte_ctx,
-                        self.depth,
+                        database, cte_ctx, self.depth,
                     )
                 } else {
                     crate::select::SelectExecutor::new_with_depth(database, self.depth)
@@ -230,28 +230,22 @@ impl CombinedExpressionEvaluator<'_> {
         };
 
         // Pass CTE context for queries referencing CTEs from outer scope (#3044)
-        let select_executor = if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
-            if let Some(cte_ctx) = self.cte_context {
-                crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                    database,
-                    outer_row,
-                    schema,
-                    cte_ctx,
-                    self.depth,
-                )
+        let select_executor =
+            if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
+                if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                        database, outer_row, schema, cte_ctx, self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                        database, outer_row, schema, self.depth,
+                    )
+                }
+            } else if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
             } else {
-                crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                    database,
-                    outer_row,
-                    schema,
-                    self.depth,
-                )
-            }
-        } else if let Some(cte_ctx) = self.cte_context {
-            crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
-        } else {
-            crate::select::SelectExecutor::new(database)
-        };
+                crate::select::SelectExecutor::new(database)
+            };
         let rows = select_executor.execute(subquery)?;
 
         // Validate column count for correlated subqueries
@@ -453,12 +447,10 @@ fn try_index_optimized_in_subquery(
 
     #[allow(clippy::collapsible_match)]
     let column_name = match &subquery.select_list[0] {
-        vibesql_ast::SelectItem::Expression { expr, .. } => {
-            match expr {
-                vibesql_ast::Expression::ColumnRef { column, .. } => column,
-                _ => return Ok(None),
-            }
-        }
+        vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+            vibesql_ast::Expression::ColumnRef { column, .. } => column,
+            _ => return Ok(None),
+        },
         _ => return Ok(None),
     };
 
@@ -521,17 +513,20 @@ fn try_index_optimized_in_subquery(
 
             // Fetch actual column values from matched rows
             let all_rows = table.scan();
-            let column_index = table
-                .schema
-                .columns
-                .iter()
-                .position(|col| col.name == *column_name)
-                .ok_or_else(|| ExecutorError::ColumnNotFound {
-                    column_name: column_name.clone(),
-                    table_name: table_name.clone(),
-                    searched_tables: vec![table_name.clone()],
-                    available_columns: table.schema.columns.iter().map(|c| c.name.clone()).collect(),
-                })?;
+            let column_index =
+                table.schema.columns.iter().position(|col| col.name == *column_name).ok_or_else(
+                    || ExecutorError::ColumnNotFound {
+                        column_name: column_name.clone(),
+                        table_name: table_name.clone(),
+                        searched_tables: vec![table_name.clone()],
+                        available_columns: table
+                            .schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    },
+                )?;
 
             let mut values = std::collections::HashSet::new();
             for row_idx in row_indices {

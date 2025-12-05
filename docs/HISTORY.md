@@ -21,7 +21,7 @@ A timeline of major milestones in the development of VibeSQL.
 
 ### November 12-18, 2025: SQLLogicTest Conformance
 
-- Achieved 100% pass rate on SQLite's test corpus (623/623 files, ~5.9M tests)
+- Achieved 100% pass rate on SQLite's test corpus (623 files, ~5.9M tests)
 - Started at 13.5% (83/613 files), reached 100% through systematic bug fixes
 - Key fixes: BETWEEN NULL handling, aggregate NULL handling, CSE cache isolation
 

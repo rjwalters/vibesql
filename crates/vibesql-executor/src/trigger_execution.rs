@@ -94,16 +94,19 @@ impl<'a> TriggerContext<'a> {
         };
 
         // Find column index in schema
-        let col_idx = self
-            .table_schema
-            .columns
-            .iter()
-            .position(|c| c.name == column)
-            .ok_or_else(|| ExecutorError::ColumnNotFound {
-                column_name: column.to_string(),
-                table_name: self.table_schema.name.clone(),
-                searched_tables: vec![self.table_schema.name.clone()],
-                available_columns: self.table_schema.columns.iter().map(|c| c.name.clone()).collect(),
+        let col_idx =
+            self.table_schema.columns.iter().position(|c| c.name == column).ok_or_else(|| {
+                ExecutorError::ColumnNotFound {
+                    column_name: column.to_string(),
+                    table_name: self.table_schema.name.clone(),
+                    searched_tables: vec![self.table_schema.name.clone()],
+                    available_columns: self
+                        .table_schema
+                        .columns
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect(),
+                }
             })?;
 
         // Return the value
@@ -158,11 +161,15 @@ impl TriggerFirer {
             TriggerEvent::Update(Some(columns)) => {
                 // Check if any of the specified columns changed
                 for col_name in columns {
-                    if let Some(col_idx) = table_schema.columns.iter().position(|c| &c.name == col_name) {
-                        if col_idx < old_row.values.len() && col_idx < new_row.values.len()
-                            && old_row.values[col_idx] != new_row.values[col_idx] {
-                                return true; // At least one monitored column changed
-                            }
+                    if let Some(col_idx) =
+                        table_schema.columns.iter().position(|c| &c.name == col_name)
+                    {
+                        if col_idx < old_row.values.len()
+                            && col_idx < new_row.values.len()
+                            && old_row.values[col_idx] != new_row.values[col_idx]
+                        {
+                            return true; // At least one monitored column changed
+                        }
                     }
                 }
                 false // None of the monitored columns changed
@@ -241,18 +248,17 @@ impl TriggerFirer {
         // Use NEW row as the base row for evaluation (prefer NEW over OLD)
         // The trigger context will handle OLD/NEW pseudo-variable references
         let row = new_row.or(old_row).ok_or_else(|| {
-            ExecutorError::UnsupportedExpression("WHEN condition requires a row context".to_string())
+            ExecutorError::UnsupportedExpression(
+                "WHEN condition requires a row context".to_string(),
+            )
         })?;
 
         // Create trigger context for OLD/NEW pseudo-variable resolution
-        let trigger_context = TriggerContext {
-            old_row,
-            new_row,
-            table_schema: schema,
-        };
+        let trigger_context = TriggerContext { old_row, new_row, table_schema: schema };
 
         // Create evaluator with trigger context
-        let evaluator = crate::ExpressionEvaluator::with_trigger_context(schema, db, &trigger_context);
+        let evaluator =
+            crate::ExpressionEvaluator::with_trigger_context(schema, db, &trigger_context);
         let result = evaluator.eval(when_expr, row)?;
 
         // Convert to boolean
@@ -297,11 +303,7 @@ impl TriggerFirer {
             .clone();
 
         // Create trigger context for OLD/NEW pseudo-variable resolution
-        let trigger_context = TriggerContext {
-            old_row,
-            new_row,
-            table_schema: &schema,
-        };
+        let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema };
 
         // Execute each statement in the trigger body with trigger context
         for statement in statements {
@@ -377,17 +379,29 @@ impl TriggerFirer {
         match statement {
             Statement::Insert(insert_stmt) => {
                 // Execute INSERT with trigger context support
-                crate::insert::execute_insert_with_trigger_context(db, insert_stmt, trigger_context)?;
+                crate::insert::execute_insert_with_trigger_context(
+                    db,
+                    insert_stmt,
+                    trigger_context,
+                )?;
                 Ok(())
             }
             Statement::Update(update_stmt) => {
                 // Execute UPDATE with trigger context support
-                crate::update::execute_update_with_trigger_context(db, update_stmt, trigger_context)?;
+                crate::update::execute_update_with_trigger_context(
+                    db,
+                    update_stmt,
+                    trigger_context,
+                )?;
                 Ok(())
             }
             Statement::Delete(delete_stmt) => {
                 // Execute DELETE with trigger context support
-                crate::delete::execute_delete_with_trigger_context(db, delete_stmt, trigger_context)?;
+                crate::delete::execute_delete_with_trigger_context(
+                    db,
+                    delete_stmt,
+                    trigger_context,
+                )?;
                 Ok(())
             }
             Statement::Select(select_stmt) => {

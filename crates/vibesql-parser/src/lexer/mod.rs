@@ -133,7 +133,8 @@ impl<'a> Lexer<'a> {
             }
             ':' => {
                 // Check if followed by alphabetic character or underscore for named placeholder
-                if self.peek_byte(1).map(|b| b.is_ascii_alphabetic() || b == b'_').unwrap_or(false) {
+                if self.peek_byte(1).map(|b| b.is_ascii_alphabetic() || b == b'_').unwrap_or(false)
+                {
                     self.tokenize_named_placeholder()
                 } else {
                     // Just a colon symbol (could be used in other contexts)

@@ -95,7 +95,10 @@ pub(super) fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<Eq
 }
 
 /// Extract equi-join conditions from an expression
-pub(super) fn extract_equijoin_conditions(expr: &Expression, conditions: &mut Vec<EquiJoinCondition>) {
+pub(super) fn extract_equijoin_conditions(
+    expr: &Expression,
+    conditions: &mut Vec<EquiJoinCondition>,
+) {
     match expr {
         Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             extract_equijoin_conditions(left, conditions);
@@ -105,8 +108,9 @@ pub(super) fn extract_equijoin_conditions(expr: &Expression, conditions: &mut Ve
             // Check if this is col1 = col2 (equi-join)
             if let (
                 Expression::ColumnRef { table: lt, column: lc },
-                Expression::ColumnRef { table: rt, column: rc }
-            ) = (left.as_ref(), right.as_ref()) {
+                Expression::ColumnRef { table: rt, column: rc },
+            ) = (left.as_ref(), right.as_ref())
+            {
                 conditions.push(EquiJoinCondition {
                     left_table: lt.clone(),
                     left_column: lc.clone(),
@@ -168,10 +172,7 @@ fn extract_non_join_predicates_recursive(
 pub(super) fn build_combined_schema(
     batches: &[(String, Option<String>, columnar::ColumnarBatch, vibesql_catalog::TableSchema)],
 ) -> CombinedSchema {
-    let mut combined = CombinedSchema {
-        table_schemas: HashMap::new(),
-        total_columns: 0,
-    };
+    let mut combined = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
 
     for (table_name, alias, _batch, schema) in batches {
         let name = alias.as_ref().unwrap_or(table_name).clone();
@@ -207,7 +208,7 @@ pub(super) fn resolve_join_column_indices(
     // Determine which side refers to joined tables vs new table
     let left_in_joined = cond.left_table.as_deref().map_or_else(
         || is_column_in_tables(&cond.left_column, joined_tables, combined_schema),
-        |t| joined_tables.contains(&t)
+        |t| joined_tables.contains(&t),
     );
 
     let (left_col, right_col) = if left_in_joined {
@@ -217,16 +218,19 @@ pub(super) fn resolve_join_column_indices(
     };
 
     // Find left column index in the current (joined) batch
-    let left_idx = combined_schema.get_column_index(None, left_col)
-        .ok_or_else(|| ExecutorError::ColumnNotFound {
+    let left_idx = combined_schema.get_column_index(None, left_col).ok_or_else(|| {
+        ExecutorError::ColumnNotFound {
             column_name: left_col.clone(),
             table_name: String::new(),
             searched_tables: joined_tables.iter().map(|s| s.to_string()).collect(),
             available_columns: vec![],
-        })?;
+        }
+    })?;
 
     // Find right column index in the new table
-    let right_idx = new_table_schema.columns.iter()
+    let right_idx = new_table_schema
+        .columns
+        .iter()
         .position(|c| c.name.eq_ignore_ascii_case(right_col))
         .ok_or_else(|| ExecutorError::ColumnNotFound {
             column_name: right_col.clone(),

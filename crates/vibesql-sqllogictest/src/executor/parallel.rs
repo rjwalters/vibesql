@@ -2,8 +2,8 @@
 
 use futures::{stream, Future, FutureExt, StreamExt};
 
-use crate::{Connections, MakeConnection};
 use super::core::{AsyncDB, Runner, RunnerLocals};
+use crate::{Connections, MakeConnection};
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Accept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
@@ -71,10 +71,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         }
 
         let tasks = stream::iter(tasks).buffer_unordered(jobs);
-        let errors: Vec<_> = tasks
-            .filter_map(|result| async { result.err() })
-            .collect()
-            .await;
+        let errors: Vec<_> = tasks.filter_map(|result| async { result.err() }).collect().await;
         if errors.is_empty() {
             Ok(())
         } else {

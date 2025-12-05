@@ -47,10 +47,10 @@ impl ParallelSearchConfig {
             .unwrap_or({
                 // Adaptive budget based on table count
                 match num_tables {
-                    0..=3 => 500,   // Simple queries
-                    4..=5 => 1000,  // Typical OLAP
-                    6..=7 => 1500,  // Complex multi-way joins (Q7)
-                    _ => 2000,      // Very complex (Q21)
+                    0..=3 => 500,  // Simple queries
+                    4..=5 => 1000, // Typical OLAP
+                    6..=7 => 1500, // Complex multi-way joins (Q7)
+                    _ => 2000,     // Very complex (Q21)
                 }
             });
 
@@ -62,7 +62,7 @@ impl ParallelSearchConfig {
             max_states_per_layer: 1000,
             pruning_threshold: 1.5,
             time_budget_ms,
-            use_time_budget: true,  // New: prefer time-bounded over table-count
+            use_time_budget: true, // New: prefer time-bounded over table-count
             verbose,
         }
     }

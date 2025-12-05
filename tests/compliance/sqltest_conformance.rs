@@ -5,9 +5,9 @@
 
 use std::fs;
 
+use serde::Deserialize;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-use serde::Deserialize;
 use vibesql_storage::Database;
 
 /// Individual test case from YAML files
@@ -314,8 +314,11 @@ impl SqltestRunner {
                 Ok(true)
             }
             vibesql_ast::Statement::DropTranslation(drop_translation_stmt) => {
-                vibesql_executor::advanced_objects::execute_drop_translation(&drop_translation_stmt, db)
-                    .map_err(|e| format!("Execution error: {:?}", e))?;
+                vibesql_executor::advanced_objects::execute_drop_translation(
+                    &drop_translation_stmt,
+                    db,
+                )
+                .map_err(|e| format!("Execution error: {:?}", e))?;
                 Ok(true)
             }
             vibesql_ast::Statement::CreateView(create_view_stmt) => {

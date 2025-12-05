@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use md5::Digest;
 
-use crate::MakeConnection;
+use super::core::{AsyncDB, Runner, SqlDialect};
 use crate::column_type::ColumnType;
 use crate::error_handling::AnyError;
-use crate::output::{RecordOutput, DBOutput};
+use crate::output::{DBOutput, RecordOutput};
 use crate::parser::*;
-use super::core::{AsyncDB, Runner, SqlDialect};
+use crate::MakeConnection;
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Infer the required SQL dialect from skipif/onlyif conditions.
@@ -54,10 +54,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// 1. Query contains `/` division operator (but not `DIV`)
     /// 2. Expected types include 'R' (Real) in a position with decimal expected values
     /// 3. Expected results contain non-integer decimal values
-    fn needs_mysql_for_division<T: ColumnType>(
-        sql: &str,
-        expected: &QueryExpect<T>,
-    ) -> bool {
+    fn needs_mysql_for_division<T: ColumnType>(sql: &str, expected: &QueryExpect<T>) -> bool {
         // Check if query contains division (/ but not DIV)
         let has_division = sql.contains('/') && !sql.to_uppercase().contains(" DIV ");
         if !has_division {
@@ -102,10 +99,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         let conn = match self.conn.get(Connection::Default).await {
             Ok(conn) => conn,
             Err(e) => {
-                return Some(RecordOutput::Statement {
-                    count: 0,
-                    error: Some(Arc::new(e)),
-                });
+                return Some(RecordOutput::Statement { count: 0, error: Some(Arc::new(e)) });
             }
         };
 
@@ -116,10 +110,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 self.current_dialect = required.clone();
                 None // Success
             }
-            Err(e) => Some(RecordOutput::Statement {
-                count: 0,
-                error: Some(Arc::new(e)),
-            }),
+            Err(e) => Some(RecordOutput::Statement { count: 0, error: Some(Arc::new(e)) }),
         }
     }
 
@@ -158,28 +149,22 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             } => {
                 let sql = match self.may_substitute(sql, true) {
                     Ok(sql) => sql,
-                    Err(error) => {
-                        return RecordOutput::Statement {
-                            count: 0,
-                            error: Some(error),
-                        }
-                    }
+                    Err(error) => return RecordOutput::Statement { count: 0, error: Some(error) },
                 };
 
                 let conn = match self.conn.get(connection.clone()).await {
                     Ok(conn) => conn,
                     Err(e) => {
-                        return RecordOutput::Statement {
-                            count: 0,
-                            error: Some(Arc::new(e)),
-                        }
+                        return RecordOutput::Statement { count: 0, error: Some(Arc::new(e)) }
                     }
                 };
 
                 // Auto-switch dialect if enabled and conditions indicate a dialect requirement
                 if self.auto_switch_dialect {
                     if let Some(required_dialect) = Self::infer_required_dialect(&conditions) {
-                        if let Some(error_output) = self.switch_dialect_if_needed(&required_dialect).await {
+                        if let Some(error_output) =
+                            self.switch_dialect_if_needed(&required_dialect).await
+                        {
                             return error_output;
                         }
                         // Don't skip - we've switched to the required dialect, now execute the test
@@ -195,50 +180,31 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
                     Err(e) => {
-                        return RecordOutput::Statement {
-                            count: 0,
-                            error: Some(Arc::new(e)),
-                        }
+                        return RecordOutput::Statement { count: 0, error: Some(Arc::new(e)) }
                     }
                 };
 
                 let ret = conn.run(&sql).await;
                 match ret {
                     Ok(out) => match out {
-                        DBOutput::Rows { types, rows } => RecordOutput::Query {
-                            types,
-                            rows,
-                            error: None,
-                        },
+                        DBOutput::Rows { types, rows } => {
+                            RecordOutput::Query { types, rows, error: None }
+                        }
                         DBOutput::StatementComplete(count) => {
                             RecordOutput::Statement { count, error: None }
                         }
                     },
-                    Err(e) => RecordOutput::Statement {
-                        count: 0,
-                        error: Some(Arc::new(e)),
-                    },
+                    Err(e) => RecordOutput::Statement { count: 0, error: Some(Arc::new(e)) },
                 }
             }
-            Record::System {
-                conditions,
-                command,
-                loc: _,
-                stdout: expected_stdout,
-                retry: _,
-            } => {
+            Record::System { conditions, command, loc: _, stdout: expected_stdout, retry: _ } => {
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
                 }
 
                 let mut command = match self.may_substitute(command, false) {
                     Ok(command) => command,
-                    Err(error) => {
-                        return RecordOutput::System {
-                            stdout: None,
-                            error: Some(error),
-                        }
-                    }
+                    Err(error) => return RecordOutput::System { stdout: None, error: Some(error) },
                 };
 
                 let is_background = command.trim().ends_with('&');
@@ -264,10 +230,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         Err(e) => Some(Arc::new(e)),
                     };
                     tracing::info!(target:"sqllogictest::system_command", command, "background system command spawned");
-                    return RecordOutput::System {
-                        error,
-                        stdout: None,
-                    };
+                    return RecordOutput::System { error, stdout: None };
                 }
 
                 cmd.stdout(std::process::Stdio::piped());
@@ -286,11 +249,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                 let mut actual_stdout = None;
                 let error: Option<AnyError> = match result {
-                    Ok(std::process::Output {
-                        status,
-                        stdout,
-                        stderr,
-                    }) => {
+                    Ok(std::process::Output { status, stdout, stderr }) => {
                         let stdout = String::from_utf8_lossy(&stdout).to_string();
                         let stderr = String::from_utf8_lossy(&stderr).to_string();
                         tracing::info!(target:"sqllogictest::system_command", command, ?status, stdout, stderr, "system command executed");
@@ -300,11 +259,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             }
                             None
                         } else {
-                            Some(Arc::new(SystemError {
-                                status,
-                                stdout,
-                                stderr,
-                            }))
+                            Some(Arc::new(SystemError { status, stdout, stderr }))
                         }
                     }
                     Err(error) => {
@@ -313,10 +268,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
-                RecordOutput::System {
-                    error,
-                    stdout: actual_stdout,
-                }
+                RecordOutput::System { error, stdout: actual_stdout }
             }
             Record::Query {
                 conditions,
@@ -357,7 +309,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // Auto-switch dialect if enabled and conditions indicate a dialect requirement
                 if self.auto_switch_dialect {
                     if let Some(required_dialect) = Self::infer_required_dialect(&conditions) {
-                        if let Some(error_output) = self.switch_dialect_if_needed(&required_dialect).await {
+                        if let Some(error_output) =
+                            self.switch_dialect_if_needed(&required_dialect).await
+                        {
                             return error_output;
                         }
                         // Don't skip - we've switched to the required dialect, now execute the test
@@ -375,7 +329,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 if self.current_dialect == SqlDialect::SQLite
                     && Self::needs_mysql_for_division(&sql, &expected)
                 {
-                    if let Some(error_output) = self.switch_dialect_if_needed(&SqlDialect::MySQL).await {
+                    if let Some(error_output) =
+                        self.switch_dialect_if_needed(&SqlDialect::MySQL).await
+                    {
                         return error_output;
                     }
                     switched_for_division = true;
@@ -482,11 +438,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
-                let num_values = if value_sort {
-                    rows.len()
-                } else {
-                    rows.len() * types.len()
-                };
+                let num_values = if value_sort { rows.len() } else { rows.len() * types.len() };
 
                 if self.hash_threshold > 0 && num_values > self.hash_threshold {
                     let mut md5 = md5::Md5::new();
@@ -509,14 +461,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 if switched_for_division {
                     // Ignore errors when switching back - we have our result
                     let _ = self.switch_dialect_if_needed(&original_dialect).await;
-                    tracing::debug!("Switched back to {:?} mode after division query", original_dialect);
+                    tracing::debug!(
+                        "Switched back to {:?} mode after division query",
+                        original_dialect
+                    );
                 }
 
-                RecordOutput::Query {
-                    error: None,
-                    types,
-                    rows,
-                }
+                RecordOutput::Query { error: None, types, rows }
             }
             Record::Sleep { duration, .. } => {
                 D::sleep(duration).await;
@@ -548,10 +499,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 let conn = match self.conn.get(Connection::Default).await {
                     Ok(conn) => conn,
                     Err(e) => {
-                        return RecordOutput::Statement {
-                            count: 0,
-                            error: Some(Arc::new(e)),
-                        }
+                        return RecordOutput::Statement { count: 0, error: Some(Arc::new(e)) }
                     }
                 };
 
@@ -566,10 +514,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         };
                         RecordOutput::Nothing
                     }
-                    Err(e) => RecordOutput::Statement {
-                        count: 0,
-                        error: Some(Arc::new(e)),
-                    }
+                    Err(e) => RecordOutput::Statement { count: 0, error: Some(Arc::new(e)) },
                 }
             }
             Record::Include { .. }

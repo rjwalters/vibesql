@@ -16,16 +16,16 @@ pub use service::BlobStorageService;
 pub struct BlobMetadata {
     /// Unique identifier for the blob
     pub id: BlobId,
-    
+
     /// Size in bytes
     pub size: i64,
-    
+
     /// MIME type (e.g., "image/png", "application/json")
     pub content_type: String,
-    
+
     /// When the blob was created
     pub created_at: chrono::DateTime<Utc>,
-    
+
     /// Optional custom metadata (JSON)
     pub metadata: Option<serde_json::Value>,
 }
@@ -33,15 +33,9 @@ pub struct BlobMetadata {
 impl BlobMetadata {
     /// Create new blob metadata
     pub fn new(id: BlobId, size: i64, content_type: String) -> Self {
-        Self {
-            id,
-            size,
-            content_type,
-            created_at: Utc::now(),
-            metadata: None,
-        }
+        Self { id, size, content_type, created_at: Utc::now(), metadata: None }
     }
-    
+
     /// Add custom metadata
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
@@ -54,7 +48,7 @@ impl BlobMetadata {
 pub struct BlobStorageConfig {
     /// Backend type: "fs", "s3", "gcs", "azure", etc.
     pub backend: String,
-    
+
     /// Backend-specific configuration (root path, bucket, etc.)
     pub config: serde_json::Value,
 }

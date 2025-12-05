@@ -43,13 +43,19 @@ impl ReindexExecutor {
                 // First try as an index name
                 if database.index_exists(target) {
                     // It's an index - reindexing is not needed but we pretend to succeed
-                    return Ok(format!("REINDEX completed successfully - index '{}' is optimized", target));
+                    return Ok(format!(
+                        "REINDEX completed successfully - index '{}' is optimized",
+                        target
+                    ));
                 }
 
                 // Try as a table name
                 if database.get_table(target).is_some() {
                     // It's a table - reindex all its indexes
-                    return Ok(format!("REINDEX completed successfully - all indexes for table '{}' are optimized", target));
+                    return Ok(format!(
+                        "REINDEX completed successfully - all indexes for table '{}' are optimized",
+                        target
+                    ));
                 }
 
                 // Not found - error out

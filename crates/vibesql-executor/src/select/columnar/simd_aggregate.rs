@@ -6,10 +6,10 @@
 //!
 //! See `simd_ops.rs` for documentation on why the 4-accumulator pattern is used.
 
-use crate::errors::ExecutorError;
 use super::aggregate::AggregateOp;
 use super::scan::ColumnarScan;
 use super::simd_ops;
+use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
 
 // Re-export optimized SIMD operations from simd_ops module
@@ -106,9 +106,10 @@ pub fn simd_aggregate_i64(
                 }
                 SqlValue::Null => continue,
                 _ => {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        format!("Cannot compute SIMD aggregate on non-integer value: {:?}", value)
-                    ))
+                    return Err(ExecutorError::UnsupportedExpression(format!(
+                        "Cannot compute SIMD aggregate on non-integer value: {:?}",
+                        value
+                    )))
                 }
             };
 
@@ -177,20 +178,16 @@ pub fn simd_aggregate_i64(
             })
         }
         AggregateOp::Avg => Ok(SqlValue::Double(sum as f64 / count as f64)),
-        AggregateOp::Min => {
-            Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
-                SqlValue::Integer(_) => SqlValue::Integer(min),
-                SqlValue::Smallint(_) => SqlValue::Smallint(min as i16),
-                _ => SqlValue::Bigint(min),
-            })
-        }
-        AggregateOp::Max => {
-            Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
-                SqlValue::Integer(_) => SqlValue::Integer(max),
-                SqlValue::Smallint(_) => SqlValue::Smallint(max as i16),
-                _ => SqlValue::Bigint(max),
-            })
-        }
+        AggregateOp::Min => Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
+            SqlValue::Integer(_) => SqlValue::Integer(min),
+            SqlValue::Smallint(_) => SqlValue::Smallint(min as i16),
+            _ => SqlValue::Bigint(min),
+        }),
+        AggregateOp::Max => Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
+            SqlValue::Integer(_) => SqlValue::Integer(max),
+            SqlValue::Smallint(_) => SqlValue::Smallint(max as i16),
+            _ => SqlValue::Bigint(max),
+        }),
         AggregateOp::Count => Ok(SqlValue::Integer(count)),
     }
 }
@@ -244,9 +241,10 @@ pub fn simd_aggregate_f64(
                 SqlValue::Smallint(v) => *v as f64,
                 SqlValue::Null => continue,
                 _ => {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        format!("Cannot compute SIMD aggregate on non-numeric value: {:?}", value)
-                    ))
+                    return Err(ExecutorError::UnsupportedExpression(format!(
+                        "Cannot compute SIMD aggregate on non-numeric value: {:?}",
+                        value
+                    )))
                 }
             };
 
@@ -337,7 +335,7 @@ pub fn can_use_simd_for_column(scan: &ColumnarScan, column_idx: usize) -> Option
                 SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => Some(true),
                 SqlValue::Double(_) | SqlValue::Float(_) | SqlValue::Numeric(_) => Some(false),
                 SqlValue::Null => continue, // Skip NULLs
-                _ => None, // Not SIMD-compatible
+                _ => None,                  // Not SIMD-compatible
             };
         }
     }
@@ -510,10 +508,8 @@ mod tests {
 
     #[test]
     fn test_simd_aggregate_empty_result() {
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(10)]),
-            Row::new(vec![SqlValue::Integer(20)]),
-        ];
+        let rows =
+            vec![Row::new(vec![SqlValue::Integer(10)]), Row::new(vec![SqlValue::Integer(20)])];
         let scan = ColumnarScan::new(&rows);
         let filter = vec![false, false]; // Filter everything out
 
@@ -527,18 +523,14 @@ mod tests {
     #[test]
     fn test_can_use_simd_for_column() {
         // Integer column
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(10)]),
-            Row::new(vec![SqlValue::Integer(20)]),
-        ];
+        let rows =
+            vec![Row::new(vec![SqlValue::Integer(10)]), Row::new(vec![SqlValue::Integer(20)])];
         let scan = ColumnarScan::new(&rows);
         assert_eq!(can_use_simd_for_column(&scan, 0), Some(true));
 
         // Float column
-        let rows = vec![
-            Row::new(vec![SqlValue::Double(1.5)]),
-            Row::new(vec![SqlValue::Double(2.5)]),
-        ];
+        let rows =
+            vec![Row::new(vec![SqlValue::Double(1.5)]), Row::new(vec![SqlValue::Double(2.5)])];
         let scan = ColumnarScan::new(&rows);
         assert_eq!(can_use_simd_for_column(&scan, 0), Some(false));
 
@@ -551,10 +543,7 @@ mod tests {
         assert_eq!(can_use_simd_for_column(&scan, 0), None);
 
         // All NULL column
-        let rows = vec![
-            Row::new(vec![SqlValue::Null]),
-            Row::new(vec![SqlValue::Null]),
-        ];
+        let rows = vec![Row::new(vec![SqlValue::Null]), Row::new(vec![SqlValue::Null])];
         let scan = ColumnarScan::new(&rows);
         assert_eq!(can_use_simd_for_column(&scan, 0), None);
     }

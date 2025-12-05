@@ -17,17 +17,18 @@ pub const INSERT_SQL: &str = "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?,
 
 /// Insert statement for SQLite/DuckDB (numbered parameters)
 #[cfg(feature = "benchmark-comparison")]
-pub const INSERT_SQL_NUMBERED: &str = "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)";
+pub const INSERT_SQL_NUMBERED: &str =
+    "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)";
 use vibesql_storage::Database as VibeDB;
 
 #[cfg(feature = "benchmark-comparison")]
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
-use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "benchmark-comparison")]
 use mysql::prelude::*;
 #[cfg(feature = "benchmark-comparison")]
 use mysql::{Pool, PooledConn};
+#[cfg(feature = "benchmark-comparison")]
+use rusqlite::Connection as SqliteConn;
 
 // =============================================================================
 // Database Loaders
@@ -230,9 +231,8 @@ fn create_sbtest_schema_sqlite(conn: &SqliteConn) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_sbtest_sqlite(conn: &SqliteConn, data: &mut SysbenchData) {
-    let mut stmt = conn
-        .prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)")
-        .unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)").unwrap();
 
     while let Some((id, k, c, padding)) = data.next_row() {
         stmt.execute(rusqlite::params![id, k, c, padding]).unwrap();
@@ -261,9 +261,8 @@ fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_sbtest_duckdb(conn: &DuckDBConn, data: &mut SysbenchData) {
-    let mut stmt = conn
-        .prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)")
-        .unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)").unwrap();
 
     while let Some((id, k, c, padding)) = data.next_row() {
         stmt.execute(duckdb::params![id, k, c, padding]).unwrap();

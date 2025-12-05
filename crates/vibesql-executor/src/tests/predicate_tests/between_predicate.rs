@@ -13,11 +13,16 @@ fn test_between_with_null_expr() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, true)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            true,
+        )],
     );
     db.create_table(schema).unwrap();
     db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Null])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -27,9 +32,16 @@ fn test_between_with_null_expr() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             negated: false,
@@ -41,7 +53,8 @@ fn test_between_with_null_expr() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // NULL doesn't match, only 5
@@ -53,12 +66,19 @@ fn test_not_between() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(25)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(25)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -68,9 +88,16 @@ fn test_not_between() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: true,
@@ -82,7 +109,8 @@ fn test_not_between() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2); // 5 and 25
@@ -93,12 +121,19 @@ fn test_between_boundary_values() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(10)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(20)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(10)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(20)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -108,9 +143,16 @@ fn test_between_boundary_values() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: false,
@@ -122,7 +164,8 @@ fn test_between_boundary_values() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 3); // All values including boundaries
@@ -135,11 +178,17 @@ fn test_not_between_with_null_bound() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -152,9 +201,16 @@ fn test_not_between_with_null_bound() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             negated: true,
@@ -166,7 +222,8 @@ fn test_not_between_with_null_bound() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // Three-valued logic: 5 < 10 = TRUE, TRUE OR NULL = TRUE
@@ -180,11 +237,17 @@ fn test_between_with_null_bound() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -195,9 +258,16 @@ fn test_between_with_null_bound() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: false,
@@ -209,7 +279,8 @@ fn test_between_with_null_bound() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 0); // SQL standard: NULL (excludes all rows)
@@ -222,12 +293,19 @@ fn test_not_between_with_null_lower_bound() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(25)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(25)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -240,9 +318,16 @@ fn test_not_between_with_null_lower_bound() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: true,
@@ -254,7 +339,8 @@ fn test_not_between_with_null_lower_bound() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // Three-valued logic: 25 > 20 = TRUE, NULL OR TRUE = TRUE
@@ -270,12 +356,19 @@ fn test_not_negative_literal_between_null_bounds() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("col0".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "col0".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(97)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(75)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(61)])).unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(97)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(75)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(61)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -286,11 +379,17 @@ fn test_not_negative_literal_between_null_bounds() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::UnaryOp {
                 op: vibesql_ast::UnaryOperator::Minus,
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(78))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    78,
+                ))),
             }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(25))),
@@ -303,7 +402,8 @@ fn test_not_negative_literal_between_null_bounds() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 0); // Should return 0 rows

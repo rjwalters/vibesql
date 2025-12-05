@@ -13,7 +13,8 @@ fn test_max_constant_without_from() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -46,7 +47,8 @@ fn test_count_star_without_from() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -79,7 +81,8 @@ fn test_aggregate_in_expression_without_from() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -87,10 +90,14 @@ fn test_aggregate_in_expression_without_from() {
                 left: Box::new(vibesql_ast::Expression::AggregateFunction {
                     name: "MAX".to_string(),
                     distinct: false,
-                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))],
+                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                        5,
+                    ))],
                 }),
                 op: vibesql_ast::BinaryOperator::Plus,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(10),
+                )),
             },
             alias: None,
         }],
@@ -116,7 +123,8 @@ fn test_count_distinct_without_from() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -149,7 +157,8 @@ fn test_multiple_aggregates_without_from() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
@@ -157,7 +166,9 @@ fn test_multiple_aggregates_without_from() {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "MAX".to_string(),
                     distinct: false,
-                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))],
+                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                        5,
+                    ))],
                 },
                 alias: None,
             },
@@ -165,7 +176,9 @@ fn test_multiple_aggregates_without_from() {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "MIN".to_string(),
                     distinct: false,
-                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))],
+                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                        10,
+                    ))],
                 },
                 alias: None,
             },
@@ -202,7 +215,8 @@ fn test_sum_avg_without_from() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
@@ -210,7 +224,9 @@ fn test_sum_avg_without_from() {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "SUM".to_string(),
                     distinct: false,
-                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100))],
+                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                        100,
+                    ))],
                 },
                 alias: None,
             },
@@ -218,7 +234,9 @@ fn test_sum_avg_without_from() {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "AVG".to_string(),
                     distinct: false,
-                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(50))],
+                    args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                        50,
+                    ))],
                 },
                 alias: None,
             },

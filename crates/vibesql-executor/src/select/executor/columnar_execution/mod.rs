@@ -61,8 +61,8 @@ use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     optimizer::adaptive::{choose_execution_model, ExecutionModel},
-    select::{columnar, cte::CteResult},
     schema::CombinedSchema,
+    select::{columnar, cte::CteResult},
 };
 use vibesql_ast::Expression;
 
@@ -107,7 +107,9 @@ impl SelectExecutor<'_> {
                 return Ok(None);
             }
             ExecutionModel::Columnar => {
-                log::debug!("  Columnar execution: Query eligible (adaptive execution selected columnar)");
+                log::debug!(
+                    "  Columnar execution: Query eligible (adaptive execution selected columnar)"
+                );
                 #[cfg(feature = "profile-q6")]
                 eprintln!("[PROFILE-Q6]   ✓ Adaptive execution selected COLUMNAR model");
                 // Continue with columnar execution
@@ -189,12 +191,12 @@ impl SelectExecutor<'_> {
                 #[cfg(feature = "profile-q6")]
                 eprintln!("[PROFILE-Q6]   ✓ Columnar execution succeeded");
                 result.map(Some)
-            },
+            }
             None => {
                 #[cfg(feature = "profile-q6")]
                 eprintln!("[PROFILE-Q6]   Reason: execute_columnar returned None (predicates or aggregates too complex)");
                 Ok(None)
-            }, // Fall back to regular execution
+            } // Fall back to regular execution
         }
     }
 
@@ -323,14 +325,18 @@ impl SelectExecutor<'_> {
         let batch = columnar::ColumnarBatch::from_storage_columnar(&columnar_arc)?;
 
         // Extract predicates from WHERE clause
-        let predicates = stmt.where_clause.as_ref()
+        let predicates = stmt
+            .where_clause
+            .as_ref()
             .and_then(|where_expr| columnar::extract_column_predicates(where_expr, &schema))
             .unwrap_or_default();
 
         // Extract select expressions
         // For GROUP BY queries, filter to only aggregate functions (GROUP BY columns are handled separately)
         let has_group_by = stmt.group_by.is_some();
-        let select_exprs: Vec<_> = stmt.select_list.iter()
+        let select_exprs: Vec<_> = stmt
+            .select_list
+            .iter()
             .filter_map(|item| match item {
                 vibesql_ast::SelectItem::Expression { expr, .. } => {
                     // For GROUP BY queries, skip non-aggregate expressions (they're GROUP BY columns)
@@ -377,10 +383,7 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         {
             let exec_time = exec_start.elapsed();
-            eprintln!(
-                "[PROFILE-Q6] Native columnar execution: {:?}",
-                exec_time
-            );
+            eprintln!("[PROFILE-Q6] Native columnar execution: {:?}", exec_time);
         }
 
         log::info!(

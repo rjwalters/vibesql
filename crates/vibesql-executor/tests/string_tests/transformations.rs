@@ -53,7 +53,9 @@ fn test_concat_single_arg() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "CONCAT".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -111,9 +113,13 @@ fn test_concat_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "CONCAT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "hello".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(" ".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("world".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "world".to_string(),
+            )),
         ],
         character_unit: None,
     };
@@ -147,7 +153,9 @@ fn test_replace_multiple_occurrences() {
     let expr = vibesql_ast::Expression::Function {
         name: "REPLACE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "hello hello".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("ll".to_string())),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("rr".to_string())),
         ],
@@ -243,7 +251,9 @@ fn test_replace_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "REPLACE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "hello".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("l".to_string())),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("r".to_string())),
         ],
@@ -274,7 +284,9 @@ fn test_reverse_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "REVERSE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -286,7 +298,9 @@ fn test_reverse_single_char() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "REVERSE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("a".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "a".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -298,7 +312,9 @@ fn test_reverse_basic() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "REVERSE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -310,7 +326,9 @@ fn test_reverse_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "REVERSE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("café".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "café".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -349,7 +367,9 @@ fn test_reverse_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "REVERSE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("test".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+            "test".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -365,8 +385,12 @@ fn test_trim_null_removal_char() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Trim {
         position: Some(vibesql_ast::TrimPosition::Both),
-        removal_char: Some(Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null))),
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))),
+        removal_char: Some(Box::new(vibesql_ast::Expression::Literal(
+            vibesql_types::SqlValue::Null,
+        ))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Null);
@@ -389,9 +413,9 @@ fn test_trim_custom_char_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Trim {
         position: Some(vibesql_ast::TrimPosition::Both),
-        removal_char: Some(Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "x".to_string(),
-        )))),
+        removal_char: Some(Box::new(vibesql_ast::Expression::Literal(
+            vibesql_types::SqlValue::Varchar("x".to_string()),
+        ))),
         string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             "xxxhelloxxx".to_string(),
         ))),

@@ -10,7 +10,10 @@ use crate::StorageError;
 /// Serialize a DataType to bytes
 ///
 /// Returns the number of bytes written
-pub(crate) fn serialize_datatype(data_type: &DataType, buffer: &mut [u8]) -> Result<usize, StorageError> {
+pub(crate) fn serialize_datatype(
+    data_type: &DataType,
+    buffer: &mut [u8],
+) -> Result<usize, StorageError> {
     let offset = 0;
 
     let bytes_written = match data_type {
@@ -190,7 +193,8 @@ pub(crate) fn deserialize_datatype(buffer: &[u8]) -> Result<(DataType, usize), S
         18 => {
             let start_field = u8_to_interval_field(buffer[offset]);
             let end_field_u8 = buffer[offset + 1];
-            let end_field = if end_field_u8 == 255 { None } else { Some(u8_to_interval_field(end_field_u8)) };
+            let end_field =
+                if end_field_u8 == 255 { None } else { Some(u8_to_interval_field(end_field_u8)) };
             offset += 2;
             DataType::Interval { start_field, end_field }
         }

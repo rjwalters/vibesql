@@ -25,7 +25,11 @@ pub(super) fn collect_table_names(from: &FromClause, names: &mut Vec<String>) {
 }
 
 /// Check if a table name conflicts with existing tables in the FROM clause
-pub(super) fn is_self_join(from: &FromClause, table_name: &str, table_alias: &Option<String>) -> bool {
+pub(super) fn is_self_join(
+    from: &FromClause,
+    table_name: &str,
+    table_alias: &Option<String>,
+) -> bool {
     let mut existing_names = Vec::new();
     collect_table_names(from, &mut existing_names);
 
@@ -33,7 +37,9 @@ pub(super) fn is_self_join(from: &FromClause, table_name: &str, table_alias: &Op
     let effective_name = table_alias.as_deref().unwrap_or(table_name);
 
     // Check if this name conflicts with any existing table
-    existing_names.iter().any(|n| n.eq_ignore_ascii_case(effective_name) || n.eq_ignore_ascii_case(table_name))
+    existing_names
+        .iter()
+        .any(|n| n.eq_ignore_ascii_case(effective_name) || n.eq_ignore_ascii_case(table_name))
 }
 
 /// Qualify an unqualified column reference with a table name
@@ -42,10 +48,7 @@ pub(super) fn qualify_outer_column_refs(expr: &Expression, outer_table: &str) ->
     match expr {
         Expression::ColumnRef { table: None, column } => {
             // Unqualified column - add outer table qualifier
-            Expression::ColumnRef {
-                table: Some(outer_table.to_string()),
-                column: column.clone(),
-            }
+            Expression::ColumnRef { table: Some(outer_table.to_string()), column: column.clone() }
         }
         Expression::ColumnRef { table: Some(_), .. } => {
             // Already qualified - leave unchanged
@@ -104,7 +107,11 @@ pub(super) fn qualify_outer_column_refs(expr: &Expression, outer_table: &str) ->
 }
 
 /// Rewrite column references in an expression to use a new table qualifier
-pub(super) fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str, new_alias: &str) -> Expression {
+pub(super) fn rewrite_column_refs_with_alias(
+    expr: &Expression,
+    old_table: &str,
+    new_alias: &str,
+) -> Expression {
     match expr {
         Expression::ColumnRef { table, column } => {
             // Rewrite if:
@@ -116,10 +123,7 @@ pub(super) fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str,
             };
 
             if should_rewrite {
-                Expression::ColumnRef {
-                    table: Some(new_alias.to_string()),
-                    column: column.clone(),
-                }
+                Expression::ColumnRef { table: Some(new_alias.to_string()), column: column.clone() }
             } else {
                 expr.clone()
             }
@@ -146,7 +150,10 @@ pub(super) fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str,
         },
         Expression::InList { expr: inner, values, negated } => Expression::InList {
             expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
-            values: values.iter().map(|v| rewrite_column_refs_with_alias(v, old_table, new_alias)).collect(),
+            values: values
+                .iter()
+                .map(|v| rewrite_column_refs_with_alias(v, old_table, new_alias))
+                .collect(),
             negated: *negated,
         },
         Expression::Like { expr: inner, pattern, negated } => Expression::Like {
@@ -156,20 +163,30 @@ pub(super) fn rewrite_column_refs_with_alias(expr: &Expression, old_table: &str,
         },
         Expression::Function { name, args, character_unit } => Expression::Function {
             name: name.clone(),
-            args: args.iter().map(|a| rewrite_column_refs_with_alias(a, old_table, new_alias)).collect(),
+            args: args
+                .iter()
+                .map(|a| rewrite_column_refs_with_alias(a, old_table, new_alias))
+                .collect(),
             character_unit: character_unit.clone(),
         },
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
-            operand: operand.as_ref().map(|o| Box::new(rewrite_column_refs_with_alias(o, old_table, new_alias))),
-            when_clauses: when_clauses.iter().map(|case_when| {
-                vibesql_ast::CaseWhen {
-                    conditions: case_when.conditions.iter()
+            operand: operand
+                .as_ref()
+                .map(|o| Box::new(rewrite_column_refs_with_alias(o, old_table, new_alias))),
+            when_clauses: when_clauses
+                .iter()
+                .map(|case_when| vibesql_ast::CaseWhen {
+                    conditions: case_when
+                        .conditions
+                        .iter()
                         .map(|c| rewrite_column_refs_with_alias(c, old_table, new_alias))
                         .collect(),
                     result: rewrite_column_refs_with_alias(&case_when.result, old_table, new_alias),
-                }
-            }).collect(),
-            else_result: else_result.as_ref().map(|e| Box::new(rewrite_column_refs_with_alias(e, old_table, new_alias))),
+                })
+                .collect(),
+            else_result: else_result
+                .as_ref()
+                .map(|e| Box::new(rewrite_column_refs_with_alias(e, old_table, new_alias))),
         },
         Expression::Cast { expr: inner, data_type } => Expression::Cast {
             expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),

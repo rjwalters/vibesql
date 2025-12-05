@@ -10,37 +10,62 @@ fn test_select_with_where() {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "age".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
     db.insert_row(
         "users",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Integer(25)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(25),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2), vibesql_types::SqlValue::Integer(17)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(17),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3), vibesql_types::SqlValue::Integer(30)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Integer(30),
+        ]),
     )
     .unwrap();
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "users".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "age".to_string(),
+            }),
             op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(18))),
         }),
@@ -63,9 +88,21 @@ fn test_select_with_and_condition() {
     let schema = vibesql_catalog::TableSchema::new(
         "products".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("price".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("stock".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "price".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "stock".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -101,11 +138,16 @@ fn test_select_with_and_condition() {
     // WHERE price > 50 AND stock > 0
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "products".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -113,7 +155,9 @@ fn test_select_with_and_condition() {
                     column: "price".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(50))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(50),
+                )),
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -122,7 +166,9 @@ fn test_select_with_and_condition() {
                     column: "stock".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(0),
+                )),
             }),
         }),
         group_by: None,
@@ -144,7 +190,11 @@ fn test_select_with_or_condition() {
     let schema = vibesql_catalog::TableSchema::new(
         "items".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "category".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -182,11 +232,16 @@ fn test_select_with_or_condition() {
     // WHERE category = 'electronics' OR category = 'books'
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "items".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "items".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -194,9 +249,9 @@ fn test_select_with_or_condition() {
                     column: "category".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "electronics".to_string(),
-                ))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("electronics".to_string()),
+                )),
             }),
             op: vibesql_ast::BinaryOperator::Or,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -205,9 +260,9 @@ fn test_select_with_or_condition() {
                     column: "category".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "books".to_string(),
-                ))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("books".to_string()),
+                )),
             }),
         }),
         group_by: None,
@@ -227,24 +282,41 @@ fn test_select_with_null_in_where() {
     let schema = vibesql_catalog::TableSchema::new(
         "data".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "value".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
     db.insert_row(
         "data",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Integer(100)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(100),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "data",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2), vibesql_types::SqlValue::Null]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Null,
+        ]),
     )
     .unwrap();
     db.insert_row(
         "data",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3), vibesql_types::SqlValue::Integer(200)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Integer(200),
+        ]),
     )
     .unwrap();
 
@@ -252,13 +324,21 @@ fn test_select_with_null_in_where() {
     // WHERE value > 50 - should filter out NULL (NULL comparisons are unknown)
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "data".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "data".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "value".to_string() }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "value".to_string(),
+            }),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(50))),
         }),

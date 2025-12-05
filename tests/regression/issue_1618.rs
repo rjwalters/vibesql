@@ -6,9 +6,9 @@
 //! 3. Critical pattern: empty table → create index → INSERT...SELECT → query
 
 use std::cell::RefCell;
-use vibesql_storage::Database;
-use vibesql_parser::Parser;
 use vibesql_executor::{InsertExecutor, SelectExecutor};
+use vibesql_parser::Parser;
+use vibesql_storage::Database;
 
 thread_local! {
     static EXECUTOR_TEST_POOL: RefCell<Option<Database>> = RefCell::new(None);
@@ -43,8 +43,7 @@ fn return_to_pool(db: Database) {
 
 /// Execute SQL using the executor layer (like SQLLogicTest does)
 fn execute_sql(db: &mut Database, sql: &str) -> Result<usize, String> {
-    let stmt = Parser::parse_sql(sql)
-        .map_err(|e| format!("Parse error: {:?}", e))?;
+    let stmt = Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create_stmt) => {
@@ -64,8 +63,8 @@ fn execute_sql(db: &mut Database, sql: &str) -> Result<usize, String> {
         }
         vibesql_ast::Statement::Select(select_stmt) => {
             let executor = SelectExecutor::new(db);
-            let rows = executor.execute(&select_stmt)
-                .map_err(|e| format!("Select error: {:?}", e))?;
+            let rows =
+                executor.execute(&select_stmt).map_err(|e| format!("Select error: {:?}", e))?;
             Ok(rows.len())
         }
         _ => Err(format!("Unsupported statement type")),

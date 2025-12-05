@@ -40,10 +40,13 @@ impl super::super::Catalog {
                         // Check if column type is a UserDefined type that matches this domain
                         // In the future, when domains are properly integrated, we might have
                         // a DataType::Domain variant or track domain usage separately
-                        if let vibesql_types::DataType::UserDefined { type_name } = &column.data_type {
+                        if let vibesql_types::DataType::UserDefined { type_name } =
+                            &column.data_type
+                        {
                             // Check if this user-defined type is actually a domain
                             if self.domains.contains_key(type_name) && type_name == name {
-                                columns_using_domain.push((table_name.clone(), column.name.clone()));
+                                columns_using_domain
+                                    .push((table_name.clone(), column.name.clone()));
                             }
                         }
                     }

@@ -9,7 +9,6 @@ mod cursor;
 mod delete;
 mod domain;
 mod drop;
-mod truncate;
 mod expressions;
 mod grant;
 mod helpers;
@@ -24,6 +23,7 @@ mod select;
 mod table_options;
 mod transaction;
 mod trigger;
+mod truncate;
 mod update;
 mod view;
 
@@ -128,13 +128,17 @@ impl Parser {
             }
             Token::Keyword(Keyword::Create) => {
                 // Check for CREATE OR REPLACE VIEW and CREATE OR REPLACE TEMP/TEMPORARY VIEW
-                if self.peek_next_keyword(Keyword::Or) && matches!(self.peek_at_offset(2), Token::Keyword(Keyword::Replace)) {
+                if self.peek_next_keyword(Keyword::Or)
+                    && matches!(self.peek_at_offset(2), Token::Keyword(Keyword::Replace))
+                {
                     // Could be CREATE OR REPLACE VIEW or CREATE OR REPLACE TEMP/TEMPORARY VIEW
                     if matches!(self.peek_at_offset(3), Token::Keyword(Keyword::View))
                         || matches!(self.peek_at_offset(3), Token::Keyword(Keyword::Temp))
                         || matches!(self.peek_at_offset(3), Token::Keyword(Keyword::Temporary))
                     {
-                        return Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?));
+                        return Ok(vibesql_ast::Statement::CreateView(
+                            self.parse_create_view_statement()?,
+                        ));
                     }
                 }
                 if self.peek_next_keyword(Keyword::Table) {
@@ -146,11 +150,15 @@ impl Parser {
                 } else if self.peek_next_keyword(Keyword::Domain) {
                     Ok(vibesql_ast::Statement::CreateDomain(self.parse_create_domain_statement()?))
                 } else if self.peek_next_keyword(Keyword::Sequence) {
-                    Ok(vibesql_ast::Statement::CreateSequence(self.parse_create_sequence_statement()?))
+                    Ok(vibesql_ast::Statement::CreateSequence(
+                        self.parse_create_sequence_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Type) {
                     Ok(vibesql_ast::Statement::CreateType(self.parse_create_type_statement()?))
                 } else if self.peek_next_keyword(Keyword::Collation) {
-                    Ok(vibesql_ast::Statement::CreateCollation(self.parse_create_collation_statement()?))
+                    Ok(vibesql_ast::Statement::CreateCollation(
+                        self.parse_create_collation_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Character) {
                     Ok(vibesql_ast::Statement::CreateCharacterSet(
                         self.parse_create_character_set_statement()?,
@@ -161,11 +169,15 @@ impl Parser {
                     ))
                 } else if self.peek_next_keyword(Keyword::View) {
                     Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
-                } else if self.peek_next_keyword(Keyword::Temp) || self.peek_next_keyword(Keyword::Temporary) {
+                } else if self.peek_next_keyword(Keyword::Temp)
+                    || self.peek_next_keyword(Keyword::Temporary)
+                {
                     // CREATE TEMP VIEW or CREATE TEMPORARY VIEW
                     Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
                 } else if self.peek_next_keyword(Keyword::Trigger) {
-                    Ok(vibesql_ast::Statement::CreateTrigger(self.parse_create_trigger_statement()?))
+                    Ok(vibesql_ast::Statement::CreateTrigger(
+                        self.parse_create_trigger_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Index)
                     || self.peek_next_keyword(Keyword::Unique)
                     || self.peek_next_keyword(Keyword::Fulltext)
@@ -173,11 +185,17 @@ impl Parser {
                 {
                     Ok(vibesql_ast::Statement::CreateIndex(self.parse_create_index_statement()?))
                 } else if self.peek_next_keyword(Keyword::Assertion) {
-                    Ok(vibesql_ast::Statement::CreateAssertion(self.parse_create_assertion_statement()?))
+                    Ok(vibesql_ast::Statement::CreateAssertion(
+                        self.parse_create_assertion_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Procedure) {
-                    Ok(vibesql_ast::Statement::CreateProcedure(self.parse_create_procedure_statement()?))
+                    Ok(vibesql_ast::Statement::CreateProcedure(
+                        self.parse_create_procedure_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Function) {
-                    Ok(vibesql_ast::Statement::CreateFunction(self.parse_create_function_statement()?))
+                    Ok(vibesql_ast::Statement::CreateFunction(
+                        self.parse_create_function_statement()?,
+                    ))
                 } else {
                     Err(ParseError {
                         message:
@@ -200,11 +218,17 @@ impl Parser {
                 } else if self.peek_next_keyword(Keyword::Type) {
                     Ok(vibesql_ast::Statement::DropType(self.parse_drop_type_statement()?))
                 } else if self.peek_next_keyword(Keyword::Collation) {
-                    Ok(vibesql_ast::Statement::DropCollation(self.parse_drop_collation_statement()?))
+                    Ok(vibesql_ast::Statement::DropCollation(
+                        self.parse_drop_collation_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Character) {
-                    Ok(vibesql_ast::Statement::DropCharacterSet(self.parse_drop_character_set_statement()?))
+                    Ok(vibesql_ast::Statement::DropCharacterSet(
+                        self.parse_drop_character_set_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Translation) {
-                    Ok(vibesql_ast::Statement::DropTranslation(self.parse_drop_translation_statement()?))
+                    Ok(vibesql_ast::Statement::DropTranslation(
+                        self.parse_drop_translation_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::View) {
                     Ok(vibesql_ast::Statement::DropView(self.parse_drop_view_statement()?))
                 } else if self.peek_next_keyword(Keyword::Trigger) {
@@ -212,9 +236,13 @@ impl Parser {
                 } else if self.peek_next_keyword(Keyword::Index) {
                     Ok(vibesql_ast::Statement::DropIndex(self.parse_drop_index_statement()?))
                 } else if self.peek_next_keyword(Keyword::Assertion) {
-                    Ok(vibesql_ast::Statement::DropAssertion(self.parse_drop_assertion_statement()?))
+                    Ok(vibesql_ast::Statement::DropAssertion(
+                        self.parse_drop_assertion_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Procedure) {
-                    Ok(vibesql_ast::Statement::DropProcedure(self.parse_drop_procedure_statement()?))
+                    Ok(vibesql_ast::Statement::DropProcedure(
+                        self.parse_drop_procedure_statement()?,
+                    ))
                 } else if self.peek_next_keyword(Keyword::Function) {
                     Ok(vibesql_ast::Statement::DropFunction(self.parse_drop_function_statement()?))
                 } else {
@@ -383,7 +411,9 @@ impl Parser {
     }
 
     /// Parse ALTER TABLE statement
-    pub fn parse_alter_table_statement(&mut self) -> Result<vibesql_ast::AlterTableStmt, ParseError> {
+    pub fn parse_alter_table_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::AlterTableStmt, ParseError> {
         alter::parse_alter_table(self)
     }
 
@@ -407,12 +437,16 @@ impl Parser {
     }
 
     /// Parse CREATE SCHEMA statement
-    pub fn parse_create_schema_statement(&mut self) -> Result<vibesql_ast::CreateSchemaStmt, ParseError> {
+    pub fn parse_create_schema_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::CreateSchemaStmt, ParseError> {
         schema::parse_create_schema(self)
     }
 
     /// Parse DROP SCHEMA statement
-    pub fn parse_drop_schema_statement(&mut self) -> Result<vibesql_ast::DropSchemaStmt, ParseError> {
+    pub fn parse_drop_schema_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::DropSchemaStmt, ParseError> {
         schema::parse_drop_schema(self)
     }
 
@@ -432,7 +466,9 @@ impl Parser {
     }
 
     /// Parse CREATE ROLE statement
-    pub fn parse_create_role_statement(&mut self) -> Result<vibesql_ast::CreateRoleStmt, ParseError> {
+    pub fn parse_create_role_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::CreateRoleStmt, ParseError> {
         role::parse_create_role(self)
     }
 
@@ -446,12 +482,16 @@ impl Parser {
     // ========================================================================
 
     /// Parse CREATE DOMAIN statement (uses full implementation from domain module)
-    pub fn parse_create_domain_statement(&mut self) -> Result<vibesql_ast::CreateDomainStmt, ParseError> {
+    pub fn parse_create_domain_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::CreateDomainStmt, ParseError> {
         domain::parse_create_domain(self)
     }
 
     /// Parse DROP DOMAIN statement (uses full implementation from domain module)
-    pub fn parse_drop_domain_statement(&mut self) -> Result<vibesql_ast::DropDomainStmt, ParseError> {
+    pub fn parse_drop_domain_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::DropDomainStmt, ParseError> {
         domain::parse_drop_domain(self)
     }
 
@@ -463,17 +503,23 @@ impl Parser {
     }
 
     /// Parse DROP SEQUENCE statement
-    pub fn parse_drop_sequence_statement(&mut self) -> Result<vibesql_ast::DropSequenceStmt, ParseError> {
+    pub fn parse_drop_sequence_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::DropSequenceStmt, ParseError> {
         advanced_objects::parse_drop_sequence(self)
     }
 
     /// Parse ALTER SEQUENCE statement
-    pub fn parse_alter_sequence_statement(&mut self) -> Result<vibesql_ast::AlterSequenceStmt, ParseError> {
+    pub fn parse_alter_sequence_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::AlterSequenceStmt, ParseError> {
         advanced_objects::parse_alter_sequence(self)
     }
 
     /// Parse CREATE TYPE statement
-    pub fn parse_create_type_statement(&mut self) -> Result<vibesql_ast::CreateTypeStmt, ParseError> {
+    pub fn parse_create_type_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::CreateTypeStmt, ParseError> {
         advanced_objects::parse_create_type(self)
     }
 
@@ -542,7 +588,9 @@ impl Parser {
     }
 
     /// Parse DROP COLLATION statement
-    pub fn parse_drop_collation_statement(&mut self) -> Result<vibesql_ast::DropCollationStmt, ParseError> {
+    pub fn parse_drop_collation_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::DropCollationStmt, ParseError> {
         advanced_objects::parse_drop_collation(self)
     }
 
@@ -582,7 +630,9 @@ impl Parser {
     }
 
     /// Parse DROP ASSERTION statement
-    pub fn parse_drop_assertion_statement(&mut self) -> Result<vibesql_ast::DropAssertionStmt, ParseError> {
+    pub fn parse_drop_assertion_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::DropAssertionStmt, ParseError> {
         advanced_objects::parse_drop_assertion(self)
     }
 

@@ -23,16 +23,8 @@ fn create_test_db(row_count: usize) -> Database {
     // Create users table with primary key for efficient lookups
     let columns = vec![
         ColumnSchema::new("id".to_string(), DataType::Integer, false),
-        ColumnSchema::new(
-            "name".to_string(),
-            DataType::Varchar { max_length: Some(100) },
-            true,
-        ),
-        ColumnSchema::new(
-            "email".to_string(),
-            DataType::Varchar { max_length: Some(100) },
-            true,
-        ),
+        ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+        ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(100) }, true),
         ColumnSchema::new("age".to_string(), DataType::Integer, true),
     ];
     let schema =
@@ -70,9 +62,8 @@ fn bench_prepared_vs_raw(c: &mut Criterion) {
 
         b.iter(|| {
             for i in 0..iterations {
-                let result = session
-                    .execute_prepared(&stmt, &[SqlValue::Integer(i as i64)])
-                    .unwrap();
+                let result =
+                    session.execute_prepared(&stmt, &[SqlValue::Integer(i as i64)]).unwrap();
                 black_box(result);
             }
         });
@@ -107,26 +98,21 @@ fn bench_multi_param_prepared(c: &mut Criterion) {
     group.throughput(Throughput::Elements(iterations as u64));
 
     // Prepared statement with range query (two parameters)
-    group.bench_function(
-        BenchmarkId::new("prepared_range_query", iterations),
-        |b| {
-            let session = Session::new(&db);
-            let stmt = session
-                .prepare("SELECT * FROM users WHERE id >= ? AND id < ?")
-                .unwrap();
+    group.bench_function(BenchmarkId::new("prepared_range_query", iterations), |b| {
+        let session = Session::new(&db);
+        let stmt = session.prepare("SELECT * FROM users WHERE id >= ? AND id < ?").unwrap();
 
-            b.iter(|| {
-                for i in 0..iterations {
-                    let start = (i * 10) as i64;
-                    let end = start + 10;
-                    let result = session
-                        .execute_prepared(&stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
-                        .unwrap();
-                    black_box(result);
-                }
-            });
-        },
-    );
+        b.iter(|| {
+            for i in 0..iterations {
+                let start = (i * 10) as i64;
+                let end = start + 10;
+                let result = session
+                    .execute_prepared(&stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
+                    .unwrap();
+                black_box(result);
+            }
+        });
+    });
 
     // Raw SQL path for comparison
     group.bench_function(BenchmarkId::new("raw_range_query", iterations), |b| {
@@ -164,9 +150,7 @@ fn bench_cache_hit_rate(c: &mut Criterion) {
         b.iter(|| {
             // This should hit the cache every time
             let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-            let result = session
-                .execute_prepared(&stmt, &[SqlValue::Integer(42)])
-                .unwrap();
+            let result = session.execute_prepared(&stmt, &[SqlValue::Integer(42)]).unwrap();
             black_box(result);
         });
     });
@@ -177,9 +161,7 @@ fn bench_cache_hit_rate(c: &mut Criterion) {
             // Create new session each time = no cache benefit
             let session = Session::new(&db);
             let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-            let result = session
-                .execute_prepared(&stmt, &[SqlValue::Integer(42)])
-                .unwrap();
+            let result = session.execute_prepared(&stmt, &[SqlValue::Integer(42)]).unwrap();
             black_box(result);
         });
     });
@@ -204,9 +186,8 @@ fn bench_query_complexity(c: &mut Criterion) {
 
         b.iter(|| {
             for i in 0..iterations {
-                let result = session
-                    .execute_prepared(&stmt, &[SqlValue::Integer(i as i64)])
-                    .unwrap();
+                let result =
+                    session.execute_prepared(&stmt, &[SqlValue::Integer(i as i64)]).unwrap();
                 black_box(result);
             }
         });
@@ -256,17 +237,13 @@ fn bench_shared_cache(c: &mut Criterion) {
 
         // Pre-warm the cache
         let warmup_session = Session::with_shared_cache(&db, Arc::clone(&shared_cache));
-        let _ = warmup_session
-            .prepare("SELECT * FROM users WHERE id = ?")
-            .unwrap();
+        let _ = warmup_session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
 
         b.iter(|| {
             // Simulate multiple sessions using the shared cache
             let session = Session::with_shared_cache(&db, Arc::clone(&shared_cache));
             let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-            let result = session
-                .execute_prepared(&stmt, &[SqlValue::Integer(42)])
-                .unwrap();
+            let result = session.execute_prepared(&stmt, &[SqlValue::Integer(42)]).unwrap();
             black_box(result);
         });
     });
@@ -277,9 +254,7 @@ fn bench_shared_cache(c: &mut Criterion) {
             // Each iteration creates a new session with fresh cache
             let session = Session::new(&db);
             let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-            let result = session
-                .execute_prepared(&stmt, &[SqlValue::Integer(42)])
-                .unwrap();
+            let result = session.execute_prepared(&stmt, &[SqlValue::Integer(42)]).unwrap();
             black_box(result);
         });
     });

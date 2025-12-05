@@ -21,9 +21,7 @@ struct TableExtractor {
 
 impl TableExtractor {
     fn new() -> Self {
-        Self {
-            tables: HashSet::new(),
-        }
+        Self { tables: HashSet::new() }
     }
 
     /// Extract tables from a FROM clause recursively
@@ -261,10 +259,9 @@ mod tests {
 
     #[test]
     fn test_select_with_union() {
-        let tables = extract_tables_from_sql(
-            "SELECT id, name FROM users UNION SELECT id, name FROM admins",
-        )
-        .unwrap();
+        let tables =
+            extract_tables_from_sql("SELECT id, name FROM users UNION SELECT id, name FROM admins")
+                .unwrap();
         assert!(tables.contains("users"));
         assert!(tables.contains("admins"));
     }

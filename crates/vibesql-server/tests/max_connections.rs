@@ -51,10 +51,7 @@ async fn test_max_connections_error_format() {
     fields.insert(b'S', "FATAL".to_string());
     fields.insert(b'V', "FATAL".to_string());
     fields.insert(b'C', "53300".to_string());
-    fields.insert(
-        b'M',
-        "sorry, too many clients already (max_connections=2)".to_string(),
-    );
+    fields.insert(b'M', "sorry, too many clients already (max_connections=2)".to_string());
 
     // Encode error response (matches BackendMessage::ErrorResponse format from main.rs)
     buf.put_u8(b'E'); // Error response type
@@ -87,10 +84,7 @@ async fn test_error_response_contains_max_connections_message() {
     fields.insert(b'S', "FATAL".to_string());
     fields.insert(b'V', "FATAL".to_string());
     fields.insert(b'C', "53300".to_string());
-    fields.insert(
-        b'M',
-        "sorry, too many clients already (max_connections=100)".to_string(),
-    );
+    fields.insert(b'M', "sorry, too many clients already (max_connections=100)".to_string());
 
     // Encode error response
     buf.put_u8(b'E');

@@ -17,7 +17,10 @@ use vibesql_storage::Database;
 /// - `Ok(true)` if TRUNCATE can be safely used
 /// - `Ok(false)` if row-by-row deletion is required
 /// - `Err` if table doesn't exist
-pub(crate) fn can_use_truncate(database: &Database, table_name: &str) -> Result<bool, ExecutorError> {
+pub(crate) fn can_use_truncate(
+    database: &Database,
+    table_name: &str,
+) -> Result<bool, ExecutorError> {
     // Check for DELETE triggers on this table
     if has_delete_triggers(database, table_name) {
         return Ok(false);
@@ -45,7 +48,10 @@ pub(crate) fn has_delete_triggers(database: &Database, table_name: &str) -> bool
 /// Returns true if any other table has a foreign key constraint referencing this table.
 /// When this is true, we cannot use TRUNCATE because we need to check each row
 /// for child references.
-pub(crate) fn is_fk_referenced(database: &Database, parent_table_name: &str) -> Result<bool, ExecutorError> {
+pub(crate) fn is_fk_referenced(
+    database: &Database,
+    parent_table_name: &str,
+) -> Result<bool, ExecutorError> {
     // Scan all tables to find foreign keys that reference this table
     for table_name in database.catalog.list_tables() {
         let child_schema = database

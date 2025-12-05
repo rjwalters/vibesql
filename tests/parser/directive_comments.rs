@@ -27,8 +27,7 @@ SELECT 1
 1
 "#;
 
-    let records = parse::<DefaultColumnType>(script)
-        .expect("Should parse skipif with comment");
+    let records = parse::<DefaultColumnType>(script).expect("Should parse skipif with comment");
 
     assert!(records.len() > 0, "Should have parsed records");
 }
@@ -45,8 +44,8 @@ SELECT 1
 1
 "#;
 
-    let records = parse::<DefaultColumnType>(script)
-        .expect("Should parse multiple directives with comments");
+    let records =
+        parse::<DefaultColumnType>(script).expect("Should parse multiple directives with comments");
 
     assert!(records.len() > 0, "Should have parsed records");
 }
@@ -60,8 +59,8 @@ SELECT 1
 1
 "#;
 
-    let records = parse::<DefaultColumnType>(script)
-        .expect("Should still parse directives without comments");
+    let records =
+        parse::<DefaultColumnType>(script).expect("Should still parse directives without comments");
 
     assert!(records.len() > 0, "Should have parsed records");
 }

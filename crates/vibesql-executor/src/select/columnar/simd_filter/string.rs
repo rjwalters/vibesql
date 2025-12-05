@@ -103,9 +103,7 @@ pub fn evaluate_predicate_string_batch(
             batch_string_ne(values, nulls, target)
         }
 
-        ColumnPredicate::Like {
-            pattern, negated, ..
-        } => {
+        ColumnPredicate::Like { pattern, negated, .. } => {
             let parsed_pattern = LikePattern::parse(pattern);
             let mut mask = batch_string_like(values, nulls, &parsed_pattern);
 
@@ -152,11 +150,7 @@ pub fn evaluate_predicate_string_batch(
             let ge_low = batch_string_ge(values, nulls, low_str);
             let le_high = batch_string_le(values, nulls, high_str);
 
-            ge_low
-                .iter()
-                .zip(le_high.iter())
-                .map(|(&a, &b)| a && b)
-                .collect()
+            ge_low.iter().zip(le_high.iter()).map(|(&a, &b)| a && b).collect()
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {

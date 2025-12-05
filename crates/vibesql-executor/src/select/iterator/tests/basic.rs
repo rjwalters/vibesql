@@ -94,10 +94,7 @@ fn test_filter_iterator_null_is_falsy() {
 #[test]
 fn test_filter_iterator_integer_truthy() {
     let schema = test_schema();
-    let rows = vec![
-        Row::new(vec![SqlValue::Integer(1)]),
-        Row::new(vec![SqlValue::Integer(2)]),
-    ];
+    let rows = vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![SqlValue::Integer(2)])];
     let scan = TableScanIterator::new(schema.clone(), rows);
 
     // Predicate that returns non-zero integer (truthy)
@@ -130,8 +127,16 @@ fn test_evaluator_direct() {
     let table_schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "age".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     let schema = CombinedSchema::from_table("test".to_string(), table_schema);
@@ -164,7 +169,11 @@ fn test_evaluator_direct() {
 
     // Verify expected values
     assert!(matches!(result1, SqlValue::Boolean(true)), "Row 1 should be true, got {:?}", result1);
-    assert!(matches!(result2, SqlValue::Boolean(false)), "Row 2 should be false, got {:?}", result2);
+    assert!(
+        matches!(result2, SqlValue::Boolean(false)),
+        "Row 2 should be false, got {:?}",
+        result2
+    );
     assert!(matches!(result3, SqlValue::Boolean(true)), "Row 3 should be true, got {:?}", result3);
 }
 
@@ -174,8 +183,16 @@ fn test_filter_with_column_ref() {
     let table_schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "age".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     let schema = CombinedSchema::from_table("test".to_string(), table_schema);
@@ -190,7 +207,7 @@ fn test_filter_with_column_ref() {
     // Predicate: age > 18 (using unqualified column reference)
     let predicate = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::ColumnRef {
-            table: None,  // Try without table qualifier
+            table: None, // Try without table qualifier
             column: "age".to_string(),
         }),
         op: vibesql_ast::BinaryOperator::GreaterThan,
@@ -206,7 +223,13 @@ fn test_filter_with_column_ref() {
 
     // Should get 2 results: id 1 (age 25) and id 3 (age 30)
     // Row 2 (age 17) should be filtered out
-    assert_eq!(results.len(), 2, "Expected 2 results, got {} results: {:?}", results.len(), results);
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 results, got {} results: {:?}",
+        results.len(),
+        results
+    );
 
     assert_eq!(results[0].values, vec![SqlValue::Integer(1), SqlValue::Integer(25)]);
     assert_eq!(results[1].values, vec![SqlValue::Integer(3), SqlValue::Integer(30)]);
@@ -215,10 +238,7 @@ fn test_filter_with_column_ref() {
 #[test]
 fn test_projection_iterator_identity() {
     let schema = test_schema();
-    let rows = vec![
-        Row::new(vec![SqlValue::Integer(1)]),
-        Row::new(vec![SqlValue::Integer(2)]),
-    ];
+    let rows = vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![SqlValue::Integer(2)])];
     let scan = TableScanIterator::new(schema.clone(), rows);
 
     // Identity projection (no-op)
@@ -235,10 +255,7 @@ fn test_projection_iterator_identity() {
 #[test]
 fn test_projection_iterator_transform() {
     let schema = test_schema();
-    let rows = vec![
-        Row::new(vec![SqlValue::Integer(1)]),
-        Row::new(vec![SqlValue::Integer(2)]),
-    ];
+    let rows = vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![SqlValue::Integer(2)])];
     let scan = TableScanIterator::new(schema.clone(), rows);
 
     // Double each value

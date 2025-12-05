@@ -21,9 +21,7 @@ impl<'arena> ArenaParser<'arena> {
             self.advance();
             self.intern(&name)
         } else {
-            return Err(ParseError {
-                message: "Expected table name after UPDATE".to_string(),
-            });
+            return Err(ParseError { message: "Expected table name after UPDATE".to_string() });
         };
 
         // Parse SET keyword
@@ -58,11 +56,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = UpdateStmt {
-            table_name,
-            assignments,
-            where_clause,
-        };
+        let stmt = UpdateStmt { table_name, assignments, where_clause };
 
         Ok(self.arena.alloc(stmt))
     }

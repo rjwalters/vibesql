@@ -1,9 +1,9 @@
 use super::*;
 
 mod aggregates;
-mod arena_parser;
 mod alter_table;
 mod arena_alter_table;
+mod arena_parser;
 mod assertion;
 mod case_expression;
 mod cast;

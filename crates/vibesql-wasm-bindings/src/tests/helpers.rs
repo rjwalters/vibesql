@@ -82,9 +82,10 @@ pub fn setup_example_database(db_name: &str) -> (vibesql_storage::Database, Opti
             let northwind_sql = include_str!("../../../../web-demo/examples/northwind.sql");
             match execute_sql(&mut db, northwind_sql) {
                 Ok(_) => (db, None),
-                Err(e) => {
-                    (vibesql_storage::Database::new(), Some(format!("northwind DB load failed: {}", e)))
-                }
+                Err(e) => (
+                    vibesql_storage::Database::new(),
+                    Some(format!("northwind DB load failed: {}", e)),
+                ),
             }
         }
         "employees" => {
@@ -92,9 +93,10 @@ pub fn setup_example_database(db_name: &str) -> (vibesql_storage::Database, Opti
             let employees_sql = include_str!("../../../../web-demo/examples/employees.sql");
             match execute_sql(&mut db, employees_sql) {
                 Ok(_) => (db, None),
-                Err(e) => {
-                    (vibesql_storage::Database::new(), Some(format!("employees DB load failed: {}", e)))
-                }
+                Err(e) => (
+                    vibesql_storage::Database::new(),
+                    Some(format!("employees DB load failed: {}", e)),
+                ),
             }
         }
         // All other databases (empty, company, university, etc.) start as empty

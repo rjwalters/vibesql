@@ -110,9 +110,9 @@ impl Parser {
                 self.advance();
                 Ok(name)
             }
-            _ => Err(ParseError {
-                message: format!("Expected alias name, found {:?}", self.peek()),
-            }),
+            _ => {
+                Err(ParseError { message: format!("Expected alias name, found {:?}", self.peek()) })
+            }
         }
     }
 

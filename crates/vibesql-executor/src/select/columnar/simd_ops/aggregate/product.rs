@@ -240,7 +240,11 @@ pub fn sum_product_f64_filtered_masked(
 /// This is the key operation for TPC-H Q6: SUM(l_extendedprice * l_discount)
 /// with WHERE clause filtering.
 #[inline]
-pub fn sum_product_f64_packed_filtered(a: &[f64], b: &[f64], filter_mask: &PackedMask) -> (f64, i64) {
+pub fn sum_product_f64_packed_filtered(
+    a: &[f64],
+    b: &[f64],
+    filter_mask: &PackedMask,
+) -> (f64, i64) {
     debug_assert_eq!(a.len(), b.len(), "Arrays must have same length");
     debug_assert_eq!(a.len(), filter_mask.len(), "Arrays and filter must have same length");
 
@@ -423,7 +427,7 @@ mod tests {
         // All pass filter
         let filter_all = vec![true; 8];
         let (sum, count) = sum_product_f64_filtered(&prices, &discounts, &filter_all);
-        assert!((sum - 213.0).abs() < 0.001);  // Same as unfiltered sum_product test
+        assert!((sum - 213.0).abs() < 0.001); // Same as unfiltered sum_product test
         assert_eq!(count, 8);
 
         // None pass filter

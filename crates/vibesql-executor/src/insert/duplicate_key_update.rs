@@ -100,16 +100,15 @@ fn update_conflicting_row(
     // Apply each assignment
     for assignment in assignments {
         // Find the column index
-        let column_idx = schema
-            .columns
-            .iter()
-            .position(|col| col.name == assignment.column)
-            .ok_or_else(|| {
-                ExecutorError::UnsupportedExpression(format!(
-                    "Column '{}' not found in table '{}'",
-                    assignment.column, table_name
-                ))
-            })?;
+        let column_idx =
+            schema.columns.iter().position(|col| col.name == assignment.column).ok_or_else(
+                || {
+                    ExecutorError::UnsupportedExpression(format!(
+                        "Column '{}' not found in table '{}'",
+                        assignment.column, table_name
+                    ))
+                },
+            )?;
 
         // Evaluate the expression in the context of the existing row and insert values
         let new_value = evaluate_duplicate_key_expression(
@@ -127,7 +126,8 @@ fn update_conflicting_row(
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
-    table_mut.update_row(row_id, vibesql_storage::Row::new(new_row_values))
+    table_mut
+        .update_row(row_id, vibesql_storage::Row::new(new_row_values))
         .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
 
     Ok(())
@@ -146,11 +146,8 @@ fn evaluate_duplicate_key_expression(
     match expr {
         vibesql_ast::Expression::DuplicateKeyValue { column } => {
             // VALUES(column) - get the value from insert_values
-            let column_idx = schema
-                .columns
-                .iter()
-                .position(|col| col.name == *column)
-                .ok_or_else(|| {
+            let column_idx =
+                schema.columns.iter().position(|col| col.name == *column).ok_or_else(|| {
                     ExecutorError::UnsupportedExpression(format!(
                         "Column '{}' not found in VALUES() function",
                         column
@@ -160,23 +157,27 @@ fn evaluate_duplicate_key_expression(
         }
         vibesql_ast::Expression::ColumnRef { table: _, column } => {
             // Column reference - get the value from existing row
-            let column_idx = schema
-                .columns
-                .iter()
-                .position(|col| col.name == *column)
-                .ok_or_else(|| {
-                    ExecutorError::UnsupportedExpression(format!(
-                        "Column '{}' not found",
-                        column
-                    ))
+            let column_idx =
+                schema.columns.iter().position(|col| col.name == *column).ok_or_else(|| {
+                    ExecutorError::UnsupportedExpression(format!("Column '{}' not found", column))
                 })?;
             Ok(existing_row_values[column_idx].clone())
         }
         vibesql_ast::Expression::Literal(value) => Ok(value.clone()),
         vibesql_ast::Expression::BinaryOp { op, left, right } => {
             // Recursively evaluate left and right, then apply the operator
-            let left_val = evaluate_duplicate_key_expression(left, schema, existing_row_values, insert_values)?;
-            let right_val = evaluate_duplicate_key_expression(right, schema, existing_row_values, insert_values)?;
+            let left_val = evaluate_duplicate_key_expression(
+                left,
+                schema,
+                existing_row_values,
+                insert_values,
+            )?;
+            let right_val = evaluate_duplicate_key_expression(
+                right,
+                schema,
+                existing_row_values,
+                insert_values,
+            )?;
 
             // Simple binary operation evaluation for common cases
             match op {

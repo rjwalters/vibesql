@@ -61,7 +61,8 @@ impl IndexData {
     /// ```
     pub fn prefix_scan_reverse(&self, prefix: &[SqlValue]) -> Vec<usize> {
         // Normalize prefix values for consistent comparison
-        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_prefix: Vec<SqlValue> =
+            prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
             IndexData::InMemory { data } => {
@@ -105,7 +106,10 @@ impl IndexData {
                 let (start_key, end_key) = if normalized_prefix.is_empty() {
                     (None, None)
                 } else {
-                    (Some(normalized_prefix.clone()), compute_prefix_upper_bound(&normalized_prefix))
+                    (
+                        Some(normalized_prefix.clone()),
+                        compute_prefix_upper_bound(&normalized_prefix),
+                    )
                 };
 
                 match acquire_btree_lock(btree) {
@@ -171,7 +175,8 @@ impl IndexData {
         }
 
         // Normalize prefix values for consistent comparison
-        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_prefix: Vec<SqlValue> =
+            prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
             IndexData::InMemory { data } => {
@@ -223,18 +228,16 @@ impl IndexData {
                 let (start_key, end_key) = if normalized_prefix.is_empty() {
                     (None, None)
                 } else {
-                    (Some(normalized_prefix.clone()), compute_prefix_upper_bound(&normalized_prefix))
+                    (
+                        Some(normalized_prefix.clone()),
+                        compute_prefix_upper_bound(&normalized_prefix),
+                    )
                 };
 
                 match acquire_btree_lock(btree) {
                     Ok(guard) => {
                         let results = guard
-                            .range_scan_reverse(
-                                start_key.as_ref(),
-                                end_key.as_ref(),
-                                true,
-                                false,
-                            )
+                            .range_scan_reverse(start_key.as_ref(), end_key.as_ref(), true, false)
                             .unwrap_or_else(|_| vec![]);
 
                         // Take first `limit` elements (they have the highest keys in DESC order)
@@ -307,38 +310,10 @@ mod tests {
     fn test_prefix_scan_reverse_two_column_prefix() {
         // Index on (w_id, d_id, o_id) - like TPC-C ORDER table
         let index = create_test_index_data(vec![
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(5),
-                    SqlValue::Integer(100),
-                ],
-                vec![0],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(5),
-                    SqlValue::Integer(200),
-                ],
-                vec![1],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(5),
-                    SqlValue::Integer(300),
-                ],
-                vec![2],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(6),
-                    SqlValue::Integer(100),
-                ],
-                vec![3],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(100)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(200)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(300)], vec![2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(6), SqlValue::Integer(100)], vec![3]),
         ]);
 
         // Look for w_id=1, d_id=5, expecting o_id in descending order
@@ -348,9 +323,10 @@ mod tests {
 
     #[test]
     fn test_prefix_scan_reverse_no_match() {
-        let index = create_test_index_data(vec![
-            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
-        ]);
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(10)],
+            vec![0],
+        )]);
 
         let reverse = index.prefix_scan_reverse(&[SqlValue::Integer(999)]);
         assert!(reverse.is_empty());
@@ -360,14 +336,8 @@ mod tests {
     fn test_prefix_scan_reverse_multiple_rows_per_key() {
         // Non-unique index: multiple row indices per key
         let index = create_test_index_data(vec![
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(10)],
-                vec![0, 1, 2],
-            ),
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(20)],
-                vec![3, 4],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0, 1, 2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![3, 4]),
         ]);
 
         let reverse = index.prefix_scan_reverse(&[SqlValue::Integer(1)]);
@@ -429,11 +399,7 @@ mod tests {
 
         // Find most recent order for customer (w_id=1, d_id=2, c_id=3)
         let result = index.prefix_scan_reverse_limit(
-            &[
-                SqlValue::Integer(1),
-                SqlValue::Integer(2),
-                SqlValue::Integer(3),
-            ],
+            &[SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(3)],
             1,
         );
         assert_eq!(result, vec![2]); // o_id 102 (highest)
@@ -453,9 +419,10 @@ mod tests {
 
     #[test]
     fn test_prefix_scan_reverse_limit_zero() {
-        let index = create_test_index_data(vec![
-            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
-        ]);
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(10)],
+            vec![0],
+        )]);
 
         let result = index.prefix_scan_reverse_limit(&[SqlValue::Integer(1)], 0);
         assert!(result.is_empty());
@@ -465,14 +432,8 @@ mod tests {
     fn test_prefix_scan_reverse_limit_with_duplicates() {
         // Non-unique index with limit
         let index = create_test_index_data(vec![
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(10)],
-                vec![0, 1],
-            ),
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(20)],
-                vec![2, 3, 4],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0, 1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![2, 3, 4]),
         ]);
 
         // Limit=3: should get [4, 3, 2] from key [1,20]
@@ -538,11 +499,7 @@ mod tests {
 
         // ORDER STATUS query: find most recent order for customer
         let result = index.prefix_scan_reverse_limit(
-            &[
-                SqlValue::Integer(1),
-                SqlValue::Integer(2),
-                SqlValue::Integer(42),
-            ],
+            &[SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(42)],
             1,
         );
 

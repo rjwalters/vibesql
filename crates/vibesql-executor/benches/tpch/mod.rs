@@ -15,7 +15,7 @@ pub mod schema;
 // Re-export commonly used items for convenience
 pub use data::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
 pub use queries::*;
-pub use schema::{load_vibesql};
+pub use schema::load_vibesql;
 
 #[cfg(feature = "benchmark-comparison")]
 pub use schema::{load_duckdb, load_sqlite};

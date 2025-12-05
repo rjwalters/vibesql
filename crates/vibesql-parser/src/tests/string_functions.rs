@@ -19,21 +19,27 @@ fn test_substring_comma_syntax() {
                 assert_eq!(args.len(), 3); // string, start, length
 
                 // Check string argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) = &args[0] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
+                    &args[0]
+                {
                     assert_eq!(s, "hello");
                 } else {
                     panic!("Expected string literal");
                 }
 
                 // Check start argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) = &args[1] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) =
+                    &args[1]
+                {
                     assert_eq!(*n, 2);
                 } else {
                     panic!("Expected integer literal for start");
                 }
 
                 // Check length argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) = &args[2] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) =
+                    &args[2]
+                {
                     assert_eq!(*n, 3);
                 } else {
                     panic!("Expected integer literal for length");
@@ -82,14 +88,18 @@ fn test_substring_from_syntax() {
                 assert_eq!(args.len(), 2); // string, start
 
                 // Check string argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) = &args[0] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
+                    &args[0]
+                {
                     assert_eq!(s, "hello");
                 } else {
                     panic!("Expected string literal");
                 }
 
                 // Check start argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) = &args[1] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) =
+                    &args[1]
+                {
                     assert_eq!(*n, 2);
                 } else {
                     panic!("Expected integer literal for start");
@@ -120,21 +130,27 @@ fn test_substring_from_for_syntax() {
                 assert_eq!(args.len(), 3); // string, start, length
 
                 // Check string argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) = &args[0] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
+                    &args[0]
+                {
                     assert_eq!(s, "hello");
                 } else {
                     panic!("Expected string literal");
                 }
 
                 // Check start argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) = &args[1] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) =
+                    &args[1]
+                {
                     assert_eq!(*n, 2);
                 } else {
                     panic!("Expected integer literal for start");
                 }
 
                 // Check length argument
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) = &args[2] {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) =
+                    &args[2]
+                {
                     assert_eq!(*n, 3);
                 } else {
                     panic!("Expected integer literal for length");
@@ -217,7 +233,9 @@ fn test_trim_from_without_char() {
                 // removal_char should be None (defaults to space)
                 assert!(removal_char.is_none());
                 // String should be the literal
-                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) = string.as_ref() {
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
+                    string.as_ref()
+                {
                     assert_eq!(s, "  foo  ");
                 } else {
                     panic!("Expected string literal");

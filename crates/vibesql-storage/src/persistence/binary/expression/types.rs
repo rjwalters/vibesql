@@ -4,7 +4,7 @@
 //
 // Handles serialization of various SQL types (CharacterUnit, TrimPosition, etc.).
 
-use vibesql_ast::{CharacterUnit, TrimPosition, IntervalUnit, FulltextMode, PseudoTable};
+use vibesql_ast::{CharacterUnit, FulltextMode, IntervalUnit, PseudoTable, TrimPosition};
 
 impl_simple_enum_serialization!(
     CharacterUnit,

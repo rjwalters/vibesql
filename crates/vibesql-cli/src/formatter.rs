@@ -178,10 +178,7 @@ mod tests {
             ResultFormatter::escape_html("<script>alert('xss')</script>"),
             "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
         );
-        assert_eq!(
-            ResultFormatter::escape_html("A & B"),
-            "A &amp; B"
-        );
+        assert_eq!(ResultFormatter::escape_html("A & B"), "A &amp; B");
     }
 
     #[test]
@@ -205,12 +202,8 @@ mod tests {
     #[test]
     fn test_empty_result() {
         let formatter = ResultFormatter::new();
-        let result = QueryResult {
-            columns: vec![],
-            rows: vec![],
-            row_count: 0,
-            execution_time_ms: None,
-        };
+        let result =
+            QueryResult { columns: vec![], rows: vec![], row_count: 0, execution_time_ms: None };
 
         // These should handle empty results gracefully
         formatter.print_markdown(&result);

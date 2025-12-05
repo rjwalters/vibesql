@@ -3,14 +3,14 @@
 //! Creates geometry from text (WKT) and binary (WKB) formats.
 
 use super::Geometry;
-use vibesql_types::SqlValue;
 use crate::errors::ExecutorError;
+use vibesql_types::SqlValue;
 
 /// Parse WKT (Well-Known Text) format
 /// Examples: POINT(1 2), LINESTRING(0 0, 1 1), POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))
 pub fn parse_wkt(wkt: &str) -> Result<Geometry, ExecutorError> {
     let wkt = wkt.trim();
-    
+
     if wkt.starts_with("POINT") {
         parse_point(wkt)
     } else if wkt.starts_with("LINESTRING") {
@@ -26,10 +26,7 @@ pub fn parse_wkt(wkt: &str) -> Result<Geometry, ExecutorError> {
     } else if wkt.starts_with("GEOMETRYCOLLECTION") {
         parse_geometrycollection(wkt)
     } else {
-        Err(ExecutorError::UnsupportedFeature(format!(
-            "Unknown WKT geometry type: {}",
-            wkt
-        )))
+        Err(ExecutorError::UnsupportedFeature(format!("Unknown WKT geometry type: {}", wkt)))
     }
 }
 
@@ -40,14 +37,12 @@ fn parse_point(wkt: &str) -> Result<Geometry, ExecutorError> {
             "Empty geometries not yet supported".to_string(),
         ));
     }
-    
+
     let coords = extract_coordinates(wkt, 1)?;
     if coords.is_empty() || coords[0].is_empty() {
-        return Err(ExecutorError::UnsupportedFeature(
-            "Invalid POINT format".to_string(),
-        ));
+        return Err(ExecutorError::UnsupportedFeature("Invalid POINT format".to_string()));
     }
-    
+
     let (x, y) = coords[0][0];
     Ok(Geometry::Point { x, y })
 }
@@ -59,17 +54,15 @@ fn parse_linestring(wkt: &str) -> Result<Geometry, ExecutorError> {
             "Empty geometries not yet supported".to_string(),
         ));
     }
-    
+
     let coords = extract_coordinates(wkt, 1)?;
     if coords.is_empty() || coords[0].len() < 2 {
         return Err(ExecutorError::UnsupportedFeature(
             "LineString must have at least 2 points".to_string(),
         ));
     }
-    
-    Ok(Geometry::LineString {
-        points: coords[0].clone(),
-    })
+
+    Ok(Geometry::LineString { points: coords[0].clone() })
 }
 
 fn parse_polygon(wkt: &str) -> Result<Geometry, ExecutorError> {
@@ -79,14 +72,14 @@ fn parse_polygon(wkt: &str) -> Result<Geometry, ExecutorError> {
             "Empty geometries not yet supported".to_string(),
         ));
     }
-    
+
     let coords = extract_coordinates(wkt, 2)?;
     if coords.is_empty() {
         return Err(ExecutorError::UnsupportedFeature(
             "Polygon must have at least one ring".to_string(),
         ));
     }
-    
+
     Ok(Geometry::Polygon { rings: coords })
 }
 
@@ -97,20 +90,20 @@ fn parse_multipoint(wkt: &str) -> Result<Geometry, ExecutorError> {
             "Empty geometries not yet supported".to_string(),
         ));
     }
-    
+
     let content = extract_parentheses_content(wkt)?;
-    
+
     // Check if this is the parenthesized format: (x1 y1), (x2 y2), ...
     // by looking for opening paren after potential whitespace
     let has_inner_parens = content.trim_start().starts_with('(');
-    
+
     let coords = if has_inner_parens {
         // Format: (x1 y1), (x2 y2), ...
         // Parse each parenthesized group
         let mut points = Vec::new();
         let mut current_group = String::new();
         let mut paren_count = 0;
-        
+
         for ch in content.chars() {
             match ch {
                 '(' => {
@@ -139,28 +132,26 @@ fn parse_multipoint(wkt: &str) -> Result<Geometry, ExecutorError> {
                 }
             }
         }
-        
+
         if points.is_empty() {
             return Err(ExecutorError::UnsupportedFeature(
                 "MultiPoint must have at least one point".to_string(),
             ));
         }
-        
+
         vec![points]
     } else {
         // Format: x1 y1, x2 y2, ...
         extract_coordinates(wkt, 1)?
     };
-    
+
     if coords.is_empty() || coords[0].is_empty() {
         return Err(ExecutorError::UnsupportedFeature(
             "MultiPoint must have at least one point".to_string(),
         ));
     }
-    
-    Ok(Geometry::MultiPoint {
-        points: coords[0].clone(),
-    })
+
+    Ok(Geometry::MultiPoint { points: coords[0].clone() })
 }
 
 fn parse_multilinestring(wkt: &str) -> Result<Geometry, ExecutorError> {
@@ -170,14 +161,14 @@ fn parse_multilinestring(wkt: &str) -> Result<Geometry, ExecutorError> {
             "Empty geometries not yet supported".to_string(),
         ));
     }
-    
+
     let coords = extract_coordinates(wkt, 2)?;
     if coords.is_empty() {
         return Err(ExecutorError::UnsupportedFeature(
             "MultiLineString must have at least one linestring".to_string(),
         ));
     }
-    
+
     Ok(Geometry::MultiLineString { lines: coords })
 }
 
@@ -188,14 +179,14 @@ fn parse_multipolygon(wkt: &str) -> Result<Geometry, ExecutorError> {
             "Empty geometries not yet supported".to_string(),
         ));
     }
-    
+
     let content = extract_parentheses_content(wkt)?;
-    
+
     // Split by top-level commas to get individual polygons
     let mut polygons = Vec::new();
     let mut current_polygon = String::new();
     let mut paren_count = 0;
-    
+
     for ch in content.chars() {
         match ch {
             '(' => {
@@ -222,7 +213,7 @@ fn parse_multipolygon(wkt: &str) -> Result<Geometry, ExecutorError> {
             }
         }
     }
-    
+
     // Don't forget the last polygon
     if !current_polygon.is_empty() {
         let poly_wkt = format!("POLYGON{}", current_polygon.trim());
@@ -231,13 +222,13 @@ fn parse_multipolygon(wkt: &str) -> Result<Geometry, ExecutorError> {
             polygons.push(rings);
         }
     }
-    
+
     if polygons.is_empty() {
         return Err(ExecutorError::UnsupportedFeature(
             "MultiPolygon must have at least one polygon".to_string(),
         ));
     }
-    
+
     Ok(Geometry::MultiPolygon { polygons })
 }
 
@@ -248,22 +239,22 @@ fn parse_geometrycollection(wkt: &str) -> Result<Geometry, ExecutorError> {
             "Empty geometries not yet supported".to_string(),
         ));
     }
-    
+
     // Extract the content between parentheses
     let content = extract_parentheses_content(wkt)?;
-    
+
     // Split by top-level commas and parse each geometry
     let geometries = split_geometries(&content)?
         .iter()
         .map(|g| parse_wkt(g.trim()))
         .collect::<Result<Vec<_>, _>>()?;
-    
+
     if geometries.is_empty() {
         return Err(ExecutorError::UnsupportedFeature(
             "GeometryCollection must have at least one geometry".to_string(),
         ));
     }
-    
+
     Ok(Geometry::Collection { geometries })
 }
 
@@ -274,13 +265,13 @@ fn extract_coordinates(
     paren_depth: usize,
 ) -> Result<Vec<Vec<(f64, f64)>>, ExecutorError> {
     let content = extract_parentheses_content(wkt)?;
-    
+
     let mut result = Vec::new();
     let mut current_coords = Vec::new();
-    
+
     let mut paren_count = 0;
     let mut current_group = String::new();
-    
+
     for ch in content.chars() {
         match ch {
             '(' => {
@@ -314,43 +305,41 @@ fn extract_coordinates(
             _ => current_group.push(ch),
         }
     }
-    
+
     // Handle remaining data
-    if !current_group.is_empty()
-        && paren_depth == 1 {
-            let coords = parse_coordinate_pair(current_group.trim())?;
-            current_coords.push(coords);
-        }
-    
+    if !current_group.is_empty() && paren_depth == 1 {
+        let coords = parse_coordinate_pair(current_group.trim())?;
+        current_coords.push(coords);
+    }
+
     if !current_coords.is_empty() {
         result.push(current_coords);
     }
-    
+
     Ok(result)
 }
 
 fn extract_parentheses_content(wkt: &str) -> Result<String, ExecutorError> {
     let start = wkt.find('(').ok_or_else(|| {
-        ExecutorError::UnsupportedFeature("Invalid WKT format: missing opening parenthesis".to_string())
+        ExecutorError::UnsupportedFeature(
+            "Invalid WKT format: missing opening parenthesis".to_string(),
+        )
     })?;
     let end = wkt.rfind(')').ok_or_else(|| {
-        ExecutorError::UnsupportedFeature("Invalid WKT format: missing closing parenthesis".to_string())
+        ExecutorError::UnsupportedFeature(
+            "Invalid WKT format: missing closing parenthesis".to_string(),
+        )
     })?;
-    
+
     if start >= end {
-        return Err(ExecutorError::UnsupportedFeature(
-            "Invalid WKT format".to_string(),
-        ));
+        return Err(ExecutorError::UnsupportedFeature("Invalid WKT format".to_string()));
     }
-    
+
     Ok(wkt[start + 1..end].to_string())
 }
 
 fn parse_coordinate_list(coords_str: &str) -> Result<Vec<(f64, f64)>, ExecutorError> {
-    coords_str
-        .split(',')
-        .map(|pair| parse_coordinate_pair(pair.trim()))
-        .collect()
+    coords_str.split(',').map(|pair| parse_coordinate_pair(pair.trim())).collect()
 }
 
 fn parse_coordinate_pair(pair: &str) -> Result<(f64, f64), ExecutorError> {
@@ -361,15 +350,15 @@ fn parse_coordinate_pair(pair: &str) -> Result<(f64, f64), ExecutorError> {
             pair
         )));
     }
-    
+
     let x = parts[0].parse::<f64>().map_err(|_| {
         ExecutorError::UnsupportedFeature(format!("Invalid X coordinate: {}", parts[0]))
     })?;
-    
+
     let y = parts[1].parse::<f64>().map_err(|_| {
         ExecutorError::UnsupportedFeature(format!("Invalid Y coordinate: {}", parts[1]))
     })?;
-    
+
     Ok((x, y))
 }
 
@@ -377,7 +366,7 @@ fn split_geometries(content: &str) -> Result<Vec<String>, ExecutorError> {
     let mut result = Vec::new();
     let mut current = String::new();
     let mut paren_count = 0;
-    
+
     for ch in content.chars() {
         match ch {
             '(' => {
@@ -397,11 +386,11 @@ fn split_geometries(content: &str) -> Result<Vec<String>, ExecutorError> {
             _ => current.push(ch),
         }
     }
-    
+
     if !current.is_empty() {
         result.push(current.trim().to_string());
     }
-    
+
     Ok(result)
 }
 
@@ -413,7 +402,7 @@ pub fn st_geom_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     let wkt = match &args[0] {
         SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
         SqlValue::Null => return Ok(SqlValue::Null),
@@ -423,7 +412,7 @@ pub fn st_geom_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             ))
         }
     };
-    
+
     let geom = parse_wkt(wkt)?;
     Ok(super::geometry_to_sql_value(geom, 0))
 }
@@ -436,7 +425,7 @@ pub fn st_point_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
             args.len()
         )));
     }
-    
+
     let wkt = match &args[0] {
         SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
         SqlValue::Null => return Ok(SqlValue::Null),
@@ -446,7 +435,7 @@ pub fn st_point_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
             ))
         }
     };
-    
+
     let geom = parse_wkt(wkt)?;
     if !matches!(geom, Geometry::Point { .. }) {
         return Err(ExecutorError::UnsupportedFeature(
@@ -465,7 +454,7 @@ pub fn st_line_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     let wkt = match &args[0] {
         SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
         SqlValue::Null => return Ok(SqlValue::Null),
@@ -475,7 +464,7 @@ pub fn st_line_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             ))
         }
     };
-    
+
     let geom = parse_wkt(wkt)?;
     if !matches!(geom, Geometry::LineString { .. }) {
         return Err(ExecutorError::UnsupportedFeature(
@@ -503,9 +492,8 @@ pub fn st_polygon_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError
                 "ST_PolygonFromText requires a string argument".to_string(),
             ))
         }
-
     };
-    
+
     let geom = parse_wkt(wkt)?;
     if !matches!(geom, Geometry::Polygon { .. }) {
         return Err(ExecutorError::UnsupportedFeature(

@@ -65,7 +65,8 @@ mod catalog_tests {
     #[test]
     fn test_catalog_create_table() {
         let mut catalog = Catalog::new();
-        let columns = vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
+        let columns =
+            vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
         let schema = TableSchema::new("users".to_string(), columns);
 
         let result = catalog.create_table(schema);
@@ -76,7 +77,8 @@ mod catalog_tests {
     #[test]
     fn test_catalog_create_duplicate_table() {
         let mut catalog = Catalog::new();
-        let columns = vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
+        let columns =
+            vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
         let schema1 = TableSchema::new("users".to_string(), columns.clone());
         let schema2 = TableSchema::new("users".to_string(), columns);
 
@@ -93,7 +95,8 @@ mod catalog_tests {
     #[test]
     fn test_catalog_get_table() {
         let mut catalog = Catalog::new();
-        let columns = vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
+        let columns =
+            vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
         let schema = TableSchema::new("users".to_string(), columns);
 
         catalog.create_table(schema).unwrap();
@@ -109,7 +112,8 @@ mod catalog_tests {
     #[test]
     fn test_catalog_drop_table() {
         let mut catalog = Catalog::new();
-        let columns = vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
+        let columns =
+            vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
         let schema = TableSchema::new("users".to_string(), columns);
 
         catalog.create_table(schema).unwrap();
@@ -162,9 +166,7 @@ mod catalog_tests {
 
     #[test]
     fn test_error_display_table_not_found() {
-        let error = CatalogError::TableNotFound {
-            table_name: "products".to_string(),
-        };
+        let error = CatalogError::TableNotFound { table_name: "products".to_string() };
         let error_msg = format!("{}", error);
         assert_eq!(error_msg, "Table 'products' not found");
     }
@@ -206,7 +208,8 @@ mod catalog_tests {
     #[test]
     fn test_catalog_clone() {
         let mut catalog1 = Catalog::new();
-        let columns = vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
+        let columns =
+            vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)];
         let schema = TableSchema::new("users".to_string(), columns);
         catalog1.create_table(schema).unwrap();
 
@@ -222,7 +225,11 @@ mod catalog_tests {
         let columns = vec![
             ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
             ColumnSchema::new("user_id".to_string(), vibesql_types::DataType::Integer, true),
-            ColumnSchema::new("name".to_string(), vibesql_types::DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
         ];
 
         // Create a foreign key on user_id
@@ -237,11 +244,7 @@ mod catalog_tests {
             on_update: ReferentialAction::NoAction,
         };
 
-        let mut schema = TableSchema::with_foreign_keys(
-            "orders".to_string(),
-            columns,
-            vec![fk],
-        );
+        let mut schema = TableSchema::with_foreign_keys("orders".to_string(), columns, vec![fk]);
 
         // Verify foreign key exists
         assert_eq!(schema.foreign_keys.len(), 1);
@@ -261,7 +264,11 @@ mod catalog_tests {
         let columns = vec![
             ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
             ColumnSchema::new("user_id".to_string(), vibesql_types::DataType::Integer, true),
-            ColumnSchema::new("name".to_string(), vibesql_types::DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
         ];
 
         // Create a foreign key on user_id
@@ -276,11 +283,7 @@ mod catalog_tests {
             on_update: ReferentialAction::NoAction,
         };
 
-        let mut schema = TableSchema::with_foreign_keys(
-            "orders".to_string(),
-            columns,
-            vec![fk],
-        );
+        let mut schema = TableSchema::with_foreign_keys("orders".to_string(), columns, vec![fk]);
 
         // Verify foreign key exists
         assert_eq!(schema.foreign_keys.len(), 1);
@@ -301,16 +304,17 @@ mod catalog_tests {
         let columns = vec![
             ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
             ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, true),
-            ColumnSchema::new("name".to_string(), vibesql_types::DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
         ];
 
         // Create a check constraint: age >= 18
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "age".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(18))),
         };
 
@@ -344,16 +348,17 @@ mod catalog_tests {
         let columns = vec![
             ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
             ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, true),
-            ColumnSchema::new("name".to_string(), vibesql_types::DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
         ];
 
         // Create a check constraint: age >= 18
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "age".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(18))),
         };
 
@@ -392,14 +397,8 @@ mod catalog_tests {
         // Create a check constraint: min_value < max_value
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::LessThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "min_value".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "max_value".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "min_value".to_string() }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "max_value".to_string() }),
         };
 
         let check_constraints = vec![("range_check".to_string(), check_expr)];
@@ -426,15 +425,19 @@ mod catalog_tests {
 
     #[test]
     fn test_remove_column_handles_all_constraints() {
-        use vibesql_ast::{BinaryOperator, Expression};
         use crate::foreign_key::{ForeignKeyConstraint, ReferentialAction};
+        use vibesql_ast::{BinaryOperator, Expression};
         use vibesql_types::SqlValue;
 
         let columns = vec![
             ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
             ColumnSchema::new("user_id".to_string(), vibesql_types::DataType::Integer, true),
             ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, true),
-            ColumnSchema::new("email".to_string(), vibesql_types::DataType::Varchar { max_length: Some(255) }, true),
+            ColumnSchema::new(
+                "email".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(255) },
+                true,
+            ),
         ];
 
         // Create a foreign key on user_id
@@ -452,10 +455,7 @@ mod catalog_tests {
         // Create a check constraint: age >= 18
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "age".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(18))),
         };
 

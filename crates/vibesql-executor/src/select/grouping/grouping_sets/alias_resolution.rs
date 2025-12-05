@@ -131,10 +131,8 @@ mod tests {
     #[test]
     fn test_resolve_group_by_alias_numeric_position() {
         // GROUP BY 1 should return the first SELECT item
-        let select_list = vec![
-            select_item(col("n_name"), Some("nation")),
-            select_item(col("amount"), None),
-        ];
+        let select_list =
+            vec![select_item(col("n_name"), Some("nation")), select_item(col("amount"), None)];
 
         let group_expr = Expression::Literal(vibesql_types::SqlValue::Integer(1));
         let resolved = resolve_group_by_alias(&group_expr, &select_list);
@@ -172,10 +170,8 @@ mod tests {
         let select_list = vec![select_item(col("n_name"), Some("nation"))];
 
         // GROUP BY t.nation should NOT resolve to n_name (it's table-qualified)
-        let group_expr = Expression::ColumnRef {
-            table: Some("t".to_string()),
-            column: "nation".to_string(),
-        };
+        let group_expr =
+            Expression::ColumnRef { table: Some("t".to_string()), column: "nation".to_string() };
         let resolved = resolve_group_by_alias(&group_expr, &select_list);
 
         // Should remain unchanged
@@ -235,10 +231,8 @@ mod tests {
 
     #[test]
     fn test_resolve_base_expressions_aliases() {
-        let select_list = vec![
-            select_item(col("a_col"), Some("a")),
-            select_item(col("b_col"), Some("b")),
-        ];
+        let select_list =
+            vec![select_item(col("a_col"), Some("a")), select_item(col("b_col"), Some("b"))];
 
         let base_exprs = vec![col("a"), col("b")];
         let resolved = resolve_base_expressions_aliases(&base_exprs, &select_list);

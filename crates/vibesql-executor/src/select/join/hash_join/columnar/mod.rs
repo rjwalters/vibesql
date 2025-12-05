@@ -58,13 +58,13 @@ pub fn columnar_hash_join_inner(
     right_key_idx: usize,
 ) -> Result<ColumnarBatch, ExecutorError> {
     // Get key columns
-    let left_key = left_batch.column(left_key_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+    let left_key =
+        left_batch.column(left_key_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: left_key_idx,
             batch_columns: left_batch.column_count(),
         })?;
-    let right_key = right_batch.column(right_key_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+    let right_key =
+        right_batch.column(right_key_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: right_key_idx,
             batch_columns: right_batch.column_count(),
         })?;
@@ -101,13 +101,13 @@ pub fn columnar_hash_join_left_outer(
     right_key_idx: usize,
 ) -> Result<ColumnarBatch, ExecutorError> {
     // Get key columns
-    let left_key = left_batch.column(left_key_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+    let left_key =
+        left_batch.column(left_key_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: left_key_idx,
             batch_columns: left_batch.column_count(),
         })?;
-    let right_key = right_batch.column(right_key_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+    let right_key =
+        right_batch.column(right_key_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: right_key_idx,
             batch_columns: right_batch.column_count(),
         })?;
@@ -116,7 +116,8 @@ pub fn columnar_hash_join_left_outer(
     let hash_table = hash_table::ColumnarHashTable::build_from_column(right_key)?;
 
     // Probe and collect matching indices, tracking unmatched left rows
-    let join_indices = probe::probe_columnar_left_outer(&hash_table, left_key, right_key, left_batch.row_count())?;
+    let join_indices =
+        probe::probe_columnar_left_outer(&hash_table, left_key, right_key, left_batch.row_count())?;
 
     // Gather result columns with NULL handling for unmatched rows
     output::gather_left_outer_result(left_batch, right_batch, &join_indices)
@@ -143,13 +144,13 @@ pub fn columnar_hash_join_right_outer(
     right_key_idx: usize,
 ) -> Result<ColumnarBatch, ExecutorError> {
     // Get key columns
-    let left_key = left_batch.column(left_key_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+    let left_key =
+        left_batch.column(left_key_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: left_key_idx,
             batch_columns: left_batch.column_count(),
         })?;
-    let right_key = right_batch.column(right_key_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+    let right_key =
+        right_batch.column(right_key_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: right_key_idx,
             batch_columns: right_batch.column_count(),
         })?;
@@ -158,7 +159,12 @@ pub fn columnar_hash_join_right_outer(
     let hash_table = hash_table::ColumnarHashTable::build_from_column(left_key)?;
 
     // Probe with right side and track unmatched right rows
-    let join_indices = probe::probe_columnar_right_outer(&hash_table, right_key, left_key, right_batch.row_count())?;
+    let join_indices = probe::probe_columnar_right_outer(
+        &hash_table,
+        right_key,
+        left_key,
+        right_batch.row_count(),
+    )?;
 
     // Gather result columns with NULL handling for unmatched rows
     output::gather_right_outer_result(left_batch, right_batch, &join_indices)
@@ -175,9 +181,16 @@ mod tests {
         // Create left batch: customer_id, name
         let left_columns = vec![
             ColumnArray::Int64(Arc::new(vec![1, 2, 3, 4]), None),
-            ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into(), "Dave".into()]), None),
+            ColumnArray::String(
+                Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into(), "Dave".into()]),
+                None,
+            ),
         ];
-        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["customer_id".into(), "name".into()])).unwrap();
+        let left_batch = ColumnarBatch::from_columns(
+            left_columns,
+            Some(vec!["customer_id".into(), "name".into()]),
+        )
+        .unwrap();
 
         // Create right batch: order_id, customer_id, amount
         let right_columns = vec![
@@ -185,7 +198,11 @@ mod tests {
             ColumnArray::Int64(Arc::new(vec![1, 2, 1, 3, 2]), None),
             ColumnArray::Float64(Arc::new(vec![100.0, 200.0, 150.0, 300.0, 250.0]), None),
         ];
-        let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["order_id".into(), "customer_id".into(), "amount".into()])).unwrap();
+        let right_batch = ColumnarBatch::from_columns(
+            right_columns,
+            Some(vec!["order_id".into(), "customer_id".into(), "amount".into()]),
+        )
+        .unwrap();
 
         // Join on customer_id (left col 0 = right col 1)
         let result = columnar_hash_join_inner(&left_batch, &right_batch, 0, 1).unwrap();
@@ -202,16 +219,27 @@ mod tests {
         // Create left batch: customer_id, name (4 customers)
         let left_columns = vec![
             ColumnArray::Int64(Arc::new(vec![1, 2, 3, 4]), None),
-            ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into(), "Dave".into()]), None),
+            ColumnArray::String(
+                Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into(), "Dave".into()]),
+                None,
+            ),
         ];
-        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["customer_id".into(), "name".into()])).unwrap();
+        let left_batch = ColumnarBatch::from_columns(
+            left_columns,
+            Some(vec!["customer_id".into(), "name".into()]),
+        )
+        .unwrap();
 
         // Create right batch: order_id, customer_id (only customers 1, 2, 3 have orders)
         let right_columns = vec![
             ColumnArray::Int64(Arc::new(vec![101, 102, 103]), None),
             ColumnArray::Int64(Arc::new(vec![1, 2, 1]), None), // Dave (id=4) has no orders
         ];
-        let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["order_id".into(), "customer_id".into()])).unwrap();
+        let right_batch = ColumnarBatch::from_columns(
+            right_columns,
+            Some(vec!["order_id".into(), "customer_id".into()]),
+        )
+        .unwrap();
 
         // LEFT OUTER JOIN on customer_id (left col 0 = right col 1)
         let result = columnar_hash_join_left_outer(&left_batch, &right_batch, 0, 1).unwrap();
@@ -249,14 +277,22 @@ mod tests {
             ColumnArray::Int64(Arc::new(vec![1, 2]), None),
             ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into()]), None),
         ];
-        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["customer_id".into(), "name".into()])).unwrap();
+        let left_batch = ColumnarBatch::from_columns(
+            left_columns,
+            Some(vec!["customer_id".into(), "name".into()]),
+        )
+        .unwrap();
 
         // Create right batch: order_id, customer_id (customer 3 has no matching left row)
         let right_columns = vec![
             ColumnArray::Int64(Arc::new(vec![101, 102, 103, 104]), None),
             ColumnArray::Int64(Arc::new(vec![1, 2, 3, 1]), None), // Order 103 has customer_id=3, not in left
         ];
-        let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["order_id".into(), "customer_id".into()])).unwrap();
+        let right_batch = ColumnarBatch::from_columns(
+            right_columns,
+            Some(vec!["order_id".into(), "customer_id".into()]),
+        )
+        .unwrap();
 
         // RIGHT OUTER JOIN on customer_id (left col 0 = right col 1)
         let result = columnar_hash_join_right_outer(&left_batch, &right_batch, 0, 1).unwrap();
@@ -300,19 +336,23 @@ mod tests {
         // Create left batch with NULL key
         let left_columns = vec![
             ColumnArray::Int64(
-                Arc::new(vec![1, 0, 3]), // 0 is placeholder for NULL
+                Arc::new(vec![1, 0, 3]),                  // 0 is placeholder for NULL
                 Some(Arc::new(vec![false, true, false])), // Index 1 is NULL
             ),
             ColumnArray::String(Arc::new(vec!["Alice".into(), "Bob".into(), "Carol".into()]), None),
         ];
-        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["id".into(), "name".into()])).unwrap();
+        let left_batch =
+            ColumnarBatch::from_columns(left_columns, Some(vec!["id".into(), "name".into()]))
+                .unwrap();
 
         // Create right batch
         let right_columns = vec![
             ColumnArray::Int64(Arc::new(vec![1, 3]), None),
             ColumnArray::String(Arc::new(vec!["Order1".into(), "Order3".into()]), None),
         ];
-        let right_batch = ColumnarBatch::from_columns(right_columns, Some(vec!["id".into(), "desc".into()])).unwrap();
+        let right_batch =
+            ColumnarBatch::from_columns(right_columns, Some(vec!["id".into(), "desc".into()]))
+                .unwrap();
 
         // LEFT OUTER JOIN - Bob (NULL key) should be preserved with NULL right columns
         let result = columnar_hash_join_left_outer(&left_batch, &right_batch, 0, 0).unwrap();
@@ -322,9 +362,9 @@ mod tests {
 
         // Verify Bob's row has NULL for right side
         let rows = result.to_rows().unwrap();
-        let bob_row = rows.iter().find(|r| {
-            matches!(r.get(1), Some(vibesql_types::SqlValue::Varchar(s)) if s == "Bob")
-        });
+        let bob_row = rows
+            .iter()
+            .find(|r| matches!(r.get(1), Some(vibesql_types::SqlValue::Varchar(s)) if s == "Bob"));
 
         assert!(bob_row.is_some());
         let bob = bob_row.unwrap();

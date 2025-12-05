@@ -44,16 +44,11 @@ pub fn order_predicates_by_selectivity(
 
     // Sort by selectivity (ascending order - most selective first)
     // Lower selectivity = filters more rows = should run first
-    pred_with_selectivity.sort_by(|a, b| {
-        a.0.partial_cmp(&b.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    pred_with_selectivity
+        .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
     // Extract ordered predicates
-    pred_with_selectivity
-        .into_iter()
-        .map(|(_, pred)| pred)
-        .collect()
+    pred_with_selectivity.into_iter().map(|(_, pred)| pred).collect()
 }
 
 /// Estimate the selectivity of a predicate (0.0 = filters all rows, 1.0 = keeps all rows)
@@ -76,11 +71,7 @@ pub fn estimate_selectivity(predicate: &Expression, stats: &TableStatistics) -> 
 
         // AND: product of selectivities (assumes independence)
         // Must come BEFORE general BinaryOp to avoid being caught by it
-        Expression::BinaryOp {
-            op: BinaryOperator::And,
-            left,
-            right,
-        } => {
+        Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
             let left_sel = estimate_selectivity(left.as_ref(), stats);
             let right_sel = estimate_selectivity(right.as_ref(), stats);
             left_sel * right_sel
@@ -88,11 +79,7 @@ pub fn estimate_selectivity(predicate: &Expression, stats: &TableStatistics) -> 
 
         // OR: 1 - ((1 - s1) * (1 - s2)) (probability theory)
         // Must come BEFORE general BinaryOp to avoid being caught by it
-        Expression::BinaryOp {
-            op: BinaryOperator::Or,
-            left,
-            right,
-        } => {
+        Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
             let left_sel = estimate_selectivity(left.as_ref(), stats);
             let right_sel = estimate_selectivity(right.as_ref(), stats);
             1.0 - ((1.0 - left_sel) * (1.0 - right_sel))
@@ -105,15 +92,12 @@ pub fn estimate_selectivity(predicate: &Expression, stats: &TableStatistics) -> 
         }
 
         // NOT: inverse selectivity
-        Expression::UnaryOp {
-            op: vibesql_ast::UnaryOperator::Not,
-            expr,
-        } => 1.0 - estimate_selectivity(expr, stats),
+        Expression::UnaryOp { op: vibesql_ast::UnaryOperator::Not, expr } => {
+            1.0 - estimate_selectivity(expr, stats)
+        }
 
         // IS NULL / IS NOT NULL
-        Expression::IsNull { expr, negated: false } => {
-            estimate_is_null_selectivity(expr, stats)
-        }
+        Expression::IsNull { expr, negated: false } => estimate_is_null_selectivity(expr, stats),
         Expression::IsNull { expr, negated: true } => {
             1.0 - estimate_is_null_selectivity(expr, stats)
         }
@@ -168,7 +152,9 @@ fn estimate_equality_selectivity(
     };
 
     // Look up column statistics (case-insensitive)
-    let col_stats = stats.columns.get(column_name)
+    let col_stats = stats
+        .columns
+        .get(column_name)
         .or_else(|| stats.columns.get(&column_name.to_uppercase()))
         .or_else(|| stats.columns.get(&column_name.to_lowercase()));
 
@@ -189,23 +175,33 @@ fn estimate_range_selectivity(
 ) -> f64 {
     // Extract column and value
     let (column_name, literal_value, operator_str) = match (op, left, right) {
-        (BinaryOperator::LessThan, Expression::ColumnRef { column, .. }, Expression::Literal(val)) => {
-            (column, val, "<")
-        }
-        (BinaryOperator::GreaterThan, Expression::ColumnRef { column, .. }, Expression::Literal(val)) => {
-            (column, val, ">")
-        }
-        (BinaryOperator::LessThanOrEqual, Expression::ColumnRef { column, .. }, Expression::Literal(val)) => {
-            (column, val, "<=")
-        }
-        (BinaryOperator::GreaterThanOrEqual, Expression::ColumnRef { column, .. }, Expression::Literal(val)) => {
-            (column, val, ">=")
-        }
+        (
+            BinaryOperator::LessThan,
+            Expression::ColumnRef { column, .. },
+            Expression::Literal(val),
+        ) => (column, val, "<"),
+        (
+            BinaryOperator::GreaterThan,
+            Expression::ColumnRef { column, .. },
+            Expression::Literal(val),
+        ) => (column, val, ">"),
+        (
+            BinaryOperator::LessThanOrEqual,
+            Expression::ColumnRef { column, .. },
+            Expression::Literal(val),
+        ) => (column, val, "<="),
+        (
+            BinaryOperator::GreaterThanOrEqual,
+            Expression::ColumnRef { column, .. },
+            Expression::Literal(val),
+        ) => (column, val, ">="),
         _ => return 0.33, // Default range selectivity
     };
 
     // Look up column statistics (case-insensitive)
-    let col_stats = stats.columns.get(column_name)
+    let col_stats = stats
+        .columns
+        .get(column_name)
         .or_else(|| stats.columns.get(&column_name.to_uppercase()))
         .or_else(|| stats.columns.get(&column_name.to_lowercase()));
 
@@ -234,7 +230,9 @@ fn estimate_in_list_selectivity(
     };
 
     // Look up column statistics (case-insensitive)
-    let col_stats = stats.columns.get(column_name)
+    let col_stats = stats
+        .columns
+        .get(column_name)
         .or_else(|| stats.columns.get(&column_name.to_uppercase()))
         .or_else(|| stats.columns.get(&column_name.to_lowercase()));
 
@@ -265,7 +263,9 @@ fn estimate_is_null_selectivity(expr: &Expression, stats: &TableStatistics) -> f
     };
 
     // Look up null ratio from column statistics (case-insensitive)
-    let col_stats = stats.columns.get(column_name)
+    let col_stats = stats
+        .columns
+        .get(column_name)
         .or_else(|| stats.columns.get(&column_name.to_uppercase()))
         .or_else(|| stats.columns.get(&column_name.to_lowercase()));
 
@@ -323,7 +323,11 @@ mod tests {
             "test_table".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("status".to_string(), DataType::Varchar { max_length: Some(20) }, true),
+                ColumnSchema::new(
+                    "status".to_string(),
+                    DataType::Varchar { max_length: Some(20) },
+                    true,
+                ),
             ],
         );
 
@@ -345,10 +349,7 @@ mod tests {
         // status = 'active' should be 3/4 = 75% (of non-null values)
         let pred = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "status".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
         };
 
@@ -365,18 +366,12 @@ mod tests {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "status".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
         };
@@ -386,8 +381,11 @@ mod tests {
         // Should be product of individual selectivities
         // Note: id < 10 has selectivity 1.0 for this test data (all ids are < 10)
         // So: 0.75 * 1.0 = 0.75
-        assert!((selectivity - 0.75).abs() < 0.01,
-            "Expected selectivity 0.75, got {}", selectivity);
+        assert!(
+            (selectivity - 0.75).abs() < 0.01,
+            "Expected selectivity 0.75, got {}",
+            selectivity
+        );
     }
 
     #[test]
@@ -399,18 +397,12 @@ mod tests {
             op: BinaryOperator::Or,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "status".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
         };
@@ -419,8 +411,7 @@ mod tests {
 
         // OR formula: 1 - ((1 - 0.75) * (1 - 1.0)) = 1 - (0.25 * 0) = 1.0
         // Note: id < 10 has selectivity 1.0 for this test data (all ids are < 10)
-        assert!((selectivity - 1.0).abs() < 0.01,
-            "Expected selectivity 1.0, got {}", selectivity);
+        assert!((selectivity - 1.0).abs() < 0.01, "Expected selectivity 1.0, got {}", selectivity);
     }
 
     #[test]
@@ -431,10 +422,7 @@ mod tests {
         // Should match all non-null rows: 4/5 = 80%
         // NDV for status is 2 (active, inactive), so selectivity = 2/2 = 1.0
         let pred = Expression::InList {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "status".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
             values: vec![
                 Expression::Literal(SqlValue::Varchar("active".to_string())),
                 Expression::Literal(SqlValue::Varchar("inactive".to_string())),
@@ -444,27 +432,28 @@ mod tests {
 
         let selectivity = estimate_selectivity(&pred, &stats);
         // With NDV=2 and 2 values in list: 2/2 = 1.0
-        assert!((selectivity - 1.0).abs() < 0.01,
-            "Expected selectivity 1.0 for IN list matching all distinct values, got {}", selectivity);
+        assert!(
+            (selectivity - 1.0).abs() < 0.01,
+            "Expected selectivity 1.0 for IN list matching all distinct values, got {}",
+            selectivity
+        );
 
         // status IN ('active')
         // Should match 3/5 = 60% of rows (3 out of 4 non-null have 'active')
         // NDV for status is 2, so selectivity = 1/2 = 0.5
         let pred_single = Expression::InList {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "status".to_string(),
-            }),
-            values: vec![
-                Expression::Literal(SqlValue::Varchar("active".to_string())),
-            ],
+            expr: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
+            values: vec![Expression::Literal(SqlValue::Varchar("active".to_string()))],
             negated: false,
         };
 
         let selectivity_single = estimate_selectivity(&pred_single, &stats);
         // With NDV=2 and 1 value in list: 1/2 = 0.5
-        assert!((selectivity_single - 0.5).abs() < 0.01,
-            "Expected selectivity 0.5 for IN list with single value, got {}", selectivity_single);
+        assert!(
+            (selectivity_single - 0.5).abs() < 0.01,
+            "Expected selectivity 0.5 for IN list with single value, got {}",
+            selectivity_single
+        );
     }
 
     #[test]
@@ -495,10 +484,7 @@ mod tests {
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(3))),
             }),
         };
@@ -508,7 +494,10 @@ mod tests {
         // Nested: (0.75 OR 0.25) AND 0.33
         // OR part: 1 - ((1 - 0.75) * (1 - 0.25)) = 1 - (0.25 * 0.75) = 1 - 0.1875 = 0.8125
         // AND with 0.33: 0.8125 * 0.33 ≈ 0.27
-        assert!((0.25..=0.30).contains(&selectivity),
-            "Expected nested selectivity ~0.27, got {}", selectivity);
+        assert!(
+            (0.25..=0.30).contains(&selectivity),
+            "Expected nested selectivity ~0.27, got {}",
+            selectivity
+        );
     }
 }

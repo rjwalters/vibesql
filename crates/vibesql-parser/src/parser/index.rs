@@ -339,11 +339,7 @@ impl Parser {
             if_not_exists,
             index_name,
             table_name,
-            index_type: vibesql_ast::IndexType::Hnsw {
-                metric,
-                m,
-                ef_construction,
-            },
+            index_type: vibesql_ast::IndexType::Hnsw { metric, m, ef_construction },
             columns,
         })
     }
@@ -352,9 +348,9 @@ impl Parser {
     fn parse_positive_integer(&mut self) -> Result<i64, ParseError> {
         match self.peek() {
             Token::Number(n) => {
-                let value = n.parse::<i64>().map_err(|_| ParseError {
-                    message: "Invalid integer value".to_string(),
-                })?;
+                let value = n
+                    .parse::<i64>()
+                    .map_err(|_| ParseError { message: "Invalid integer value".to_string() })?;
                 self.advance();
                 if value < 1 {
                     return Err(ParseError {
@@ -363,9 +359,7 @@ impl Parser {
                 }
                 Ok(value)
             }
-            _ => Err(ParseError {
-                message: "Expected positive integer".to_string(),
-            }),
+            _ => Err(ParseError { message: "Expected positive integer".to_string() }),
         }
     }
 
@@ -391,10 +385,7 @@ impl Parser {
                         // Validate prefix length range (MySQL compatibility)
                         if value < 1 {
                             return Err(ParseError {
-                                message: format!(
-                                    "Key part '{}' length cannot be 0",
-                                    column_name
-                                ),
+                                message: format!("Key part '{}' length cannot be 0", column_name),
                             });
                         }
                         // MySQL InnoDB limit: 3072 bytes for index prefix length
@@ -431,11 +422,7 @@ impl Parser {
                 vibesql_ast::OrderDirection::Asc // Default
             };
 
-            columns.push(vibesql_ast::IndexColumn {
-                column_name,
-                direction,
-                prefix_length,
-            });
+            columns.push(vibesql_ast::IndexColumn { column_name, direction, prefix_length });
 
             if self.peek() == &Token::Comma {
                 self.advance(); // consume comma
@@ -494,17 +481,15 @@ impl Parser {
                         // Validate prefix length range (MySQL compatibility)
                         if value < 1 {
                             return Err(ParseError {
-                                message: format!(
-                                    "Key part '{}' length cannot be 0",
-                                    column_name
-                                ),
+                                message: format!("Key part '{}' length cannot be 0", column_name),
                             });
                         }
                         // MySQL InnoDB limit: 3072 bytes for index prefix length
                         // This is the maximum for utf8mb4 with innodb_large_prefix enabled
                         if value > 3072 {
                             return Err(ParseError {
-                                message: "Specified key was too long; max key length is 3072 bytes".to_string(),
+                                message: "Specified key was too long; max key length is 3072 bytes"
+                                    .to_string(),
                             });
                         }
 
@@ -546,14 +531,22 @@ impl Parser {
         // Expect closing parenthesis
         self.expect_token(Token::RParen)?;
 
-        Ok(vibesql_ast::CreateIndexStmt { if_not_exists, index_name, table_name, index_type, columns })
+        Ok(vibesql_ast::CreateIndexStmt {
+            if_not_exists,
+            index_name,
+            table_name,
+            index_type,
+            columns,
+        })
     }
 
     /// Parse DROP INDEX statement
     ///
     /// Syntax:
     ///   DROP INDEX [IF EXISTS] index_name
-    pub(super) fn parse_drop_index_statement(&mut self) -> Result<vibesql_ast::DropIndexStmt, ParseError> {
+    pub(super) fn parse_drop_index_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::DropIndexStmt, ParseError> {
         // Expect DROP keyword
         self.expect_keyword(Keyword::Drop)?;
 
@@ -579,7 +572,9 @@ impl Parser {
     ///
     /// Syntax:
     ///   REINDEX [database_name | table_name | index_name]
-    pub(super) fn parse_reindex_statement(&mut self) -> Result<vibesql_ast::ReindexStmt, ParseError> {
+    pub(super) fn parse_reindex_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::ReindexStmt, ParseError> {
         // Expect REINDEX keyword
         self.expect_keyword(Keyword::Reindex)?;
 
@@ -595,7 +590,9 @@ impl Parser {
         Ok(vibesql_ast::ReindexStmt { target })
     }
 
-    pub(super) fn parse_analyze_statement(&mut self) -> Result<vibesql_ast::AnalyzeStmt, ParseError> {
+    pub(super) fn parse_analyze_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::AnalyzeStmt, ParseError> {
         // Expect ANALYZE keyword
         self.expect_keyword(Keyword::Analyze)?;
 
@@ -629,9 +626,6 @@ impl Parser {
             None
         };
 
-        Ok(vibesql_ast::AnalyzeStmt {
-            table_name,
-            columns,
-        })
+        Ok(vibesql_ast::AnalyzeStmt { table_name, columns })
     }
 }

@@ -394,9 +394,7 @@ fn column_to_json(col: &ColumnSchema) -> JsonColumn {
         DataType::Interval { .. } => ("INTERVAL".to_string(), None, None, None),
         DataType::BinaryLargeObject => ("BLOB".to_string(), None, None, None),
         DataType::Bit { length } => ("BIT".to_string(), *length, None, None),
-        DataType::Vector { dimensions } => {
-            (format!("VECTOR({})", dimensions), None, None, None)
-        }
+        DataType::Vector { dimensions } => (format!("VECTOR({})", dimensions), None, None, None),
         DataType::UserDefined { type_name } => (type_name.clone(), None, None, None),
         DataType::Null => ("NULL".to_string(), None, None, None),
     };
@@ -442,14 +440,16 @@ fn json_database_to_db(json_db: JsonDatabase) -> Result<Database, StorageError> 
 
     // Create schemas
     for schema in json_db.schemas {
-        db.catalog
-            .create_schema(schema.name)
-            .map_err(|e: vibesql_catalog::CatalogError| StorageError::CatalogError(e.to_string()))?;
+        db.catalog.create_schema(schema.name).map_err(|e: vibesql_catalog::CatalogError| {
+            StorageError::CatalogError(e.to_string())
+        })?;
     }
 
     // Create roles
     for role in json_db.roles {
-        db.catalog.create_role(role.name).map_err(|e: vibesql_catalog::CatalogError| StorageError::CatalogError(e.to_string()))?;
+        db.catalog.create_role(role.name).map_err(|e: vibesql_catalog::CatalogError| {
+            StorageError::CatalogError(e.to_string())
+        })?;
     }
 
     // Create tables and insert data

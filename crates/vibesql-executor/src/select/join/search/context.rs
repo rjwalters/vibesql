@@ -42,7 +42,8 @@ impl JoinOrderContext {
 
         for table in &self.all_tables {
             let filtered_card = self.table_cardinalities.get(table).copied().unwrap_or(10000);
-            let base_card = self.table_base_cardinalities.get(table).copied().unwrap_or(filtered_card);
+            let base_card =
+                self.table_base_cardinalities.get(table).copied().unwrap_or(filtered_card);
 
             // If the filtered cardinality is less than base, a filter was applied
             if filtered_card < base_card && base_card > 0 {

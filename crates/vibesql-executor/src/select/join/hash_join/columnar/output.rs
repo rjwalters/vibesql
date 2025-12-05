@@ -139,93 +139,79 @@ pub(crate) fn gather_right_outer_result(
 }
 
 /// Gather values from a column based on indices
-pub(crate) fn gather_column(column: &ColumnArray, indices: &[u32]) -> Result<ColumnArray, ExecutorError> {
+pub(crate) fn gather_column(
+    column: &ColumnArray,
+    indices: &[u32],
+) -> Result<ColumnArray, ExecutorError> {
     match column {
         ColumnArray::Int64(values, nulls) => {
-            let gathered: Vec<i64> = indices.iter()
-                .map(|&idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<i64> = indices.iter().map(|&idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::Int64(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Int32(values, nulls) => {
-            let gathered: Vec<i32> = indices.iter()
-                .map(|&idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<i32> = indices.iter().map(|&idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::Int32(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Float64(values, nulls) => {
-            let gathered: Vec<f64> = indices.iter()
-                .map(|&idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<f64> = indices.iter().map(|&idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::Float64(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Float32(values, nulls) => {
-            let gathered: Vec<f32> = indices.iter()
-                .map(|&idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<f32> = indices.iter().map(|&idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::Float32(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::String(values, nulls) => {
-            let gathered: Vec<String> = indices.iter()
-                .map(|&idx| values[idx as usize].clone())
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<String> =
+                indices.iter().map(|&idx| values[idx as usize].clone()).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::String(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::FixedString(values, nulls) => {
-            let gathered: Vec<String> = indices.iter()
-                .map(|&idx| values[idx as usize].clone())
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<String> =
+                indices.iter().map(|&idx| values[idx as usize].clone()).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::FixedString(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Date(values, nulls) => {
-            let gathered: Vec<i32> = indices.iter()
-                .map(|&idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<i32> = indices.iter().map(|&idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::Date(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Timestamp(values, nulls) => {
-            let gathered: Vec<i64> = indices.iter()
-                .map(|&idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<i64> = indices.iter().map(|&idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::Timestamp(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Boolean(values, nulls) => {
-            let gathered: Vec<u8> = indices.iter()
-                .map(|&idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect())
-            });
+            let gathered: Vec<u8> = indices.iter().map(|&idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(indices.iter().map(|&idx| n[idx as usize]).collect()));
             Ok(ColumnArray::Boolean(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::Mixed(values) => {
-            let gathered: Vec<vibesql_types::SqlValue> = indices.iter()
-                .map(|&idx| values[idx as usize].clone())
-                .collect();
+            let gathered: Vec<vibesql_types::SqlValue> =
+                indices.iter().map(|&idx| values[idx as usize].clone()).collect();
             Ok(ColumnArray::Mixed(Arc::new(gathered)))
         }
     }
@@ -234,7 +220,10 @@ pub(crate) fn gather_column(column: &ColumnArray, indices: &[u32]) -> Result<Col
 /// Gather values from a column with NULL handling for outer joins
 ///
 /// u32::MAX indices are converted to NULL values
-pub(crate) fn gather_column_with_nulls(column: &ColumnArray, indices: &[u32]) -> Result<ColumnArray, ExecutorError> {
+pub(crate) fn gather_column_with_nulls(
+    column: &ColumnArray,
+    indices: &[u32],
+) -> Result<ColumnArray, ExecutorError> {
     match column {
         ColumnArray::Int64(values, _existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
@@ -381,7 +370,8 @@ pub(crate) fn gather_column_with_nulls(column: &ColumnArray, indices: &[u32]) ->
             Ok(ColumnArray::Boolean(Arc::new(gathered), Some(Arc::new(nulls))))
         }
         ColumnArray::Mixed(values) => {
-            let gathered: Vec<vibesql_types::SqlValue> = indices.iter()
+            let gathered: Vec<vibesql_types::SqlValue> = indices
+                .iter()
                 .map(|&idx| {
                     if idx == u32::MAX {
                         vibesql_types::SqlValue::Null

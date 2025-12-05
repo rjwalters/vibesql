@@ -1,9 +1,11 @@
 //! Tests for trigger error handling, rollback, and recursion prevention
 
-use vibesql_ast::{CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
-use vibesql_storage::Database;
-use crate::{InsertExecutor, SelectExecutor};
 use super::create_users_table;
+use crate::{InsertExecutor, SelectExecutor};
+use vibesql_ast::{
+    CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
+};
+use vibesql_storage::Database;
 
 #[test]
 fn test_trigger_failure_causes_rollback() {
@@ -48,7 +50,11 @@ fn test_trigger_failure_causes_rollback() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "USERS".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "USERS".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -101,6 +107,9 @@ fn test_recursion_prevention() {
     assert!(result.is_err(), "Insert should have failed due to recursion limit");
     let err = result.unwrap_err();
     let err_msg = format!("{:?}", err);
-    assert!(err_msg.contains("recursion") || err_msg.contains("depth"),
-            "Error should mention recursion or depth: {}", err_msg);
+    assert!(
+        err_msg.contains("recursion") || err_msg.contains("depth"),
+        "Error should mention recursion or depth: {}",
+        err_msg
+    );
 }

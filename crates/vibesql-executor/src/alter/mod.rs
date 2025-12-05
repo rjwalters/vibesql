@@ -38,7 +38,9 @@ impl AlterTableExecutor {
         PrivilegeChecker::check_alter(database, table_name)?;
 
         match stmt {
-            AlterTableStmt::AddColumn(add_column) => columns::execute_add_column(add_column, database),
+            AlterTableStmt::AddColumn(add_column) => {
+                columns::execute_add_column(add_column, database)
+            }
             AlterTableStmt::DropColumn(drop_column) => {
                 columns::execute_drop_column(drop_column, database)
             }

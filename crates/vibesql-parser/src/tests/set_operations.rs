@@ -234,11 +234,7 @@ fn test_parse_intersect_distinct() {
 #[test]
 fn test_parse_union_all_parenthesized() {
     let result = Parser::parse_sql("SELECT id FROM users UNION ALL (SELECT id FROM customers);");
-    assert!(
-        result.is_ok(),
-        "UNION ALL with parenthesized SELECT should parse: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "UNION ALL with parenthesized SELECT should parse: {:?}", result);
 }
 
 #[test]

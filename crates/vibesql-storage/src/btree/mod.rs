@@ -136,12 +136,14 @@ pub(crate) fn estimate_max_key_size(key_schema: &[DataType]) -> usize {
 
     for data_type in key_schema {
         let size = match data_type {
-            DataType::Smallint => 1 + 2,  // tag + i16
-            DataType::Integer | DataType::Bigint => 1 + 8,  // tag + i64
-            DataType::Unsigned => 1 + 8,  // tag + u64
-            DataType::Float { .. } | DataType::Real => 1 + 4,  // tag + f32
-            DataType::Numeric { .. } | DataType::Decimal { .. } | DataType::DoublePrecision => 1 + 8,  // tag + f64
-            DataType::Boolean => 1 + 1,  // tag + bool
+            DataType::Smallint => 1 + 2,                      // tag + i16
+            DataType::Integer | DataType::Bigint => 1 + 8,    // tag + i64
+            DataType::Unsigned => 1 + 8,                      // tag + u64
+            DataType::Float { .. } | DataType::Real => 1 + 4, // tag + f32
+            DataType::Numeric { .. } | DataType::Decimal { .. } | DataType::DoublePrecision => {
+                1 + 8
+            } // tag + f64
+            DataType::Boolean => 1 + 1,                       // tag + bool
             DataType::Character { length } => {
                 // tag + length(8) + max_chars
                 // Conservative estimate: assume 4 bytes per UTF-8 char
@@ -178,7 +180,7 @@ pub(crate) fn estimate_max_key_size(key_schema: &[DataType]) -> usize {
                 // BIT type: tag + length + bits (rounded up to bytes)
                 // MySQL BIT can be 1-64 bits
                 let bit_length = length.unwrap_or(1);
-                let byte_length = bit_length.div_ceil(8);  // Round up to nearest byte
+                let byte_length = bit_length.div_ceil(8); // Round up to nearest byte
                 1 + 8 + byte_length
             }
             DataType::Vector { dimensions } => {
@@ -230,10 +232,7 @@ mod tests {
 
     #[test]
     fn test_calculate_degree_multi_column() {
-        let key_schema = vec![
-            DataType::Integer,
-            DataType::Varchar { max_length: Some(20) },
-        ];
+        let key_schema = vec![DataType::Integer, DataType::Varchar { max_length: Some(20) }];
         let degree = calculate_degree(&key_schema);
 
         // Multi-column keys should have lower degree
@@ -281,5 +280,4 @@ mod tests {
         // - Test range scans work correctly
         // - Compare results with incremental insert
     }
-
 }

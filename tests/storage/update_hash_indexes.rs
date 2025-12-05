@@ -91,11 +91,12 @@ fn test_update_hash_indexes() {
     let test_unique_values: Vec<vibesql_types::SqlValue> =
         unique_indices.iter().map(|&idx| table.scan()[0].values[idx].clone()).collect();
 
-    let constraint_violated = if !test_unique_values.iter().any(|v| *v == vibesql_types::SqlValue::Null) {
-        unique_indexes[0].contains_key(&test_unique_values)
-    } else {
-        false
-    };
+    let constraint_violated =
+        if !test_unique_values.iter().any(|v| *v == vibesql_types::SqlValue::Null) {
+            unique_indexes[0].contains_key(&test_unique_values)
+        } else {
+            false
+        };
     let lookup_time = start.elapsed();
 
     println!("Unique constraint check time: {:?}", lookup_time);

@@ -171,11 +171,7 @@ mod tests {
                 SqlValue::Null,
                 SqlValue::Varchar("Bob".to_string()),
             ]),
-            Row::new(vec![
-                SqlValue::Integer(3),
-                SqlValue::Double(2.71),
-                SqlValue::Null,
-            ]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Double(2.71), SqlValue::Null]),
         ];
 
         let column_names = vec!["id".to_string(), "value".to_string(), "name".to_string()];

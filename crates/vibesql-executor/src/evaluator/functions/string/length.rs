@@ -61,7 +61,9 @@ pub(in crate::evaluator::functions) fn octet_length(
     match &args[0] {
         vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
         vibesql_types::SqlValue::Varchar(s) => Ok(vibesql_types::SqlValue::Integer(s.len() as i64)),
-        vibesql_types::SqlValue::Character(s) => Ok(vibesql_types::SqlValue::Integer(s.len() as i64)),
+        vibesql_types::SqlValue::Character(s) => {
+            Ok(vibesql_types::SqlValue::Integer(s.len() as i64))
+        }
         val => Err(ExecutorError::UnsupportedFeature(format!(
             "OCTET_LENGTH requires string argument, got {:?}",
             val

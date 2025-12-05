@@ -41,7 +41,8 @@ fn test_arena_alter_table_add_column() {
 #[test]
 fn test_arena_alter_table_add_column_without_column_keyword() {
     let arena = Bump::new();
-    let result = ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t1 ADD col1 INT;", &arena);
+    let result =
+        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t1 ADD col1 INT;", &arena);
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -61,7 +62,10 @@ fn test_arena_alter_table_add_column_without_column_keyword() {
 #[test]
 fn test_arena_alter_table_add_column_with_not_null() {
     let arena = Bump::new();
-    let result = ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t1 ADD col1 INT NOT NULL;", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE t1 ADD col1 INT NOT NULL;",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, _interner) = result.unwrap();
 
@@ -98,7 +102,10 @@ fn test_arena_alter_table_add_column_with_default() {
 #[test]
 fn test_arena_alter_table_drop_column() {
     let arena = Bump::new();
-    let result = ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users DROP COLUMN email;", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE users DROP COLUMN email;",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -115,8 +122,10 @@ fn test_arena_alter_table_drop_column() {
 #[test]
 fn test_arena_alter_table_drop_column_if_exists() {
     let arena = Bump::new();
-    let result =
-        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users DROP COLUMN IF EXISTS email;", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE users DROP COLUMN IF EXISTS email;",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -175,13 +184,19 @@ fn test_arena_alter_table_alter_column_drop_not_null() {
 #[test]
 fn test_arena_alter_table_alter_column_set_default() {
     let arena = Bump::new();
-    let result =
-        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users ALTER COLUMN status SET DEFAULT 'active';", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE users ALTER COLUMN status SET DEFAULT 'active';",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
     match stmt {
-        AlterTableStmt::AlterColumn(AlterColumnStmt::SetDefault { table_name, column_name, .. }) => {
+        AlterTableStmt::AlterColumn(AlterColumnStmt::SetDefault {
+            table_name,
+            column_name,
+            ..
+        }) => {
             assert_eq!(interner.resolve(*table_name), "USERS");
             assert_eq!(interner.resolve(*column_name), "STATUS");
         }
@@ -192,8 +207,10 @@ fn test_arena_alter_table_alter_column_set_default() {
 #[test]
 fn test_arena_alter_table_alter_column_drop_default() {
     let arena = Bump::new();
-    let result =
-        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users ALTER COLUMN status DROP DEFAULT;", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE users ALTER COLUMN status DROP DEFAULT;",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -213,7 +230,10 @@ fn test_arena_alter_table_alter_column_drop_default() {
 #[test]
 fn test_arena_alter_table_rename_to() {
     let arena = Bump::new();
-    let result = ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users RENAME TO customers;", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE users RENAME TO customers;",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -233,7 +253,10 @@ fn test_arena_alter_table_rename_to() {
 #[test]
 fn test_arena_alter_table_add_check_constraint() {
     let arena = Bump::new();
-    let result = ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t ADD CHECK (x > 0);", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE t ADD CHECK (x > 0);",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -253,7 +276,8 @@ fn test_arena_alter_table_add_check_constraint() {
 #[test]
 fn test_arena_alter_table_add_unique_constraint() {
     let arena = Bump::new();
-    let result = ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t ADD UNIQUE (col);", &arena);
+    let result =
+        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t ADD UNIQUE (col);", &arena);
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -275,7 +299,10 @@ fn test_arena_alter_table_add_unique_constraint() {
 #[test]
 fn test_arena_alter_table_add_primary_key_constraint() {
     let arena = Bump::new();
-    let result = ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t ADD PRIMARY KEY (col);", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE t ADD PRIMARY KEY (col);",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -330,8 +357,10 @@ fn test_arena_alter_table_add_foreign_key_constraint() {
 #[test]
 fn test_arena_alter_table_add_named_constraint() {
     let arena = Bump::new();
-    let result =
-        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE t ADD CONSTRAINT ck CHECK (x > 0);", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE t ADD CONSTRAINT ck CHECK (x > 0);",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -356,8 +385,10 @@ fn test_arena_alter_table_add_named_constraint() {
 #[test]
 fn test_arena_alter_table_drop_constraint() {
     let arena = Bump::new();
-    let result =
-        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users DROP CONSTRAINT pk_users;", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE users DROP CONSTRAINT pk_users;",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 
@@ -377,8 +408,10 @@ fn test_arena_alter_table_drop_constraint() {
 #[test]
 fn test_arena_alter_table_modify_column() {
     let arena = Bump::new();
-    let result =
-        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users MODIFY COLUMN email VARCHAR(200);", &arena);
+    let result = ArenaParser::parse_alter_table_sql_with_interner(
+        "ALTER TABLE users MODIFY COLUMN email VARCHAR(200);",
+        &arena,
+    );
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     let (stmt, interner) = result.unwrap();
 

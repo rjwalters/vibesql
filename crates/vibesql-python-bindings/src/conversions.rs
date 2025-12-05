@@ -32,8 +32,12 @@ pub fn sqlvalue_to_py(py: Python, value: &vibesql_types::SqlValue) -> PyResult<P
         vibesql_types::SqlValue::Numeric(n) => n.into_pyobject(py)?.into_any().unbind(),
         vibesql_types::SqlValue::Date(d) => d.to_string().into_pyobject(py)?.into_any().unbind(),
         vibesql_types::SqlValue::Time(t) => t.to_string().into_pyobject(py)?.into_any().unbind(),
-        vibesql_types::SqlValue::Timestamp(ts) => ts.to_string().into_pyobject(py)?.into_any().unbind(),
-        vibesql_types::SqlValue::Interval(i) => i.to_string().into_pyobject(py)?.into_any().unbind(),
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            ts.to_string().into_pyobject(py)?.into_any().unbind()
+        }
+        vibesql_types::SqlValue::Interval(i) => {
+            i.to_string().into_pyobject(py)?.into_any().unbind()
+        }
         vibesql_types::SqlValue::Vector(v) => {
             // Convert vector to Python list of floats
             pyo3::types::PyList::new(py, v.iter().map(|f| *f as f64))?.into_any().unbind()
@@ -159,7 +163,9 @@ pub fn substitute_placeholders(sql: &str, sql_values: &[vibesql_types::SqlValue]
                         // Escape single quotes by doubling them (SQL standard)
                         format!("'{}'", s.replace('\'', "''"))
                     }
-                    vibesql_types::SqlValue::Boolean(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+                    vibesql_types::SqlValue::Boolean(b) => {
+                        if *b { "TRUE" } else { "FALSE" }.to_string()
+                    }
                     vibesql_types::SqlValue::Date(s) => format!("DATE '{}'", s),
                     vibesql_types::SqlValue::Time(s) => format!("TIME '{}'", s),
                     vibesql_types::SqlValue::Timestamp(s) => format!("TIMESTAMP '{}'", s),

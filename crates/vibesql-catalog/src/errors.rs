@@ -79,10 +79,7 @@ impl std::fmt::Display for CatalogError {
             CatalogError::ColumnAlreadyExists(name) => {
                 write!(f, "Column '{}' already exists", name)
             }
-            CatalogError::ColumnNotFound {
-                column_name,
-                table_name,
-            } => {
+            CatalogError::ColumnNotFound { column_name, table_name } => {
                 write!(f, "Column '{}' not found in table '{}'", column_name, table_name)
             }
             CatalogError::SchemaAlreadyExists(name) => {
@@ -200,20 +197,18 @@ impl std::fmt::Display for CatalogError {
             CatalogError::ConstraintNotFound(name) => {
                 write!(f, "Constraint '{}' not found", name)
             }
-            CatalogError::IndexAlreadyExists {
-                index_name,
-                table_name,
-            } => {
+            CatalogError::IndexAlreadyExists { index_name, table_name } => {
                 write!(f, "Index '{}' on table '{}' already exists", index_name, table_name)
             }
-            CatalogError::IndexNotFound {
-                index_name,
-                table_name,
-            } => {
+            CatalogError::IndexNotFound { index_name, table_name } => {
                 write!(f, "Index '{}' on table '{}' not found", index_name, table_name)
             }
             CatalogError::CircularForeignKey { table_name, message } => {
-                write!(f, "Circular foreign key dependency detected for table '{}': {}", table_name, message)
+                write!(
+                    f,
+                    "Circular foreign key dependency detected for table '{}': {}",
+                    table_name, message
+                )
             }
         }
     }

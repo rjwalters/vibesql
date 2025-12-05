@@ -2,13 +2,13 @@
 
 use std::fmt;
 
-use crate::ColumnType;
 use super::location::Location;
 use super::retry_parser::RetryConfig;
+use crate::ColumnType;
 // SortMode and ResultMode are used in Display impl via ControlItem trait
 #[allow(unused_imports)]
-use super::directive_parser::{Control, Condition, Connection, SortMode, ResultMode, ControlItem};
-use super::record_parser::{StatementExpect, QueryExpect};
+use super::directive_parser::{Condition, Connection, Control, ControlItem, ResultMode, SortMode};
+use super::record_parser::{QueryExpect, StatementExpect};
 
 /// A single directive in a sqllogictest file.
 #[derive(Debug, Clone, PartialEq)]
@@ -119,33 +119,13 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             Record::Include { loc: _, filename } => {
                 write!(f, "include {filename}")
             }
-            Record::Statement {
-                loc: _,
-                conditions: _,
-                connection: _,
-                sql,
-                expected,
-                retry,
-            } => {
+            Record::Statement { loc: _, conditions: _, connection: _, sql, expected, retry } => {
                 super::record_parser::fmt_statement(f, sql, expected, retry)
             }
-            Record::Query {
-                loc: _,
-                conditions: _,
-                connection: _,
-                sql,
-                expected,
-                retry,
-            } => {
+            Record::Query { loc: _, conditions: _, connection: _, sql, expected, retry } => {
                 super::record_parser::fmt_query(f, sql, expected, retry)
             }
-            Record::System {
-                loc: _,
-                conditions: _,
-                command,
-                stdout,
-                retry,
-            } => {
+            Record::System { loc: _, conditions: _, command, stdout, retry } => {
                 super::record_parser::fmt_system(f, command, stdout, retry)
             }
             Record::Sleep { loc: _, duration } => {

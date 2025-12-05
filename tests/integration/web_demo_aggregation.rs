@@ -116,9 +116,5 @@ fn test_aggregation_sql_examples() {
     println!("=========================================\n");
 
     // Require at least some tests to pass (will be stricter once all examples have expected data)
-    assert!(
-        passed >= 1,
-        "Expected at least 1 aggregation example to pass, got {}",
-        passed
-    );
+    assert!(passed >= 1, "Expected at least 1 aggregation example to pass, got {}", passed);
 }

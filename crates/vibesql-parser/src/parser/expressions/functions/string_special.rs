@@ -12,7 +12,9 @@ use super::super::*;
 impl Parser {
     /// Parse POSITION(substring IN string [USING unit])
     /// SQL:1999 standard syntax
-    pub(super) fn parse_position_function(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
+    pub(super) fn parse_position_function(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
         // Parse substring at primary level (literals, identifiers, function calls)
         // to avoid IN operator consumption at comparison level
         let substring = self.parse_primary_expression()?;
@@ -62,10 +64,7 @@ impl Parser {
         // Expect closing parenthesis
         self.expect_token(Token::RParen)?;
 
-        Ok(vibesql_ast::Expression::Extract {
-            field,
-            expr: Box::new(expr),
-        })
+        Ok(vibesql_ast::Expression::Extract { field, expr: Box::new(expr) })
     }
 
     /// Parse TRIM([position] [removal_char FROM] string)
@@ -111,7 +110,11 @@ impl Parser {
 
             self.expect_token(Token::RParen)?;
 
-            return Ok(vibesql_ast::Expression::Trim { position, removal_char, string: Box::new(string) });
+            return Ok(vibesql_ast::Expression::Trim {
+                position,
+                removal_char,
+                string: Box::new(string),
+            });
         }
 
         // Try to parse the first expression (could be removal_char or string)
@@ -132,7 +135,11 @@ impl Parser {
             // removal_char defaults to None (which means space)
             self.expect_token(Token::RParen)?;
 
-            Ok(vibesql_ast::Expression::Trim { position, removal_char: None, string: Box::new(first_expr) })
+            Ok(vibesql_ast::Expression::Trim {
+                position,
+                removal_char: None,
+                string: Box::new(first_expr),
+            })
         }
     }
 
@@ -190,7 +197,9 @@ impl Parser {
 
     /// Parse CHARACTERS or OCTETS keyword for USING clause
     /// SQL:1999 Section 6.29: String value functions
-    pub(super) fn parse_character_unit(&mut self) -> Result<vibesql_ast::CharacterUnit, ParseError> {
+    pub(super) fn parse_character_unit(
+        &mut self,
+    ) -> Result<vibesql_ast::CharacterUnit, ParseError> {
         match self.peek() {
             Token::Keyword(Keyword::Characters) => {
                 self.advance();

@@ -37,17 +37,17 @@
 //! let result = pipeline.apply_limit_offset(projected, limit, offset)?;
 //! ```
 
-mod context;
-mod types;
-mod row_oriented;
 mod columnar;
+mod context;
 mod native_columnar;
+mod row_oriented;
+mod types;
 
-pub use context::ExecutionContext;
-pub use types::{PipelineInput, PipelineOutput};
-pub use row_oriented::RowOrientedPipeline;
 pub use columnar::ColumnarPipeline;
+pub use context::ExecutionContext;
 pub use native_columnar::NativeColumnarPipeline;
+pub use row_oriented::RowOrientedPipeline;
+pub use types::{PipelineInput, PipelineOutput};
 
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
@@ -82,7 +82,10 @@ pub trait ExecutionPipeline {
     /// The default implementation delegates to `ctx.create_evaluator()`, which handles
     /// all the context variants (CTE, outer row, procedural, windows).
     #[inline]
-    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> CombinedExpressionEvaluator<'a> {
+    fn create_evaluator<'a>(
+        &self,
+        ctx: &'a ExecutionContext<'a>,
+    ) -> CombinedExpressionEvaluator<'a> {
         ctx.create_evaluator()
     }
 

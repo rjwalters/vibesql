@@ -22,13 +22,21 @@ fn test_insert_not_null_constraint_with_column_list() {
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
                 false,
             ),
-            vibesql_catalog::ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "age".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -57,14 +65,20 @@ fn test_insert_primary_key_duplicate_single_column() {
     // Insert first row
     let stmt1 = build_insert_values(
         "users",
-        vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Varchar("Alice".to_string())],
+        vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Varchar("Alice".to_string()),
+        ],
     );
     InsertExecutor::execute(&mut db, &stmt1).unwrap();
 
     // Try to insert row with duplicate id
     let stmt2 = build_insert_values(
         "users",
-        vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Varchar("Bob".to_string())],
+        vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Varchar("Bob".to_string()),
+        ],
     );
 
     let result = InsertExecutor::execute(&mut db, &stmt2);
@@ -121,7 +135,10 @@ fn test_insert_primary_key_unique_values() {
     for i in 1..=3 {
         let stmt = build_insert_values(
             "users",
-            vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Varchar(format!("User{}", i))],
+            vec![
+                vibesql_types::SqlValue::Integer(i),
+                vibesql_types::SqlValue::Varchar(format!("User{}", i)),
+            ],
         );
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
@@ -171,8 +188,10 @@ fn test_insert_unique_constraint_allows_null() {
     // Insert multiple rows with NULL email - should all succeed
     // (NULL != NULL in SQL, so multiple NULLs are allowed)
     for i in 1..=3 {
-        let stmt =
-            build_insert_values("users", vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Null]);
+        let stmt = build_insert_values(
+            "users",
+            vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Null],
+        );
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
 
@@ -307,8 +326,10 @@ fn test_insert_check_constraint_with_null() {
 
     // Insert row with NULL price - should succeed
     // (NULL in CHECK constraint evaluates to UNKNOWN, which is treated as TRUE)
-    let stmt =
-        build_insert_values("products", vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Null]);
+    let stmt = build_insert_values(
+        "products",
+        vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Null],
+    );
 
     InsertExecutor::execute(&mut db, &stmt).unwrap();
 

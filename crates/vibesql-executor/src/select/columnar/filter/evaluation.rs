@@ -101,8 +101,10 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
         }
         ColumnPredicate::Between { low, high, .. } => {
             // Both bounds must pass - if either comparison involves NULL, it returns false
-            let passes_low = compare_values(value, low).matches(&[Ordering::Greater, Ordering::Equal]);
-            let passes_high = compare_values(value, high).matches(&[Ordering::Less, Ordering::Equal]);
+            let passes_low =
+                compare_values(value, low).matches(&[Ordering::Greater, Ordering::Equal]);
+            let passes_high =
+                compare_values(value, high).matches(&[Ordering::Less, Ordering::Equal]);
             passes_low && passes_high
         }
         ColumnPredicate::Like { pattern, negated, .. } => {
@@ -114,15 +116,23 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             };
 
             let matches = like_match(text, pattern);
-            if *negated { !matches } else { matches }
+            if *negated {
+                !matches
+            } else {
+                matches
+            }
         }
         ColumnPredicate::InList { values: list_values, negated, .. } => {
             use std::cmp::Ordering;
             // Check if value matches any in the list
-            let matches = list_values.iter().any(|list_val| {
-                compare_values(value, list_val).equals(Ordering::Equal)
-            });
-            if *negated { !matches } else { matches }
+            let matches = list_values
+                .iter()
+                .any(|list_val| compare_values(value, list_val).equals(Ordering::Equal));
+            if *negated {
+                !matches
+            } else {
+                matches
+            }
         }
     }
 }

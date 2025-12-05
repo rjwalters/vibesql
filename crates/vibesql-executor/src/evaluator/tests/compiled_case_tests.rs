@@ -12,7 +12,11 @@ fn create_test_schema() -> CombinedSchema {
     let table_schema = TableSchema::new(
         "test".to_string(),
         vec![
-            ColumnSchema::new("day_name".to_string(), DataType::Varchar { max_length: Some(20) }, false),
+            ColumnSchema::new(
+                "day_name".to_string(),
+                DataType::Varchar { max_length: Some(20) },
+                false,
+            ),
             ColumnSchema::new("sales_price".to_string(), DataType::Integer, false),
             ColumnSchema::new("quantity".to_string(), DataType::Integer, false),
         ],
@@ -20,23 +24,21 @@ fn create_test_schema() -> CombinedSchema {
     CombinedSchema::from_table("test".to_string(), table_schema)
 }
 
-fn create_simple_case_expression(col_name: &str, match_value: SqlValue, result_col: &str) -> Expression {
+fn create_simple_case_expression(
+    col_name: &str,
+    match_value: SqlValue,
+    result_col: &str,
+) -> Expression {
     // CASE WHEN col_name = match_value THEN result_col ELSE NULL END
     Expression::Case {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: col_name.to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: col_name.to_string() }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(match_value)),
             }],
-            result: Expression::ColumnRef {
-                table: None,
-                column: result_col.to_string(),
-            },
+            result: Expression::ColumnRef { table: None, column: result_col.to_string() },
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
     }
@@ -204,10 +206,7 @@ fn test_does_not_compile_simple_case_with_operand() {
         })),
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::Literal(SqlValue::Varchar("Sunday".to_string()))],
-            result: Expression::ColumnRef {
-                table: None,
-                column: "sales_price".to_string(),
-            },
+            result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
         else_result: None,
     };
@@ -270,10 +269,7 @@ fn test_does_not_compile_non_null_else() {
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar("Sunday".to_string()))),
             }],
-            result: Expression::ColumnRef {
-                table: None,
-                column: "sales_price".to_string(),
-            },
+            result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Integer(0)))),
     };
@@ -298,10 +294,7 @@ fn test_does_not_compile_non_equality_condition() {
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }],
-            result: Expression::ColumnRef {
-                table: None,
-                column: "sales_price".to_string(),
-            },
+            result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
     };
@@ -358,10 +351,7 @@ fn test_compiles_with_absent_else() {
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar("Sunday".to_string()))),
             }],
-            result: Expression::ColumnRef {
-                table: None,
-                column: "sales_price".to_string(),
-            },
+            result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
         else_result: None,
     };
@@ -386,10 +376,7 @@ fn test_literal_on_left_side_of_equality() {
                     column: "day_name".to_string(),
                 }),
             }],
-            result: Expression::ColumnRef {
-                table: None,
-                column: "sales_price".to_string(),
-            },
+            result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
     };
@@ -403,10 +390,7 @@ fn test_does_not_compile_non_case_expression() {
     let schema = create_test_schema();
 
     // Plain column reference - not a CASE expression
-    let expr = Expression::ColumnRef {
-        table: None,
-        column: "day_name".to_string(),
-    };
+    let expr = Expression::ColumnRef { table: None, column: "day_name".to_string() };
 
     let compiled = CompiledCaseExpression::try_compile(&expr, &schema);
     assert!(compiled.is_none(), "Should not compile non-CASE expressions");
@@ -431,10 +415,7 @@ fn test_does_not_compile_column_to_column_comparison() {
                     column: "sales_price".to_string(),
                 }),
             }],
-            result: Expression::ColumnRef {
-                table: None,
-                column: "quantity".to_string(),
-            },
+            result: Expression::ColumnRef { table: None, column: "quantity".to_string() },
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
     };

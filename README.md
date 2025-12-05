@@ -12,8 +12,8 @@
 ## Highlights
 
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
-- **100% SQLLogicTest conformance** - 623 files (~7.4M tests)
-- **5,300+ unit tests** - comprehensive test coverage
+- **100% SQLLogicTest conformance** - 623 files (~5.9M tests)
+- **4,800+ unit tests** - comprehensive test coverage
 - **Real-time subscriptions** - Convex-like reactivity with delta updates
 - **HTTP REST & GraphQL API** - Full CRUD and query endpoints
 - **Vector search** - AI/ML embeddings with similarity search
@@ -22,7 +22,7 @@
 - **TypeScript SDK** with React hooks and Drizzle ORM adapter
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
-- **350,000+ lines** of Rust across 11 crates
+- **327,000+ lines** of Rust across 11 crates
 
 Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
 
@@ -160,8 +160,8 @@ VibeSQL runs industry-standard database benchmarks. Performance optimization is 
 | Suite | Coverage | Tests |
 |-------|----------|-------|
 | SQL:1999 Core | 100% | 739/739 sqltest |
-| SQLLogicTest | 100% | 623 files (~7.4M tests) |
-| Unit Tests | - | 5,391 tests |
+| SQLLogicTest | 100% | 623 files (~5.9M tests) |
+| Unit Tests | - | 4,800+ tests |
 | TPC-DS | 98% | 97/99 queries |
 | TPC-H | 100% | 22/22 queries |
 | TPC-C | 100% | All transactions |

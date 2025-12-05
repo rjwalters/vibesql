@@ -22,7 +22,11 @@ fn create_employees_table_numeric_salary(db: &mut Database) {
         "employees".to_string(),
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("salary".to_string(), DataType::Numeric { precision: 15, scale: 2 }, true),
+            ColumnSchema::new(
+                "salary".to_string(),
+                DataType::Numeric { precision: 15, scale: 2 },
+                true,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -57,7 +61,11 @@ fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_as
         }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: table_name.to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: table_name.to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -86,7 +94,11 @@ fn create_aggregate_subquery(
         }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: table_name.to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: table_name.to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

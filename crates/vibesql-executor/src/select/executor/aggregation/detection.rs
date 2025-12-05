@@ -82,8 +82,9 @@ impl SelectExecutor<'_> {
             }
             // Scalar subquery and EXISTS: subqueries can contain aggregates, but we don't check inside them
             // The aggregates inside subqueries are in their own scope
-            vibesql_ast::Expression::ScalarSubquery(_)
-            | vibesql_ast::Expression::Exists { .. } => false,
+            vibesql_ast::Expression::ScalarSubquery(_) | vibesql_ast::Expression::Exists { .. } => {
+                false
+            }
             // Window functions already contain aggregate-like logic
             vibesql_ast::Expression::WindowFunction { .. } => false,
             // DuplicateKeyValue references a column from INSERT VALUES
@@ -164,7 +165,7 @@ impl SelectExecutor<'_> {
             Some(vibesql_ast::FromClause::Table { name, .. }) => name.clone(),
             Some(vibesql_ast::FromClause::Join { .. }) => return None, // JOIN not allowed
             Some(vibesql_ast::FromClause::Subquery { .. }) => return None, // Subquery not allowed
-            None => return None,                               // No FROM clause
+            None => return None,                                       // No FROM clause
         };
 
         Some(table_name)

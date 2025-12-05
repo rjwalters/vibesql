@@ -8,8 +8,7 @@ use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 
 fn execute_sql(db: &mut Database, sql: &str) -> Result<Vec<Row>, String> {
-    let stmt = Parser::parse_sql(sql)
-        .map_err(|e| format!("Parse error: {:?}", e))?;
+    let stmt = Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create_stmt) => {
@@ -24,8 +23,7 @@ fn execute_sql(db: &mut Database, sql: &str) -> Result<Vec<Row>, String> {
         }
         vibesql_ast::Statement::Select(select_stmt) => {
             let executor = SelectExecutor::new(db);
-            executor.execute(&select_stmt)
-                .map_err(|e| format!("Select error: {:?}", e))
+            executor.execute(&select_stmt).map_err(|e| format!("Select error: {:?}", e))
         }
         _ => Err("Unsupported statement type".to_string()),
     }
@@ -40,14 +38,13 @@ fn test_correlated_subquery_outer_table_reference() {
         .expect("Failed to create table");
 
     // Insert some data
-    execute_sql(&mut db, "INSERT INTO t1 VALUES(1,2,3,4,5)")
-        .expect("Failed to insert row 1");
-    execute_sql(&mut db, "INSERT INTO t1 VALUES(2,3,4,5,6)")
-        .expect("Failed to insert row 2");
+    execute_sql(&mut db, "INSERT INTO t1 VALUES(1,2,3,4,5)").expect("Failed to insert row 1");
+    execute_sql(&mut db, "INSERT INTO t1 VALUES(2,3,4,5,6)").expect("Failed to insert row 2");
 
     // This is the failing query from issue #2998
     // The subquery references t1.b from the outer query while using alias x for its own t1
-    let result = execute_sql(&mut db, "SELECT a, (SELECT count(*) FROM t1 AS x WHERE x.b < t1.b) FROM t1");
+    let result =
+        execute_sql(&mut db, "SELECT a, (SELECT count(*) FROM t1 AS x WHERE x.b < t1.b) FROM t1");
 
     match result {
         Ok(rows) => {

@@ -341,9 +341,8 @@ fn test_explain_delete() {
 
 #[test]
 fn test_explain_select_with_join() {
-    let stmt =
-        Parser::parse_sql("EXPLAIN SELECT * FROM users u JOIN orders o ON u.id = o.user_id")
-            .unwrap();
+    let stmt = Parser::parse_sql("EXPLAIN SELECT * FROM users u JOIN orders o ON u.id = o.user_id")
+        .unwrap();
 
     if let Statement::Explain(explain) = stmt {
         assert!(matches!(*explain.statement, Statement::Select(_)));

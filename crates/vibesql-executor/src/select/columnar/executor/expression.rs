@@ -3,8 +3,8 @@
 //! This module provides functions for evaluating SQL expressions on columnar
 //! data, including support for aggregate expressions like SUM(col_a * col_b).
 
-use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::aggregate::AggregateOp;
+use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::simd_ops;
 use crate::errors::ExecutorError;
 use vibesql_ast::{BinaryOperator, Expression};
@@ -26,8 +26,9 @@ pub fn compute_expression_aggregate_batch(
             // Get column indices from left and right operands
             if let (
                 Expression::ColumnRef { column: col1, .. },
-                Expression::ColumnRef { column: col2, .. }
-            ) = (left.as_ref(), right.as_ref()) {
+                Expression::ColumnRef { column: col2, .. },
+            ) = (left.as_ref(), right.as_ref())
+            {
                 // Find column indices by name
                 let left_idx = batch.column_index_by_name(col1);
                 let right_idx = batch.column_index_by_name(col2);
@@ -49,11 +50,26 @@ pub fn compute_expression_aggregate_batch(
         // Evaluate expression for this row
         if let Ok(value) = eval_expr_on_batch(batch, expr, row_idx) {
             match value {
-                SqlValue::Integer(v) => { sum += v as f64; count += 1; }
-                SqlValue::Double(v) => { sum += v; count += 1; }
-                SqlValue::Float(v) => { sum += v as f64; count += 1; }
-                SqlValue::Bigint(v) => { sum += v as f64; count += 1; }
-                SqlValue::Numeric(v) => { sum += v; count += 1; }
+                SqlValue::Integer(v) => {
+                    sum += v as f64;
+                    count += 1;
+                }
+                SqlValue::Double(v) => {
+                    sum += v;
+                    count += 1;
+                }
+                SqlValue::Float(v) => {
+                    sum += v as f64;
+                    count += 1;
+                }
+                SqlValue::Bigint(v) => {
+                    sum += v as f64;
+                    count += 1;
+                }
+                SqlValue::Numeric(v) => {
+                    sum += v;
+                    count += 1;
+                }
                 SqlValue::Null => {}
                 _ => {}
             }
@@ -63,10 +79,12 @@ pub fn compute_expression_aggregate_batch(
     match op {
         AggregateOp::Sum => Ok(if count > 0 { SqlValue::Double(sum) } else { SqlValue::Null }),
         AggregateOp::Count => Ok(SqlValue::Integer(count)),
-        AggregateOp::Avg => Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null }),
+        AggregateOp::Avg => {
+            Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null })
+        }
         _ => Err(ExecutorError::UnsupportedExpression(
-            "MIN/MAX not supported for expression aggregates".to_string()
-        ))
+            "MIN/MAX not supported for expression aggregates".to_string(),
+        )),
     }
 }
 
@@ -80,18 +98,15 @@ pub fn compute_multiply_aggregate(
     right_idx: usize,
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
-    let left_col = batch.column(left_idx).ok_or_else(|| {
-        ExecutorError::ColumnarColumnNotFound {
-            column_index: left_idx,
-            batch_columns: batch.column_count(),
-        }
+    let left_col = batch.column(left_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: left_idx,
+        batch_columns: batch.column_count(),
     })?;
-    let right_col = batch.column(right_idx).ok_or_else(|| {
-        ExecutorError::ColumnarColumnNotFound {
+    let right_col =
+        batch.column(right_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: right_idx,
             batch_columns: batch.column_count(),
-        }
-    })?;
+        })?;
 
     // Fast path: Both columns are Float64 - use SIMD-accelerated sum_product
     if let (
@@ -117,10 +132,12 @@ pub fn compute_multiply_aggregate(
         return match op {
             AggregateOp::Sum => Ok(if count > 0 { SqlValue::Double(sum) } else { SqlValue::Null }),
             AggregateOp::Count => Ok(SqlValue::Integer(count)),
-            AggregateOp::Avg => Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null }),
+            AggregateOp::Avg => {
+                Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null })
+            }
             _ => Err(ExecutorError::UnsupportedExpression(
-                "MIN/MAX not supported for expression aggregates".to_string()
-            ))
+                "MIN/MAX not supported for expression aggregates".to_string(),
+            )),
         };
     }
 
@@ -164,10 +181,14 @@ pub fn compute_multiply_aggregate(
             return match op {
                 AggregateOp::Sum => Ok(SqlValue::Integer(sum)),
                 AggregateOp::Count => Ok(SqlValue::Integer(len as i64)),
-                AggregateOp::Avg => Ok(if len > 0 { SqlValue::Double(sum as f64 / len as f64) } else { SqlValue::Null }),
+                AggregateOp::Avg => Ok(if len > 0 {
+                    SqlValue::Double(sum as f64 / len as f64)
+                } else {
+                    SqlValue::Null
+                }),
                 _ => Err(ExecutorError::UnsupportedExpression(
-                    "MIN/MAX not supported for expression aggregates".to_string()
-                ))
+                    "MIN/MAX not supported for expression aggregates".to_string(),
+                )),
             };
         }
 
@@ -189,10 +210,14 @@ pub fn compute_multiply_aggregate(
         return match op {
             AggregateOp::Sum => Ok(if count > 0 { SqlValue::Integer(sum) } else { SqlValue::Null }),
             AggregateOp::Count => Ok(SqlValue::Integer(count)),
-            AggregateOp::Avg => Ok(if count > 0 { SqlValue::Double(sum as f64 / count as f64) } else { SqlValue::Null }),
+            AggregateOp::Avg => Ok(if count > 0 {
+                SqlValue::Double(sum as f64 / count as f64)
+            } else {
+                SqlValue::Null
+            }),
             _ => Err(ExecutorError::UnsupportedExpression(
-                "MIN/MAX not supported for expression aggregates".to_string()
-            ))
+                "MIN/MAX not supported for expression aggregates".to_string(),
+            )),
         };
     }
 
@@ -222,51 +247,52 @@ pub fn compute_multiply_aggregate(
     match op {
         AggregateOp::Sum => Ok(if count > 0 { SqlValue::Double(sum) } else { SqlValue::Null }),
         AggregateOp::Count => Ok(SqlValue::Integer(count)),
-        AggregateOp::Avg => Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null }),
+        AggregateOp::Avg => {
+            Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null })
+        }
         _ => Err(ExecutorError::UnsupportedExpression(
-            "MIN/MAX not supported for expression aggregates".to_string()
-        ))
+            "MIN/MAX not supported for expression aggregates".to_string(),
+        )),
     }
 }
 
 /// Convert a ColumnArray to Vec<Option<f64>> for arithmetic operations
 pub fn column_to_f64_vec(column: &ColumnArray) -> Result<Vec<Option<f64>>, ExecutorError> {
     match column {
-        ColumnArray::Int64(values, nulls) => {
-            Ok(values.iter().enumerate().map(|(i, &v)| {
-                if nulls.as_ref().map_or(false, |n| n[i]) {
-                    None
-                } else {
-                    Some(v as f64)
-                }
-            }).collect())
-        }
-        ColumnArray::Float64(values, nulls) => {
-            Ok(values.iter().enumerate().map(|(i, &v)| {
-                if nulls.as_ref().map_or(false, |n| n[i]) {
-                    None
-                } else {
-                    Some(v)
-                }
-            }).collect())
-        }
-        ColumnArray::Mixed(values) => {
-            Ok(values.iter().map(|v| {
-                match v {
-                    SqlValue::Integer(n) => Some(*n as f64),
-                    SqlValue::Bigint(n) => Some(*n as f64),
-                    SqlValue::Float(n) => Some(*n as f64),
-                    SqlValue::Double(n) => Some(*n),
-                    SqlValue::Numeric(n) => Some(*n),
-                    SqlValue::Null => None,
-                    _ => None,
-                }
-            }).collect())
-        }
+        ColumnArray::Int64(values, nulls) => Ok(values
+            .iter()
+            .enumerate()
+            .map(
+                |(i, &v)| {
+                    if nulls.as_ref().map_or(false, |n| n[i]) {
+                        None
+                    } else {
+                        Some(v as f64)
+                    }
+                },
+            )
+            .collect()),
+        ColumnArray::Float64(values, nulls) => Ok(values
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| if nulls.as_ref().map_or(false, |n| n[i]) { None } else { Some(v) })
+            .collect()),
+        ColumnArray::Mixed(values) => Ok(values
+            .iter()
+            .map(|v| match v {
+                SqlValue::Integer(n) => Some(*n as f64),
+                SqlValue::Bigint(n) => Some(*n as f64),
+                SqlValue::Float(n) => Some(*n as f64),
+                SqlValue::Double(n) => Some(*n),
+                SqlValue::Numeric(n) => Some(*n),
+                SqlValue::Null => None,
+                _ => None,
+            })
+            .collect()),
         _ => Err(ExecutorError::UnsupportedArrayType {
             operation: "column_to_f64".to_string(),
             array_type: format!("{:?}", std::mem::discriminant(column)),
-        })
+        }),
     }
 }
 
@@ -313,17 +339,20 @@ pub fn eval_expr_on_batch(
                         BinaryOperator::Minus => l_f64 - r_f64,
                         BinaryOperator::Multiply => l_f64 * r_f64,
                         BinaryOperator::Divide => l_f64 / r_f64,
-                        _ => return Err(ExecutorError::UnsupportedExpression(
-                            format!("Unsupported binary operator: {:?}", op)
-                        ))
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(format!(
+                                "Unsupported binary operator: {:?}",
+                                op
+                            )))
+                        }
                     };
                     Ok(SqlValue::Double(result))
                 }
             }
         }
         _ => Err(ExecutorError::UnsupportedExpression(
-            "Complex expression not supported".to_string()
-        ))
+            "Complex expression not supported".to_string(),
+        )),
     }
 }
 

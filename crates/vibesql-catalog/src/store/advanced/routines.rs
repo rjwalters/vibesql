@@ -77,8 +77,7 @@ impl super::super::Catalog {
         if self.procedures.contains_key(&name) {
             return Err(CatalogError::ProcedureAlreadyExists(name));
         }
-        self.procedures
-            .insert(name.clone(), Procedure::new(name, schema, parameters, body));
+        self.procedures.insert(name.clone(), Procedure::new(name, schema, parameters, body));
         Ok(())
     }
 
@@ -164,7 +163,7 @@ impl super::super::Catalog {
             Procedure::new(
                 name,
                 schema,
-                Vec::new(), // Empty parameter list
+                Vec::new(),                           // Empty parameter list
                 ProcedureBody::RawSql(String::new()), // Empty body
             ),
         );

@@ -206,10 +206,7 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::AlterTriggerStmt {
-            trigger_name,
-            action,
-        })
+        Ok(vibesql_ast::AlterTriggerStmt { trigger_name, action })
     }
 
     /// Parse DROP TRIGGER statement

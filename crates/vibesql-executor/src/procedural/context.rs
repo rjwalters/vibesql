@@ -132,10 +132,7 @@ impl ExecutionContext {
     pub fn enter_recursion(&mut self) -> Result<(), String> {
         self.recursion_depth += 1;
         if self.recursion_depth > self.max_recursion {
-            Err(format!(
-                "Maximum recursion depth ({}) exceeded",
-                self.max_recursion
-            ))
+            Err(format!("Maximum recursion depth ({}) exceeded", self.max_recursion))
         } else {
             Ok(())
         }
@@ -171,10 +168,8 @@ impl ExecutionContext {
 
     /// Get all available variable and parameter names (for error messages)
     pub fn get_available_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.variables.keys()
-            .chain(self.parameters.keys())
-            .cloned()
-            .collect();
+        let mut names: Vec<String> =
+            self.variables.keys().chain(self.parameters.keys()).cloned().collect();
         names.sort();
         names
     }

@@ -74,17 +74,15 @@ fn test_parse_extract_day() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select_stmt) => {
-            match &select_stmt.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::Extract { field, .. } => {
-                        assert_eq!(*field, vibesql_ast::IntervalUnit::Day);
-                    }
-                    _ => panic!("Expected Extract expression"),
-                },
-                _ => panic!("Expected Expression select item"),
-            }
-        }
+        vibesql_ast::Statement::Select(select_stmt) => match &select_stmt.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Extract { field, .. } => {
+                    assert_eq!(*field, vibesql_ast::IntervalUnit::Day);
+                }
+                _ => panic!("Expected Extract expression"),
+            },
+            _ => panic!("Expected Expression select item"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }
@@ -97,17 +95,15 @@ fn test_parse_extract_hour() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select_stmt) => {
-            match &select_stmt.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::Extract { field, .. } => {
-                        assert_eq!(*field, vibesql_ast::IntervalUnit::Hour);
-                    }
-                    _ => panic!("Expected Extract expression"),
-                },
-                _ => panic!("Expected Expression select item"),
-            }
-        }
+        vibesql_ast::Statement::Select(select_stmt) => match &select_stmt.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Extract { field, .. } => {
+                    assert_eq!(*field, vibesql_ast::IntervalUnit::Hour);
+                }
+                _ => panic!("Expected Extract expression"),
+            },
+            _ => panic!("Expected Expression select item"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }
@@ -120,17 +116,15 @@ fn test_parse_extract_minute() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select_stmt) => {
-            match &select_stmt.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::Extract { field, .. } => {
-                        assert_eq!(*field, vibesql_ast::IntervalUnit::Minute);
-                    }
-                    _ => panic!("Expected Extract expression"),
-                },
-                _ => panic!("Expected Expression select item"),
-            }
-        }
+        vibesql_ast::Statement::Select(select_stmt) => match &select_stmt.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Extract { field, .. } => {
+                    assert_eq!(*field, vibesql_ast::IntervalUnit::Minute);
+                }
+                _ => panic!("Expected Extract expression"),
+            },
+            _ => panic!("Expected Expression select item"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }
@@ -143,17 +137,15 @@ fn test_parse_extract_second() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select_stmt) => {
-            match &select_stmt.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::Extract { field, .. } => {
-                        assert_eq!(*field, vibesql_ast::IntervalUnit::Second);
-                    }
-                    _ => panic!("Expected Extract expression"),
-                },
-                _ => panic!("Expected Expression select item"),
-            }
-        }
+        vibesql_ast::Statement::Select(select_stmt) => match &select_stmt.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Extract { field, .. } => {
+                    assert_eq!(*field, vibesql_ast::IntervalUnit::Second);
+                }
+                _ => panic!("Expected Extract expression"),
+            },
+            _ => panic!("Expected Expression select item"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }
@@ -167,18 +159,16 @@ fn test_parse_extract_from_current_date() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select_stmt) => {
-            match &select_stmt.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::Extract { field, expr } => {
-                        assert_eq!(*field, vibesql_ast::IntervalUnit::Year);
-                        assert!(matches!(**expr, vibesql_ast::Expression::CurrentDate));
-                    }
-                    _ => panic!("Expected Extract expression"),
-                },
-                _ => panic!("Expected Expression select item"),
-            }
-        }
+        vibesql_ast::Statement::Select(select_stmt) => match &select_stmt.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Extract { field, expr } => {
+                    assert_eq!(*field, vibesql_ast::IntervalUnit::Year);
+                    assert!(matches!(**expr, vibesql_ast::Expression::CurrentDate));
+                }
+                _ => panic!("Expected Extract expression"),
+            },
+            _ => panic!("Expected Expression select item"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }
@@ -201,24 +191,22 @@ fn test_parse_extract_with_qualified_column() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select_stmt) => {
-            match &select_stmt.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::Extract { field, expr } => {
-                        assert_eq!(*field, vibesql_ast::IntervalUnit::Month);
-                        match &**expr {
-                            vibesql_ast::Expression::ColumnRef { table, column } => {
-                                assert_eq!(table.as_deref(), Some("ORDERS"));
-                                assert_eq!(column, "ORDER_DATE");
-                            }
-                            _ => panic!("Expected qualified column reference"),
+        vibesql_ast::Statement::Select(select_stmt) => match &select_stmt.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Extract { field, expr } => {
+                    assert_eq!(*field, vibesql_ast::IntervalUnit::Month);
+                    match &**expr {
+                        vibesql_ast::Expression::ColumnRef { table, column } => {
+                            assert_eq!(table.as_deref(), Some("ORDERS"));
+                            assert_eq!(column, "ORDER_DATE");
                         }
+                        _ => panic!("Expected qualified column reference"),
                     }
-                    _ => panic!("Expected Extract expression"),
-                },
-                _ => panic!("Expected Expression select item"),
-            }
-        }
+                }
+                _ => panic!("Expected Extract expression"),
+            },
+            _ => panic!("Expected Expression select item"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }

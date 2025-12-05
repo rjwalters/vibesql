@@ -58,8 +58,9 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
             Err(JsValue::from_str("Use query() method for SELECT statements"))
         }
         vibesql_ast::Statement::BeginTransaction(begin_stmt) => {
-            let message = vibesql_executor::BeginTransactionExecutor::execute(&begin_stmt, &mut db.db)
-                .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            let message =
+                vibesql_executor::BeginTransactionExecutor::execute(&begin_stmt, &mut db.db)
+                    .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult { rows_affected: 0, message };
 
@@ -94,9 +95,11 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::RollbackToSavepoint(rollback_to_stmt) => {
-            let message =
-                vibesql_executor::RollbackToSavepointExecutor::execute(&rollback_to_stmt, &mut db.db)
-                    .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            let message = vibesql_executor::RollbackToSavepointExecutor::execute(
+                &rollback_to_stmt,
+                &mut db.db,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult { rows_affected: 0, message };
 
@@ -104,8 +107,9 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::ReleaseSavepoint(release_stmt) => {
-            let message = vibesql_executor::ReleaseSavepointExecutor::execute(&release_stmt, &mut db.db)
-                .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            let message =
+                vibesql_executor::ReleaseSavepointExecutor::execute(&release_stmt, &mut db.db)
+                    .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult { rows_affected: 0, message };
 
@@ -123,8 +127,9 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::DropRole(drop_role_stmt) => {
-            let message = vibesql_executor::RoleExecutor::execute_drop_role(&drop_role_stmt, &mut db.db)
-                .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            let message =
+                vibesql_executor::RoleExecutor::execute_drop_role(&drop_role_stmt, &mut db.db)
+                    .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult { rows_affected: 0, message };
 
@@ -132,9 +137,11 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::CreateDomain(create_domain_stmt) => {
-            let message =
-                vibesql_executor::DomainExecutor::execute_create_domain(&create_domain_stmt, &mut db.db)
-                    .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            let message = vibesql_executor::DomainExecutor::execute_create_domain(
+                &create_domain_stmt,
+                &mut db.db,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult { rows_affected: 0, message };
 
@@ -142,9 +149,11 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::DropDomain(drop_domain_stmt) => {
-            let message =
-                vibesql_executor::DomainExecutor::execute_drop_domain(&drop_domain_stmt, &mut db.db)
-                    .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            let message = vibesql_executor::DomainExecutor::execute_drop_domain(
+                &drop_domain_stmt,
+                &mut db.db,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult { rows_affected: 0, message };
 
@@ -152,8 +161,11 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::CreateSequence(create_seq_stmt) => {
-            vibesql_executor::advanced_objects::execute_create_sequence(&create_seq_stmt, &mut db.db)
-                .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            vibesql_executor::advanced_objects::execute_create_sequence(
+                &create_seq_stmt,
+                &mut db.db,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult {
                 rows_affected: 0,
@@ -204,8 +216,9 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::DropType(drop_type_stmt) => {
-            let message = vibesql_executor::TypeExecutor::execute_drop_type(&drop_type_stmt, &mut db.db)
-                .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            let message =
+                vibesql_executor::TypeExecutor::execute_drop_type(&drop_type_stmt, &mut db.db)
+                    .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult { rows_affected: 0, message };
 
@@ -213,8 +226,11 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::CreateTrigger(create_trigger_stmt) => {
-            vibesql_executor::advanced_objects::execute_create_trigger(&create_trigger_stmt, &mut db.db)
-                .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            vibesql_executor::advanced_objects::execute_create_trigger(
+                &create_trigger_stmt,
+                &mut db.db,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult {
                 rows_affected: 0,
@@ -228,12 +244,18 @@ pub fn execute_statement(db: &mut Database, sql: &str) -> Result<JsValue, JsValu
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
         }
         vibesql_ast::Statement::DropTrigger(drop_trigger_stmt) => {
-            vibesql_executor::advanced_objects::execute_drop_trigger(&drop_trigger_stmt, &mut db.db)
-                .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
+            vibesql_executor::advanced_objects::execute_drop_trigger(
+                &drop_trigger_stmt,
+                &mut db.db,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
 
             let result = ExecuteResult {
                 rows_affected: 0,
-                message: format!("Trigger '{}' dropped successfully", drop_trigger_stmt.trigger_name),
+                message: format!(
+                    "Trigger '{}' dropped successfully",
+                    drop_trigger_stmt.trigger_name
+                ),
             };
 
             serde_wasm_bindgen::to_value(&result)

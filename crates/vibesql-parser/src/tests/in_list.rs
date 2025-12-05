@@ -14,7 +14,9 @@ fn test_parse_in_with_integer_list() {
         assert!(select.where_clause.is_some());
 
         // Should be an InList expression
-        if let vibesql_ast::Expression::InList { expr, values, negated } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::InList { expr, values, negated } =
+            &select.where_clause.unwrap()
+        {
             // Left side should be column reference
             assert!(matches!(**expr, vibesql_ast::Expression::ColumnRef { .. }));
 
@@ -22,9 +24,18 @@ fn test_parse_in_with_integer_list() {
             assert_eq!(values.len(), 3);
 
             // All should be integer literals
-            assert!(matches!(values[0], vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))));
-            assert!(matches!(values[1], vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))));
-            assert!(matches!(values[2], vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3))));
+            assert!(matches!(
+                values[0],
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))
+            ));
+            assert!(matches!(
+                values[1],
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))
+            ));
+            assert!(matches!(
+                values[2],
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3))
+            ));
 
             // Not negated
             assert!(!(*negated));
@@ -66,7 +77,9 @@ fn test_parse_not_in_with_value_list() {
         assert!(select.where_clause.is_some());
 
         // Should be an InList expression with negated=true
-        if let vibesql_ast::Expression::InList { negated, values, .. } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::InList { negated, values, .. } =
+            &select.where_clause.unwrap()
+        {
             assert!(*negated, "NOT IN should set negated=true");
             assert_eq!(values.len(), 2);
         } else {

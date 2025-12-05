@@ -1,7 +1,7 @@
 //! Tests for DELETE statement execution
 
-mod common;
 mod basic;
+mod common;
 mod edge_cases;
 mod subqueries;
 mod truncate_optimization;

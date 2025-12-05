@@ -75,7 +75,8 @@ impl super::Catalog {
                 message: "Circular foreign key dependency detected between multiple tables. \
                 Circular foreign key relationships are not allowed during table creation. \
                 Consider using ALTER TABLE to add foreign keys after all tables are created, \
-                or ensure foreign keys only reference tables that don't create dependency cycles.".to_string(),
+                or ensure foreign keys only reference tables that don't create dependency cycles."
+                    .to_string(),
             });
         }
 
@@ -154,14 +155,15 @@ impl super::Catalog {
         if let Some((schema_name, table_name)) = name.split_once('.') {
             let normalized_table = self.normalize_identifier(table_name);
             // Find schema with case-insensitive lookup
-            self.get_schema_case_insensitive(schema_name)
-                .and_then(|schema| schema.get_table(&normalized_table, self.case_sensitive_identifiers))
+            self.get_schema_case_insensitive(schema_name).and_then(|schema| {
+                schema.get_table(&normalized_table, self.case_sensitive_identifiers)
+            })
         } else {
             // Use current schema for unqualified names
             let normalized_table = self.normalize_identifier(name);
-            self.schemas
-                .get(&self.current_schema)
-                .and_then(|schema| schema.get_table(&normalized_table, self.case_sensitive_identifiers))
+            self.schemas.get(&self.current_schema).and_then(|schema| {
+                schema.get_table(&normalized_table, self.case_sensitive_identifiers)
+            })
         }
     }
 
@@ -202,7 +204,8 @@ impl super::Catalog {
         // Per SQL standard (R-37808-62273): triggers are automatically dropped when the table is dropped
         // Note: We need to normalize trigger table_name for comparison in case-insensitive mode
         let case_sensitive = self.case_sensitive_identifiers;
-        let trigger_names: Vec<String> = self.triggers
+        let trigger_names: Vec<String> = self
+            .triggers
             .values()
             .filter(|trigger| {
                 let trigger_table = if case_sensitive {
@@ -225,13 +228,12 @@ impl super::Catalog {
             .ok_or(CatalogError::SchemaNotFound(schema_key.clone()))?;
 
         // For error messages, we want to use the original input name, not the normalized one
-        schema.drop_table(&normalized_table, case_sensitive)
-            .map_err(|e| match e {
-                CatalogError::TableNotFound { .. } => CatalogError::TableNotFound {
-                    table_name: original_table_name.to_string(),
-                },
-                other => other,
-            })
+        schema.drop_table(&normalized_table, case_sensitive).map_err(|e| match e {
+            CatalogError::TableNotFound { .. } => {
+                CatalogError::TableNotFound { table_name: original_table_name.to_string() }
+            }
+            other => other,
+        })
     }
 
     /// List all table names in the current schema.
@@ -287,7 +289,7 @@ mod tests {
             name: "Tr1".to_string(),
             timing: TriggerTiming::After,
             event: TriggerEvent::Update(None), // None = no column list
-            table_name: "T1".to_string(), // Different case than table creation
+            table_name: "T1".to_string(),      // Different case than table creation
             granularity: TriggerGranularity::Row,
             when_condition: None,
             triggered_action: TriggerAction::RawSql("".to_string()),
@@ -302,9 +304,11 @@ mod tests {
         catalog.drop_table("t1").unwrap();
 
         // Verify trigger was automatically deleted despite case mismatch
-        assert!(catalog.get_trigger("Tr1").is_none(),
-                "Trigger should be automatically deleted when table is dropped, \
-                 regardless of case used in CREATE TRIGGER vs DROP TABLE");
+        assert!(
+            catalog.get_trigger("Tr1").is_none(),
+            "Trigger should be automatically deleted when table is dropped, \
+                 regardless of case used in CREATE TRIGGER vs DROP TABLE"
+        );
     }
 
     #[test]

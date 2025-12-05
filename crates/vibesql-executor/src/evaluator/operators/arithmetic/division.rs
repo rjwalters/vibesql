@@ -1,6 +1,6 @@
 //! Division operators (/, //) implementation
 
-use vibesql_types::{TypeBehavior, ValueType, SqlValue};
+use vibesql_types::{SqlValue, TypeBehavior, ValueType};
 
 use crate::errors::ExecutorError;
 
@@ -35,7 +35,7 @@ impl Division {
                         return Err(ExecutorError::DivisionByZero);
                     }
                 }
-                return Ok(Null);  // Non-strict mode: division by zero returns NULL
+                return Ok(Null); // Non-strict mode: division by zero returns NULL
             }
 
             // Use TypeBehavior trait to determine result type
@@ -73,7 +73,7 @@ impl Division {
                     return Err(ExecutorError::DivisionByZero);
                 }
             }
-            return Ok(Null);  // Non-strict mode: division by zero returns NULL
+            return Ok(Null); // Non-strict mode: division by zero returns NULL
         }
 
         // Use TypeBehavior trait to determine result type based on original operands
@@ -97,14 +97,10 @@ impl Division {
                 Ok(Float((a / b) as f32))
             }
             // Numeric division - always returns Numeric
-            (super::CoercedValues::Numeric(a, b), ValueType::Numeric) => {
-                Ok(Numeric(a / b))
-            }
+            (super::CoercedValues::Numeric(a, b), ValueType::Numeric) => Ok(Numeric(a / b)),
             // Handle edge case: if TypeBehavior returns Float for approximate operands
             // but coercion produced Numeric, convert to Numeric
-            (super::CoercedValues::Numeric(a, b), ValueType::Float) => {
-                Ok(Numeric(a / b))
-            }
+            (super::CoercedValues::Numeric(a, b), ValueType::Float) => Ok(Numeric(a / b)),
             // ApproximateNumeric with Numeric result type (MySQL mode with Float operands)
             // MySQL always returns Numeric for division even with Float inputs
             (super::CoercedValues::ApproximateNumeric(a, b), ValueType::Numeric) => {

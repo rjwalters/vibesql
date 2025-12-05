@@ -24,9 +24,7 @@ use std::collections::HashMap;
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
-    optimizer::adaptive::{
-        choose_execution_strategy, ExecutionStrategy, StrategyContext,
-    },
+    optimizer::adaptive::{choose_execution_strategy, ExecutionStrategy, StrategyContext},
     pipeline::{
         ColumnarPipeline, ExecutionContext, ExecutionPipeline, NativeColumnarPipeline,
         PipelineInput,
@@ -42,7 +40,10 @@ use crate::{
 
 impl SelectExecutor<'_> {
     /// Execute a SELECT statement
-    pub fn execute(&self, stmt: &vibesql_ast::SelectStmt) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+    pub fn execute(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 
@@ -314,13 +315,18 @@ impl SelectExecutor<'_> {
 
                 // Phase 4: Try columnar join execution for multi-table JOIN queries (#2943)
                 // This provides 3-5x speedup for TPC-H Q3 style queries
-                let has_joins = stmt.from.as_ref().is_some_and(|f| matches!(f, vibesql_ast::FromClause::Join { .. }));
+                let has_joins = stmt
+                    .from
+                    .as_ref()
+                    .is_some_and(|f| matches!(f, vibesql_ast::FromClause::Join { .. }));
                 if has_joins {
                     if let Some(result) = self.try_columnar_join_execution(stmt, cte_results)? {
                         log::info!("Columnar join execution succeeded");
                         result
                     } else {
-                        log::debug!("Columnar join execution not applicable, falling back to row-oriented");
+                        log::debug!(
+                            "Columnar join execution not applicable, falling back to row-oriented"
+                        );
                         self.execute_row_oriented(stmt, cte_results)?
                     }
                 } else {
@@ -331,7 +337,8 @@ impl SelectExecutor<'_> {
             ExecutionStrategy::ExpressionOnly { .. } => {
                 // SELECT without FROM - special case that doesn't use pipelines
                 // May still have aggregates (e.g., SELECT COUNT(*), SELECT MAX(1))
-                return self.execute_expression_only(stmt, cte_results);
+                // Note: Do NOT use early return here - we need to fall through to set operations handling
+                self.execute_expression_only(stmt, cte_results)?
             }
         };
 
@@ -399,7 +406,8 @@ impl SelectExecutor<'_> {
         // Check query complexity - pipelines don't support all features
         let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
         let has_group_by = stmt.group_by.is_some();
-        let has_joins = stmt.from.as_ref().is_some_and(|f| matches!(f, vibesql_ast::FromClause::Join { .. }));
+        let has_joins =
+            stmt.from.as_ref().is_some_and(|f| matches!(f, vibesql_ast::FromClause::Join { .. }));
         let has_order_by = stmt.order_by.is_some();
         let has_distinct = stmt.distinct;
         let has_set_ops = stmt.set_operation.is_some();
@@ -423,7 +431,12 @@ impl SelectExecutor<'_> {
 
         // For complex queries (ORDER BY, DISTINCT, window functions, set ops, DISTINCT aggregates),
         // fall back to full execution paths which have complete support
-        if has_order_by || has_distinct || has_window_funcs || has_set_ops || has_distinct_aggregates {
+        if has_order_by
+            || has_distinct
+            || has_window_funcs
+            || has_set_ops
+            || has_distinct_aggregates
+        {
             log::debug!(
                 "{} pipeline doesn't support complex features (order_by={}, distinct={}, window={}, set_ops={}, distinct_agg={})",
                 strategy_name,
@@ -483,7 +496,8 @@ impl SelectExecutor<'_> {
         // Stage 1: Filter (WHERE clause)
         let filtered = match pipeline.apply_filter(input, stmt.where_clause.as_ref(), &exec_ctx) {
             Ok(result) => result,
-            Err(ExecutorError::UnsupportedFeature(_)) | Err(ExecutorError::UnsupportedExpression(_)) => {
+            Err(ExecutorError::UnsupportedFeature(_))
+            | Err(ExecutorError::UnsupportedExpression(_)) => {
                 log::debug!("{} pipeline filter failed, falling back", strategy_name);
                 return Ok(None);
             }
@@ -504,7 +518,8 @@ impl SelectExecutor<'_> {
                 &exec_ctx,
             ) {
                 Ok(result) => result,
-                Err(ExecutorError::UnsupportedFeature(_)) | Err(ExecutorError::UnsupportedExpression(_)) => {
+                Err(ExecutorError::UnsupportedFeature(_))
+                | Err(ExecutorError::UnsupportedExpression(_)) => {
                     log::debug!("{} pipeline aggregation failed, falling back", strategy_name);
                     return Ok(None);
                 }
@@ -514,7 +529,8 @@ impl SelectExecutor<'_> {
             // Execute projection only
             match pipeline.apply_projection(filtered.into_input(), &stmt.select_list, &exec_ctx) {
                 Ok(result) => result,
-                Err(ExecutorError::UnsupportedFeature(_)) | Err(ExecutorError::UnsupportedExpression(_)) => {
+                Err(ExecutorError::UnsupportedFeature(_))
+                | Err(ExecutorError::UnsupportedExpression(_)) => {
                     log::debug!("{} pipeline projection failed, falling back", strategy_name);
                     return Ok(None);
                 }
@@ -529,11 +545,7 @@ impl SelectExecutor<'_> {
 
         #[cfg(feature = "profile-q6")]
         {
-            eprintln!(
-                "[PROFILE-Q6] ✓ {} pipeline execution: {:?}",
-                strategy_name,
-                start.elapsed()
-            );
+            eprintln!("[PROFILE-Q6] ✓ {} pipeline execution: {:?}", strategy_name, start.elapsed());
         }
 
         log::debug!("✓ {} pipeline execution succeeded", strategy_name);
@@ -683,7 +695,8 @@ impl SelectExecutor<'_> {
         // Execute the immediate right query WITHOUT its set operations
         // This prevents right-recursive evaluation
         let right_stmt = &set_op.right;
-        let has_aggregates = self.has_aggregates(&right_stmt.select_list) || right_stmt.having.is_some();
+        let has_aggregates =
+            self.has_aggregates(&right_stmt.select_list) || right_stmt.having.is_some();
         let has_group_by = right_stmt.group_by.is_some();
 
         let right_results = if has_aggregates || has_group_by {
@@ -691,8 +704,14 @@ impl SelectExecutor<'_> {
         } else if let Some(from_clause) = &right_stmt.from {
             // Note: LIMIT is None for set operation sides - it's applied after the set operation
             // Pass select_list for table elimination optimization (#3556)
-            let from_result =
-                self.execute_from_with_where(from_clause, cte_results, right_stmt.where_clause.as_ref(), right_stmt.order_by.as_deref(), None, Some(&right_stmt.select_list))?;
+            let from_result = self.execute_from_with_where(
+                from_clause,
+                cte_results,
+                right_stmt.where_clause.as_ref(),
+                right_stmt.order_by.as_deref(),
+                None,
+                Some(&right_stmt.select_list),
+            )?;
             self.execute_without_aggregation(right_stmt, from_result, cte_results)?
         } else {
             self.execute_select_without_from(right_stmt)?
@@ -738,21 +757,31 @@ impl SelectExecutor<'_> {
     ) -> Result<FromResult, ExecutorError> {
         use crate::select::scan::execute_from_clause;
 
-        let from_result = execute_from_clause(from, cte_results, self.database, where_clause, order_by, limit, self.outer_row, self.outer_schema, |query| {
-            // For derived table subqueries, create a child executor with CTE context
-            // This allows CTEs from the outer WITH clause to be referenced in subqueries
-            // Critical for queries like TPC-DS Q2 where CTEs are used in FROM subqueries
-            if !cte_results.is_empty() {
-                let child = SelectExecutor::new_with_cte_and_depth(
-                    self.database,
-                    cte_results,
-                    self.subquery_depth,
-                );
-                child.execute_with_columns(query)
-            } else {
-                self.execute_with_columns(query)
-            }
-        })?;
+        let from_result = execute_from_clause(
+            from,
+            cte_results,
+            self.database,
+            where_clause,
+            order_by,
+            limit,
+            self.outer_row,
+            self.outer_schema,
+            |query| {
+                // For derived table subqueries, create a child executor with CTE context
+                // This allows CTEs from the outer WITH clause to be referenced in subqueries
+                // Critical for queries like TPC-DS Q2 where CTEs are used in FROM subqueries
+                if !cte_results.is_empty() {
+                    let child = SelectExecutor::new_with_cte_and_depth(
+                        self.database,
+                        cte_results,
+                        self.subquery_depth,
+                    );
+                    child.execute_with_columns(query)
+                } else {
+                    self.execute_with_columns(query)
+                }
+            },
+        )?;
 
         // NOTE: We DON'T merge outer schema with from_result.schema here because:
         // 1. from_result.rows only contain values from inner tables
@@ -761,5 +790,4 @@ impl SelectExecutor<'_> {
 
         Ok(from_result)
     }
-
 }

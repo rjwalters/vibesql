@@ -6,7 +6,9 @@ use crate::errors::ExecutorError;
 
 /// TO_NUMBER(string) - Convert string to numeric value
 /// SQL:1999 Section 6.12: Type conversions
-pub(super) fn to_number(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn to_number(
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "TO_NUMBER requires exactly 1 argument, got {}",
@@ -42,7 +44,9 @@ pub(super) fn to_number(args: &[vibesql_types::SqlValue]) -> Result<vibesql_type
 
 /// TO_DATE(string, format) - Convert string to date with format
 /// SQL:1999 Section 6.12: Type conversions
-pub(super) fn to_date(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn to_date(
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "TO_DATE requires exactly 2 arguments (string, format), got {}",
@@ -51,7 +55,9 @@ pub(super) fn to_date(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types:
     }
 
     match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => Ok(vibesql_types::SqlValue::Null),
+        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
+            Ok(vibesql_types::SqlValue::Null)
+        }
         (
             vibesql_types::SqlValue::Varchar(input) | vibesql_types::SqlValue::Character(input),
             vibesql_types::SqlValue::Varchar(format) | vibesql_types::SqlValue::Character(format),
@@ -63,7 +69,8 @@ pub(super) fn to_date(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types:
                 naive_date.year(),
                 naive_date.month() as u8,
                 naive_date.day() as u8,
-            ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
+            )
+            .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
             Ok(vibesql_types::SqlValue::Date(date))
         }
         (input, format) => Err(ExecutorError::UnsupportedFeature(format!(
@@ -75,7 +82,9 @@ pub(super) fn to_date(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types:
 
 /// TO_TIMESTAMP(string, format) - Convert string to timestamp with format
 /// SQL:1999 Section 6.12: Type conversions
-pub(super) fn to_timestamp(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn to_timestamp(
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "TO_TIMESTAMP requires exactly 2 arguments (string, format), got {}",
@@ -84,7 +93,9 @@ pub(super) fn to_timestamp(args: &[vibesql_types::SqlValue]) -> Result<vibesql_t
     }
 
     match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => Ok(vibesql_types::SqlValue::Null),
+        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
+            Ok(vibesql_types::SqlValue::Null)
+        }
         (
             vibesql_types::SqlValue::Varchar(input) | vibesql_types::SqlValue::Character(input),
             vibesql_types::SqlValue::Varchar(format) | vibesql_types::SqlValue::Character(format),
@@ -96,13 +107,15 @@ pub(super) fn to_timestamp(args: &[vibesql_types::SqlValue]) -> Result<vibesql_t
                 naive_timestamp.year(),
                 naive_timestamp.month() as u8,
                 naive_timestamp.day() as u8,
-            ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
+            )
+            .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
             let time = vibesql_types::Time::new(
                 naive_timestamp.hour() as u8,
                 naive_timestamp.minute() as u8,
                 naive_timestamp.second() as u8,
                 naive_timestamp.nanosecond(),
-            ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid time: {}", e)))?;
+            )
+            .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid time: {}", e)))?;
             Ok(vibesql_types::SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)))
         }
         (input, format) => Err(ExecutorError::UnsupportedFeature(format!(
@@ -114,7 +127,9 @@ pub(super) fn to_timestamp(args: &[vibesql_types::SqlValue]) -> Result<vibesql_t
 
 /// TO_CHAR(value, format) - Convert date/number to formatted string
 /// SQL:1999 Section 6.12: Type conversions
-pub(super) fn to_char(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn to_char(
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "TO_CHAR requires exactly 2 arguments (value, format), got {}",
@@ -146,20 +161,23 @@ pub(super) fn to_char(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types:
             Ok(vibesql_types::SqlValue::Varchar(formatted))
         }
         vibesql_types::SqlValue::Timestamp(ts) => {
-            use chrono::NaiveDateTime;
             use chrono::NaiveDate;
+            use chrono::NaiveDateTime;
             use chrono::NaiveTime;
             // Convert our Timestamp type to NaiveDateTime for formatting
-            let naive_date = NaiveDate::from_ymd_opt(ts.date.year, ts.date.month as u32, ts.date.day as u32)
-                .ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid date".to_string()))?;
+            let naive_date =
+                NaiveDate::from_ymd_opt(ts.date.year, ts.date.month as u32, ts.date.day as u32)
+                    .ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid date".to_string()))?;
             let naive_time = NaiveTime::from_hms_nano_opt(
                 ts.time.hour as u32,
                 ts.time.minute as u32,
                 ts.time.second as u32,
                 ts.time.nanosecond,
-            ).ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid time".to_string()))?;
+            )
+            .ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid time".to_string()))?;
             let naive_timestamp = NaiveDateTime::new(naive_date, naive_time);
-            let formatted = super::super::date_format::format_timestamp(&naive_timestamp, format_str)?;
+            let formatted =
+                super::super::date_format::format_timestamp(&naive_timestamp, format_str)?;
             Ok(vibesql_types::SqlValue::Varchar(formatted))
         }
         vibesql_types::SqlValue::Time(time) => {
@@ -170,7 +188,8 @@ pub(super) fn to_char(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types:
                 time.minute as u32,
                 time.second as u32,
                 time.nanosecond,
-            ).ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid time".to_string()))?;
+            )
+            .ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid time".to_string()))?;
             let formatted = super::super::date_format::format_time(&naive_time, format_str)?;
             Ok(vibesql_types::SqlValue::Varchar(formatted))
         }
@@ -211,7 +230,10 @@ pub(super) fn to_char(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types:
 /// SQL:1999 Section 6.10: CAST specification
 /// Note: CAST syntax is handled specially by the parser
 /// This function receives [value, DataType] as arguments
-pub(super) fn cast(args: &[vibesql_types::SqlValue], sql_mode: &vibesql_types::SqlMode) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn cast(
+    args: &[vibesql_types::SqlValue],
+    sql_mode: &vibesql_types::SqlMode,
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "CAST requires exactly 2 arguments (value, target_type), got {}",
@@ -223,7 +245,9 @@ pub(super) fn cast(args: &[vibesql_types::SqlValue], sql_mode: &vibesql_types::S
     // For now, we'll extract the target type information from string representation
     // This is a simplified implementation - ideally the parser would pass DataType directly
     let target_type_str = match &args[1] {
-        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => s.to_uppercase(),
+        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+            s.to_uppercase()
+        }
         val => {
             return Err(ExecutorError::UnsupportedFeature(format!(
                 "CAST target type must be string, got {:?}",

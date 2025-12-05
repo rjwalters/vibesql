@@ -412,10 +412,8 @@ fn test_tpcds_q14_rollup_cross_sell_analysis() {
     assert!(rows.len() >= 4, "Expected multiple rows");
 
     // Verify category subtotals (NULL class, non-NULL category)
-    let category_subtotals: Vec<_> = rows
-        .iter()
-        .filter(|r| !is_null(&r.values[0]) && is_null(&r.values[1]))
-        .collect();
+    let category_subtotals: Vec<_> =
+        rows.iter().filter(|r| !is_null(&r.values[0]) && is_null(&r.values[1])).collect();
     assert!(!category_subtotals.is_empty(), "Missing category subtotals");
 
     // For category subtotals, GROUPING(i_category)=0, GROUPING(i_class)=1
@@ -488,10 +486,8 @@ fn test_tpcds_q22_rollup_quarterly_analysis() {
     assert!(rows.len() > 4, "Expected multiple rows");
 
     // Verify quarter subtotals exist
-    let q_subtotals: Vec<_> = rows
-        .iter()
-        .filter(|r| !is_null(&r.values[0]) && is_null(&r.values[1]))
-        .collect();
+    let q_subtotals: Vec<_> =
+        rows.iter().filter(|r| !is_null(&r.values[0]) && is_null(&r.values[1])).collect();
     assert!(!q_subtotals.is_empty(), "Missing quarter subtotals");
 }
 
@@ -525,10 +521,8 @@ fn test_tpcds_q27_rollup_store_profit() {
     assert!(rows.len() >= 3, "Expected multiple rows");
 
     // Verify state subtotals (GROUPING(s_state)=0, GROUPING(s_county)=1)
-    let state_subtotals: Vec<_> = rows
-        .iter()
-        .filter(|r| get_i64(&r.values[4]) == 0 && get_i64(&r.values[5]) == 1)
-        .collect();
+    let state_subtotals: Vec<_> =
+        rows.iter().filter(|r| get_i64(&r.values[4]) == 0 && get_i64(&r.values[5]) == 1).collect();
     assert!(!state_subtotals.is_empty(), "Missing state subtotals");
 }
 
@@ -570,31 +564,23 @@ fn test_tpcds_q36_grouping_sets() {
 
     // Verify different grouping levels exist
     // Detail level: cat_grp=0, state_grp=0
-    let detail_rows: Vec<_> = rows
-        .iter()
-        .filter(|r| get_i64(&r.values[3]) == 0 && get_i64(&r.values[4]) == 0)
-        .collect();
+    let detail_rows: Vec<_> =
+        rows.iter().filter(|r| get_i64(&r.values[3]) == 0 && get_i64(&r.values[4]) == 0).collect();
     assert!(!detail_rows.is_empty(), "Missing detail rows (both groupings=0)");
 
     // Category-only: cat_grp=0, state_grp=1
-    let category_only: Vec<_> = rows
-        .iter()
-        .filter(|r| get_i64(&r.values[3]) == 0 && get_i64(&r.values[4]) == 1)
-        .collect();
+    let category_only: Vec<_> =
+        rows.iter().filter(|r| get_i64(&r.values[3]) == 0 && get_i64(&r.values[4]) == 1).collect();
     assert!(!category_only.is_empty(), "Missing category-only subtotals");
 
     // State-only: cat_grp=1, state_grp=0
-    let state_only: Vec<_> = rows
-        .iter()
-        .filter(|r| get_i64(&r.values[3]) == 1 && get_i64(&r.values[4]) == 0)
-        .collect();
+    let state_only: Vec<_> =
+        rows.iter().filter(|r| get_i64(&r.values[3]) == 1 && get_i64(&r.values[4]) == 0).collect();
     assert!(!state_only.is_empty(), "Missing state-only subtotals");
 
     // Grand total: cat_grp=1, state_grp=1
-    let grand_total: Vec<_> = rows
-        .iter()
-        .filter(|r| get_i64(&r.values[3]) == 1 && get_i64(&r.values[4]) == 1)
-        .collect();
+    let grand_total: Vec<_> =
+        rows.iter().filter(|r| get_i64(&r.values[3]) == 1 && get_i64(&r.values[4]) == 1).collect();
     assert_eq!(grand_total.len(), 1, "Should have exactly 1 grand total");
 }
 
@@ -788,10 +774,8 @@ fn test_tpcds_q77_rollup_channel_profit() {
     assert!(rows.len() >= 4, "Expected multiple rows");
 
     // Verify channel subtotals
-    let channel_subtotals: Vec<_> = rows
-        .iter()
-        .filter(|r| !is_null(&r.values[0]) && is_null(&r.values[1]))
-        .collect();
+    let channel_subtotals: Vec<_> =
+        rows.iter().filter(|r| !is_null(&r.values[0]) && is_null(&r.values[1])).collect();
     assert!(!channel_subtotals.is_empty(), "Missing channel subtotals");
 }
 

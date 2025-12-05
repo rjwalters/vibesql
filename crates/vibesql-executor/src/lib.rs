@@ -13,9 +13,6 @@ pub mod cursor;
 mod delete;
 mod domain_ddl;
 mod drop_table;
-pub mod truncate;
-mod truncate_table;
-mod truncate_validation;
 pub mod errors;
 pub mod evaluator;
 mod explain;
@@ -37,12 +34,15 @@ mod role_ddl;
 pub mod schema;
 mod schema_ddl;
 pub mod select;
-pub mod session;
 mod select_into;
+pub mod session;
 pub mod timeout;
 mod transaction;
 mod trigger_ddl;
 mod trigger_execution;
+pub mod truncate;
+mod truncate_table;
+mod truncate_validation;
 mod type_ddl;
 mod update;
 mod view_ddl;
@@ -62,10 +62,9 @@ pub use cursor::{Cursor, CursorExecutor, CursorResult, CursorStore, FetchResult}
 pub use delete::DeleteExecutor;
 pub use domain_ddl::DomainExecutor;
 pub use drop_table::DropTableExecutor;
-pub use truncate_table::TruncateTableExecutor;
 pub use errors::ExecutorError;
-pub use evaluator::ExpressionEvaluator;
 pub use evaluator::clear_in_subquery_cache;
+pub use evaluator::ExpressionEvaluator;
 pub use explain::{ExplainExecutor, ExplainResult, PlanNode};
 pub use grant::GrantExecutor;
 pub use index_ddl::{
@@ -81,21 +80,22 @@ pub use pipeline::{
 };
 pub use privilege_checker::PrivilegeChecker;
 pub use revoke::RevokeExecutor;
-pub use trigger_execution::TriggerFirer;
 pub use role_ddl::RoleExecutor;
 pub use schema_ddl::SchemaExecutor;
 pub use select::{SelectExecutor, SelectResult};
 pub use select_into::SelectIntoExecutor;
+pub use session::{PreparedExecutionResult, Session, SessionError, SessionMut};
+pub use timeout::TimeoutContext;
 pub use transaction::{
     BeginTransactionExecutor, CommitExecutor, ReleaseSavepointExecutor, RollbackExecutor,
     RollbackToSavepointExecutor, SavepointExecutor,
 };
 pub use trigger_ddl::TriggerExecutor;
+pub use trigger_execution::TriggerFirer;
+pub use truncate_table::TruncateTableExecutor;
 pub use type_ddl::TypeExecutor;
 pub use update::UpdateExecutor;
 pub use view_ddl::ViewExecutor;
-pub use timeout::TimeoutContext;
-pub use session::{PreparedExecutionResult, Session, SessionError, SessionMut};
 
 #[cfg(test)]
 mod tests;

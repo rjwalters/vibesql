@@ -36,37 +36,25 @@ async fn test_sse_initial_results_received() {
     let server = start_test_server_with_config(config).await;
 
     // Set up database via wire protocol first (easier than HTTP POST)
-    let mut test_client = common::TestClient::connect(server.addr())
-        .await
-        .expect("Failed to connect for setup");
+    let mut test_client =
+        common::TestClient::connect(server.addr()).await.expect("Failed to connect for setup");
 
-    test_client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    test_client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ =
+        test_client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create table with test data
     test_client
         .send_query("CREATE TABLE IF NOT EXISTS sse_test_users (id INT, name VARCHAR)")
         .await
         .expect("Failed to create table");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     test_client
         .send_query("INSERT INTO sse_test_users VALUES (1, 'Alice'), (2, 'Bob')")
         .await
         .expect("Failed to insert data");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Now try to subscribe via HTTP SSE
     // Note: This will work once the HTTP server properly binds
@@ -83,8 +71,10 @@ async fn test_sse_initial_results_received() {
             .get(&http_url)
             .query(&[("query", "SELECT * FROM sse_test_users")])
             .timeout(Duration::from_secs(1))
-            .send()
-    ).await {
+            .send(),
+    )
+    .await
+    {
         Ok(Ok(resp)) => {
             assert_eq!(resp.status(), 200);
 
@@ -99,10 +89,12 @@ async fn test_sse_initial_results_received() {
                         if field == "data" {
                             // Check if this is the initial event
                             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
-                                if let Some("initial") = event.get("type").and_then(|v| v.as_str()) {
+                                if let Some("initial") = event.get("type").and_then(|v| v.as_str())
+                                {
                                     found_initial = true;
                                     // Check for columns and rows
-                                    if event.get("columns").is_some() && event.get("rows").is_some() {
+                                    if event.get("columns").is_some() && event.get("rows").is_some()
+                                    {
                                         found_data = true;
                                     }
                                 }
@@ -148,8 +140,10 @@ async fn test_sse_error_on_invalid_query() {
             .get(&http_url)
             .query(&[("query", "SELECT * FROM nonexistent_table")])
             .timeout(Duration::from_secs(1))
-            .send()
-    ).await {
+            .send(),
+    )
+    .await
+    {
         Ok(Ok(resp)) => {
             // Should get 200 with SSE error event
             assert_eq!(resp.status(), 200);
@@ -206,8 +200,10 @@ async fn test_sse_non_select_query_error() {
             .get(&http_url)
             .query(&[("query", "INSERT INTO users VALUES (1, 'test')")])
             .timeout(Duration::from_secs(1))
-            .send()
-    ).await {
+            .send(),
+    )
+    .await
+    {
         Ok(Ok(resp)) => {
             assert_eq!(resp.status(), 200);
 
@@ -219,7 +215,9 @@ async fn test_sse_non_select_query_error() {
                         if field == "data" {
                             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
                                 if let Some("error") = event.get("type").and_then(|v| v.as_str()) {
-                                    if let Some(err_msg) = event.get("error").and_then(|v| v.as_str()) {
+                                    if let Some(err_msg) =
+                                        event.get("error").and_then(|v| v.as_str())
+                                    {
                                         if err_msg.to_lowercase().contains("select") {
                                             found_error = true;
                                         }
@@ -255,27 +253,18 @@ async fn test_sse_empty_result_set() {
     let server = start_test_server_with_config(config).await;
 
     // Set up database via wire protocol
-    let mut test_client = common::TestClient::connect(server.addr())
-        .await
-        .expect("Failed to connect for setup");
+    let mut test_client =
+        common::TestClient::connect(server.addr()).await.expect("Failed to connect for setup");
 
-    test_client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    test_client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ =
+        test_client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     test_client
         .send_query("CREATE TABLE IF NOT EXISTS sse_empty_test (id INT)")
         .await
         .expect("Failed to create table");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Subscribe to empty table
     let tcp_port = server.addr().port();
@@ -289,8 +278,10 @@ async fn test_sse_empty_result_set() {
             .get(&http_url)
             .query(&[("query", "SELECT * FROM sse_empty_test")])
             .timeout(Duration::from_secs(1))
-            .send()
-    ).await {
+            .send(),
+    )
+    .await
+    {
         Ok(Ok(resp)) => {
             assert_eq!(resp.status(), 200);
 
@@ -301,7 +292,8 @@ async fn test_sse_empty_result_set() {
                     if let Some((field, value)) = parse_sse_event(line) {
                         if field == "data" {
                             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
-                                if let Some("initial") = event.get("type").and_then(|v| v.as_str()) {
+                                if let Some("initial") = event.get("type").and_then(|v| v.as_str())
+                                {
                                     if let Some(rows) = event.get("rows") {
                                         if let Some(arr) = rows.as_array() {
                                             if arr.is_empty() {
@@ -339,36 +331,24 @@ async fn test_sse_with_query_parameters() {
     let server = start_test_server_with_config(config).await;
 
     // Set up database via wire protocol
-    let mut test_client = common::TestClient::connect(server.addr())
-        .await
-        .expect("Failed to connect for setup");
+    let mut test_client =
+        common::TestClient::connect(server.addr()).await.expect("Failed to connect for setup");
 
-    test_client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    test_client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ =
+        test_client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     test_client
         .send_query("CREATE TABLE IF NOT EXISTS sse_param_test (id INT, name VARCHAR)")
         .await
         .expect("Failed to create table");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     test_client
         .send_query("INSERT INTO sse_param_test VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie')")
         .await
         .expect("Failed to insert data");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Subscribe with a simple parameterized query
     let tcp_port = server.addr().port();
@@ -380,13 +360,12 @@ async fn test_sse_with_query_parameters() {
         Duration::from_secs(2),
         client
             .get(&http_url)
-            .query(&[
-                ("query", "SELECT * FROM sse_param_test WHERE id > ?"),
-                ("params", "1"),
-            ])
+            .query(&[("query", "SELECT * FROM sse_param_test WHERE id > ?"), ("params", "1")])
             .timeout(Duration::from_secs(1))
-            .send()
-    ).await {
+            .send(),
+    )
+    .await
+    {
         Ok(Ok(resp)) => {
             assert_eq!(resp.status(), 200);
 
@@ -397,7 +376,8 @@ async fn test_sse_with_query_parameters() {
                     if let Some((field, value)) = parse_sse_event(line) {
                         if field == "data" {
                             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
-                                if let Some("initial") = event.get("type").and_then(|v| v.as_str()) {
+                                if let Some("initial") = event.get("type").and_then(|v| v.as_str())
+                                {
                                     found_initial = true;
                                 }
                             }
@@ -426,27 +406,18 @@ async fn test_sse_client_disconnect_unsubscribes() {
     let server = start_test_server_with_config(config).await;
 
     // Set up database via wire protocol
-    let mut test_client = common::TestClient::connect(server.addr())
-        .await
-        .expect("Failed to connect for setup");
+    let mut test_client =
+        common::TestClient::connect(server.addr()).await.expect("Failed to connect for setup");
 
-    test_client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    test_client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ =
+        test_client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     test_client
         .send_query("CREATE TABLE IF NOT EXISTS sse_disconnect_test (id INT)")
         .await
         .expect("Failed to create table");
-    let _ = test_client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Connect via HTTP SSE
     let tcp_port = server.addr().port();
@@ -460,8 +431,10 @@ async fn test_sse_client_disconnect_unsubscribes() {
             .get(&http_url)
             .query(&[("query", "SELECT * FROM sse_disconnect_test")])
             .timeout(Duration::from_secs(1))
-            .send()
-    ).await {
+            .send(),
+    )
+    .await
+    {
         Ok(Ok(resp)) => {
             assert_eq!(resp.status(), 200);
             // Drop the response (disconnect the client)

@@ -28,14 +28,17 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use vibesql_ast::arena::{ArenaInterner, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr, SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt};
+use vibesql_ast::arena::{
+    ArenaInterner, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
+    SelectItem as ArenaSelectItem, SelectStmt as ArenaSelectStmt,
+};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::builder::SelectExecutor;
 use crate::errors::ExecutorError;
-use crate::evaluator::ArenaExpressionEvaluator;
 use crate::evaluator::window::compare_values;
+use crate::evaluator::ArenaExpressionEvaluator;
 use crate::schema::CombinedSchema;
 
 impl SelectExecutor<'_> {
@@ -116,10 +119,7 @@ impl SelectExecutor<'_> {
         interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Vec<Row>, ExecutorError> {
         // Create an empty schema and row for expression evaluation
-        let schema = CombinedSchema {
-            table_schemas: HashMap::new(),
-            total_columns: 0,
-        };
+        let schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
         let empty_row = Row::new(vec![]);
         let evaluator = ArenaExpressionEvaluator::new(&schema, params, interner);
 
@@ -172,16 +172,18 @@ impl SelectExecutor<'_> {
         let table_name_str = interner.resolve(table_name);
 
         // Get the table
-        let table = self.database.get_table(table_name_str).ok_or_else(|| {
-            ExecutorError::TableNotFound(table_name_str.to_string())
-        })?;
+        let table = self
+            .database
+            .get_table(table_name_str)
+            .ok_or_else(|| ExecutorError::TableNotFound(table_name_str.to_string()))?;
 
         // Build schema - use alias if provided, otherwise table name
         let schema_alias_str = alias.map(|a| interner.resolve(a)).unwrap_or(table_name_str);
         let schema = CombinedSchema::from_table(schema_alias_str.to_string(), table.schema.clone());
 
         // Create evaluator
-        let evaluator = ArenaExpressionEvaluator::with_database(&schema, params, self.database, interner);
+        let evaluator =
+            ArenaExpressionEvaluator::with_database(&schema, params, self.database, interner);
 
         // Scan table and filter
         let mut results = Vec::new();
@@ -202,7 +204,8 @@ impl SelectExecutor<'_> {
             }
 
             // Project columns
-            let projected = self.project_arena_row(&stmt.select_list, row, &schema, &evaluator, interner)?;
+            let projected =
+                self.project_arena_row(&stmt.select_list, row, &schema, &evaluator, interner)?;
             results.push(projected);
 
             // Check timeout periodically
@@ -244,7 +247,9 @@ impl SelectExecutor<'_> {
                 ArenaSelectItem::QualifiedWildcard { qualifier, .. } => {
                     // Qualified wildcard (table.*) - expand columns from specific table
                     let qualifier_str = interner.resolve(*qualifier);
-                    if let Some(&(start, ref tbl_schema)) = schema.table_schemas.get(&qualifier_str.to_lowercase()) {
+                    if let Some(&(start, ref tbl_schema)) =
+                        schema.table_schemas.get(&qualifier_str.to_lowercase())
+                    {
                         for i in 0..tbl_schema.columns.len() {
                             if let Some(val) = row.get(start + i) {
                                 values.push(val.clone());
@@ -273,16 +278,15 @@ impl SelectExecutor<'_> {
         use vibesql_ast::arena::OrderDirection;
 
         // Create evaluator for order by expressions
-        let evaluator = ArenaExpressionEvaluator::with_database(schema, params, self.database, interner);
+        let evaluator =
+            ArenaExpressionEvaluator::with_database(schema, params, self.database, interner);
 
         // Pre-compute order by values for each row to avoid repeated evaluation
         let mut keyed_rows: Vec<(Vec<SqlValue>, Row)> = results
             .drain(..)
             .map(|row| {
-                let keys: Result<Vec<_>, _> = order_by
-                    .iter()
-                    .map(|item| evaluator.eval(&item.expr, &row))
-                    .collect();
+                let keys: Result<Vec<_>, _> =
+                    order_by.iter().map(|item| evaluator.eval(&item.expr, &row)).collect();
                 keys.map(|k| (k, row))
             })
             .collect::<Result<_, _>>()?;
@@ -293,7 +297,8 @@ impl SelectExecutor<'_> {
                 let cmp = compare_values(key_a, key_b);
                 if cmp != Ordering::Equal {
                     // Apply ASC/DESC
-                    let asc = order_by.get(i).is_some_and(|o| matches!(o.direction, OrderDirection::Asc));
+                    let asc =
+                        order_by.get(i).is_some_and(|o| matches!(o.direction, OrderDirection::Asc));
                     return if asc { cmp } else { cmp.reverse() };
                 }
             }

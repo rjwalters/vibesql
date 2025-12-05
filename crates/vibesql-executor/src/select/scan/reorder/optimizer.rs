@@ -1,19 +1,19 @@
 //! Main join reordering optimization logic
 
-use std::collections::{HashMap, HashSet};
-use vibesql_ast::{Expression, FromClause};
+use super::{graph, predicates, utils};
 use crate::{
     errors::ExecutorError,
     schema::CombinedSchema,
-    timeout::TimeoutContext,
     select::{
         cte::CteResult,
         join::{nested_loop_join, JoinOrderAnalyzer, JoinOrderSearch},
-        SelectResult,
         scan::{derived::execute_derived_table, table::execute_table_scan, FromResult},
+        SelectResult,
     },
+    timeout::TimeoutContext,
 };
-use super::{graph, predicates, utils};
+use std::collections::{HashMap, HashSet};
+use vibesql_ast::{Expression, FromClause};
 
 /// Check if join profiling is enabled via environment variable
 fn join_profile_enabled() -> bool {
@@ -56,7 +56,8 @@ where
 
     // Step 3.5: Build schema-based column-to-table mapping
     // This uses actual database schema to resolve unqualified column references
-    let column_to_table = utils::build_column_to_table_map(database, &table_names, &table_refs, cte_results);
+    let column_to_table =
+        utils::build_column_to_table_map(database, &table_names, &table_refs, cte_results);
 
     // Create analyzer with schema-based column resolution
     let mut analyzer = JoinOrderAnalyzer::with_column_map(column_to_table.clone());
@@ -66,16 +67,26 @@ where
     let table_set: HashSet<String> = table_names.iter().map(|t| t.to_lowercase()).collect();
 
     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-        eprintln!("[JOIN_REORDER] Schema-based column mapping: {} columns resolved from {} tables",
-            column_to_table.len(), table_names.len());
+        eprintln!(
+            "[JOIN_REORDER] Schema-based column mapping: {} columns resolved from {} tables",
+            column_to_table.len(),
+            table_names.len()
+        );
         if column_to_table.is_empty() && !table_names.is_empty() {
-            eprintln!("[JOIN_REORDER] Warning: No schema columns found for tables: {:?}", table_names);
+            eprintln!(
+                "[JOIN_REORDER] Warning: No schema columns found for tables: {:?}",
+                table_names
+            );
         }
     }
 
     // Step 4: Analyze join conditions to extract edges with their join types
     for condition_with_type in &join_conditions_with_types {
-        analyzer.analyze_predicate_with_type(&condition_with_type.condition, &table_set, condition_with_type.join_type.clone());
+        analyzer.analyze_predicate_with_type(
+            &condition_with_type.condition,
+            &table_set,
+            condition_with_type.join_type.clone(),
+        );
     }
 
     // Step 5: Analyze WHERE clause predicates if available
@@ -90,7 +101,11 @@ where
         }
 
         // Extract equijoin conditions from WHERE clause using schema-based column resolution
-        let equijoins = predicates::extract_where_equijoins_with_schema(where_expr, &table_set, &column_to_table);
+        let equijoins = predicates::extract_where_equijoins_with_schema(
+            where_expr,
+            &table_set,
+            &column_to_table,
+        );
 
         if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
             eprintln!("[JOIN_REORDER] Extracted {} WHERE equijoins", equijoins.len());
@@ -111,7 +126,11 @@ where
     // Step 6.5: Extract table-local predicates for cardinality estimation
     // Use schema-based column resolution to handle unqualified columns like `p_name LIKE '%green%'`
     let mut table_local_predicates = if let Some(where_expr) = where_clause {
-        predicates::extract_table_local_predicates_with_schema(where_expr, &table_set, &column_to_table)
+        predicates::extract_table_local_predicates_with_schema(
+            where_expr,
+            &table_set,
+            &column_to_table,
+        )
     } else {
         HashMap::new()
     };
@@ -126,14 +145,20 @@ where
     // Extract common single-table predicates from OR branches (e.g., TPC-H Q19)
     // This handles cases like `l_shipmode IN ('AIR', 'AIR REG')` that appear in all OR branches
     if let Some(where_expr) = where_clause {
-        for (table, preds) in predicates::extract_common_or_predicates_with_schema(where_expr, &table_set, &column_to_table) {
+        for (table, preds) in predicates::extract_common_or_predicates_with_schema(
+            where_expr,
+            &table_set,
+            &column_to_table,
+        ) {
             table_local_predicates.entry(table).or_default().extend(preds);
         }
     }
 
     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && !table_local_predicates.is_empty() {
-        eprintln!("[JOIN_REORDER] Table-local predicates: {:?}",
-            table_local_predicates.keys().collect::<Vec<_>>());
+        eprintln!(
+            "[JOIN_REORDER] Table-local predicates: {:?}",
+            table_local_predicates.keys().collect::<Vec<_>>()
+        );
     }
 
     // Step 6.6: Build alias-to-table mapping for cardinality estimation
@@ -149,7 +174,12 @@ where
 
     // Step 7: Use search to find optimal join order (with real statistics + selectivity)
     let optimizer_start = std::time::Instant::now();
-    let search = JoinOrderSearch::from_analyzer_with_predicates(&analyzer, database, &table_local_predicates, &alias_to_table);
+    let search = JoinOrderSearch::from_analyzer_with_predicates(
+        &analyzer,
+        database,
+        &table_local_predicates,
+        &alias_to_table,
+    );
     let optimal_order = search.find_optimal_order();
     let optimizer_time = optimizer_start.elapsed();
 
@@ -157,7 +187,10 @@ where
     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
         eprintln!("[JOIN_REORDER] Original order: {:?}", table_names);
         eprintln!("[JOIN_REORDER] Optimal order:  {:?}", optimal_order);
-        eprintln!("[JOIN_REORDER] Join conditions (including WHERE equijoins): {}", join_conditions.len());
+        eprintln!(
+            "[JOIN_REORDER] Join conditions (including WHERE equijoins): {}",
+            join_conditions.len()
+        );
     }
 
     // Profiling: Track times for each phase
@@ -202,7 +235,12 @@ where
         let scan_start = std::time::Instant::now();
         let table_result = if table_ref.is_subquery {
             if let Some(subquery) = &table_ref.subquery {
-                execute_derived_table(subquery, table_name, table_ref.column_aliases.as_ref(), execute_subquery)?
+                execute_derived_table(
+                    subquery,
+                    table_name,
+                    table_ref.column_aliases.as_ref(),
+                    execute_subquery,
+                )?
             } else {
                 return Err(ExecutorError::UnsupportedFeature(
                     "Subquery reference missing query".to_string(),
@@ -213,7 +251,17 @@ where
             // This allows pushing down filters like `l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'`
             // to the table scan, significantly reducing rows before joins
             // Note: LIMIT pushdown is None here because this is for join intermediate results
-            execute_table_scan(&table_ref.name, table_ref.alias.as_ref(), cte_results, database, table_filter.as_ref(), None, None, outer_row, outer_schema)?
+            execute_table_scan(
+                &table_ref.name,
+                table_ref.alias.as_ref(),
+                cte_results,
+                database,
+                table_filter.as_ref(),
+                None,
+                None,
+                outer_row,
+                outer_schema,
+            )?
         };
         let scan_time = scan_start.elapsed();
         if profile {
@@ -222,7 +270,8 @@ where
         }
 
         // Record the column count for this table (using table_schemas to get column info)
-        let col_count = if let Some((_, schema)) = table_result.schema.table_schemas.get(table_name) {
+        let col_count = if let Some((_, schema)) = table_result.schema.table_schemas.get(table_name)
+        {
             schema.columns.len()
         } else {
             table_result.schema.total_columns
@@ -242,17 +291,26 @@ where
 
                 // Extract tables referenced in this condition using schema-based column resolution
                 let mut referenced_tables = HashSet::new();
-                graph::extract_referenced_tables_with_schema(condition, &mut referenced_tables, &table_set, &column_to_table);
+                graph::extract_referenced_tables_with_schema(
+                    condition,
+                    &mut referenced_tables,
+                    &table_set,
+                    &column_to_table,
+                );
 
                 // Check if condition connects the new table with any already-joined table
                 // Condition is applicable if it references the new table AND at least one joined table
                 let references_new_table = referenced_tables.contains(&table_name.to_lowercase());
-                let references_joined_table = referenced_tables.iter().any(|t| joined_tables.contains(t));
+                let references_joined_table =
+                    referenced_tables.iter().any(|t| joined_tables.contains(t));
 
                 if references_new_table && references_joined_table {
                     applicable_conditions.push(condition.clone());
                     applied_conditions.insert(idx);
-                } else if column_to_table.is_empty() && joined_tables.len() == 1 && referenced_tables.is_empty() {
+                } else if column_to_table.is_empty()
+                    && joined_tables.len() == 1
+                    && referenced_tables.is_empty()
+                {
                     // CTE fallback: When column_to_table is empty (CTE results), include condition
                     // for 2-table joins since it was already extracted as a WHERE equijoin.
                     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
@@ -265,13 +323,22 @@ where
 
             // Debug logging for applicable conditions
             if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                eprintln!("[JOIN_REORDER] Joining {} to {:?}, found {} applicable conditions",
-                    table_name, joined_tables, applicable_conditions.len());
+                eprintln!(
+                    "[JOIN_REORDER] Joining {} to {:?}, found {} applicable conditions",
+                    table_name,
+                    joined_tables,
+                    applicable_conditions.len()
+                );
                 eprintln!("[JOIN_REORDER]   join_conditions total: {}", join_conditions.len());
                 for (idx, cond) in join_conditions.iter().enumerate() {
                     if !applied_conditions.contains(&idx) {
                         let mut refs = HashSet::new();
-                        graph::extract_referenced_tables_with_schema(cond, &mut refs, &table_set, &column_to_table);
+                        graph::extract_referenced_tables_with_schema(
+                            cond,
+                            &mut refs,
+                            &table_set,
+                            &column_to_table,
+                        );
                         eprintln!("[JOIN_REORDER]   cond[{}] refs: {:?}, new_table: {}, matches_new: {}, matches_joined: {}",
                             idx, refs, table_name.to_lowercase(),
                             refs.contains(&table_name.to_lowercase()),
@@ -305,7 +372,12 @@ where
             let join_time = join_start.elapsed();
             let result_rows = result.as_ref().map(|r| r.data.as_slice().len()).unwrap_or(0);
             if profile {
-                join_times.push((table_name.clone(), join_time, left_rows * right_rows, result_rows));
+                join_times.push((
+                    table_name.clone(),
+                    join_time,
+                    left_rows * right_rows,
+                    result_rows,
+                ));
             }
         } else {
             result = Some(table_result);
@@ -315,11 +387,13 @@ where
         joined_tables.insert(table_name.to_lowercase());
     }
 
-    let result = result.ok_or_else(|| ExecutorError::UnsupportedFeature("No tables in join".to_string()))?;
+    let result =
+        result.ok_or_else(|| ExecutorError::UnsupportedFeature("No tables in join".to_string()))?;
 
     // Step 11: Restore original column ordering if needed
     // Build column permutation: map from current position to target position
-    let column_permutation = utils::build_column_permutation(&table_names, &optimal_order, &table_column_counts);
+    let column_permutation =
+        utils::build_column_permutation(&table_names, &optimal_order, &table_column_counts);
 
     // Reorder rows according to the permutation
     let reorder_start = std::time::Instant::now();
@@ -348,13 +422,21 @@ where
         eprintln!("[JOIN_PROFILE] Total scan time: {:?}", total_scan);
         eprintln!("[JOIN_PROFILE] Joins ({} joins):", join_times.len());
         for (name, time, cartesian, result_rows) in &join_times {
-            eprintln!("[JOIN_PROFILE]   Join {}: {:?} (cartesian={}, result={})",
-                name, time, cartesian, result_rows);
+            eprintln!(
+                "[JOIN_PROFILE]   Join {}: {:?} (cartesian={}, result={})",
+                name, time, cartesian, result_rows
+            );
         }
         eprintln!("[JOIN_PROFILE] Total join time: {:?}", total_join);
-        eprintln!("[JOIN_PROFILE] Column reorder: {:?} ({} rows)", reorder_time, reordered_rows.len());
-        eprintln!("[JOIN_PROFILE] Grand total (scan+join+reorder): {:?}",
-            total_scan + total_join + reorder_time);
+        eprintln!(
+            "[JOIN_PROFILE] Column reorder: {:?} ({} rows)",
+            reorder_time,
+            reordered_rows.len()
+        );
+        eprintln!(
+            "[JOIN_PROFILE] Grand total (scan+join+reorder): {:?}",
+            total_scan + total_join + reorder_time
+        );
     }
 
     // Build a new combined schema with tables in original order

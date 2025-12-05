@@ -9,10 +9,10 @@
 // 3. Index correctness (NULL handling, duplicates, multi-column)
 // 4. Persistence and recovery
 
+use vibesql_ast::{IndexColumn, OrderDirection};
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::{Database, DatabaseConfig, Row, SpillPolicy};
 use vibesql_types::{DataType, SqlValue};
-use vibesql_ast::{IndexColumn, OrderDirection};
 
 // ============================================================================
 // Resource Budget Configuration Tests
@@ -27,9 +27,20 @@ mod resource_budget_tests {
         let config = DatabaseConfig::browser_default();
 
         // Browser config should have limited memory (512MB) and reasonable disk (2GB)
-        assert_eq!(config.memory_budget, 512 * 1024 * 1024, "Browser should have 512MB memory budget");
-        assert_eq!(config.disk_budget, 2 * 1024 * 1024 * 1024, "Browser should have 2GB disk budget");
-        assert!(matches!(config.spill_policy, SpillPolicy::SpillToDisk), "Browser should spill to disk when memory exhausted");
+        assert_eq!(
+            config.memory_budget,
+            512 * 1024 * 1024,
+            "Browser should have 512MB memory budget"
+        );
+        assert_eq!(
+            config.disk_budget,
+            2 * 1024 * 1024 * 1024,
+            "Browser should have 2GB disk budget"
+        );
+        assert!(
+            matches!(config.spill_policy, SpillPolicy::SpillToDisk),
+            "Browser should spill to disk when memory exhausted"
+        );
     }
 
     #[test]
@@ -37,9 +48,20 @@ mod resource_budget_tests {
         let config = DatabaseConfig::server_default();
 
         // Server config should have abundant memory (16GB) and large disk (1TB)
-        assert_eq!(config.memory_budget, 16 * 1024 * 1024 * 1024, "Server should have 16GB memory budget");
-        assert_eq!(config.disk_budget, 1024 * 1024 * 1024 * 1024, "Server should have 1TB disk budget");
-        assert!(matches!(config.spill_policy, SpillPolicy::BestEffort), "Server should use best effort policy");
+        assert_eq!(
+            config.memory_budget,
+            16 * 1024 * 1024 * 1024,
+            "Server should have 16GB memory budget"
+        );
+        assert_eq!(
+            config.disk_budget,
+            1024 * 1024 * 1024 * 1024,
+            "Server should have 1TB disk budget"
+        );
+        assert!(
+            matches!(config.spill_policy, SpillPolicy::BestEffort),
+            "Server should use best effort policy"
+        );
     }
 
     #[test]
@@ -80,7 +102,11 @@ mod adaptive_backend_tests {
             "small_table".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
             ],
         );
 
@@ -88,10 +114,7 @@ mod adaptive_backend_tests {
 
         // Insert a small number of rows (should stay in memory)
         for i in 0..100 {
-            let row = Row::new(vec![
-                SqlValue::Integer(i),
-                SqlValue::Varchar(format!("user{}", i)),
-            ]);
+            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("user{}", i))]);
             db.insert_row("small_table", row).unwrap();
         }
 
@@ -144,22 +167,37 @@ mod adaptive_backend_tests {
             "idx_a".to_string(),
             "multi".to_string(),
             false,
-            vec![IndexColumn { column_name: "a".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "a".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         db.create_index(
             "idx_b".to_string(),
             "multi".to_string(),
             false,
-            vec![IndexColumn { column_name: "b".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "b".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         db.create_index(
             "idx_c".to_string(),
             "multi".to_string(),
             false,
-            vec![IndexColumn { column_name: "c".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "c".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         // All indexes should exist
         assert!(db.index_exists("idx_a"), "Index idx_a should exist");
@@ -192,7 +230,11 @@ mod correctness_tests {
             "idx_empty".to_string(),
             "empty_table".to_string(),
             false,
-            vec![IndexColumn { column_name: "id".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
+            vec![IndexColumn {
+                column_name: "id".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
         );
 
         assert!(result.is_ok(), "Should be able to create index on empty table");
@@ -214,17 +256,31 @@ mod correctness_tests {
         db.create_table(schema).unwrap();
 
         // Insert rows with NULL values
-        db.insert_row("nullable_table", Row::new(vec![SqlValue::Integer(1), SqlValue::Null])).unwrap();
-        db.insert_row("nullable_table", Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(100)])).unwrap();
-        db.insert_row("nullable_table", Row::new(vec![SqlValue::Integer(3), SqlValue::Null])).unwrap();
-        db.insert_row("nullable_table", Row::new(vec![SqlValue::Integer(4), SqlValue::Integer(200)])).unwrap();
+        db.insert_row("nullable_table", Row::new(vec![SqlValue::Integer(1), SqlValue::Null]))
+            .unwrap();
+        db.insert_row(
+            "nullable_table",
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(100)]),
+        )
+        .unwrap();
+        db.insert_row("nullable_table", Row::new(vec![SqlValue::Integer(3), SqlValue::Null]))
+            .unwrap();
+        db.insert_row(
+            "nullable_table",
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Integer(200)]),
+        )
+        .unwrap();
 
         // Create index on nullable column
         let result = db.create_index(
             "idx_nullable".to_string(),
             "nullable_table".to_string(),
             false,
-            vec![IndexColumn { column_name: "value".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
+            vec![IndexColumn {
+                column_name: "value".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
         );
 
         assert!(result.is_ok(), "Should be able to create index on nullable column");
@@ -246,17 +302,25 @@ mod correctness_tests {
         db.create_table(schema).unwrap();
 
         // Insert rows with duplicate category values
-        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)])).unwrap();
-        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(100)])).unwrap();
-        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(200)])).unwrap();
-        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(4), SqlValue::Integer(100)])).unwrap();
+        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)]))
+            .unwrap();
+        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(100)]))
+            .unwrap();
+        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(200)]))
+            .unwrap();
+        db.insert_row("duplicates", Row::new(vec![SqlValue::Integer(4), SqlValue::Integer(100)]))
+            .unwrap();
 
         // Create non-unique index - should succeed with duplicates
         let result = db.create_index(
             "idx_category".to_string(),
             "duplicates".to_string(),
             false, // NOT unique
-            vec![IndexColumn { column_name: "category".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
+            vec![IndexColumn {
+                column_name: "category".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
         );
 
         assert!(result.is_ok(), "Non-unique index should accept duplicate values");
@@ -270,8 +334,16 @@ mod correctness_tests {
         let schema = TableSchema::new(
             "multi_col".to_string(),
             vec![
-                ColumnSchema::new("last_name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
-                ColumnSchema::new("first_name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+                ColumnSchema::new(
+                    "last_name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    false,
+                ),
+                ColumnSchema::new(
+                    "first_name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    false,
+                ),
                 ColumnSchema::new("age".to_string(), DataType::Integer, false),
             ],
         );
@@ -279,17 +351,25 @@ mod correctness_tests {
         db.create_table(schema).unwrap();
 
         // Insert some rows
-        db.insert_row("multi_col", Row::new(vec![
-            SqlValue::Varchar("Smith".to_string()),
-            SqlValue::Varchar("Alice".to_string()),
-            SqlValue::Integer(30),
-        ])).unwrap();
+        db.insert_row(
+            "multi_col",
+            Row::new(vec![
+                SqlValue::Varchar("Smith".to_string()),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(30),
+            ]),
+        )
+        .unwrap();
 
-        db.insert_row("multi_col", Row::new(vec![
-            SqlValue::Varchar("Smith".to_string()),
-            SqlValue::Varchar("Bob".to_string()),
-            SqlValue::Integer(25),
-        ])).unwrap();
+        db.insert_row(
+            "multi_col",
+            Row::new(vec![
+                SqlValue::Varchar("Smith".to_string()),
+                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Integer(25),
+            ]),
+        )
+        .unwrap();
 
         // Create multi-column index
         let result = db.create_index(
@@ -297,8 +377,16 @@ mod correctness_tests {
             "multi_col".to_string(),
             false,
             vec![
-                IndexColumn { column_name: "last_name".to_string(), direction: OrderDirection::Asc, prefix_length: None },
-                IndexColumn { column_name: "first_name".to_string(), direction: OrderDirection::Asc, prefix_length: None },
+                IndexColumn {
+                    column_name: "last_name".to_string(),
+                    direction: OrderDirection::Asc,
+                    prefix_length: None,
+                },
+                IndexColumn {
+                    column_name: "first_name".to_string(),
+                    direction: OrderDirection::Asc,
+                    prefix_length: None,
+                },
             ],
         );
 
@@ -314,31 +402,47 @@ mod correctness_tests {
             "unique_test".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+                ColumnSchema::new(
+                    "email".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
             ],
         );
 
         db.create_table(schema).unwrap();
 
         // Insert first row
-        db.insert_row("unique_test", Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Varchar("alice@example.com".to_string()),
-        ])).unwrap();
+        db.insert_row(
+            "unique_test",
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("alice@example.com".to_string()),
+            ]),
+        )
+        .unwrap();
 
         // Create UNIQUE index
         db.create_index(
             "idx_email_unique".to_string(),
             "unique_test".to_string(),
             true, // UNIQUE
-            vec![IndexColumn { column_name: "email".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "email".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         // Try to insert duplicate email - should fail
-        let duplicate_result = db.insert_row("unique_test", Row::new(vec![
-            SqlValue::Integer(2),
-            SqlValue::Varchar("alice@example.com".to_string()),
-        ]));
+        let duplicate_result = db.insert_row(
+            "unique_test",
+            Row::new(vec![
+                SqlValue::Integer(2),
+                SqlValue::Varchar("alice@example.com".to_string()),
+            ]),
+        );
 
         assert!(duplicate_result.is_err(), "Unique index should reject duplicate values");
     }
@@ -377,7 +481,11 @@ mod persistence_tests {
             "idx_id".to_string(),
             "test_table".to_string(),
             false,
-            vec![IndexColumn { column_name: "id".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
+            vec![IndexColumn {
+                column_name: "id".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
         );
 
         assert!(result.is_ok(), "Index creation should succeed with path configured");
@@ -399,8 +507,13 @@ mod persistence_tests {
             "idx_persist".to_string(),
             "persist_test".to_string(),
             false,
-            vec![IndexColumn { column_name: "id".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "id".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         // Verify index exists
         assert!(db.index_exists("idx_persist"), "Index should exist");
@@ -431,8 +544,13 @@ mod index_operations_tests {
             "idx_to_drop".to_string(),
             "drop_test".to_string(),
             false,
-            vec![IndexColumn { column_name: "id".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "id".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         assert!(db.index_exists("idx_to_drop"), "Index should exist before drop");
 
@@ -463,15 +581,25 @@ mod index_operations_tests {
             "idx_cascade_1".to_string(),
             "cascade_test".to_string(),
             false,
-            vec![IndexColumn { column_name: "id".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "id".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         db.create_index(
             "idx_cascade_2".to_string(),
             "cascade_test".to_string(),
             false,
-            vec![IndexColumn { column_name: "value".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
-        ).unwrap();
+            vec![IndexColumn {
+                column_name: "value".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+        )
+        .unwrap();
 
         assert!(db.index_exists("idx_cascade_1"), "Index 1 should exist");
         assert!(db.index_exists("idx_cascade_2"), "Index 2 should exist");
@@ -505,7 +633,11 @@ mod index_operations_tests {
             "idx_rebuild".to_string(),
             "rebuild_test".to_string(),
             false,
-            vec![IndexColumn { column_name: "id".to_string(), direction: OrderDirection::Asc, prefix_length: None }],
+            vec![IndexColumn {
+                column_name: "id".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
         );
 
         assert!(result.is_ok(), "Should be able to create index on existing data");

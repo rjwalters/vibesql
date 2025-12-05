@@ -71,9 +71,10 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
             parser.advance();
             parse_change_column(parser, table_name)
         }
-        _ => {
-            Err(ParseError { message: "Expected ADD, DROP, ALTER, RENAME, MODIFY, or CHANGE after table name".to_string() })
-        }
+        _ => Err(ParseError {
+            message: "Expected ADD, DROP, ALTER, RENAME, MODIFY, or CHANGE after table name"
+                .to_string(),
+        }),
     }
 }
 
@@ -325,11 +326,7 @@ fn parse_modify_column(
         comment: None,
     };
 
-    Ok(AlterTableStmt::ModifyColumn(ModifyColumnStmt {
-        table_name,
-        column_name,
-        new_column_def,
-    }))
+    Ok(AlterTableStmt::ModifyColumn(ModifyColumnStmt { table_name, column_name, new_column_def }))
 }
 
 /// Parse CHANGE COLUMN

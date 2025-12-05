@@ -62,7 +62,6 @@ pub fn execute_drop_view(stmt: &DropViewStmt, db: &mut Database) -> Result<(), E
         ViewDropBehavior::Silent // SQLite-compatible: allow dropping even with dependents
     };
 
-    db.catalog
-        .drop_view_with_behavior(&stmt.view_name, drop_behavior)?;
+    db.catalog.drop_view_with_behavior(&stmt.view_name, drop_behavior)?;
     Ok(())
 }

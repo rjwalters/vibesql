@@ -13,12 +13,17 @@ fn test_issue_990_multiple_unary_plus() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "id".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert 1 row
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -35,12 +40,16 @@ fn test_issue_990_multiple_unary_plus() {
                     op: vibesql_ast::UnaryOperator::Plus,
                     expr: Box::new(vibesql_ast::Expression::UnaryOp {
                         op: vibesql_ast::UnaryOperator::Plus,
-                        expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))),
+                        expr: Box::new(vibesql_ast::Expression::Literal(
+                            vibesql_types::SqlValue::Integer(5),
+                        )),
                     }),
                 }),
                 op: vibesql_ast::BinaryOperator::Plus,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(92))),
+                    left: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(92),
+                    )),
                     op: vibesql_ast::BinaryOperator::Multiply,
                     right: Box::new(vibesql_ast::Expression::AggregateFunction {
                         name: "COUNT".to_string(),
@@ -51,7 +60,11 @@ fn test_issue_990_multiple_unary_plus() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -82,12 +95,17 @@ fn test_issue_990_simpler_case() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "id".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert 1 row
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -100,10 +118,14 @@ fn test_issue_990_simpler_case() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))),
+                left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    5,
+                ))),
                 op: vibesql_ast::BinaryOperator::Plus,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(92))),
+                    left: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(92),
+                    )),
                     op: vibesql_ast::BinaryOperator::Multiply,
                     right: Box::new(vibesql_ast::Expression::AggregateFunction {
                         name: "COUNT".to_string(),
@@ -114,7 +136,11 @@ fn test_issue_990_simpler_case() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

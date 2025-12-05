@@ -74,17 +74,9 @@ pub struct SetOperation<'arena> {
 /// Item in the SELECT list
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelectItem<'arena> {
-    Wildcard {
-        alias: Option<BumpVec<'arena, Symbol>>,
-    },
-    QualifiedWildcard {
-        qualifier: Symbol,
-        alias: Option<BumpVec<'arena, Symbol>>,
-    },
-    Expression {
-        expr: Expression<'arena>,
-        alias: Option<Symbol>,
-    },
+    Wildcard { alias: Option<BumpVec<'arena, Symbol>> },
+    QualifiedWildcard { qualifier: Symbol, alias: Option<BumpVec<'arena, Symbol>> },
+    Expression { expr: Expression<'arena>, alias: Option<Symbol> },
 }
 
 /// FROM clause

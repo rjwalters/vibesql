@@ -114,10 +114,7 @@ impl ConnectionHandler {
     /// Handle startup message and authentication
     async fn handle_startup(&mut self, msg: Option<FrontendMessage>) -> Result<()> {
         match msg {
-            Some(FrontendMessage::Startup {
-                protocol_version,
-                params,
-            }) => {
+            Some(FrontendMessage::Startup { protocol_version, params }) => {
                 debug!("Startup: version={}, params={:?}", protocol_version, params);
 
                 let user = params.get("user").cloned().unwrap_or_else(|| "postgres".to_string());
@@ -345,11 +342,7 @@ impl ConnectionHandler {
     ///
     /// Parses the query, extracts table dependencies, executes the query,
     /// registers the subscription, and sends the initial data to the client.
-    async fn handle_subscribe(
-        &mut self,
-        query: &str,
-        params: Vec<Option<Vec<u8>>>,
-    ) -> Result<()> {
+    async fn handle_subscribe(&mut self, query: &str, params: Vec<Option<Vec<u8>>>) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
 
         // Parse the query to extract table dependencies
@@ -358,8 +351,7 @@ impl ConnectionHandler {
             Err(e) => {
                 // Send subscription error with a dummy subscription ID (query failed before registration)
                 let error_id = [0u8; 16];
-                self.send_subscription_error(&error_id, &format!("Parse error: {}", e))
-                    .await?;
+                self.send_subscription_error(&error_id, &format!("Parse error: {}", e)).await?;
                 return Ok(());
             }
         };
@@ -368,15 +360,16 @@ impl ConnectionHandler {
         let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
 
         // Register the subscription first (to get the ID)
-        let subscription_id = match self.subscription_manager
-            .subscribe(query.to_string(), params, table_dependencies)
-        {
+        let subscription_id = match self.subscription_manager.subscribe(
+            query.to_string(),
+            params,
+            table_dependencies,
+        ) {
             Ok(id) => id,
             Err(e) => {
                 // Send subscription error with a dummy subscription ID (subscription failed before registration)
                 let error_id = [0u8; 16];
-                self.send_subscription_error(&error_id, &format!("{}", e))
-                    .await?;
+                self.send_subscription_error(&error_id, &format!("{}", e)).await?;
                 return Ok(());
             }
         };
@@ -388,10 +381,7 @@ impl ConnectionHandler {
                 let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
                     .iter()
                     .map(|row| {
-                        row.values
-                            .iter()
-                            .map(|v| Some(v.to_string().as_bytes().to_vec()))
-                            .collect()
+                        row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect()
                     })
                     .collect();
 
@@ -435,7 +425,7 @@ impl ConnectionHandler {
                         name: col.name.clone(),
                         table_oid: 0,
                         column_attr_number: i as i16,
-                        data_type_oid: 25, // TEXT type
+                        data_type_oid: 25,  // TEXT type
                         data_type_size: -1, // Variable length
                         type_modifier: -1,
                         format_code: 0, // Text format
@@ -480,9 +470,7 @@ impl ConnectionHandler {
                 self.send_command_complete("CREATE TABLE").await?;
             }
 
-            ExecutionResult::DropTable
-            | ExecutionResult::DropIndex
-            | ExecutionResult::DropView => {
+            ExecutionResult::DropTable | ExecutionResult::DropIndex | ExecutionResult::DropView => {
                 self.send_command_complete("DROP TABLE").await?;
             }
 
@@ -519,7 +507,7 @@ impl ConnectionHandler {
                         name: col.name.clone(),
                         table_oid: 0,
                         column_attr_number: i as i16,
-                        data_type_oid: 25, // TEXT type
+                        data_type_oid: 25,  // TEXT type
                         data_type_size: -1, // Variable length
                         type_modifier: -1,
                         format_code: 0, // Text format
@@ -572,11 +560,8 @@ impl ConnectionHandler {
     }
 
     async fn send_parameter_status(&mut self, name: &str, value: &str) -> Result<()> {
-        BackendMessage::ParameterStatus {
-            name: name.to_string(),
-            value: value.to_string(),
-        }
-        .encode(&mut self.write_buf);
+        BackendMessage::ParameterStatus { name: name.to_string(), value: value.to_string() }
+            .encode(&mut self.write_buf);
         self.flush_write_buffer().await
     }
 
@@ -631,12 +616,8 @@ impl ConnectionHandler {
         update_type: SubscriptionUpdateType,
         rows: Vec<Vec<Option<Vec<u8>>>>,
     ) -> Result<()> {
-        BackendMessage::SubscriptionData {
-            subscription_id: *subscription_id,
-            update_type,
-            rows,
-        }
-        .encode(&mut self.write_buf);
+        BackendMessage::SubscriptionData { subscription_id: *subscription_id, update_type, rows }
+            .encode(&mut self.write_buf);
         self.flush_write_buffer().await
     }
 

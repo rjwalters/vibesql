@@ -8,8 +8,8 @@
 //! - `lists`: Number of clusters (default 100)
 //! - `probes`: Number of clusters to search at query time (default 1)
 
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use vibesql_ast::VectorDistanceMetric;
 
@@ -113,7 +113,9 @@ impl IVFFlatIndex {
             if vec.len() != self.dimensions {
                 return Err(format!(
                     "Vector at row {} has {} dimensions, expected {}",
-                    row_id, vec.len(), self.dimensions
+                    row_id,
+                    vec.len(),
+                    self.dimensions
                 ));
             }
         }
@@ -141,7 +143,8 @@ impl IVFFlatIndex {
         if vector.len() != self.dimensions {
             return Err(format!(
                 "Vector has {} dimensions, expected {}",
-                vector.len(), self.dimensions
+                vector.len(),
+                self.dimensions
             ));
         }
 
@@ -171,7 +174,8 @@ impl IVFFlatIndex {
         if query.len() != self.dimensions {
             return Err(format!(
                 "Query has {} dimensions, expected {}",
-                query.len(), self.dimensions
+                query.len(),
+                self.dimensions
             ));
         }
 
@@ -202,9 +206,7 @@ impl IVFFlatIndex {
         }
 
         // Convert heap to sorted results
-        let mut results: Vec<_> = heap.into_iter()
-            .map(|r| (r.row_id, r.distance))
-            .collect();
+        let mut results: Vec<_> = heap.into_iter().map(|r| (r.row_id, r.distance)).collect();
         results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
 
         Ok(results)
@@ -229,9 +231,7 @@ impl IVFFlatIndex {
             }
         }
 
-        let mut results: Vec<_> = heap.into_iter()
-            .map(|r| (r.row_id, r.distance))
-            .collect();
+        let mut results: Vec<_> = heap.into_iter().map(|r| (r.row_id, r.distance)).collect();
         results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
 
         Ok(results)
@@ -248,11 +248,7 @@ impl IVFFlatIndex {
 
     /// Compute L2 (Euclidean) distance
     fn l2_distance(&self, a: &[f64], b: &[f64]) -> f64 {
-        a.iter()
-            .zip(b.iter())
-            .map(|(x, y)| (x - y).powi(2))
-            .sum::<f64>()
-            .sqrt()
+        a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f64>().sqrt()
     }
 
     /// Compute cosine distance (1 - cosine similarity)
@@ -293,7 +289,8 @@ impl IVFFlatIndex {
 
     /// Find the indices of the k nearest centroids
     fn find_nearest_centroids(&self, vector: &[f64], k: usize) -> Vec<usize> {
-        let mut distances: Vec<(usize, f64)> = self.centroids
+        let mut distances: Vec<(usize, f64)> = self
+            .centroids
             .iter()
             .enumerate()
             .map(|(idx, centroid)| (idx, self.compute_distance(vector, centroid)))
@@ -301,10 +298,7 @@ impl IVFFlatIndex {
 
         distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
 
-        distances.into_iter()
-            .take(k.min(self.centroids.len()))
-            .map(|(idx, _)| idx)
-            .collect()
+        distances.into_iter().take(k.min(self.centroids.len())).map(|(idx, _)| idx).collect()
     }
 
     /// Perform k-means clustering to find centroids
@@ -411,10 +405,7 @@ impl IVFFlatIndex {
             let distances: Vec<f64> = vectors
                 .iter()
                 .map(|(_, v)| {
-                    centroids
-                        .iter()
-                        .map(|c| self.l2_distance(v, c))
-                        .fold(f64::INFINITY, f64::min)
+                    centroids.iter().map(|c| self.l2_distance(v, c)).fold(f64::INFINITY, f64::min)
                 })
                 .collect();
 
@@ -445,10 +436,7 @@ impl IVFFlatIndex {
 
     /// Get all row IDs stored in the index
     pub fn all_row_ids(&self) -> Vec<usize> {
-        self.inverted_lists
-            .iter()
-            .flat_map(|list| list.iter().map(|(row_id, _)| *row_id))
-            .collect()
+        self.inverted_lists.iter().flat_map(|list| list.iter().map(|(row_id, _)| *row_id)).collect()
     }
 }
 
@@ -516,10 +504,7 @@ mod tests {
     fn test_ivfflat_insert_remove() {
         let mut index = IVFFlatIndex::new(2, 2, VectorDistanceMetric::L2);
 
-        let vectors = vec![
-            (0, vec![0.0, 0.0]),
-            (1, vec![1.0, 1.0]),
-        ];
+        let vectors = vec![(0, vec![0.0, 0.0]), (1, vec![1.0, 1.0])];
 
         index.build(vectors).unwrap();
         assert_eq!(index.len(), 2);

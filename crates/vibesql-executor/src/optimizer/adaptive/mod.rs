@@ -122,7 +122,9 @@ pub fn choose_execution_model(query: &SelectStmt) -> ExecutionModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibesql_ast::{BinaryOperator, Expression, FromClause, GroupByClause, JoinType, SelectItem, SelectStmt};
+    use vibesql_ast::{
+        BinaryOperator, Expression, FromClause, GroupByClause, JoinType, SelectItem, SelectStmt,
+    };
     use vibesql_types::SqlValue;
 
     #[test]
@@ -134,12 +136,13 @@ mod tests {
             select_list: vec![SelectItem::Wildcard { alias: None }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: "users".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: Some(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(123))),
             }),
@@ -164,10 +167,7 @@ mod tests {
             distinct: false,
             select_list: vec![
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "region".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "region".to_string() },
                     alias: None,
                 },
                 SelectItem::Expression {
@@ -191,7 +191,11 @@ mod tests {
             ],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: "orders".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
                 table: None,
@@ -235,7 +239,11 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: "orders".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -261,18 +269,34 @@ mod tests {
             from: Some(FromClause::Join {
                 left: Box::new(FromClause::Join {
                     left: Box::new(FromClause::Join {
-                        left: Box::new(FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-                        right: Box::new(FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+                        left: Box::new(FromClause::Table {
+                            name: "t1".to_string(),
+                            alias: None,
+                            column_aliases: None,
+                        }),
+                        right: Box::new(FromClause::Table {
+                            name: "t2".to_string(),
+                            alias: None,
+                            column_aliases: None,
+                        }),
                         join_type: JoinType::Inner,
                         condition: None,
                         natural: false,
                     }),
-                    right: Box::new(FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
+                    right: Box::new(FromClause::Table {
+                        name: "t3".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     join_type: JoinType::Inner,
                     condition: None,
                     natural: false,
                 }),
-                right: Box::new(FromClause::Table { name: "t4".to_string(), alias: None, column_aliases: None }),
+                right: Box::new(FromClause::Table {
+                    name: "t4".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 join_type: JoinType::Inner,
                 condition: None,
                 natural: false,
@@ -305,7 +329,11 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: "orders".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -339,7 +367,11 @@ mod tests {
             }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: "orders".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -360,23 +392,21 @@ mod tests {
             distinct: false,
             select_list: vec![
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "id".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                     alias: None,
                 },
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "name".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                     alias: None,
                 },
             ],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: "users".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -395,7 +425,11 @@ mod tests {
             select_list: vec![SelectItem::Wildcard { alias: None }],
             into_table: None,
             into_variables: None,
-            from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+            from: Some(FromClause::Table {
+                name: "users".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,

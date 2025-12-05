@@ -88,7 +88,7 @@ impl ColumnarHashTable {
             ColumnArray::Date(values, _nulls) => Ok(Self::build_from_i32(values)),
             ColumnArray::Timestamp(values, _nulls) => Ok(Self::build_from_i64(values)),
             _ => Err(ExecutorError::UnsupportedFeature(
-                "Columnar hash join not supported for this column type".to_string()
+                "Columnar hash join not supported for this column type".to_string(),
             )),
         }
     }
@@ -137,7 +137,11 @@ impl ColumnarHashTable {
 
     /// Probe the hash table with an i64 key, returning matching row indices
     #[inline]
-    pub fn probe_i64<'a>(&'a self, key: i64, build_values: &'a [i64]) -> impl Iterator<Item = u32> + 'a {
+    pub fn probe_i64<'a>(
+        &'a self,
+        key: i64,
+        build_values: &'a [i64],
+    ) -> impl Iterator<Item = u32> + 'a {
         let hash = Self::hash_i64(key);
         let bucket_idx = (hash as usize) & (self.bucket_count - 1);
 
@@ -150,7 +154,11 @@ impl ColumnarHashTable {
 
     /// Probe the hash table with a string key
     #[inline]
-    pub fn probe_string<'a>(&'a self, key: &'a str, build_values: &'a [String]) -> impl Iterator<Item = u32> + 'a {
+    pub fn probe_string<'a>(
+        &'a self,
+        key: &'a str,
+        build_values: &'a [String],
+    ) -> impl Iterator<Item = u32> + 'a {
         let hash = Self::hash_string(key);
         let bucket_idx = (hash as usize) & (self.bucket_count - 1);
 

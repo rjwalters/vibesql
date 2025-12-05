@@ -314,15 +314,7 @@ impl Procedure {
         comment: Option<String>,
         language: String,
     ) -> Self {
-        Procedure {
-            name,
-            schema,
-            parameters,
-            body,
-            sql_security,
-            comment,
-            language,
-        }
+        Procedure { name, schema, parameters, body, sql_security, comment, language }
     }
 }
 

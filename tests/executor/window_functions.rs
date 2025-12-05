@@ -269,7 +269,11 @@ fn test_window_lag_basic() {
     let schema = TableSchema::new(
         "SALES".to_string(),
         vec![
-            ColumnSchema::new("MONTH".to_string(), DataType::Varchar { max_length: Some(10) }, false),
+            ColumnSchema::new(
+                "MONTH".to_string(),
+                DataType::Varchar { max_length: Some(10) },
+                false,
+            ),
             ColumnSchema::new("REVENUE".to_string(), DataType::Integer, false),
         ],
     );
@@ -278,9 +282,15 @@ fn test_window_lag_basic() {
     // Insert test data
     use vibesql_storage::Row;
     let table = db.get_table_mut("SALES").unwrap();
-    table.insert(Row::new(vec![SqlValue::Varchar("2024-01".to_string()), SqlValue::Integer(100)])).unwrap();
-    table.insert(Row::new(vec![SqlValue::Varchar("2024-02".to_string()), SqlValue::Integer(150)])).unwrap();
-    table.insert(Row::new(vec![SqlValue::Varchar("2024-03".to_string()), SqlValue::Integer(200)])).unwrap();
+    table
+        .insert(Row::new(vec![SqlValue::Varchar("2024-01".to_string()), SqlValue::Integer(100)]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![SqlValue::Varchar("2024-02".to_string()), SqlValue::Integer(150)]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![SqlValue::Varchar("2024-03".to_string()), SqlValue::Integer(200)]))
+        .unwrap();
 
     // Test LAG to get previous month's revenue
     let query = r#"SELECT
@@ -321,7 +331,11 @@ fn test_window_lead_basic() {
     let schema = TableSchema::new(
         "SALES".to_string(),
         vec![
-            ColumnSchema::new("MONTH".to_string(), DataType::Varchar { max_length: Some(10) }, false),
+            ColumnSchema::new(
+                "MONTH".to_string(),
+                DataType::Varchar { max_length: Some(10) },
+                false,
+            ),
             ColumnSchema::new("REVENUE".to_string(), DataType::Integer, false),
         ],
     );
@@ -330,9 +344,15 @@ fn test_window_lead_basic() {
     // Insert test data
     use vibesql_storage::Row;
     let table = db.get_table_mut("SALES").unwrap();
-    table.insert(Row::new(vec![SqlValue::Varchar("2024-01".to_string()), SqlValue::Integer(100)])).unwrap();
-    table.insert(Row::new(vec![SqlValue::Varchar("2024-02".to_string()), SqlValue::Integer(150)])).unwrap();
-    table.insert(Row::new(vec![SqlValue::Varchar("2024-03".to_string()), SqlValue::Integer(200)])).unwrap();
+    table
+        .insert(Row::new(vec![SqlValue::Varchar("2024-01".to_string()), SqlValue::Integer(100)]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![SqlValue::Varchar("2024-02".to_string()), SqlValue::Integer(150)]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![SqlValue::Varchar("2024-03".to_string()), SqlValue::Integer(200)]))
+        .unwrap();
 
     // Test LEAD to get next month's revenue
     let query = r#"SELECT
@@ -373,8 +393,16 @@ fn test_window_first_value() {
     let schema = TableSchema::new(
         "EMPLOYEES".to_string(),
         vec![
-            ColumnSchema::new("DEPARTMENT".to_string(), DataType::Varchar { max_length: Some(50) }, false),
-            ColumnSchema::new("EMPLOYEE".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ColumnSchema::new(
+                "DEPARTMENT".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
+            ColumnSchema::new(
+                "EMPLOYEE".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
             ColumnSchema::new("SALARY".to_string(), DataType::Integer, false),
         ],
     );
@@ -383,26 +411,34 @@ fn test_window_first_value() {
     // Insert test data
     use vibesql_storage::Row;
     let table = db.get_table_mut("EMPLOYEES").unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Engineering".to_string()),
-        SqlValue::Varchar("Alice".to_string()),
-        SqlValue::Integer(120000),
-    ])).unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Engineering".to_string()),
-        SqlValue::Varchar("Bob".to_string()),
-        SqlValue::Integer(95000),
-    ])).unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Sales".to_string()),
-        SqlValue::Varchar("Carol".to_string()),
-        SqlValue::Integer(85000),
-    ])).unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Sales".to_string()),
-        SqlValue::Varchar("Dave".to_string()),
-        SqlValue::Integer(90000),
-    ])).unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Integer(120000),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Integer(95000),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar("Carol".to_string()),
+            SqlValue::Integer(85000),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar("Dave".to_string()),
+            SqlValue::Integer(90000),
+        ]))
+        .unwrap();
 
     // Test FIRST_VALUE to get highest salary per department
     let query = r#"SELECT
@@ -444,8 +480,16 @@ fn test_window_last_value() {
     let schema = TableSchema::new(
         "EMPLOYEES".to_string(),
         vec![
-            ColumnSchema::new("DEPARTMENT".to_string(), DataType::Varchar { max_length: Some(50) }, false),
-            ColumnSchema::new("EMPLOYEE".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ColumnSchema::new(
+                "DEPARTMENT".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
+            ColumnSchema::new(
+                "EMPLOYEE".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
             ColumnSchema::new("SALARY".to_string(), DataType::Integer, false),
         ],
     );
@@ -454,26 +498,34 @@ fn test_window_last_value() {
     // Insert test data
     use vibesql_storage::Row;
     let table = db.get_table_mut("EMPLOYEES").unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Engineering".to_string()),
-        SqlValue::Varchar("Alice".to_string()),
-        SqlValue::Integer(120000),
-    ])).unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Engineering".to_string()),
-        SqlValue::Varchar("Bob".to_string()),
-        SqlValue::Integer(95000),
-    ])).unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Sales".to_string()),
-        SqlValue::Varchar("Carol".to_string()),
-        SqlValue::Integer(85000),
-    ])).unwrap();
-    table.insert(Row::new(vec![
-        SqlValue::Varchar("Sales".to_string()),
-        SqlValue::Varchar("Dave".to_string()),
-        SqlValue::Integer(90000),
-    ])).unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Integer(120000),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Integer(95000),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar("Carol".to_string()),
+            SqlValue::Integer(85000),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar("Dave".to_string()),
+            SqlValue::Integer(90000),
+        ]))
+        .unwrap();
 
     // Test LAST_VALUE to get lowest salary per department
     let query = r#"SELECT
@@ -549,9 +601,9 @@ fn test_window_lag_with_offset_and_default() {
         assert_eq!(result[1].values[2], SqlValue::Integer(999));
 
         // Remaining rows should lag by 2
-        assert_eq!(result[2].values[2], SqlValue::Integer(10));  // LAG of row 1
-        assert_eq!(result[3].values[2], SqlValue::Integer(20));  // LAG of row 2
-        assert_eq!(result[4].values[2], SqlValue::Integer(30));  // LAG of row 3
+        assert_eq!(result[2].values[2], SqlValue::Integer(10)); // LAG of row 1
+        assert_eq!(result[3].values[2], SqlValue::Integer(20)); // LAG of row 2
+        assert_eq!(result[4].values[2], SqlValue::Integer(30)); // LAG of row 3
 
         println!("✅ LAG with offset and default test works!");
     } else {

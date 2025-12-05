@@ -2,9 +2,9 @@
 //!
 //! Provides functions for getting and setting SRID on geometries.
 
-use super::{sql_value_to_geometry, geometry_to_sql_value};
-use vibesql_types::SqlValue;
+use super::{geometry_to_sql_value, sql_value_to_geometry};
 use crate::errors::ExecutorError;
+use vibesql_types::SqlValue;
 
 /// ST_SRID(geom) - Get the SRID of a geometry
 pub fn st_srid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
@@ -44,22 +44,14 @@ pub fn st_set_srid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Bigint(i) => *i as i32,
         SqlValue::Smallint(i) => *i as i32,
         SqlValue::Null => {
-            return Err(ExecutorError::UnsupportedFeature(
-                "SRID cannot be NULL".to_string(),
-            ))
+            return Err(ExecutorError::UnsupportedFeature("SRID cannot be NULL".to_string()))
         }
-        _ => {
-            return Err(ExecutorError::UnsupportedFeature(
-                "SRID must be an integer".to_string(),
-            ))
-        }
+        _ => return Err(ExecutorError::UnsupportedFeature("SRID must be an integer".to_string())),
     };
 
     // Validate SRID (0 is allowed = undefined, others should be valid EPSG codes)
     if srid < 0 {
-        return Err(ExecutorError::UnsupportedFeature(
-            format!("SRID must be >= 0, got {}", srid),
-        ));
+        return Err(ExecutorError::UnsupportedFeature(format!("SRID must be >= 0, got {}", srid)));
     }
 
     let mut geom = sql_value_to_geometry(&args[0])?;
@@ -85,18 +77,18 @@ pub fn st_transform(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 }
 
 // Common EPSG codes for reference (validation could be added in Phase 3+)
-const EPSG_WGS84: i32 = 4326;           // GPS coordinates (lat/lon)
-const EPSG_WEB_MERCATOR: i32 = 3857;   // Web Mercator (web maps)
+const EPSG_WGS84: i32 = 4326; // GPS coordinates (lat/lon)
+const EPSG_WEB_MERCATOR: i32 = 3857; // Web Mercator (web maps)
 const EPSG_US_NATIONAL_ATLAS: i32 = 2163; // US National Atlas Equal Area
 
 /// Check if SRID is a valid/known EPSG code
 #[allow(dead_code)]
 fn is_valid_srid(srid: i32) -> bool {
     match srid {
-        0 => true,                    // Undefined
+        0 => true, // Undefined
         EPSG_WGS84 => true,
         EPSG_WEB_MERCATOR => true,
         EPSG_US_NATIONAL_ATLAS => true,
-        _ => false,  // In Phase 3+, we could check against full EPSG database
+        _ => false, // In Phase 3+, we could check against full EPSG database
     }
 }

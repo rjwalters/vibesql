@@ -6,13 +6,21 @@ fn setup_products_table(db: &mut Database) {
     let schema = vibesql_catalog::TableSchema::with_primary_key(
         "products".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
                 true,
             ),
-            vibesql_catalog::ColumnSchema::new("stock".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "stock".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
         ],
         vec!["id".to_string()], // id is PRIMARY KEY
     );
@@ -30,7 +38,9 @@ fn test_on_duplicate_key_update_basic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Widget".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Widget".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
@@ -46,15 +56,15 @@ fn test_on_duplicate_key_update_basic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Widget".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Widget".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20)),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "stock".to_string(),
-            value: vibesql_ast::Expression::DuplicateKeyValue {
-                column: "stock".to_string(),
-            },
+            value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
         }]),
     };
 
@@ -83,7 +93,9 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Widget".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Widget".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
@@ -98,7 +110,9 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Widget".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Widget".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(30)),
         ]]),
         conflict_clause: None,
@@ -139,15 +153,15 @@ fn test_on_duplicate_key_update_no_conflict() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Widget".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Widget".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "stock".to_string(),
-            value: vibesql_ast::Expression::DuplicateKeyValue {
-                column: "stock".to_string(),
-            },
+            value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
         }]),
     };
 

@@ -29,14 +29,30 @@ use vibesql_parser::Parser;
 
 fn run_query_detailed(db: &vibesql_storage::Database, name: &str, sql: &str, timeout: Duration) {
     eprintln!("\n=== {} ===", name);
-    eprintln!("SQL: {}", sql.trim().lines().take(3).collect::<Vec<_>>().join(" ").chars().take(80).collect::<String>());
+    eprintln!(
+        "SQL: {}",
+        sql.trim()
+            .lines()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(80)
+            .collect::<String>()
+    );
 
     // Parse
     let parse_start = Instant::now();
     let stmt = match Parser::parse_sql(sql) {
         Ok(vibesql_ast::Statement::Select(s)) => s,
-        Ok(_) => { eprintln!("ERROR: Not a SELECT"); return; }
-        Err(e) => { eprintln!("ERROR: Parse error: {}", e); return; }
+        Ok(_) => {
+            eprintln!("ERROR: Not a SELECT");
+            return;
+        }
+        Err(e) => {
+            eprintln!("ERROR: Parse error: {}", e);
+            return;
+        }
     };
     let parse_time = parse_start.elapsed();
     eprintln!("  Parse:    {:>10.2?}", parse_time);
@@ -71,10 +87,8 @@ fn main() {
     eprintln!("=== TPC-H Query Profiling ===");
 
     // Get timeout from env (default 30s)
-    let timeout_secs: u64 = env::var("QUERY_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(30);
+    let timeout_secs: u64 =
+        env::var("QUERY_TIMEOUT_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
     let timeout = Duration::from_secs(timeout_secs);
     eprintln!("Per-query timeout: {}s (set QUERY_TIMEOUT_SECS to change)", timeout_secs);
 
@@ -135,13 +149,12 @@ fn main() {
         // CLI arg takes precedence: run only specified query
         let target_query = &args[1];
         eprintln!("Single-query mode: {}", target_query);
-        all_queries.into_iter()
-            .filter(|(name, _)| *name == target_query)
-            .collect()
+        all_queries.into_iter().filter(|(name, _)| *name == target_query).collect()
     } else if !query_filter.is_empty() {
         // Env var filter: run multiple specified queries
         eprintln!("Query filter mode: {:?}", query_filter);
-        all_queries.into_iter()
+        all_queries
+            .into_iter()
             .filter(|(name, _)| query_filter.contains(&name.to_uppercase()))
             .collect()
     } else {
@@ -154,7 +167,10 @@ fn main() {
         if args.len() > 1 {
             eprintln!("Error: Query '{}' not found. Valid queries: Q1-Q22", args[1]);
         } else {
-            eprintln!("Error: No matching queries for filter {:?}. Valid queries: Q1-Q22", query_filter);
+            eprintln!(
+                "Error: No matching queries for filter {:?}. Valid queries: Q1-Q22",
+                query_filter
+            );
         }
         eprintln!("Run with --help for usage information.");
         std::process::exit(1);

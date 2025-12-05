@@ -39,7 +39,9 @@ fn test_aggregation_functions() {
 
     // Median of 100 items is average of 50th and 51st elements (50ms and 51ms) = 50.5ms
     let median = metrics.median_query_time();
-    assert!(median >= Duration::from_nanos(50_500_000) && median <= Duration::from_nanos(50_500_001));
+    assert!(
+        median >= Duration::from_nanos(50_500_000) && median <= Duration::from_nanos(50_500_001)
+    );
 
     assert_eq!(metrics.p95_query_time(), Duration::from_millis(95));
     assert_eq!(metrics.p99_query_time(), Duration::from_millis(99));

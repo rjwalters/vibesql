@@ -102,7 +102,8 @@ impl<L: RowIterator> HashJoinIterator<L> {
 
         // Build phase: Create hash table from right side
         // This is the one-time materialization cost
-        let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>> = AHashMap::new();
+        let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>> =
+            AHashMap::new();
         let mut build_iterations = 0;
 
         for row in right.into_rows() {
@@ -212,8 +213,8 @@ impl<L: RowIterator> RowIterator for HashJoinIterator<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibesql_catalog::{ColumnSchema, TableSchema};
     use crate::select::TableScanIterator;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::Row;
     use vibesql_types::{DataType, SqlValue};
 
@@ -492,10 +493,6 @@ mod tests {
         // Verify that we didn't consume all left rows (lazy evaluation)
         // We should have consumed at most 2 rows (matching ids 1 and 2)
         let consumed_count = *consumed.lock().unwrap();
-        assert!(
-            consumed_count <= 3,
-            "Expected at most 3 rows consumed, got {}",
-            consumed_count
-        );
+        assert!(consumed_count <= 3, "Expected at most 3 rows consumed, got {}", consumed_count);
     }
 }

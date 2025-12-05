@@ -19,7 +19,10 @@ fn test_parse_create_table_with_primary_key() {
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::PrimaryKey, .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
+                    ..
+                }
             ));
         }
         _ => panic!("Expected CREATE TABLE statement"),
@@ -37,7 +40,10 @@ fn test_parse_create_table_with_unique() {
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::Unique, .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::Unique,
+                    ..
+                }
             ));
         }
         _ => panic!("Expected CREATE TABLE statement"),
@@ -56,7 +62,10 @@ fn test_parse_create_table_with_check_constraint() {
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::Check(_), .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::Check(_),
+                    ..
+                }
             ));
         }
         _ => panic!("Expected CREATE TABLE statement"),
@@ -76,7 +85,12 @@ fn test_parse_create_table_with_references() {
             match &create.columns[0].constraints[0] {
                 vibesql_ast::ColumnConstraint {
                     kind:
-                        vibesql_ast::ColumnConstraintKind::References { table, column, on_delete, on_update },
+                        vibesql_ast::ColumnConstraintKind::References {
+                            table,
+                            column,
+                            on_delete,
+                            on_update,
+                        },
                     ..
                 } => {
                     assert_eq!(table, "CUSTOMERS");
@@ -112,28 +126,40 @@ fn test_parse_create_table_with_multiple_constraints() {
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::PrimaryKey, .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
+                    ..
+                }
             ));
 
             // email has UNIQUE
             assert_eq!(create.columns[1].constraints.len(), 1);
             assert!(matches!(
                 create.columns[1].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::Unique, .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::Unique,
+                    ..
+                }
             ));
 
             // salary has CHECK
             assert_eq!(create.columns[2].constraints.len(), 1);
             assert!(matches!(
                 create.columns[2].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::Check(_), .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::Check(_),
+                    ..
+                }
             ));
 
             // department_id has REFERENCES
             assert_eq!(create.columns[3].constraints.len(), 1);
             assert!(matches!(
                 create.columns[3].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::References { .. }, .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::References { .. },
+                    ..
+                }
             ));
         }
         _ => panic!("Expected CREATE TABLE statement"),
@@ -192,20 +218,20 @@ fn test_parse_create_table_key_constraint() {
             assert_eq!(create.columns.len(), 3);
 
             // value has KEY
-            assert!(create.columns[1].constraints.iter().any(|c| matches!(
-                c.kind,
-                vibesql_ast::ColumnConstraintKind::Key
-            )));
+            assert!(create.columns[1]
+                .constraints
+                .iter()
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Key)));
 
             // status has KEY and NOT NULL
-            assert!(create.columns[2].constraints.iter().any(|c| matches!(
-                c.kind,
-                vibesql_ast::ColumnConstraintKind::Key
-            )));
-            assert!(create.columns[2].constraints.iter().any(|c| matches!(
-                c.kind,
-                vibesql_ast::ColumnConstraintKind::NotNull
-            )));
+            assert!(create.columns[2]
+                .constraints
+                .iter()
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Key)));
+            assert!(create.columns[2]
+                .constraints
+                .iter()
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

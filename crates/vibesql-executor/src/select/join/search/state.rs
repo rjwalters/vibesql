@@ -48,10 +48,7 @@ pub struct CascadingFilterState {
 
 impl CascadingFilterState {
     pub fn new() -> Self {
-        Self {
-            filtered_tables: BTreeMap::new(),
-            correlation_factor: 1.0,
-        }
+        Self { filtered_tables: BTreeMap::new(), correlation_factor: 1.0 }
     }
 
     /// Record that a table has had filters applied with given selectivity
@@ -80,10 +77,7 @@ impl CascadingFilterState {
     /// produce fewer rows than independent selectivity would suggest.
     pub fn apply_correlation_for_join(&mut self, joined_tables: &BTreeSet<String>) {
         // Count how many filtered tables we're joining through
-        let filtered_count = joined_tables
-            .iter()
-            .filter(|t| self.is_filtered(t))
-            .count();
+        let filtered_count = joined_tables.iter().filter(|t| self.is_filtered(t)).count();
 
         if filtered_count > 0 {
             // Each filtered table in the join chain reduces the correlation factor

@@ -26,15 +26,16 @@
 //! With hash join: Scan ~5000 STOCK rows to build hash table, probe ~200 ORDER_LINE rows
 //! With INL: For each of ~170 distinct ol_i_id values, do one point lookup on STOCK
 
-use std::collections::{HashMap, HashSet};
 use ahash::AHashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
     optimizer::{
-        combine_with_and, PredicatePlan,
+        combine_with_and,
         where_pushdown::{extract_referenced_tables_branch, flatten_conjuncts},
+        PredicatePlan,
     },
     schema::CombinedSchema,
     select::cte::CteResult,
@@ -65,22 +66,32 @@ where
 {
     // Execute left and right sides with WHERE clause for predicate pushdown
     // Note: ORDER BY and LIMIT are not optimized at JOIN level, so we pass None
-    let left_result = super::execute_from_clause(left, cte_results, database, where_clause, None, None, outer_row, outer_schema, execute_subquery)?;
+    let left_result = super::execute_from_clause(
+        left,
+        cte_results,
+        database,
+        where_clause,
+        None,
+        None,
+        outer_row,
+        outer_schema,
+        execute_subquery,
+    )?;
 
     // Index Nested Loop (INL) optimization for SEMI joins with small left side (#3392)
     // When left side is small, use index lookups on right table instead of scanning all rows
     if matches!(join_type, vibesql_ast::JoinType::Semi) {
         let left_row_count = left_result.as_slice().len();
         if std::env::var("INL_DEBUG").is_ok() {
-            eprintln!("[INL] SEMI join detected, left_row_count={}, threshold={}", left_row_count, INL_THRESHOLD);
+            eprintln!(
+                "[INL] SEMI join detected, left_row_count={}, threshold={}",
+                left_row_count, INL_THRESHOLD
+            );
         }
         if left_row_count > 0 && left_row_count < INL_THRESHOLD {
-            if let Some(result) = try_index_nested_loop_semi_join(
-                &left_result,
-                right,
-                condition,
-                database,
-            )? {
+            if let Some(result) =
+                try_index_nested_loop_semi_join(&left_result, right, condition, database)?
+            {
                 return Ok(result);
             }
         }
@@ -110,7 +121,17 @@ where
         }
         _ => where_clause.cloned(),
     };
-    let right_result = super::execute_from_clause(right, cte_results, database, right_where_clause.as_ref(), None, None, outer_row, outer_schema, execute_subquery)?;
+    let right_result = super::execute_from_clause(
+        right,
+        cte_results,
+        database,
+        right_where_clause.as_ref(),
+        None,
+        None,
+        outer_row,
+        outer_schema,
+        execute_subquery,
+    )?;
 
     // For NATURAL JOIN, generate the implicit join condition based on common column names
     let natural_join_condition = if natural {
@@ -125,7 +146,8 @@ where
     // If we have a WHERE clause, use predicate plan to extract equijoin conditions (Phase 1)
     let equijoin_predicates = if let Some(where_expr) = where_clause {
         // Build combined schema for WHERE clause analysis using SchemaBuilder for O(n) performance
-        let mut schema_builder = crate::schema::SchemaBuilder::from_schema(left_result.schema.clone());
+        let mut schema_builder =
+            crate::schema::SchemaBuilder::from_schema(left_result.schema.clone());
         for (table_name, (_start_idx, table_schema)) in &right_result.schema.table_schemas {
             schema_builder.add_table(table_name.clone(), table_schema.clone());
         }
@@ -314,12 +336,10 @@ fn extract_right_only_predicates(
             // Some(empty set) means no tables referenced (skip it)
             // Some(non-empty set) - check if all tables are in right_table_set
             match extract_referenced_tables_branch(pred, &right_schema) {
-                Some(ref tables) if !tables.is_empty() => {
-                    tables.iter().all(|t| {
-                        let t_lower = t.to_lowercase();
-                        right_table_set.contains(t) || right_table_set.contains(&t_lower)
-                    })
-                }
+                Some(ref tables) if !tables.is_empty() => tables.iter().all(|t| {
+                    let t_lower = t.to_lowercase();
+                    right_table_set.contains(t) || right_table_set.contains(&t_lower)
+                }),
                 _ => false,
             }
         })
@@ -393,7 +413,9 @@ fn try_index_nested_loop_semi_join(
     let cond = match condition {
         Some(c) => c,
         None => {
-            if debug { eprintln!("[INL] No condition, returning None"); }
+            if debug {
+                eprintln!("[INL] No condition, returning None");
+            }
             return Ok(None);
         }
     };
@@ -402,7 +424,9 @@ fn try_index_nested_loop_semi_join(
     let (right_table_name, _right_alias) = match right_from {
         vibesql_ast::FromClause::Table { name, alias, .. } => (name.clone(), alias.clone()),
         _ => {
-            if debug { eprintln!("[INL] Right side is not a simple table"); }
+            if debug {
+                eprintln!("[INL] Right side is not a simple table");
+            }
             return Ok(None); // Complex right side, can't use INL
         }
     };
@@ -415,7 +439,9 @@ fn try_index_nested_loop_semi_join(
     let right_table = match database.get_table(&right_table_name) {
         Some(t) => t,
         None => {
-            if debug { eprintln!("[INL] Table not found: {}", right_table_name); }
+            if debug {
+                eprintln!("[INL] Table not found: {}", right_table_name);
+            }
             return Ok(None);
         }
     };
@@ -423,17 +449,24 @@ fn try_index_nested_loop_semi_join(
     // Parse the join condition to extract:
     // 1. The equi-join columns (left_col = right_col)
     // 2. Additional filter predicates on the right table
-    let (equi_join, right_filters) = match parse_semi_join_condition(cond, left_result, &right_table_name, debug) {
-        Some(parsed) => parsed,
-        None => {
-            if debug { eprintln!("[INL] parse_semi_join_condition returned None"); }
-            return Ok(None);
-        }
-    };
+    let (equi_join, right_filters) =
+        match parse_semi_join_condition(cond, left_result, &right_table_name, debug) {
+            Some(parsed) => parsed,
+            None => {
+                if debug {
+                    eprintln!("[INL] parse_semi_join_condition returned None");
+                }
+                return Ok(None);
+            }
+        };
 
     if debug {
-        eprintln!("[INL] Parsed condition: left_col={}, right_col={}, has_right_filters={}",
-            equi_join.left_col, equi_join.right_col, right_filters.is_some());
+        eprintln!(
+            "[INL] Parsed condition: left_col={}, right_col={}, has_right_filters={}",
+            equi_join.left_col,
+            equi_join.right_col,
+            right_filters.is_some()
+        );
     }
 
     // Check if the right table has a usable index for point lookups
@@ -448,7 +481,8 @@ fn try_index_nested_loop_semi_join(
     // So we can build a composite key for point lookups
 
     // Try to extract constant predicates from right_filters that can be combined with join key
-    let constant_prefix = extract_constant_prefix_for_pk(&right_filters, &pk_columns, &equi_join.right_col);
+    let constant_prefix =
+        extract_constant_prefix_for_pk(&right_filters, &pk_columns, &equi_join.right_col);
 
     if debug {
         eprintln!("[INL] PK columns: {:?}, constant_prefix: {:?}", pk_columns, constant_prefix);
@@ -456,15 +490,16 @@ fn try_index_nested_loop_semi_join(
 
     // Build the index lookup key template
     // For Stock-Level: key = [s_w_id (from filter), s_i_id (from join)]
-    let lookup_key_template = match build_lookup_key_template(&pk_columns, &equi_join.right_col, &constant_prefix) {
-        Some(template) => template,
-        None => {
-            if debug {
-                eprintln!("[INL] Cannot build lookup key template, falling back to hash join");
+    let lookup_key_template =
+        match build_lookup_key_template(&pk_columns, &equi_join.right_col, &constant_prefix) {
+            Some(template) => template,
+            None => {
+                if debug {
+                    eprintln!("[INL] Cannot build lookup key template, falling back to hash join");
+                }
+                return Ok(None);
             }
-            return Ok(None);
-        }
-    };
+        };
 
     if debug {
         eprintln!("[INL] Using INL with lookup_key_template: {:?}", lookup_key_template);
@@ -483,15 +518,17 @@ fn try_index_nested_loop_semi_join(
     };
 
     // Build evaluator for right-side filter (residual predicates after PK lookup)
-    let right_schema = CombinedSchema::from_table(right_table_name.clone(), right_table.schema.clone());
+    let right_schema =
+        CombinedSchema::from_table(right_table_name.clone(), right_table.schema.clone());
     let residual_filter = build_residual_filter(&right_filters, &pk_columns);
-    let evaluator = residual_filter.as_ref().map(|_| {
-        CombinedExpressionEvaluator::with_database(&right_schema, database)
-    });
+    let evaluator = residual_filter
+        .as_ref()
+        .map(|_| CombinedExpressionEvaluator::with_database(&right_schema, database));
 
     // Collect distinct join keys from left side
     let left_slice = left_result.as_slice();
-    let mut seen_keys: AHashSet<vibesql_types::SqlValue> = AHashSet::with_capacity(left_slice.len());
+    let mut seen_keys: AHashSet<vibesql_types::SqlValue> =
+        AHashSet::with_capacity(left_slice.len());
     let mut matching_keys: AHashSet<vibesql_types::SqlValue> = AHashSet::new();
 
     let all_rows = right_table.scan();
@@ -529,10 +566,7 @@ fn try_index_nested_loop_semi_join(
             // Apply residual filter if any
             let passes = if let (Some(filter), Some(eval)) = (&residual_filter, &evaluator) {
                 eval.clear_cse_cache();
-                matches!(
-                    eval.eval(filter, right_row),
-                    Ok(vibesql_types::SqlValue::Boolean(true))
-                )
+                matches!(eval.eval(filter, right_row), Ok(vibesql_types::SqlValue::Boolean(true)))
             } else {
                 true // No residual filter
             };
@@ -544,8 +578,11 @@ fn try_index_nested_loop_semi_join(
     }
 
     if debug {
-        eprintln!("[INL] Found {} matching keys out of {} distinct left keys",
-            matching_keys.len(), seen_keys.len());
+        eprintln!(
+            "[INL] Found {} matching keys out of {} distinct left keys",
+            matching_keys.len(),
+            seen_keys.len()
+        );
     }
 
     // Build result: all left rows whose join key is in matching_keys
@@ -580,9 +617,8 @@ fn parse_semi_join_condition(
         eprintln!("[INL] Parsing condition with {} conjuncts", conjuncts.len());
     }
 
-    let left_tables: HashSet<String> = left_result.schema.table_schemas.keys()
-        .map(|s| s.to_uppercase())
-        .collect();
+    let left_tables: HashSet<String> =
+        left_result.schema.table_schemas.keys().map(|s| s.to_uppercase()).collect();
 
     if debug {
         eprintln!("[INL] Left tables: {:?}", left_tables);
@@ -618,19 +654,27 @@ fn parse_semi_join_condition(
                 let _right_col_upper = right_col.to_uppercase();
 
                 if debug {
-                    eprintln!("[INL] Found column=column eq: left=({:?}, {}), right=({:?}, {})", left_tbl_upper, left_col, right_tbl_upper, right_col);
+                    eprintln!(
+                        "[INL] Found column=column eq: left=({:?}, {}), right=({:?}, {})",
+                        left_tbl_upper, left_col, right_tbl_upper, right_col
+                    );
                 }
 
                 // Check if left_col is from left tables and right_col is from right table
                 // When table qualifier is None, check if column exists in any left table's schema
-                let left_is_left = left_tbl_upper.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false)
-                    || left_result.schema.table_schemas.values().any(|(_, schema)| {
-                        schema.columns.iter().any(|c| c.name.to_uppercase() == left_col_upper)
-                    });
-                let right_is_right = right_tbl_upper.as_ref().map(|t| t == &right_table_upper).unwrap_or(true);
+                let left_is_left =
+                    left_tbl_upper.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false)
+                        || left_result.schema.table_schemas.values().any(|(_, schema)| {
+                            schema.columns.iter().any(|c| c.name.to_uppercase() == left_col_upper)
+                        });
+                let right_is_right =
+                    right_tbl_upper.as_ref().map(|t| t == &right_table_upper).unwrap_or(true);
 
                 if debug {
-                    eprintln!("[INL] left_is_left={}, right_is_right={}", left_is_left, right_is_right);
+                    eprintln!(
+                        "[INL] left_is_left={}, right_is_right={}",
+                        left_is_left, right_is_right
+                    );
                 }
 
                 if left_is_left && right_is_right && equi_join.is_none() {
@@ -642,8 +686,10 @@ fn parse_semi_join_condition(
                 }
 
                 // Check the reverse: right_col from left, left_col from right
-                let right_is_left = right_tbl_upper.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false);
-                let left_is_right = left_tbl_upper.as_ref().map(|t| t == &right_table_upper).unwrap_or(true);
+                let right_is_left =
+                    right_tbl_upper.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false);
+                let left_is_right =
+                    left_tbl_upper.as_ref().map(|t| t == &right_table_upper).unwrap_or(true);
 
                 if right_is_left && left_is_right && equi_join.is_none() {
                     equi_join = Some(EquiJoinInfo {
@@ -710,7 +756,9 @@ fn extract_constant_prefix_for_pk(
             {
                 let col_upper = column.to_uppercase();
                 // Only add if it's a PK column and not the join key
-                if pk_columns.iter().any(|pk| pk.to_uppercase() == col_upper) && col_upper != join_key_upper {
+                if pk_columns.iter().any(|pk| pk.to_uppercase() == col_upper)
+                    && col_upper != join_key_upper
+                {
                     constants.insert(col_upper, value.clone());
                 }
             }
@@ -722,7 +770,9 @@ fn extract_constant_prefix_for_pk(
             ) = (left.as_ref(), right.as_ref())
             {
                 let col_upper = column.to_uppercase();
-                if pk_columns.iter().any(|pk| pk.to_uppercase() == col_upper) && col_upper != join_key_upper {
+                if pk_columns.iter().any(|pk| pk.to_uppercase() == col_upper)
+                    && col_upper != join_key_upper
+                {
                     constants.insert(col_upper, value.clone());
                 }
             }

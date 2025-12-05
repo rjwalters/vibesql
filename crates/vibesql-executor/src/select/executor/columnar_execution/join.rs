@@ -14,13 +14,11 @@ use super::join_helpers::{
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
-    select::{
-        columnar, cte::CteResult,
-        executor::builder::SelectExecutor,
-        join::hash_join::columnar as columnar_join,
-        projection::project_row_combined,
-    },
     schema::CombinedSchema,
+    select::{
+        columnar, cte::CteResult, executor::builder::SelectExecutor,
+        join::hash_join::columnar as columnar_join, projection::project_row_combined,
+    },
 };
 use vibesql_ast::{FromClause, SelectItem};
 
@@ -122,7 +120,12 @@ impl SelectExecutor<'_> {
         );
 
         // Load all tables as ColumnarBatch
-        let mut batches: Vec<(String, Option<String>, columnar::ColumnarBatch, vibesql_catalog::TableSchema)> = Vec::new();
+        let mut batches: Vec<(
+            String,
+            Option<String>,
+            columnar::ColumnarBatch,
+            vibesql_catalog::TableSchema,
+        )> = Vec::new();
 
         for (table_name, alias, _is_subquery) in &table_refs {
             let table = match self.database.get_table(table_name) {
@@ -153,7 +156,11 @@ impl SelectExecutor<'_> {
             extract_equijoin_conditions(where_clause, &mut join_conditions);
         }
 
-        log::debug!("Columnar join: found {} join conditions for {} tables", join_conditions.len(), table_refs.len());
+        log::debug!(
+            "Columnar join: found {} join conditions for {} tables",
+            join_conditions.len(),
+            table_refs.len()
+        );
 
         // For N tables, we need exactly N-1 equijoin conditions for a simple connected join graph.
         // If there are more conditions, some are filters that need special handling.
@@ -162,7 +169,9 @@ impl SelectExecutor<'_> {
         if join_conditions.len() > min_join_conditions {
             log::debug!(
                 "Columnar join: {} join conditions exceeds minimum {} for {} tables, falling back",
-                join_conditions.len(), min_join_conditions, table_refs.len()
+                join_conditions.len(),
+                min_join_conditions,
+                table_refs.len()
             );
             return Ok(None);
         }
@@ -171,20 +180,23 @@ impl SelectExecutor<'_> {
         let combined_schema = build_combined_schema(&batches);
 
         // Execute joins in sequence, building up the result batch
-        let joined_batch = match self.execute_columnar_join_chain(&batches, &join_conditions, &combined_schema) {
-            Ok(Some(batch)) => batch,
-            Ok(None) => {
-                log::debug!("Columnar join: join chain execution returned None");
-                return Ok(None);
-            }
-            Err(e) => {
-                log::debug!("Columnar join: join chain execution failed: {:?}", e);
-                return Ok(None);
-            }
-        };
+        let joined_batch =
+            match self.execute_columnar_join_chain(&batches, &join_conditions, &combined_schema) {
+                Ok(Some(batch)) => batch,
+                Ok(None) => {
+                    log::debug!("Columnar join: join chain execution returned None");
+                    return Ok(None);
+                }
+                Err(e) => {
+                    log::debug!("Columnar join: join chain execution failed: {:?}", e);
+                    return Ok(None);
+                }
+            };
 
         // Apply remaining WHERE predicates (non-join conditions) using SIMD filtering
-        let predicates = stmt.where_clause.as_ref()
+        let predicates = stmt
+            .where_clause
+            .as_ref()
             .and_then(|where_expr| extract_non_join_predicates(where_expr, &combined_schema))
             .unwrap_or_default();
 
@@ -195,10 +207,7 @@ impl SelectExecutor<'_> {
         };
 
         let joined_row_count = filtered_batch.row_count();
-        log::info!(
-            "Columnar join: {} rows after join and filter",
-            joined_row_count
-        );
+        log::info!("Columnar join: {} rows after join and filter", joined_row_count);
 
         // Check for GROUP BY
         let has_group_by = stmt.group_by.is_some();
@@ -221,9 +230,13 @@ impl SelectExecutor<'_> {
             } else {
                 // Check if SELECT list contains aggregate functions
                 // Aggregates without GROUP BY need special handling (fall back to row-oriented)
-                let has_aggregates = crate::optimizer::aggregate_analysis::AggregateAnalysis::analyze(stmt).has_aggregates;
+                let has_aggregates =
+                    crate::optimizer::aggregate_analysis::AggregateAnalysis::analyze(stmt)
+                        .has_aggregates;
                 if has_aggregates {
-                    log::debug!("Columnar join: aggregates without GROUP BY not supported, falling back");
+                    log::debug!(
+                        "Columnar join: aggregates without GROUP BY not supported, falling back"
+                    );
                     return Ok(None);
                 }
 
@@ -232,10 +245,10 @@ impl SelectExecutor<'_> {
 
                 // Create evaluator for projection
                 // SAFETY: combined_schema lives for the duration of this function call
-                let schema_ref: &'static CombinedSchema = unsafe {
-                    std::mem::transmute(&combined_schema)
-                };
-                let evaluator = CombinedExpressionEvaluator::with_database(schema_ref, self.database);
+                let schema_ref: &'static CombinedSchema =
+                    unsafe { std::mem::transmute(&combined_schema) };
+                let evaluator =
+                    CombinedExpressionEvaluator::with_database(schema_ref, self.database);
                 let buffer_pool = self.database.query_buffer_pool();
 
                 let mut projected_rows = Vec::with_capacity(rows.len());
@@ -259,7 +272,12 @@ impl SelectExecutor<'_> {
     /// Execute a chain of hash joins on columnar batches
     pub(super) fn execute_columnar_join_chain(
         &self,
-        batches: &[(String, Option<String>, columnar::ColumnarBatch, vibesql_catalog::TableSchema)],
+        batches: &[(
+            String,
+            Option<String>,
+            columnar::ColumnarBatch,
+            vibesql_catalog::TableSchema,
+        )],
         join_conditions: &[EquiJoinCondition],
         combined_schema: &CombinedSchema,
     ) -> Result<Option<columnar::ColumnarBatch>, ExecutorError> {
@@ -275,9 +293,7 @@ impl SelectExecutor<'_> {
         let mut current_batch = batches[0].2.clone();
 
         // Track which tables have been joined
-        let mut joined_tables: Vec<&str> = vec![
-            batches[0].1.as_deref().unwrap_or(&batches[0].0)
-        ];
+        let mut joined_tables: Vec<&str> = vec![batches[0].1.as_deref().unwrap_or(&batches[0].0)];
 
         // Join subsequent tables
         for (table_name, alias, batch, schema) in batches.iter().skip(1) {
@@ -286,17 +302,29 @@ impl SelectExecutor<'_> {
             // Find a join condition that connects this table to already-joined tables
             let join_cond = join_conditions.iter().find(|cond| {
                 let left_in_joined = joined_tables.iter().any(|t| {
-                    cond.left_table.as_deref() == Some(*t) ||
-                    (cond.left_table.is_none() && is_column_in_tables(&cond.left_column, &joined_tables, combined_schema))
+                    cond.left_table.as_deref() == Some(*t)
+                        || (cond.left_table.is_none()
+                            && is_column_in_tables(
+                                &cond.left_column,
+                                &joined_tables,
+                                combined_schema,
+                            ))
                 });
-                let right_is_current = cond.right_table.as_deref() == Some(table_ref) ||
-                    (cond.right_table.is_none() && is_column_in_table(&cond.right_column, table_ref, combined_schema));
+                let right_is_current = cond.right_table.as_deref() == Some(table_ref)
+                    || (cond.right_table.is_none()
+                        && is_column_in_table(&cond.right_column, table_ref, combined_schema));
                 let right_in_joined = joined_tables.iter().any(|t| {
-                    cond.right_table.as_deref() == Some(*t) ||
-                    (cond.right_table.is_none() && is_column_in_tables(&cond.right_column, &joined_tables, combined_schema))
+                    cond.right_table.as_deref() == Some(*t)
+                        || (cond.right_table.is_none()
+                            && is_column_in_tables(
+                                &cond.right_column,
+                                &joined_tables,
+                                combined_schema,
+                            ))
                 });
-                let left_is_current = cond.left_table.as_deref() == Some(table_ref) ||
-                    (cond.left_table.is_none() && is_column_in_table(&cond.left_column, table_ref, combined_schema));
+                let left_is_current = cond.left_table.as_deref() == Some(table_ref)
+                    || (cond.left_table.is_none()
+                        && is_column_in_table(&cond.left_column, table_ref, combined_schema));
 
                 (left_in_joined && right_is_current) || (right_in_joined && left_is_current)
             });
@@ -306,7 +334,8 @@ impl SelectExecutor<'_> {
                 None => {
                     log::debug!(
                         "Columnar join: no join condition found connecting '{}' to {:?}",
-                        table_ref, joined_tables
+                        table_ref,
+                        joined_tables
                     );
                     return Ok(None);
                 }
@@ -323,8 +352,10 @@ impl SelectExecutor<'_> {
 
             log::debug!(
                 "Columnar join: joining '{}' (col {}) with '{}' (col {})",
-                joined_tables.join(", "), left_col_idx,
-                table_ref, right_col_idx
+                joined_tables.join(", "),
+                left_col_idx,
+                table_ref,
+                right_col_idx
             );
 
             // Execute the hash join

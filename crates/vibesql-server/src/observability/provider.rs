@@ -25,11 +25,7 @@ impl ObservabilityProvider {
     /// Initialize observability with the given configuration
     pub fn init(config: &ObservabilityConfig) -> Result<Self> {
         if !config.enabled {
-            return Ok(Self {
-                meter_provider: None,
-                tracer_provider: None,
-                metrics: None,
-            });
+            return Ok(Self { meter_provider: None, tracer_provider: None, metrics: None });
         }
 
         let resource = Resource::builder()
@@ -122,11 +118,7 @@ impl ObservabilityProvider {
             None
         };
 
-        Ok(Self {
-            meter_provider,
-            tracer_provider,
-            metrics,
-        })
+        Ok(Self { meter_provider, tracer_provider, metrics })
     }
 
     /// Get server metrics (if enabled)
@@ -141,15 +133,11 @@ impl ObservabilityProvider {
     #[allow(dead_code)]
     pub fn shutdown(mut self) -> Result<()> {
         if let Some(provider) = self.meter_provider.take() {
-            provider
-                .shutdown()
-                .context("Failed to shutdown meter provider")?;
+            provider.shutdown().context("Failed to shutdown meter provider")?;
         }
 
         if let Some(provider) = self.tracer_provider.take() {
-            provider
-                .shutdown()
-                .context("Failed to shutdown tracer provider")?;
+            provider.shutdown().context("Failed to shutdown tracer provider")?;
         }
 
         Ok(())

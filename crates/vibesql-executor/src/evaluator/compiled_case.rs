@@ -132,13 +132,11 @@ impl CompiledCaseExpression {
                     result_col_idx,
                 })
             }
-            Expression::Literal(val) => {
-                Some(CompiledCaseExpression::WhenEqualsThenLiteral {
-                    condition_col_idx,
-                    condition_value,
-                    result_value: val.clone(),
-                })
-            }
+            Expression::Literal(val) => Some(CompiledCaseExpression::WhenEqualsThenLiteral {
+                condition_col_idx,
+                condition_value,
+                result_value: val.clone(),
+            }),
             _ => None,
         }
     }

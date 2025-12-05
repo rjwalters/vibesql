@@ -41,16 +41,14 @@ impl JoinOrderSearch {
         alias_to_table: &std::collections::HashMap<String, String>,
     ) -> Self {
         let edges = analyzer.edges().to_vec();
-        let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
+        let edge_selectivities =
+            JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
 
         let num_tables = analyzer.tables().len();
 
         // Extract base cardinalities (before filters) for cascading filter tracking
-        let table_base_cardinalities = JoinOrderContext::extract_base_cardinalities(
-            analyzer,
-            database,
-            alias_to_table,
-        );
+        let table_base_cardinalities =
+            JoinOrderContext::extract_base_cardinalities(analyzer, database, alias_to_table);
 
         let context = JoinOrderContext {
             all_tables: analyzer.tables().clone(),
@@ -86,16 +84,14 @@ impl JoinOrderSearch {
         aggregate_analysis: AggregateAnalysis,
     ) -> Self {
         let edges = analyzer.edges().to_vec();
-        let edge_selectivities = JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
+        let edge_selectivities =
+            JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
 
         let num_tables = analyzer.tables().len();
 
         // Extract base cardinalities (before filters) for cascading filter tracking
-        let table_base_cardinalities = JoinOrderContext::extract_base_cardinalities(
-            analyzer,
-            database,
-            alias_to_table,
-        );
+        let table_base_cardinalities =
+            JoinOrderContext::extract_base_cardinalities(analyzer, database, alias_to_table);
 
         let context = JoinOrderContext {
             all_tables: analyzer.tables().clone(),

@@ -5,8 +5,7 @@
 ///
 /// ## References
 /// - [MySQL 8.0 sql_mode Documentation](https://dev.mysql.com/doc/refman/8.0/en/sql-mode.html)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct MySqlModeFlags {
     /// Whether || acts as string concat (vs OR operator)
     ///
@@ -47,7 +46,6 @@ pub struct MySqlModeFlags {
     pub sqlite_division_semantics: bool,
 }
 
-
 impl MySqlModeFlags {
     /// Create MySqlModeFlags with all default settings
     pub fn new() -> Self {
@@ -56,35 +54,22 @@ impl MySqlModeFlags {
 
     /// Create MySqlModeFlags with PIPES_AS_CONCAT enabled
     pub fn with_pipes_as_concat() -> Self {
-        Self {
-            pipes_as_concat: true,
-            ..Default::default()
-        }
+        Self { pipes_as_concat: true, ..Default::default() }
     }
 
     /// Create MySqlModeFlags with ANSI_QUOTES enabled
     pub fn with_ansi_quotes() -> Self {
-        Self {
-            ansi_quotes: true,
-            ..Default::default()
-        }
+        Self { ansi_quotes: true, ..Default::default() }
     }
 
     /// Create MySqlModeFlags with STRICT_MODE enabled
     pub fn with_strict_mode() -> Self {
-        Self {
-            strict_mode: true,
-            ..Default::default()
-        }
+        Self { strict_mode: true, ..Default::default() }
     }
 
     /// Create MySqlModeFlags with ANSI mode (combination of ANSI_QUOTES and PIPES_AS_CONCAT)
     pub fn ansi() -> Self {
-        Self {
-            pipes_as_concat: true,
-            ansi_quotes: true,
-            ..Default::default()
-        }
+        Self { pipes_as_concat: true, ansi_quotes: true, ..Default::default() }
     }
 
     /// Create MySqlModeFlags with SQLite division semantics enabled
@@ -92,10 +77,7 @@ impl MySqlModeFlags {
     /// This is useful for SQLLogicTest compatibility where MySQL syntax is needed
     /// but division should behave like SQLite (INTEGER / INTEGER → INTEGER).
     pub fn with_sqlite_division_semantics() -> Self {
-        Self {
-            sqlite_division_semantics: true,
-            ..Default::default()
-        }
+        Self { sqlite_division_semantics: true, ..Default::default() }
     }
 }
 
@@ -107,8 +89,8 @@ mod tests {
     fn test_default_mysql_flags() {
         let flags = MySqlModeFlags::default();
         assert!(!flags.pipes_as_concat); // || is OR by default
-        assert!(!flags.ansi_quotes);      // " is string by default
-        assert!(!flags.strict_mode);      // Permissive by default
+        assert!(!flags.ansi_quotes); // " is string by default
+        assert!(!flags.strict_mode); // Permissive by default
     }
 
     #[test]

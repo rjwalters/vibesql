@@ -22,10 +22,7 @@ async fn test_sql_syntax_error() {
     let messages = parse_backend_messages(&data);
 
     // Should have ErrorResponse
-    assert!(
-        messages.iter().any(|m| m.is_error()),
-        "Should receive ErrorResponse for syntax error"
-    );
+    assert!(messages.iter().any(|m| m.is_error()), "Should receive ErrorResponse for syntax error");
 
     // Should still be ready for more queries
     assert!(
@@ -37,7 +34,10 @@ async fn test_sql_syntax_error() {
     client.send_query("SELECT 1").await.expect("Failed to send query");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
-    assert!(messages.iter().any(|m| m.is_command_complete()), "Connection should still work after error");
+    assert!(
+        messages.iter().any(|m| m.is_command_complete()),
+        "Connection should still work after error"
+    );
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();
@@ -53,7 +53,10 @@ async fn test_nonexistent_table_error() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Query non-existent table
-    client.send_query("SELECT * FROM table_that_does_not_exist").await.expect("Failed to send query");
+    client
+        .send_query("SELECT * FROM table_that_does_not_exist")
+        .await
+        .expect("Failed to send query");
 
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
@@ -62,10 +65,7 @@ async fn test_nonexistent_table_error() {
         messages.iter().any(|m| m.is_error()),
         "Should receive ErrorResponse for non-existent table"
     );
-    assert!(
-        messages.iter().any(|m| m.is_ready_for_query()),
-        "Should still be ready for queries"
-    );
+    assert!(messages.iter().any(|m| m.is_ready_for_query()), "Should still be ready for queries");
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();
@@ -81,7 +81,10 @@ async fn test_invalid_column_error() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Create table and verify it succeeded
-    client.send_query("CREATE TABLE col_test (id INT, name VARCHAR(50))").await.expect("Failed to CREATE");
+    client
+        .send_query("CREATE TABLE col_test (id INT, name VARCHAR(50))")
+        .await
+        .expect("Failed to CREATE");
     let create_data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let create_messages = parse_backend_messages(&create_data);
     assert!(
@@ -91,7 +94,10 @@ async fn test_invalid_column_error() {
     );
 
     // Query non-existent column
-    client.send_query("SELECT nonexistent_column FROM col_test").await.expect("Failed to send query");
+    client
+        .send_query("SELECT nonexistent_column FROM col_test")
+        .await
+        .expect("Failed to send query");
 
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
@@ -121,14 +127,21 @@ async fn test_multiple_errors_resilience() {
         let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
         let messages = parse_backend_messages(&data);
         assert!(messages.iter().any(|m| m.is_error()), "Query {} should error", i);
-        assert!(messages.iter().any(|m| m.is_ready_for_query()), "Should still be ready after error {}", i);
+        assert!(
+            messages.iter().any(|m| m.is_ready_for_query()),
+            "Should still be ready after error {}",
+            i
+        );
     }
 
     // Connection should still work for valid queries
     client.send_query("SELECT 1").await.expect("Failed to send valid query");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
-    assert!(messages.iter().any(|m| m.is_command_complete()), "Valid query should succeed after errors");
+    assert!(
+        messages.iter().any(|m| m.is_command_complete()),
+        "Valid query should succeed after errors"
+    );
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();
@@ -144,7 +157,10 @@ async fn test_constraint_violation_error() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Create table with primary key
-    client.send_query("CREATE TABLE pk_test (id INT PRIMARY KEY, value INT)").await.expect("Failed to CREATE");
+    client
+        .send_query("CREATE TABLE pk_test (id INT PRIMARY KEY, value INT)")
+        .await
+        .expect("Failed to CREATE");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Insert first row
@@ -152,7 +168,10 @@ async fn test_constraint_violation_error() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Try to insert duplicate primary key
-    client.send_query("INSERT INTO pk_test VALUES (1, 200)").await.expect("Failed to send duplicate INSERT");
+    client
+        .send_query("INSERT INTO pk_test VALUES (1, 200)")
+        .await
+        .expect("Failed to send duplicate INSERT");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
 
@@ -190,7 +209,10 @@ async fn test_error_recovery() {
     client.send_query("INSERT INTO recovery_test VALUES (1)").await.expect("Failed to INSERT");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
-    assert!(messages.iter().any(|m| m.is_command_complete()), "Should complete INSERT after error recovery");
+    assert!(
+        messages.iter().any(|m| m.is_command_complete()),
+        "Should complete INSERT after error recovery"
+    );
 
     // Recovery: valid select
     client.send_query("SELECT * FROM recovery_test").await.expect("Failed to SELECT");
@@ -216,14 +238,8 @@ async fn test_drop_nonexistent_table_error() {
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
 
-    assert!(
-        messages.iter().any(|m| m.is_error()),
-        "Should error when dropping non-existent table"
-    );
-    assert!(
-        messages.iter().any(|m| m.is_ready_for_query()),
-        "Should still be ready for queries"
-    );
+    assert!(messages.iter().any(|m| m.is_error()), "Should error when dropping non-existent table");
+    assert!(messages.iter().any(|m| m.is_ready_for_query()), "Should still be ready for queries");
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();
@@ -270,7 +286,11 @@ async fn test_alternating_errors_successes() {
             client.send_query(&format!("SELECT {}", i)).await.expect("Failed to send query");
             let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
             let messages = parse_backend_messages(&data);
-            assert!(messages.iter().any(|m| m.is_command_complete()), "Even iteration {} should succeed", i);
+            assert!(
+                messages.iter().any(|m| m.is_command_complete()),
+                "Even iteration {} should succeed",
+                i
+            );
         } else {
             // Error case
             client.send_query("INVALID SQL").await.expect("Failed to send query");
@@ -298,7 +318,10 @@ async fn test_type_mismatch_error() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Insert string into INT column - may error or coerce depending on implementation
-    client.send_query("INSERT INTO type_test VALUES ('not an integer')").await.expect("Failed to send INSERT");
+    client
+        .send_query("INSERT INTO type_test VALUES ('not an integer')")
+        .await
+        .expect("Failed to send INSERT");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
 
@@ -335,10 +358,7 @@ async fn test_ambiguous_column_error() {
     let messages = parse_backend_messages(&data);
 
     // Either error or succeed - both are valid outcomes
-    assert!(
-        messages.iter().any(|m| m.is_ready_for_query()),
-        "Should still be ready for queries"
-    );
+    assert!(messages.iter().any(|m| m.is_ready_for_query()), "Should still be ready for queries");
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();
@@ -354,22 +374,37 @@ async fn test_concurrent_errors() {
         .map(|i| {
             tokio::spawn(async move {
                 let mut client = TestClient::connect(addr).await.expect("Failed to connect");
-                client.send_startup(&format!("user{}", i), "testdb").await.expect("Failed to startup");
-                let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                client
+                    .send_startup(&format!("user{}", i), "testdb")
+                    .await
+                    .expect("Failed to startup");
+                let _ =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
                 // Each client causes multiple errors
                 for j in 0..3 {
-                    client.send_query(&format!("INVALID_QUERY_{}_{}", i, j)).await.expect("Failed to send query");
-                    let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                    client
+                        .send_query(&format!("INVALID_QUERY_{}_{}", i, j))
+                        .await
+                        .expect("Failed to send query");
+                    let data = client
+                        .read_until_message_type(b'Z')
+                        .await
+                        .expect("Failed to read response");
                     let messages = parse_backend_messages(&data);
                     assert!(messages.iter().any(|m| m.is_error()));
                 }
 
                 // Then a valid query
                 client.send_query("SELECT 1").await.expect("Failed to send valid query");
-                let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                let data =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
                 let messages = parse_backend_messages(&data);
-                assert!(messages.iter().any(|m| m.is_command_complete()), "Valid query should succeed for client {}", i);
+                assert!(
+                    messages.iter().any(|m| m.is_command_complete()),
+                    "Valid query should succeed for client {}",
+                    i
+                );
 
                 client.send_terminate().await.expect("Failed to terminate");
             })

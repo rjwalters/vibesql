@@ -5,10 +5,7 @@ use std::time::Duration;
 use sqllogictest::Runner;
 use tokio::time::timeout;
 
-use super::{
-    db_adapter::VibeSqlDB,
-    scheduler, stats::TestFailure,
-};
+use super::{db_adapter::VibeSqlDB, scheduler, stats::TestFailure};
 
 // Re-export DialectStats for use by the test suite
 pub use sqllogictest::DialectStats;
@@ -64,11 +61,7 @@ async fn run_test_file_async(contents: &str, _file_name: &str) -> TestFileResult
     let dialect_stats = tester.dialect_stats().clone();
 
     match result {
-        Ok(_) => TestFileResult {
-            result: Ok(()),
-            failures: vec![],
-            dialect_stats,
-        },
+        Ok(_) => TestFileResult { result: Ok(()), failures: vec![], dialect_stats },
         Err(e) => {
             // Capture error information
             let failure = TestFailure {
@@ -121,10 +114,7 @@ async fn run_test_file_with_timeout_impl(
 
 /// Run a test file and capture detailed failure information
 #[allow(dead_code)]
-pub fn run_test_file_with_details(
-    contents: &str,
-    file_name: &str,
-) -> TestFileResult {
+pub fn run_test_file_with_details(contents: &str, file_name: &str) -> TestFileResult {
     let timeout_secs = scheduler::get_test_file_timeout_for(file_name);
 
     let result = std::panic::catch_unwind(|| {
@@ -162,9 +152,9 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
     #[allow(unused_imports)]
-    use std::env;
-    #[allow(unused_imports)]
     use crate::sqllogictest::scheduler::get_test_file_timeout;
+    #[allow(unused_imports)]
+    use std::env;
 
     #[test]
     fn test_timeout_wraps_execution() {

@@ -67,11 +67,7 @@ pub enum SamplingMethod {
 impl SamplingConfig {
     /// Create a new sampling configuration
     pub fn new(sample_size: SampleSize, method: SamplingMethod) -> Self {
-        Self {
-            sample_size,
-            method,
-            confidence_level: 0.95,
-        }
+        Self { sample_size, method, confidence_level: 0.95 }
     }
 
     /// Create configuration for adaptive sampling (default)
@@ -132,11 +128,7 @@ impl SamplingConfig {
 }
 
 /// Sample rows from a table using the specified sampling method
-pub fn sample_rows<T: Clone>(
-    rows: &[T],
-    config: &SamplingConfig,
-    rng: &mut impl Rng,
-) -> Vec<T> {
+pub fn sample_rows<T: Clone>(rows: &[T], config: &SamplingConfig, rng: &mut impl Rng) -> Vec<T> {
     let (sample_size, should_sample) = config.determine_sample_size(rows.len());
 
     if !should_sample {
@@ -172,11 +164,7 @@ fn systematic_sample<T: Clone>(rows: &[T], n: usize) -> Vec<T> {
         return rows.to_vec();
     }
 
-    rows.iter()
-        .step_by(step)
-        .take(n)
-        .cloned()
-        .collect()
+    rows.iter().step_by(step).take(n).cloned().collect()
 }
 
 /// Reservoir sampling: single-pass, constant memory
@@ -223,20 +211,16 @@ pub struct SampleMetadata {
 
 impl SampleMetadata {
     /// Create metadata for a sample
-    pub fn new(total_rows: usize, sample_size: usize, sampled: bool, confidence_level: f64) -> Self {
-        let sampling_ratio = if total_rows > 0 {
-            sample_size as f64 / total_rows as f64
-        } else {
-            1.0
-        };
+    pub fn new(
+        total_rows: usize,
+        sample_size: usize,
+        sampled: bool,
+        confidence_level: f64,
+    ) -> Self {
+        let sampling_ratio =
+            if total_rows > 0 { sample_size as f64 / total_rows as f64 } else { 1.0 };
 
-        Self {
-            total_rows,
-            sample_size,
-            sampling_ratio,
-            sampled,
-            confidence_level,
-        }
+        Self { total_rows, sample_size, sampling_ratio, sampled, confidence_level }
     }
 
     /// Extrapolate a count from sample to full table
@@ -318,8 +302,8 @@ impl SampleMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_sample_size_adaptive() {

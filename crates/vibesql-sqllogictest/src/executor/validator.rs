@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 
-use crate::{MakeConnection, ColumnType};
-use crate::error_handling::{TestError, TestErrorKind, RecordKind};
+use super::core::{AsyncDB, Runner};
+use crate::error_handling::{RecordKind, TestError, TestErrorKind};
 use crate::output::RecordOutput;
 use crate::parser::*;
-use super::core::{AsyncDB, Runner};
+use crate::{ColumnType, MakeConnection};
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Run a single record without retry.
@@ -19,10 +19,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         let result = self.apply_record(record.clone()).await;
 
         // Helper to check if this record type should be tracked for dialect stats
-        let is_testable_record = matches!(
-            &record,
-            Record::Statement { .. } | Record::Query { .. }
-        );
+        let is_testable_record = matches!(&record, Record::Statement { .. } | Record::Query { .. });
 
         // Track dialect statistics for Statement and Query records
         // We capture the current dialect before validation since it may have been switched
@@ -34,20 +31,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             }
             // Tolerate the mismatched return type...
             (
-                Record::Statement {
-                    sql, expected, loc, ..
-                },
-                RecordOutput::Query {
-                    error: None, rows, ..
-                },
+                Record::Statement { sql, expected, loc, .. },
+                RecordOutput::Query { error: None, rows, .. },
             ) => {
                 if let StatementExpect::Error(_) = expected {
                     self.dialect_stats.record(&current_dialect, false);
-                    return Err(TestErrorKind::Ok {
-                        sql,
-                        kind: RecordKind::Query,
-                    }
-                    .at(loc));
+                    return Err(TestErrorKind::Ok { sql, kind: RecordKind::Query }.at(loc));
                 }
                 if let StatementExpect::Count(expected_count) = expected {
                     if expected_count != rows.len() as u64 {
@@ -62,18 +51,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 }
             }
             (
-                Record::Query {
-                    loc, sql, expected, ..
-                },
+                Record::Query { loc, sql, expected, .. },
                 RecordOutput::Statement { error: None, .. },
             ) => match expected {
                 QueryExpect::Error(_) => {
                     self.dialect_stats.record(&current_dialect, false);
-                    return Err(TestErrorKind::Ok {
-                        sql,
-                        kind: RecordKind::Query,
-                    }
-                    .at(loc))
+                    return Err(TestErrorKind::Ok { sql, kind: RecordKind::Query }.at(loc));
                 }
                 QueryExpect::Results { results, .. } if !results.is_empty() => {
                     self.dialect_stats.record(&current_dialect, false);
@@ -82,28 +65,17 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         expected: results.join("\n"),
                         actual: "".to_string(),
                     }
-                    .at(loc))
+                    .at(loc));
                 }
                 QueryExpect::Results { .. } => {}
             },
             (
-                Record::Statement {
-                    loc,
-                    connection: _,
-                    conditions: _,
-                    sql,
-                    expected,
-                    retry: _,
-                },
+                Record::Statement { loc, connection: _, conditions: _, sql, expected, retry: _ },
                 RecordOutput::Statement { count, error },
             ) => match (error, expected) {
                 (None, StatementExpect::Error(_)) => {
                     self.dialect_stats.record(&current_dialect, false);
-                    return Err(TestErrorKind::Ok {
-                        sql,
-                        kind: RecordKind::Statement,
-                    }
-                    .at(loc))
+                    return Err(TestErrorKind::Ok { sql, kind: RecordKind::Statement }.at(loc));
                 }
                 (None, StatementExpect::Count(expected_count)) => {
                     if expected_count != *count {
@@ -140,24 +112,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 }
             },
             (
-                Record::Query {
-                    loc,
-                    conditions: _,
-                    connection: _,
-                    sql,
-                    expected,
-                    retry: _,
-                },
+                Record::Query { loc, conditions: _, connection: _, sql, expected, retry: _ },
                 RecordOutput::Query { types, rows, error },
             ) => {
                 match (error, expected) {
                     (None, QueryExpect::Error(_)) => {
                         self.dialect_stats.record(&current_dialect, false);
-                        return Err(TestErrorKind::Ok {
-                            sql,
-                            kind: RecordKind::Query,
-                        }
-                        .at(loc));
+                        return Err(TestErrorKind::Ok { sql, kind: RecordKind::Query }.at(loc));
                     }
                     (Some(e), QueryExpect::Error(expected_error)) => {
                         if !expected_error.is_match(&e.to_string()) {
@@ -224,24 +185,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 };
             }
             (
-                Record::System {
-                    loc,
-                    conditions: _,
-                    command,
-                    stdout: expected_stdout,
-                    retry: _,
-                },
-                RecordOutput::System {
-                    error,
-                    stdout: actual_stdout,
-                },
+                Record::System { loc, conditions: _, command, stdout: expected_stdout, retry: _ },
+                RecordOutput::System { error, stdout: actual_stdout },
             ) => {
                 if let Some(err) = error {
-                    return Err(TestErrorKind::SystemFail {
-                        command,
-                        err: Arc::clone(err),
-                    }
-                    .at(loc));
+                    return Err(TestErrorKind::SystemFail { command, err: Arc::clone(err) }.at(loc));
                 }
                 match (expected_stdout, actual_stdout) {
                     (None, _) => {}

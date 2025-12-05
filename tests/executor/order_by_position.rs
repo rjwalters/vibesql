@@ -4,7 +4,7 @@ use vibesql_parser::Parser;
 fn test_parse_order_by_position() {
     let sql = "SELECT x FROM t ORDER BY 1";
     let stmt = Parser::parse_sql(sql).unwrap();
-    
+
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             println!("SELECT list: {:?}", select.select_list);
@@ -22,7 +22,7 @@ fn test_parse_order_by_position() {
 fn test_parse_order_by_expression() {
     let sql = "SELECT CASE WHEN c > 150 THEN a*2 ELSE b*10 END FROM t ORDER BY 1";
     let stmt = Parser::parse_sql(sql).unwrap();
-    
+
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             println!("SELECT list: {:?}", select.select_list);

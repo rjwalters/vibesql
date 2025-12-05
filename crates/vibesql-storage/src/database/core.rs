@@ -53,9 +53,7 @@ impl Database {
     /// Begin a new transaction
     pub fn begin_transaction(&mut self) -> Result<(), StorageError> {
         let catalog = &self.catalog.clone();
-        self.lifecycle
-            .transaction_manager_mut()
-            .begin_transaction(catalog, &self.tables)
+        self.lifecycle.transaction_manager_mut().begin_transaction(catalog, &self.tables)
     }
 
     /// Commit the current transaction
@@ -85,7 +83,8 @@ impl Database {
 
     /// Rollback to a named savepoint
     pub fn rollback_to_savepoint(&mut self, name: String) -> Result<(), StorageError> {
-        let changes_to_undo = self.lifecycle.transaction_manager_mut().rollback_to_savepoint(name)?;
+        let changes_to_undo =
+            self.lifecycle.transaction_manager_mut().rollback_to_savepoint(name)?;
 
         for change in changes_to_undo.into_iter().rev() {
             self.undo_change(change)?;
@@ -136,8 +135,7 @@ impl Database {
     ) -> Result<(), StorageError> {
         let table_name = schema.name.clone();
 
-        self.operations
-            .create_table(&mut self.catalog, schema.clone())?;
+        self.operations.create_table(&mut self.catalog, schema.clone())?;
 
         // Normalize table name for storage (matches catalog normalization)
         let normalized_table_name = if self.catalog.is_case_sensitive_identifiers() {
@@ -232,17 +230,10 @@ impl Database {
 
     /// Insert a row into a table
     pub fn insert_row(&mut self, table_name: &str, row: Row) -> Result<(), StorageError> {
-        let row_index = self.operations.insert_row(
-            &self.catalog,
-            &mut self.tables,
-            table_name,
-            row.clone(),
-        )?;
+        let row_index =
+            self.operations.insert_row(&self.catalog, &mut self.tables, table_name, row.clone())?;
 
-        self.record_change(TransactionChange::Insert {
-            table_name: table_name.to_string(),
-            row,
-        });
+        self.record_change(TransactionChange::Insert { table_name: table_name.to_string(), row });
 
         // Broadcast change event to subscribers
         self.broadcast_change(ChangeEvent::Insert {
@@ -289,7 +280,11 @@ impl Database {
     /// ];
     /// let count = db.insert_rows_batch("users", rows)?;
     /// ```
-    pub fn insert_rows_batch(&mut self, table_name: &str, rows: Vec<Row>) -> Result<usize, StorageError> {
+    pub fn insert_rows_batch(
+        &mut self,
+        table_name: &str,
+        rows: Vec<Row>,
+    ) -> Result<usize, StorageError> {
         if rows.is_empty() {
             return Ok(0);
         }
@@ -351,7 +346,12 @@ impl Database {
     /// let rows = (0..100_000).map(|i| Row::new(vec![SqlValue::Integer(i)]));
     /// let count = db.insert_rows_iter("numbers", rows, 5000)?;
     /// ```
-    pub fn insert_rows_iter<I>(&mut self, table_name: &str, rows: I, batch_size: usize) -> Result<usize, StorageError>
+    pub fn insert_rows_iter<I>(
+        &mut self,
+        table_name: &str,
+        rows: I,
+        batch_size: usize,
+    ) -> Result<usize, StorageError>
     where
         I: Iterator<Item = Row>,
     {
@@ -414,14 +414,14 @@ impl Database {
         // First phase: read data (immutable borrow)
         let (row_index, old_row, schema, resolved_name) = {
             // Get table using existing lookup logic (handles schema prefixes)
-            let table = self.get_table(table_name).ok_or_else(|| {
-                StorageError::TableNotFound(table_name.to_string())
-            })?;
+            let table = self
+                .get_table(table_name)
+                .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
 
             // Look up row by PK
-            let pk_index = table.primary_key_index().ok_or_else(|| {
-                StorageError::Other("Table has no primary key index".to_string())
-            })?;
+            let pk_index = table
+                .primary_key_index()
+                .ok_or_else(|| StorageError::Other("Table has no primary key index".to_string()))?;
 
             let row_index = match pk_index.get(&vec![pk_value.clone()]) {
                 Some(&idx) => idx,
@@ -441,19 +441,16 @@ impl Database {
         let mut changed_columns = std::collections::HashSet::new();
 
         for (col_name, new_value) in &column_updates {
-            let col_index = schema.get_column_index(col_name).ok_or_else(|| {
-                StorageError::ColumnNotFound {
+            let col_index =
+                schema.get_column_index(col_name).ok_or_else(|| StorageError::ColumnNotFound {
                     column_name: col_name.to_string(),
                     table_name: resolved_name.clone(),
-                }
-            })?;
+                })?;
 
             // Check NOT NULL constraint
             let column = &schema.columns[col_index];
             if !column.nullable && *new_value == vibesql_types::SqlValue::Null {
-                return Err(StorageError::NullConstraintViolation {
-                    column: col_name.to_string(),
-                });
+                return Err(StorageError::NullConstraintViolation { column: col_name.to_string() });
             }
 
             new_row.set(col_index, new_value.clone())?;
@@ -474,10 +471,7 @@ impl Database {
         );
 
         // Broadcast change event to subscribers
-        self.broadcast_change(ChangeEvent::Update {
-            table_name: resolved_name.clone(),
-            row_index,
-        });
+        self.broadcast_change(ChangeEvent::Update { table_name: resolved_name.clone(), row_index });
 
         // Invalidate columnar cache
         self.columnar_cache.invalidate(&resolved_name);
@@ -744,7 +738,10 @@ impl Database {
     /// * `table_name` - Name of the table that was modified
     /// * `row_index` - Index of the row that was updated
     pub fn notify_update(&self, table_name: &str, row_index: usize) {
-        self.broadcast_change(ChangeEvent::Update { table_name: table_name.to_string(), row_index });
+        self.broadcast_change(ChangeEvent::Update {
+            table_name: table_name.to_string(),
+            row_index,
+        });
     }
 
     /// Notify subscribers of a delete event
@@ -820,9 +817,7 @@ mod tests {
         assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
         // Change back to MySQL
-        db.set_sql_mode(SqlMode::MySQL {
-            flags: MySqlModeFlags::default(),
-        });
+        db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
     }
 
@@ -874,16 +869,16 @@ mod tests {
         let mut db = Database::new();
 
         // Set MySQL with default flags (all false)
-        db.set_sql_mode(SqlMode::MySQL {
-            flags: MySqlModeFlags::default(),
-        });
+        db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
 
         // Check session variable has default MySQL modes
         let sql_mode_var = db.get_session_variable("SQL_MODE");
         assert!(sql_mode_var.is_some());
         if let Some(SqlValue::Varchar(mode_str)) = sql_mode_var {
             // Default should include common MySQL defaults
-            assert!(mode_str.contains("NO_ZERO_IN_DATE") || mode_str.contains("NO_ENGINE_SUBSTITUTION"));
+            assert!(
+                mode_str.contains("NO_ZERO_IN_DATE") || mode_str.contains("NO_ENGINE_SUBSTITUTION")
+            );
         } else {
             panic!("Expected SQL_MODE to be a Varchar");
         }
@@ -936,13 +931,18 @@ mod tests {
             "users".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    false,
+                ),
             ],
         );
         db.create_table(schema).unwrap();
 
         // Insert a row
-        let row = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
+        let row =
+            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
         db.insert_row("users", row).unwrap();
 
         // Verify change event was emitted
@@ -971,7 +971,11 @@ mod tests {
             "products".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    false,
+                ),
             ],
         );
         db.create_table(schema).unwrap();
@@ -1004,14 +1008,19 @@ mod tests {
             "users".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    false,
+                ),
             ],
             vec!["id".to_string()],
         );
         db.create_table(schema).unwrap();
 
         // Insert a row
-        let row = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
+        let row =
+            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
         db.insert_row("users", row).unwrap();
 
         // Now enable change events and update
@@ -1087,9 +1096,15 @@ mod tests {
 
         let events = rx.recv_all();
         assert_eq!(events.len(), 3);
-        assert!(matches!(&events[0], ChangeEvent::Delete { table_name, row_index: 0 } if table_name == "users"));
-        assert!(matches!(&events[1], ChangeEvent::Delete { table_name, row_index: 2 } if table_name == "users"));
-        assert!(matches!(&events[2], ChangeEvent::Delete { table_name, row_index: 5 } if table_name == "users"));
+        assert!(
+            matches!(&events[0], ChangeEvent::Delete { table_name, row_index: 0 } if table_name == "users")
+        );
+        assert!(
+            matches!(&events[1], ChangeEvent::Delete { table_name, row_index: 2 } if table_name == "users")
+        );
+        assert!(
+            matches!(&events[2], ChangeEvent::Delete { table_name, row_index: 5 } if table_name == "users")
+        );
     }
 
     #[test]
@@ -1102,6 +1117,8 @@ mod tests {
 
         let events = rx.recv_all();
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], ChangeEvent::Update { table_name, row_index: 42 } if table_name == "products"));
+        assert!(
+            matches!(&events[0], ChangeEvent::Update { table_name, row_index: 42 } if table_name == "products")
+        );
     }
 }

@@ -5,7 +5,9 @@
 //! - EXECUTE statement
 //! - DEALLOCATE statement
 
-use vibesql_ast::{DeallocateStmt, DeallocateTarget, ExecuteStmt, PrepareStmt, PreparedStatementBody};
+use vibesql_ast::{
+    DeallocateStmt, DeallocateTarget, ExecuteStmt, PrepareStmt, PreparedStatementBody,
+};
 
 use crate::{
     keywords::Keyword,

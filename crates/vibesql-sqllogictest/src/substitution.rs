@@ -16,10 +16,7 @@ pub(crate) struct Substitution<'a> {
 
 impl Substitution<'_> {
     pub fn new(runner_locals: &RunnerLocals, subst_env_vars: bool) -> Substitution<'_> {
-        Substitution {
-            runner_locals,
-            subst_env_vars,
-        }
+        Substitution { runner_locals, subst_env_vars }
     }
 }
 
@@ -46,10 +43,7 @@ impl Substitution<'_> {
 
     fn simple_replace(&self, input: &str) -> String {
         let mut res = input
-            .replace(
-                &format!("${}", well_known::TEST_DIR),
-                &self.runner_locals.test_dir(),
-            )
+            .replace(&format!("${}", well_known::TEST_DIR), &self.runner_locals.test_dir())
             .replace(&format!("${}", well_known::NOW), &now_string());
         for (key, value) in self.runner_locals.vars() {
             res = res.replace(&format!("${}", key), value);
@@ -65,11 +59,7 @@ impl<'a> subst::VariableMap<'a> for Substitution<'a> {
         match key {
             well_known::TEST_DIR => self.runner_locals.test_dir().into(),
             well_known::NOW => now_string().into(),
-            key => self
-                .runner_locals
-                .get_var(key)
-                .cloned()
-                .or_else(|| Env.get(key)),
+            key => self.runner_locals.get_var(key).cloned().or_else(|| Env.get(key)),
         }
     }
 }

@@ -1,8 +1,8 @@
 //! Predicate extraction and analysis for join reordering
 
+use super::utils::resolve_column_with_fallback;
 use std::collections::{HashMap, HashSet};
 use vibesql_ast::{BinaryOperator, Expression};
-use super::utils::resolve_column_with_fallback;
 
 /// Check if an expression contains any column reference (for CTE fallback)
 fn expr_has_column(expr: &Expression) -> bool {
@@ -30,7 +30,12 @@ pub(super) fn extract_table_local_predicates_with_schema(
     for pred in predicates {
         // Get tables referenced by this predicate using schema-based resolution
         let mut referenced_tables = HashSet::new();
-        super::graph::extract_referenced_tables_with_schema(&pred, &mut referenced_tables, table_set, column_to_table);
+        super::graph::extract_referenced_tables_with_schema(
+            &pred,
+            &mut referenced_tables,
+            table_set,
+            column_to_table,
+        );
 
         // If predicate references exactly one table, it's table-local
         if referenced_tables.len() == 1 {
@@ -74,25 +79,41 @@ pub(super) fn extract_in_predicates_from_or(
         }
     }
 
-    fn extract_eq(pred: &Expression, table_set: &HashSet<String>) -> Option<(String, String, vibesql_types::SqlValue)> {
+    fn extract_eq(
+        pred: &Expression,
+        table_set: &HashSet<String>,
+    ) -> Option<(String, String, vibesql_types::SqlValue)> {
         if let Expression::BinaryOp { op: BinaryOperator::Equal, left, right } = pred {
-            if let (Expression::ColumnRef { table: Some(t), column: c }, Expression::Literal(v)) = (left.as_ref(), right.as_ref()) {
-                if table_set.contains(&t.to_lowercase()) { return Some((t.clone(), c.clone(), v.clone())); }
+            if let (Expression::ColumnRef { table: Some(t), column: c }, Expression::Literal(v)) =
+                (left.as_ref(), right.as_ref())
+            {
+                if table_set.contains(&t.to_lowercase()) {
+                    return Some((t.clone(), c.clone(), v.clone()));
+                }
             }
-            if let (Expression::Literal(v), Expression::ColumnRef { table: Some(t), column: c }) = (left.as_ref(), right.as_ref()) {
-                if table_set.contains(&t.to_lowercase()) { return Some((t.clone(), c.clone(), v.clone())); }
+            if let (Expression::Literal(v), Expression::ColumnRef { table: Some(t), column: c }) =
+                (left.as_ref(), right.as_ref())
+            {
+                if table_set.contains(&t.to_lowercase()) {
+                    return Some((t.clone(), c.clone(), v.clone()));
+                }
             }
         }
         None
     }
 
     for pred in flatten_and_chain(where_expr) {
-        if !matches!(&pred, Expression::BinaryOp { op: BinaryOperator::Or, .. }) { continue; }
+        if !matches!(&pred, Expression::BinaryOp { op: BinaryOperator::Or, .. }) {
+            continue;
+        }
         let mut branches: Vec<Vec<Expression>> = Vec::new();
         collect_or_branches(&pred, &mut branches);
-        if branches.len() < 2 { continue; }
+        if branches.len() < 2 {
+            continue;
+        }
 
-        let mut col_vals: HashMap<(String, String), HashSet<vibesql_types::SqlValue>> = HashMap::new();
+        let mut col_vals: HashMap<(String, String), HashSet<vibesql_types::SqlValue>> =
+            HashMap::new();
         let mut col_count: HashMap<(String, String), usize> = HashMap::new();
         for branch in &branches {
             let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -103,12 +124,17 @@ pub(super) fn extract_in_predicates_from_or(
                     seen.insert(k);
                 }
             }
-            for k in seen { *col_count.entry(k).or_default() += 1; }
+            for k in seen {
+                *col_count.entry(k).or_default() += 1;
+            }
         }
         for ((t, c), vals) in col_vals {
             if col_count.get(&(t.clone(), c.clone())) == Some(&branches.len()) && vals.len() >= 2 {
                 let in_pred = Expression::InList {
-                    expr: Box::new(Expression::ColumnRef { table: Some(t.clone()), column: c.clone() }),
+                    expr: Box::new(Expression::ColumnRef {
+                        table: Some(t.clone()),
+                        column: c.clone(),
+                    }),
                     values: vals.into_iter().map(Expression::Literal).collect(),
                     negated: false,
                 };
@@ -153,7 +179,8 @@ pub(super) fn extract_common_or_predicates_with_schema(
         match pred {
             Expression::InList { expr, values, negated } => {
                 // Sort values for comparison since order doesn't matter for IN lists
-                let mut sorted_vals: Vec<String> = values.iter().map(|v| format!("{:?}", v)).collect();
+                let mut sorted_vals: Vec<String> =
+                    values.iter().map(|v| format!("{:?}", v)).collect();
                 sorted_vals.sort();
                 format!("InList({:?},{:?},{:?})", expr, sorted_vals, negated)
             }
@@ -171,7 +198,12 @@ pub(super) fn extract_common_or_predicates_with_schema(
         column_to_table: &HashMap<String, String>,
     ) -> Option<String> {
         let mut referenced_tables = HashSet::new();
-        super::graph::extract_referenced_tables_with_schema(pred, &mut referenced_tables, table_set, column_to_table);
+        super::graph::extract_referenced_tables_with_schema(
+            pred,
+            &mut referenced_tables,
+            table_set,
+            column_to_table,
+        );
 
         if referenced_tables.len() == 1 {
             referenced_tables.into_iter().next()
@@ -221,9 +253,9 @@ pub(super) fn extract_common_or_predicates_with_schema(
             // For each predicate in first branch, check if it appears in all other branches
             for (pred, normalized) in first_preds {
                 let appears_in_all = branch_predicates[1..].iter().all(|branch| {
-                    branch.get(table).is_some_and(|preds| {
-                        preds.iter().any(|(_, n)| n == normalized)
-                    })
+                    branch
+                        .get(table)
+                        .is_some_and(|preds| preds.iter().any(|(_, n)| n == normalized))
                 });
 
                 if appears_in_all {
@@ -231,7 +263,10 @@ pub(super) fn extract_common_or_predicates_with_schema(
                     let existing = result.entry(table.clone()).or_default();
                     if !existing.iter().any(|e| normalize_predicate(e) == *normalized) {
                         if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                            eprintln!("[JOIN_REORDER] Extracted common OR predicate for table {}: {:?}", table, pred);
+                            eprintln!(
+                                "[JOIN_REORDER] Extracted common OR predicate for table {}: {:?}",
+                                table, pred
+                            );
                         }
                         existing.push(pred.clone());
                     }
@@ -284,9 +319,9 @@ pub(super) fn extract_where_equijoins_with_schema(
 
         for eq in first_branch {
             // Check if this equijoin appears in all other branches
-            let appears_in_all = branch_equijoins[1..].iter().all(|branch| {
-                branch.iter().any(|e| exprs_equivalent(e, eq))
-            });
+            let appears_in_all = branch_equijoins[1..]
+                .iter()
+                .all(|branch| branch.iter().any(|e| exprs_equivalent(e, eq)));
 
             if appears_in_all {
                 common.push(eq.clone());
@@ -335,8 +370,10 @@ pub(super) fn extract_where_equijoins_with_schema(
                     let common_eqs = find_common_equijoins(&branch_equijoins);
 
                     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                        eprintln!("[JOIN_REORDER] Found {} common equijoins across all OR branches",
-                            common_eqs.len());
+                        eprintln!(
+                            "[JOIN_REORDER] Found {} common equijoins across all OR branches",
+                            common_eqs.len()
+                        );
                     }
 
                     // Add common equijoins to result
@@ -366,9 +403,15 @@ pub(super) fn extract_where_equijoins_with_schema(
                 // If both sides reference columns from different tables, it's an equijoin
                 if let (Some(lt), Some(rt)) = (left_table.clone(), right_table.clone()) {
                     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                        eprintln!("[JOIN_REORDER] Checking equijoin: left_table={:?}, right_table={:?}", lt, rt);
-                        eprintln!("[JOIN_REORDER]   tables.contains(left)={}, tables.contains(right)={}",
-                            tables.contains(&lt), tables.contains(&rt));
+                        eprintln!(
+                            "[JOIN_REORDER] Checking equijoin: left_table={:?}, right_table={:?}",
+                            lt, rt
+                        );
+                        eprintln!(
+                            "[JOIN_REORDER]   tables.contains(left)={}, tables.contains(right)={}",
+                            tables.contains(&lt),
+                            tables.contains(&rt)
+                        );
                         eprintln!("[JOIN_REORDER]   condition: {:?}", expr);
                     }
                     if lt != rt && tables.contains(&lt) && tables.contains(&rt) {

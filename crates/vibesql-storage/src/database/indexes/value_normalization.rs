@@ -37,38 +37,17 @@ mod tests {
     #[test]
     fn test_normalize_for_comparison_numeric_types() {
         // All numeric types should normalize to Double
-        assert_eq!(
-            normalize_for_comparison(&SqlValue::Integer(42)),
-            SqlValue::Double(42.0)
-        );
-        assert_eq!(
-            normalize_for_comparison(&SqlValue::Smallint(10)),
-            SqlValue::Double(10.0)
-        );
-        assert_eq!(
-            normalize_for_comparison(&SqlValue::Bigint(1000)),
-            SqlValue::Double(1000.0)
-        );
-        assert_eq!(
-            normalize_for_comparison(&SqlValue::Unsigned(99)),
-            SqlValue::Double(99.0)
-        );
+        assert_eq!(normalize_for_comparison(&SqlValue::Integer(42)), SqlValue::Double(42.0));
+        assert_eq!(normalize_for_comparison(&SqlValue::Smallint(10)), SqlValue::Double(10.0));
+        assert_eq!(normalize_for_comparison(&SqlValue::Bigint(1000)), SqlValue::Double(1000.0));
+        assert_eq!(normalize_for_comparison(&SqlValue::Unsigned(99)), SqlValue::Double(99.0));
         assert_eq!(
             normalize_for_comparison(&SqlValue::Float(3.14)),
             SqlValue::Double(3.14f32 as f64)
         );
-        assert_eq!(
-            normalize_for_comparison(&SqlValue::Real(2.5)),
-            SqlValue::Double(2.5)
-        );
-        assert_eq!(
-            normalize_for_comparison(&SqlValue::Numeric(123.45)),
-            SqlValue::Double(123.45)
-        );
-        assert_eq!(
-            normalize_for_comparison(&SqlValue::Double(7.89)),
-            SqlValue::Double(7.89)
-        );
+        assert_eq!(normalize_for_comparison(&SqlValue::Real(2.5)), SqlValue::Double(2.5));
+        assert_eq!(normalize_for_comparison(&SqlValue::Numeric(123.45)), SqlValue::Double(123.45));
+        assert_eq!(normalize_for_comparison(&SqlValue::Double(7.89)), SqlValue::Double(7.89));
     }
 
     #[test]

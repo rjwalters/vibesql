@@ -108,7 +108,8 @@ fn test_tokenize_user_variable() {
 
 #[test]
 fn test_tokenize_session_variable_in_expression() {
-    let mut lexer = Lexer::new("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))");
+    let mut lexer =
+        Lexer::new("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))");
     let tokens = lexer.tokenize().unwrap();
     // Find the SessionVariable token
     let found = tokens.iter().any(|t| matches!(t, Token::SessionVariable(s) if s == "sql_mode"));

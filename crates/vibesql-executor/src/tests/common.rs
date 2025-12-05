@@ -13,11 +13,7 @@ pub fn setup_users_table(db: &mut Database) {
         "users".to_string(),
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new(
-                "name".to_string(),
-                DataType::Varchar { max_length: Some(50) },
-                true,
-            ),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, true),
         ],
     );
     db.create_table(schema).unwrap();

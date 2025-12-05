@@ -10,13 +10,21 @@ fn test_between_integer() {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(100) },
                 false,
             ),
-            vibesql_catalog::ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "age".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -63,12 +71,16 @@ fn test_between_integer() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "name".to_string(),
+                },
                 alias: None,
             },
             vibesql_ast::SelectItem::Expression {
@@ -76,9 +88,16 @@ fn test_between_integer() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "users".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "age".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(28))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(36))),
             negated: false,
@@ -109,13 +128,21 @@ fn test_not_between() {
     let schema = vibesql_catalog::TableSchema::new(
         "products".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(100) },
                 false,
             ),
-            vibesql_catalog::ColumnSchema::new("price".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "price".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -153,16 +180,24 @@ fn test_not_between() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "products".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "price".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "price".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: true, // NOT BETWEEN
@@ -190,28 +225,45 @@ fn test_between_boundary_inclusive() {
     // Create test table
     let schema = vibesql_catalog::TableSchema::new(
         "DATA".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("VALUE".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "VALUE".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert boundary and middle values
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(9)])).unwrap();
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(10)])).unwrap(); // Lower boundary
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)])).unwrap(); // Middle
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(20)])).unwrap(); // Upper boundary
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(21)])).unwrap();
+    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(9)]))
+        .unwrap();
+    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(10)]))
+        .unwrap(); // Lower boundary
+    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)]))
+        .unwrap(); // Middle
+    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(20)]))
+        .unwrap(); // Upper boundary
+    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(21)]))
+        .unwrap();
 
     // Test: BETWEEN is inclusive of boundaries
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "DATA".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "DATA".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "VALUE".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: false,
@@ -241,9 +293,21 @@ fn test_between_with_column_references() {
     let schema = vibesql_catalog::TableSchema::new(
         "ranges".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("VALUE".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("min_val".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("max_val".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "VALUE".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "min_val".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "max_val".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -281,16 +345,24 @@ fn test_between_with_column_references() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "ranges".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "ranges".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "VALUE".to_string(),
+            }),
             low: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
                 column: "min_val".to_string(),
@@ -327,13 +399,21 @@ fn test_between_symmetric_swaps_bounds() {
     // Create test table
     let schema = vibesql_catalog::TableSchema::new(
         "NUMBERS".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("VALUE".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "VALUE".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert test data: values from 1 to 10
     for i in 1..=10 {
-        db.insert_row("NUMBERS", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)])).unwrap();
+        db.insert_row(
+            "NUMBERS",
+            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+        )
+        .unwrap();
     }
 
     // Test: WHERE value BETWEEN SYMMETRIC 10 AND 1
@@ -360,13 +440,21 @@ fn test_between_asymmetric_does_not_swap() {
     // Create test table
     let schema = vibesql_catalog::TableSchema::new(
         "NUMBERS".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("VALUE".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "VALUE".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert test data
     for i in 1..=10 {
-        db.insert_row("NUMBERS", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)])).unwrap();
+        db.insert_row(
+            "NUMBERS",
+            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+        )
+        .unwrap();
     }
 
     // Test: WHERE value BETWEEN ASYMMETRIC 10 AND 1
@@ -394,13 +482,21 @@ fn test_between_default_is_asymmetric() {
     // Create test table
     let schema = vibesql_catalog::TableSchema::new(
         "NUMBERS".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("VALUE".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "VALUE".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert test data
     for i in 1..=10 {
-        db.insert_row("NUMBERS", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)])).unwrap();
+        db.insert_row(
+            "NUMBERS",
+            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+        )
+        .unwrap();
     }
 
     // Test: BETWEEN without modifier should behave like ASYMMETRIC
@@ -434,13 +530,21 @@ fn test_symmetric_with_equal_bounds() {
     // Create test table
     let schema = vibesql_catalog::TableSchema::new(
         "NUMBERS".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("VALUE".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "VALUE".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert test data
     for i in 1..=10 {
-        db.insert_row("NUMBERS", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)])).unwrap();
+        db.insert_row(
+            "NUMBERS",
+            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+        )
+        .unwrap();
     }
 
     // Test: WHERE value BETWEEN SYMMETRIC 5 AND 5
@@ -465,13 +569,21 @@ fn test_not_between_symmetric() {
     // Create test table
     let schema = vibesql_catalog::TableSchema::new(
         "NUMBERS".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("VALUE".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "VALUE".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert test data
     for i in 1..=10 {
-        db.insert_row("NUMBERS", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)])).unwrap();
+        db.insert_row(
+            "NUMBERS",
+            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+        )
+        .unwrap();
     }
 
     // Test: WHERE value NOT BETWEEN SYMMETRIC 8 AND 2
@@ -509,8 +621,10 @@ fn test_symmetric_with_null() {
 
     // Insert test data including NULL
     db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Null])).unwrap();
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)])).unwrap();
+    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
+    db.insert_row("DATA", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(15)]))
+        .unwrap();
 
     // Test: WHERE value BETWEEN SYMMETRIC 1 AND 10
     // NULL should not match

@@ -560,7 +560,11 @@ fn test_composite_primary_key_persistence() {
         vec![
             ColumnSchema::new("order_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("line_number".to_string(), DataType::Integer, false),
-            ColumnSchema::new("product".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+            ColumnSchema::new(
+                "product".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                false,
+            ),
             ColumnSchema::new("quantity".to_string(), DataType::Integer, false),
         ],
         vec!["order_id".to_string(), "line_number".to_string()],

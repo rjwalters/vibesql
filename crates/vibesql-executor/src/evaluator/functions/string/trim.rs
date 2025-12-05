@@ -19,8 +19,12 @@ pub(in crate::evaluator::functions) fn trim(
 
     match &args[0] {
         vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-        vibesql_types::SqlValue::Varchar(s) => Ok(vibesql_types::SqlValue::Varchar(s.trim().to_string())),
-        vibesql_types::SqlValue::Character(s) => Ok(vibesql_types::SqlValue::Varchar(s.trim().to_string())),
+        vibesql_types::SqlValue::Varchar(s) => {
+            Ok(vibesql_types::SqlValue::Varchar(s.trim().to_string()))
+        }
+        vibesql_types::SqlValue::Character(s) => {
+            Ok(vibesql_types::SqlValue::Varchar(s.trim().to_string()))
+        }
         val => Err(ExecutorError::UnsupportedFeature(format!(
             "TRIM requires string argument, got {:?}",
             val

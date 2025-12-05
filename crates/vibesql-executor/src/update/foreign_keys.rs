@@ -162,7 +162,8 @@ impl ForeignKeyValidator {
                                 .map(|(row_idx, mut child_row)| {
                                     // Set FK columns to NULL
                                     for &fk_col_idx in &fk.column_indices {
-                                        child_row.values[fk_col_idx] = vibesql_types::SqlValue::Null;
+                                        child_row.values[fk_col_idx] =
+                                            vibesql_types::SqlValue::Null;
                                     }
                                     (row_idx, child_row)
                                 })
@@ -176,7 +177,9 @@ impl ForeignKeyValidator {
                             let default_exprs: Vec<Option<vibesql_ast::Expression>> = fk
                                 .column_indices
                                 .iter()
-                                .map(|&fk_col_idx| child_schema.columns[fk_col_idx].default_value.clone())
+                                .map(|&fk_col_idx| {
+                                    child_schema.columns[fk_col_idx].default_value.clone()
+                                })
                                 .collect();
 
                             // Evaluate default values for each FK column
@@ -187,15 +190,25 @@ impl ForeignKeyValidator {
                                     match default_expr {
                                         vibesql_ast::Expression::NextValue { sequence_name } => {
                                             // Get the next value from the sequence
-                                            let seq = db.catalog.get_sequence_mut(&sequence_name).map_err(|e| {
-                                                ExecutorError::UnsupportedExpression(format!("Sequence error: {:?}", e))
-                                            })?;
+                                            let seq =
+                                                db.catalog
+                                                    .get_sequence_mut(&sequence_name)
+                                                    .map_err(|e| {
+                                                        ExecutorError::UnsupportedExpression(
+                                                            format!("Sequence error: {:?}", e),
+                                                        )
+                                                    })?;
                                             let next_val = seq.next_value().map_err(|e| {
-                                                ExecutorError::ConstraintViolation(format!("Sequence error: {}", e))
+                                                ExecutorError::ConstraintViolation(format!(
+                                                    "Sequence error: {}",
+                                                    e
+                                                ))
                                             })?;
                                             vibesql_types::SqlValue::Integer(next_val)
                                         }
-                                        _ => crate::insert::defaults::evaluate_default_expression(&default_expr)?,
+                                        _ => crate::insert::defaults::evaluate_default_expression(
+                                            &default_expr,
+                                        )?,
                                     }
                                 } else {
                                     // No default value defined, use NULL
@@ -218,7 +231,8 @@ impl ForeignKeyValidator {
 
                             cascade_updates.push((table_name.clone(), updated_rows));
                         }
-                        vibesql_catalog::ReferentialAction::NoAction | vibesql_catalog::ReferentialAction::Restrict => {
+                        vibesql_catalog::ReferentialAction::NoAction
+                        | vibesql_catalog::ReferentialAction::Restrict => {
                             // Block the update when child references exist
                             return Err(ExecutorError::ConstraintViolation(format!(
                                 "FOREIGN KEY constraint violation: cannot update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",

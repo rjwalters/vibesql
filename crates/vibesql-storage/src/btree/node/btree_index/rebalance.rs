@@ -13,7 +13,11 @@ impl BTreeIndex {
     /// Rebalance a leaf node after deletion
     ///
     /// Tries to borrow from siblings first, then merges if necessary.
-    pub(super) fn rebalance_leaf(&mut self, leaf: LeafNode, path: Vec<(PageId, usize)>) -> Result<(), StorageError> {
+    pub(super) fn rebalance_leaf(
+        &mut self,
+        leaf: LeafNode,
+        path: Vec<(PageId, usize)>,
+    ) -> Result<(), StorageError> {
         if path.is_empty() {
             // Leaf is root, no rebalancing needed
             return Ok(());
@@ -45,7 +49,12 @@ impl BTreeIndex {
     /// Try to borrow entries from sibling leaf nodes
     ///
     /// Returns true if successfully borrowed, false if no sibling has spare entries.
-    fn try_borrow_leaf(&mut self, leaf: &LeafNode, parent: &mut InternalNode, idx: usize) -> Result<bool, StorageError> {
+    fn try_borrow_leaf(
+        &mut self,
+        leaf: &LeafNode,
+        parent: &mut InternalNode,
+        idx: usize,
+    ) -> Result<bool, StorageError> {
         // Try left sibling
         if idx > 0 {
             let mut left_sibling = self.read_leaf_node(parent.children[idx - 1])?;
@@ -88,11 +97,16 @@ impl BTreeIndex {
             }
         }
 
-        Ok(false)  // No sibling has enough entries to borrow
+        Ok(false) // No sibling has enough entries to borrow
     }
 
     /// Merge underfull leaf with sibling
-    fn merge_leaf(&mut self, leaf: LeafNode, parent: &mut InternalNode, idx: usize) -> Result<(), StorageError> {
+    fn merge_leaf(
+        &mut self,
+        leaf: LeafNode,
+        parent: &mut InternalNode,
+        idx: usize,
+    ) -> Result<(), StorageError> {
         // Prefer merging with left sibling
         if idx > 0 {
             let mut left_sibling = self.read_leaf_node(parent.children[idx - 1])?;
@@ -132,7 +146,10 @@ impl BTreeIndex {
     }
 
     /// Propagate rebalancing up the tree after deletion
-    pub(super) fn propagate_rebalance_delete(&mut self, path: Vec<(PageId, usize)>) -> Result<(), StorageError> {
+    pub(super) fn propagate_rebalance_delete(
+        &mut self,
+        path: Vec<(PageId, usize)>,
+    ) -> Result<(), StorageError> {
         // Process from bottom to top (skip the last entry which we already handled)
         for i in (0..path.len() - 1).rev() {
             let (parent_id, child_idx) = path[i];
@@ -159,7 +176,12 @@ impl BTreeIndex {
     }
 
     /// Try to borrow entries from sibling internal nodes
-    fn try_borrow_internal(&mut self, node: &InternalNode, parent: &mut InternalNode, idx: usize) -> Result<bool, StorageError> {
+    fn try_borrow_internal(
+        &mut self,
+        node: &InternalNode,
+        parent: &mut InternalNode,
+        idx: usize,
+    ) -> Result<bool, StorageError> {
         // Try left sibling
         if idx > 0 {
             let mut left_sibling = self.read_internal_node(parent.children[idx - 1])?;
@@ -206,11 +228,16 @@ impl BTreeIndex {
             }
         }
 
-        Ok(false)  // No sibling has enough entries to borrow
+        Ok(false) // No sibling has enough entries to borrow
     }
 
     /// Merge underfull internal node with sibling
-    fn merge_internal(&mut self, node: InternalNode, parent: &mut InternalNode, idx: usize) -> Result<(), StorageError> {
+    fn merge_internal(
+        &mut self,
+        node: InternalNode,
+        parent: &mut InternalNode,
+        idx: usize,
+    ) -> Result<(), StorageError> {
         // Prefer merging with left sibling
         if idx > 0 {
             let mut left_sibling = self.read_internal_node(parent.children[idx - 1])?;

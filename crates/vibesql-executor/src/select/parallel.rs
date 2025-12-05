@@ -56,10 +56,7 @@ impl ParallelConfig {
             Self::thresholds_for_hardware(num_threads)
         };
 
-        ParallelConfig {
-            num_threads,
-            thresholds,
-        }
+        ParallelConfig { num_threads, thresholds }
     }
 
     /// Parse PARALLEL_THRESHOLD environment variable
@@ -186,16 +183,10 @@ where
 
     if config.should_parallelize_scan(rows.len()) {
         // Parallel path: use rayon for efficient parallel filtering
-        rows.par_iter()
-            .filter(|row| predicate(row))
-            .cloned()
-            .collect()
+        rows.par_iter().filter(|row| predicate(row)).cloned().collect()
     } else {
         // Sequential fallback for small datasets
-        rows.iter()
-            .filter(|row| predicate(row))
-            .cloned()
-            .collect()
+        rows.iter().filter(|row| predicate(row)).cloned().collect()
     }
 }
 
@@ -230,14 +221,10 @@ where
 
     if config.should_parallelize_scan(rows.len()) {
         // Parallel path: use rayon for efficient parallel mapping
-        rows.par_iter()
-            .map(&transform)
-            .collect()
+        rows.par_iter().map(&transform).collect()
     } else {
         // Sequential fallback for small datasets
-        rows.iter()
-            .map(transform)
-            .collect()
+        rows.iter().map(transform).collect()
     }
 }
 
@@ -273,14 +260,10 @@ where
 
     if config.should_parallelize_scan(rows.len()) {
         // Parallel path: use rayon for efficient parallel filter-map
-        rows.par_iter()
-            .filter_map(&filter_map)
-            .collect()
+        rows.par_iter().filter_map(&filter_map).collect()
     } else {
         // Sequential fallback for small datasets
-        rows.iter()
-            .filter_map(filter_map)
-            .collect()
+        rows.iter().filter_map(filter_map).collect()
     }
 }
 
@@ -299,9 +282,7 @@ pub fn parallel_scan_materialize(rows: &[Row]) -> Vec<Row> {
 
     if config.should_parallelize_scan(rows.len()) {
         // Parallel path: use rayon for efficient parallel cloning
-        rows.par_iter()
-            .cloned()
-            .collect()
+        rows.par_iter().cloned().collect()
     } else {
         // Sequential fallback for small datasets
         rows.to_vec()
@@ -421,9 +402,10 @@ mod tests {
         let rows = create_test_rows(100);
 
         // Filter for even numbers
-        let filtered = parallel_scan_filter(&rows, |row| {
-            matches!(row.values[0], vibesql_types::SqlValue::Integer(x) if x % 2 == 0)
-        });
+        let filtered = parallel_scan_filter(
+            &rows,
+            |row| matches!(row.values[0], vibesql_types::SqlValue::Integer(x) if x % 2 == 0),
+        );
 
         // Should have 50 even numbers (0, 2, 4, ..., 98)
         assert_eq!(filtered.len(), 50);
@@ -492,8 +474,9 @@ mod tests {
         // Should have 50 even numbers, doubled
         assert_eq!(result.len(), 50);
         assert!(matches!(result[0].values[0], vibesql_types::SqlValue::Integer(0)));
-        assert!(matches!(result[1].values[0], vibesql_types::SqlValue::Integer(4)));  // 2*2
-        assert!(matches!(result[2].values[0], vibesql_types::SqlValue::Integer(8)));  // 4*2
+        assert!(matches!(result[1].values[0], vibesql_types::SqlValue::Integer(4))); // 2*2
+        assert!(matches!(result[2].values[0], vibesql_types::SqlValue::Integer(8)));
+        // 4*2
     }
 
     #[test]
@@ -513,11 +496,12 @@ mod tests {
     fn test_parallel_scan_small_dataset_uses_sequential() {
         // With small dataset, should use sequential path
         // (This is implicit in the implementation, but we test correctness)
-        let rows = create_test_rows(10);  // Well below any threshold
+        let rows = create_test_rows(10); // Well below any threshold
 
-        let filtered = parallel_scan_filter(&rows, |row| {
-            matches!(row.values[0], vibesql_types::SqlValue::Integer(x) if x < 5)
-        });
+        let filtered = parallel_scan_filter(
+            &rows,
+            |row| matches!(row.values[0], vibesql_types::SqlValue::Integer(x) if x < 5),
+        );
 
         assert_eq!(filtered.len(), 5);
     }

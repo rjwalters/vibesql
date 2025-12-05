@@ -27,14 +27,14 @@ pub enum BinaryOperator {
     Concat, /* || */
 
     // Vector distance operators (pgvector compatible)
-    CosineDistance,        // <-> (1 - cosine_similarity)
-    NegativeInnerProduct,  // <#> (negative dot product for MIPS)
-    L2Distance,            // <=> (Euclidean distance)
+    CosineDistance,       // <-> (1 - cosine_similarity)
+    NegativeInnerProduct, // <#> (negative dot product for MIPS)
+    L2Distance,           // <=> (Euclidean distance)
 
-    // Note: LIKE and IN are not simple binary operators. They are implemented
-    // as Expression variants in expression.rs due to their complex structure:
-    // - LIKE: Pattern matching with wildcards (%, _)
-    // - IN: Subquery or value list support
+                          // Note: LIKE and IN are not simple binary operators. They are implemented
+                          // as Expression variants in expression.rs due to their complex structure:
+                          // - LIKE: Pattern matching with wildcards (%, _)
+                          // - IN: Subquery or value list support
 }
 
 /// Unary operators for SQL expressions

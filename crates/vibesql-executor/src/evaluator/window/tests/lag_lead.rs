@@ -13,8 +13,11 @@ fn simple_eval(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
     match expr {
         Expression::Literal(val) => Ok(val.clone()),
         Expression::ColumnRef { column, .. } => {
-            let col_idx: usize = column.parse().map_err(|e| format!("Invalid column index: {}", e))?;
-            row.get(col_idx).cloned().ok_or_else(|| format!("Column index {} out of bounds", col_idx))
+            let col_idx: usize =
+                column.parse().map_err(|e| format!("Invalid column index: {}", e))?;
+            row.get(col_idx)
+                .cloned()
+                .ok_or_else(|| format!("Column index {} out of bounds", col_idx))
         }
         _ => Err("Unsupported expression in test".to_string()),
     }
@@ -84,15 +87,18 @@ fn test_lag_with_default_value() {
     let default_expr = Expression::Literal(SqlValue::Integer(0));
 
     // Row 0: should return 0 (default) instead of NULL
-    let result = evaluate_lag(&partition, 0, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lag(&partition, 0, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
     assert_eq!(result, SqlValue::Integer(0));
 
     // Row 1: should return 10 (previous row)
-    let result = evaluate_lag(&partition, 1, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lag(&partition, 1, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
     assert_eq!(result, SqlValue::Integer(10));
 
     // Row 2: should return 20 (previous row)
-    let result = evaluate_lag(&partition, 2, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lag(&partition, 2, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
     assert_eq!(result, SqlValue::Integer(20));
 }
 
@@ -109,7 +115,9 @@ fn test_lag_offset_beyond_partition_start() {
 
     // With default value
     let default_expr = Expression::Literal(SqlValue::Integer(-1));
-    let result = evaluate_lag(&partition, 2, &value_expr, Some(100), Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lag(&partition, 2, &value_expr, Some(100), Some(&default_expr), simple_eval)
+            .unwrap();
     assert_eq!(result, SqlValue::Integer(-1));
 }
 
@@ -177,15 +185,18 @@ fn test_lead_with_default_value() {
     let default_expr = Expression::Literal(SqlValue::Integer(999));
 
     // Row 0: should return 20 (next row)
-    let result = evaluate_lead(&partition, 0, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lead(&partition, 0, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
     assert_eq!(result, SqlValue::Integer(20));
 
     // Row 1: should return 30 (next row)
-    let result = evaluate_lead(&partition, 1, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lead(&partition, 1, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
     assert_eq!(result, SqlValue::Integer(30));
 
     // Row 2: should return 999 (default) instead of NULL
-    let result = evaluate_lead(&partition, 2, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lead(&partition, 2, &value_expr, None, Some(&default_expr), simple_eval).unwrap();
     assert_eq!(result, SqlValue::Integer(999));
 }
 
@@ -202,7 +213,9 @@ fn test_lead_offset_beyond_partition_end() {
 
     // With default value
     let default_expr = Expression::Literal(SqlValue::Integer(-1));
-    let result = evaluate_lead(&partition, 0, &value_expr, Some(100), Some(&default_expr), simple_eval).unwrap();
+    let result =
+        evaluate_lead(&partition, 0, &value_expr, Some(100), Some(&default_expr), simple_eval)
+            .unwrap();
     assert_eq!(result, SqlValue::Integer(-1));
 }
 

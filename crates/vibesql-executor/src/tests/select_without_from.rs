@@ -11,7 +11,8 @@ fn test_select_literal_integers() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
@@ -52,7 +53,8 @@ fn test_select_literal_mixed_types() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
@@ -61,7 +63,9 @@ fn test_select_literal_mixed_types() {
                 alias: Some("num".to_string()),
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+                expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "hello".to_string(),
+                )),
                 alias: Some("text".to_string()),
             },
             vibesql_ast::SelectItem::Expression {
@@ -92,23 +96,32 @@ fn test_select_arithmetic_expression() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+                    left: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(1),
+                    )),
                     op: vibesql_ast::BinaryOperator::Plus,
-                    right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(1),
+                    )),
                 },
                 alias: Some("sum".to_string()),
             },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))),
+                    left: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(2),
+                    )),
                     op: vibesql_ast::BinaryOperator::Multiply,
-                    right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3))),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(3),
+                    )),
                 },
                 alias: Some("product".to_string()),
             },
@@ -136,13 +149,16 @@ fn test_select_function_call() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "UPPER".to_string(),
-                args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+                args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "hello".to_string(),
+                ))],
                 character_unit: None,
             },
             alias: Some("upper".to_string()),
@@ -168,7 +184,8 @@ fn test_select_star_without_from_fails() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -198,11 +215,15 @@ fn test_column_reference_without_from_fails() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "some_column".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "some_column".to_string(),
+            },
             alias: None,
         }],
         from: None,
@@ -231,7 +252,8 @@ fn test_is_null_with_column_reference_fails() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -270,7 +292,8 @@ fn test_between_with_column_reference_fails() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -279,8 +302,12 @@ fn test_between_with_column_reference_fails() {
                     table: None,
                     column: "price".to_string(),
                 }),
-                low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
-                high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
+                low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    10,
+                ))),
+                high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    20,
+                ))),
                 negated: false,
                 symmetric: false,
             },
@@ -312,7 +339,8 @@ fn test_cast_with_column_reference_fails() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -351,7 +379,8 @@ fn test_like_with_column_reference_fails() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -360,9 +389,9 @@ fn test_like_with_column_reference_fails() {
                     table: None,
                     column: "name".to_string(),
                 }),
-                pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "A%".to_string(),
-                ))),
+                pattern: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("A%".to_string()),
+                )),
                 negated: false,
             },
             alias: None,
@@ -393,7 +422,8 @@ fn test_in_list_with_column_reference_fails() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -437,7 +467,11 @@ fn test_hex_literal_in_subquery_without_from() {
     // Create empty table
     let schema = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("x".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
@@ -451,13 +485,19 @@ fn test_hex_literal_in_subquery_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("012".to_string()))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "012".to_string(),
+                ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+                    from: Some(vibesql_ast::FromClause::Table {
+                        name: "t1".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -465,7 +505,8 @@ fn test_hex_literal_in_subquery_without_from() {
                     limit: None,
                     offset: None,
                     into_table: None,
-                    into_variables: None,                }),
+                    into_variables: None,
+                }),
                 negated: false,
             },
             alias: None,
@@ -478,7 +519,8 @@ fn test_hex_literal_in_subquery_without_from() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -494,11 +536,14 @@ fn test_hex_literal_simple() {
     // SELECT x'48656C6C6F' (should return "Hello")
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello".to_string())),
+            expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Hello".to_string(),
+            )),
             alias: Some("hex_value".to_string()),
         }],
         from: None,
@@ -522,7 +567,11 @@ fn test_binary_literal_in_subquery_without_from() {
     // Create empty table
     let schema = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("x".to_string(), vibesql_types::DataType::Varchar { max_length: None }, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Varchar { max_length: None },
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
@@ -535,13 +584,19 @@ fn test_binary_literal_in_subquery_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("U".to_string()))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "U".to_string(),
+                ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+                    from: Some(vibesql_ast::FromClause::Table {
+                        name: "t1".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -549,7 +604,8 @@ fn test_binary_literal_in_subquery_without_from() {
                     limit: None,
                     offset: None,
                     into_table: None,
-                    into_variables: None,                }),
+                    into_variables: None,
+                }),
                 negated: false,
             },
             alias: None,
@@ -562,7 +618,8 @@ fn test_binary_literal_in_subquery_without_from() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -581,8 +638,16 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
     let schema = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("x".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("y".to_string(), vibesql_types::DataType::Varchar { max_length: None }, false),
+            vibesql_catalog::ColumnSchema::new(
+                "x".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "y".to_string(),
+                vibesql_types::DataType::Varchar { max_length: None },
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -600,7 +665,11 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "t1".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
@@ -608,7 +677,11 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
                 set_operation: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                from: Some(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
+                from: Some(vibesql_ast::FromClause::Table {
+                    name: "t1".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 where_clause: None,
                 group_by: None,
                 having: None,

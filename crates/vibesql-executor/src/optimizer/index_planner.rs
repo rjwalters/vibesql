@@ -109,12 +109,13 @@ impl<'a> IndexPlanner<'a> {
     ) -> Option<IndexPlan> {
         // Use the existing cost-based selection from index_scan module
         // This delegates to the current implementation but provides a clean API boundary
-        let (index_name, sorted_columns) = crate::select::scan::index_scan::cost_based_index_selection(
-            table_name,
-            where_clause,
-            order_by,
-            self.database,
-        )?;
+        let (index_name, sorted_columns) =
+            crate::select::scan::index_scan::cost_based_index_selection(
+                table_name,
+                where_clause,
+                order_by,
+                self.database,
+            )?;
 
         // Determine if WHERE clause is fully satisfied by the index
         let fully_satisfies_where = if let Some(where_expr) = where_clause {
@@ -136,17 +137,9 @@ impl<'a> IndexPlanner<'a> {
         };
 
         // Estimate selectivity for cost-based decisions
-        let estimated_selectivity = self.estimate_selectivity(
-            &index_name,
-            where_clause,
-        );
+        let estimated_selectivity = self.estimate_selectivity(&index_name, where_clause);
 
-        Some(IndexPlan {
-            index_name,
-            fully_satisfies_where,
-            sorted_columns,
-            estimated_selectivity,
-        })
+        Some(IndexPlan { index_name, fully_satisfies_where, sorted_columns, estimated_selectivity })
     }
 
     /// Estimate selectivity of index predicate
@@ -155,11 +148,7 @@ impl<'a> IndexPlanner<'a> {
     /// the estimated fraction of rows that will match the index predicate.
     ///
     /// Uses column statistics when available, falls back to conservative defaults.
-    fn estimate_selectivity(
-        &self,
-        index_name: &str,
-        where_clause: Option<&Expression>,
-    ) -> f64 {
+    fn estimate_selectivity(&self, index_name: &str, where_clause: Option<&Expression>) -> f64 {
         // If no WHERE clause, selectivity is 1.0 (all rows)
         let where_expr = match where_clause {
             Some(expr) => expr,

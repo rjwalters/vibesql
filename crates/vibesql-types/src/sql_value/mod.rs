@@ -92,7 +92,7 @@ impl SqlValue {
             SqlValue::Timestamp(_) => DataType::Timestamp { with_timezone: false },
             SqlValue::Interval(_) => DataType::Interval {
                 start_field: IntervalField::Day, /* Default - actual type lost in string
-                                                   * representation */
+                                                  * representation */
                 end_field: None,
             },
             SqlValue::Vector(v) => DataType::Vector { dimensions: v.len() as u32 },

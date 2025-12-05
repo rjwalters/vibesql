@@ -56,15 +56,15 @@
 //! let result_rows = gather_columns(&source_batch, &final_selection, &projected_columns);
 //! ```
 
-mod selection;
-mod row_ref;
-mod lazy_batch;
 mod gather;
+mod lazy_batch;
+mod row_ref;
+mod selection;
 
-pub use selection::SelectionVector;
-pub use row_ref::RowReference;
-pub use lazy_batch::LazyMaterializedBatch;
 pub use gather::{gather_columns, gather_single_column};
+pub use lazy_batch::LazyMaterializedBatch;
+pub use row_ref::RowReference;
+pub use selection::SelectionVector;
 
 #[cfg(test)]
 mod tests;

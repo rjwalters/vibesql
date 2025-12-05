@@ -57,9 +57,7 @@ pub(crate) fn parse_retry_config(tokens: &[&str]) -> Result<Option<RetryConfig>,
         Some(&"backoff") => {}
         Some(token) => return Err(ParseErrorKind::UnexpectedToken(token.to_string())),
         None => {
-            return Err(ParseErrorKind::InvalidRetryConfig(
-                "expected keyword backoff".to_string(),
-            ))
+            return Err(ParseErrorKind::InvalidRetryConfig("expected keyword backoff".to_string()))
         }
     }
 
@@ -67,9 +65,7 @@ pub(crate) fn parse_retry_config(tokens: &[&str]) -> Result<Option<RetryConfig>,
     let duration_str = match iter.next() {
         Some(s) => s,
         None => {
-            return Err(ParseErrorKind::InvalidRetryConfig(
-                "expected backoff duration".to_string(),
-            ))
+            return Err(ParseErrorKind::InvalidRetryConfig("expected backoff duration".to_string()))
         }
     };
 

@@ -34,9 +34,9 @@ impl PredicateEvaluator for NumericComparisonEvaluator {
     #[inline(always)]
     fn evaluate(&self, row: &Row) -> Result<bool, ExecutorError> {
         // Extract value from row
-        let value = row.get(self.col_idx).ok_or(ExecutorError::ColumnIndexOutOfBounds {
-            index: self.col_idx,
-        })?;
+        let value = row
+            .get(self.col_idx)
+            .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: self.col_idx })?;
 
         // NULL handling - NULL comparison returns false (SQL three-valued logic)
         // In WHERE clauses, NULL is treated as false
@@ -94,9 +94,9 @@ impl PredicateEvaluator for IntegerComparisonEvaluator {
     #[inline(always)]
     fn evaluate(&self, row: &Row) -> Result<bool, ExecutorError> {
         // Extract value from row
-        let value = row.get(self.col_idx).ok_or(ExecutorError::ColumnIndexOutOfBounds {
-            index: self.col_idx,
-        })?;
+        let value = row
+            .get(self.col_idx)
+            .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: self.col_idx })?;
 
         // NULL handling - NULL comparison returns false
         if matches!(value, SqlValue::Null) {
@@ -173,9 +173,9 @@ impl PredicateEvaluator for DateRangeEvaluator {
     #[inline(always)]
     fn evaluate(&self, row: &Row) -> Result<bool, ExecutorError> {
         // Extract value from row
-        let value = row.get(self.col_idx).ok_or(ExecutorError::ColumnIndexOutOfBounds {
-            index: self.col_idx,
-        })?;
+        let value = row
+            .get(self.col_idx)
+            .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: self.col_idx })?;
 
         // NULL handling - NULL comparison returns false
         if matches!(value, SqlValue::Null) {
@@ -217,9 +217,9 @@ impl PredicateEvaluator for BetweenNumericEvaluator {
     #[inline(always)]
     fn evaluate(&self, row: &Row) -> Result<bool, ExecutorError> {
         // Extract value from row
-        let value = row.get(self.col_idx).ok_or(ExecutorError::ColumnIndexOutOfBounds {
-            index: self.col_idx,
-        })?;
+        let value = row
+            .get(self.col_idx)
+            .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: self.col_idx })?;
 
         // NULL handling - NULL comparison returns false
         if matches!(value, SqlValue::Null) {

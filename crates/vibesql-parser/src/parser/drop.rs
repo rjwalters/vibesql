@@ -8,7 +8,9 @@ impl Parser {
     ///
     /// Syntax:
     ///   DROP TABLE [IF EXISTS] table_name
-    pub(super) fn parse_drop_table_statement(&mut self) -> Result<vibesql_ast::DropTableStmt, ParseError> {
+    pub(super) fn parse_drop_table_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::DropTableStmt, ParseError> {
         // Expect DROP keyword
         self.expect_keyword(Keyword::Drop)?;
 

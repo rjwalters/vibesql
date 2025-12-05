@@ -206,7 +206,8 @@ fn test_parse_create_table_with_table_level_unique() {
             assert_eq!(create.table_constraints.len(), 1);
             match &create.table_constraints[0] {
                 vibesql_ast::TableConstraint {
-                    kind: vibesql_ast::TableConstraintKind::Unique { columns }, ..
+                    kind: vibesql_ast::TableConstraintKind::Unique { columns },
+                    ..
                 } => {
                     assert_eq!(columns.len(), 2);
                     assert_eq!(columns[0].column_name, "EMAIL");
@@ -236,7 +237,10 @@ fn test_parse_create_table_with_table_level_check() {
             assert_eq!(create.table_constraints.len(), 1);
             assert!(matches!(
                 create.table_constraints[0],
-                vibesql_ast::TableConstraint { kind: vibesql_ast::TableConstraintKind::Check { .. }, .. }
+                vibesql_ast::TableConstraint {
+                    kind: vibesql_ast::TableConstraintKind::Check { .. },
+                    ..
+                }
             ));
         }
         _ => panic!("Expected CREATE TABLE statement"),

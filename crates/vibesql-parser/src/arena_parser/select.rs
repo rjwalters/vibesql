@@ -2,9 +2,8 @@
 
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_ast::arena::{
-    CommonTableExpr, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet,
-    JoinType, OrderByItem, OrderDirection, SelectItem, SelectStmt, SetOperation, SetOperator,
-    Symbol,
+    CommonTableExpr, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet, JoinType,
+    OrderByItem, OrderDirection, SelectItem, SelectStmt, SetOperation, SetOperator, Symbol,
 };
 
 use super::ArenaParser;
@@ -76,15 +75,13 @@ impl<'arena> ArenaParser<'arena> {
         // Parse LIMIT
         let limit = if self.try_consume_keyword(Keyword::Limit) {
             if let Token::Number(n) = self.peek() {
-                let n = n.parse::<usize>().map_err(|_| ParseError {
-                    message: "Invalid LIMIT value".to_string(),
-                })?;
+                let n = n
+                    .parse::<usize>()
+                    .map_err(|_| ParseError { message: "Invalid LIMIT value".to_string() })?;
                 self.advance();
                 Some(n)
             } else {
-                return Err(ParseError {
-                    message: "Expected integer after LIMIT".to_string(),
-                });
+                return Err(ParseError { message: "Expected integer after LIMIT".to_string() });
             }
         } else {
             None
@@ -93,15 +90,13 @@ impl<'arena> ArenaParser<'arena> {
         // Parse OFFSET
         let offset = if self.try_consume_keyword(Keyword::Offset) {
             if let Token::Number(n) = self.peek() {
-                let n = n.parse::<usize>().map_err(|_| ParseError {
-                    message: "Invalid OFFSET value".to_string(),
-                })?;
+                let n = n
+                    .parse::<usize>()
+                    .map_err(|_| ParseError { message: "Invalid OFFSET value".to_string() })?;
                 self.advance();
                 Some(n)
             } else {
-                return Err(ParseError {
-                    message: "Expected integer after OFFSET".to_string(),
-                });
+                return Err(ParseError { message: "Expected integer after OFFSET".to_string() });
             }
         } else {
             None
@@ -155,9 +150,7 @@ impl<'arena> ArenaParser<'arena> {
             self.advance();
             self.intern(&name)
         } else {
-            return Err(ParseError {
-                message: "Expected CTE name".to_string(),
-            });
+            return Err(ParseError { message: "Expected CTE name".to_string() });
         };
 
         // Parse optional column list
@@ -182,11 +175,7 @@ impl<'arena> ArenaParser<'arena> {
         let query = self.parse_select_statement()?;
         self.expect_token(Token::RParen)?;
 
-        Ok(CommonTableExpr {
-            name,
-            columns,
-            query,
-        })
+        Ok(CommonTableExpr { name, columns, query })
     }
 
     /// Parse select list.
@@ -235,9 +224,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Some(self.intern(&name))
             } else {
-                return Err(ParseError {
-                    message: "Expected alias after AS".to_string(),
-                });
+                return Err(ParseError { message: "Expected alias after AS".to_string() });
             }
         } else if let Token::Identifier(name) = self.peek() {
             // Implicit alias (no AS keyword)
@@ -365,9 +352,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 self.intern(&name)
             } else {
-                return Err(ParseError {
-                    message: "Subquery requires alias".to_string(),
-                });
+                return Err(ParseError { message: "Subquery requires alias".to_string() });
             };
 
             // Parse optional column aliases: (col1, col2, ...)
@@ -420,11 +405,7 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         // Parse optional column aliases: (col1, col2, ...)
-        let column_aliases = if alias.is_some() {
-            self.parse_column_alias_list()?
-        } else {
-            None
-        };
+        let column_aliases = if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
         Ok(FromClause::Table { name, alias, column_aliases })
     }
@@ -530,7 +511,9 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse ORDER BY clause.
-    fn parse_order_by_clause(&mut self) -> Result<BumpVec<'arena, OrderByItem<'arena>>, ParseError> {
+    fn parse_order_by_clause(
+        &mut self,
+    ) -> Result<BumpVec<'arena, OrderByItem<'arena>>, ParseError> {
         let mut items = BumpVec::new_in(self.arena);
 
         loop {

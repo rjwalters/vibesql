@@ -77,9 +77,8 @@ use vibesql_ast::Statement;
 pub fn parse_with_arena_fallback(sql: &str) -> Result<Statement, ParseError> {
     // Tokenize to detect statement type
     let mut lexer = Lexer::new(sql);
-    let tokens = lexer
-        .tokenize()
-        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+    let tokens =
+        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
     // Check first token to determine statement type
     if let Some(first_token) = tokens.first() {
@@ -124,7 +123,7 @@ mod arena_fallback_tests {
     fn test_arena_fallback_select_with_cte() {
         let result = parse_with_arena_fallback(
             "WITH active_users AS (SELECT * FROM users WHERE active = TRUE) \
-             SELECT * FROM active_users"
+             SELECT * FROM active_users",
         );
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), Statement::Select(_)));

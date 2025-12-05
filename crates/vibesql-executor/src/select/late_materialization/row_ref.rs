@@ -93,10 +93,7 @@ impl JoinedRowRef {
     /// Create a new joined row reference (inner join match)
     #[inline]
     pub const fn matched(left: RowReference, right: RowReference) -> Self {
-        Self {
-            left,
-            right: Some(right),
-        }
+        Self { left, right: Some(right) }
     }
 
     /// Create a new joined row reference (left outer, no match)
@@ -157,8 +154,7 @@ impl<'a> RowResolver for VecRowResolver<'a> {
     }
 
     fn resolve_column(&self, reference: &RowReference, column_idx: usize) -> Option<&SqlValue> {
-        self.resolve(reference)
-            .and_then(|row| row.get(column_idx))
+        self.resolve(reference).and_then(|row| row.get(column_idx))
     }
 }
 
@@ -203,8 +199,7 @@ impl<'a> RowResolver for MultiTableResolver<'a> {
     }
 
     fn resolve_column(&self, reference: &RowReference, column_idx: usize) -> Option<&SqlValue> {
-        self.resolve(reference)
-            .and_then(|row| row.get(column_idx))
+        self.resolve(reference).and_then(|row| row.get(column_idx))
     }
 }
 
@@ -221,10 +216,7 @@ pub struct OwnedRowSource {
 impl OwnedRowSource {
     /// Create a new owned row source
     pub fn new(table_id: u16, rows: Vec<Row>) -> Self {
-        Self {
-            table_id,
-            rows: Arc::new(rows),
-        }
+        Self { table_id, rows: Arc::new(rows) }
     }
 
     /// Get the table ID
@@ -263,10 +255,7 @@ impl OwnedRowSource {
 
     /// Clone the Arc (cheap, just bumps reference count)
     pub fn share(&self) -> Self {
-        Self {
-            table_id: self.table_id,
-            rows: Arc::clone(&self.rows),
-        }
+        Self { table_id: self.table_id, rows: Arc::clone(&self.rows) }
     }
 }
 
@@ -319,22 +308,13 @@ mod row_ref_tests {
         let table0 = [Row::new(vec![SqlValue::Varchar("A".into())])];
         let table1 = [Row::new(vec![SqlValue::Varchar("B".into())])];
 
-        let resolver = MultiTableResolver::from_tables(vec![
-            (0, &table0[..]),
-            (1, &table1[..]),
-        ]);
+        let resolver = MultiTableResolver::from_tables(vec![(0, &table0[..]), (1, &table1[..])]);
 
         let ref0 = RowReference::new(0, 0);
         let ref1 = RowReference::new(1, 0);
 
-        assert_eq!(
-            resolver.resolve_column(&ref0, 0),
-            Some(&SqlValue::Varchar("A".into()))
-        );
-        assert_eq!(
-            resolver.resolve_column(&ref1, 0),
-            Some(&SqlValue::Varchar("B".into()))
-        );
+        assert_eq!(resolver.resolve_column(&ref0, 0), Some(&SqlValue::Varchar("A".into())));
+        assert_eq!(resolver.resolve_column(&ref1, 0), Some(&SqlValue::Varchar("B".into())));
     }
 
     #[test]
@@ -353,10 +333,8 @@ mod row_ref_tests {
 
     #[test]
     fn test_owned_row_source() {
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(100)]),
-            Row::new(vec![SqlValue::Integer(200)]),
-        ];
+        let rows =
+            vec![Row::new(vec![SqlValue::Integer(100)]), Row::new(vec![SqlValue::Integer(200)])];
 
         let source = OwnedRowSource::new(0, rows);
         assert_eq!(source.row_count(), 2);

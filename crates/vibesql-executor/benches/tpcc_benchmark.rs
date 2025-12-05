@@ -66,7 +66,8 @@ fn print_results(results: &TPCCBenchmarkResults, transaction_type: TransactionTy
     eprintln!("Transaction type: {}", transaction_type.name());
     eprintln!("Total transactions: {}", results.total_transactions);
     if results.total_transactions > 0 {
-        eprintln!("Successful: {} ({:.1}%)",
+        eprintln!(
+            "Successful: {} ({:.1}%)",
             results.successful_transactions,
             results.successful_transactions as f64 / results.total_transactions as f64 * 100.0
         );
@@ -77,19 +78,34 @@ fn print_results(results: &TPCCBenchmarkResults, transaction_type: TransactionTy
 
     eprintln!("\n--- Transaction Breakdown ---");
     if results.new_order_count > 0 {
-        eprintln!("New-Order:     {:>6} txns, avg {:>10.2} us", results.new_order_count, results.new_order_avg_us);
+        eprintln!(
+            "New-Order:     {:>6} txns, avg {:>10.2} us",
+            results.new_order_count, results.new_order_avg_us
+        );
     }
     if results.payment_count > 0 {
-        eprintln!("Payment:       {:>6} txns, avg {:>10.2} us", results.payment_count, results.payment_avg_us);
+        eprintln!(
+            "Payment:       {:>6} txns, avg {:>10.2} us",
+            results.payment_count, results.payment_avg_us
+        );
     }
     if results.order_status_count > 0 {
-        eprintln!("Order-Status:  {:>6} txns, avg {:>10.2} us", results.order_status_count, results.order_status_avg_us);
+        eprintln!(
+            "Order-Status:  {:>6} txns, avg {:>10.2} us",
+            results.order_status_count, results.order_status_avg_us
+        );
     }
     if results.delivery_count > 0 {
-        eprintln!("Delivery:      {:>6} txns, avg {:>10.2} us", results.delivery_count, results.delivery_avg_us);
+        eprintln!(
+            "Delivery:      {:>6} txns, avg {:>10.2} us",
+            results.delivery_count, results.delivery_avg_us
+        );
     }
     if results.stock_level_count > 0 {
-        eprintln!("Stock-Level:   {:>6} txns, avg {:>10.2} us", results.stock_level_count, results.stock_level_avg_us);
+        eprintln!(
+            "Stock-Level:   {:>6} txns, avg {:>10.2} us",
+            results.stock_level_count, results.stock_level_avg_us
+        );
     }
 }
 
@@ -131,11 +147,21 @@ fn run_benchmark<E: TPCCExecutor>(
         };
 
         match txn_type {
-            0 => { let _ = executor.new_order(&workload.generate_new_order()); }
-            1 => { let _ = executor.payment(&workload.generate_payment()); }
-            2 => { let _ = executor.order_status(&workload.generate_order_status()); }
-            3 => { let _ = executor.delivery(&workload.generate_delivery()); }
-            4 => { let _ = executor.stock_level(&workload.generate_stock_level()); }
+            0 => {
+                let _ = executor.new_order(&workload.generate_new_order());
+            }
+            1 => {
+                let _ = executor.payment(&workload.generate_payment());
+            }
+            2 => {
+                let _ = executor.order_status(&workload.generate_order_status());
+            }
+            3 => {
+                let _ = executor.delivery(&workload.generate_delivery());
+            }
+            4 => {
+                let _ = executor.stock_level(&workload.generate_stock_level());
+            }
             _ => unreachable!(),
         }
     }
@@ -264,11 +290,21 @@ fn run_mysql_benchmark(
         };
 
         match txn_type {
-            0 => { let _ = executor.new_order(&workload.generate_new_order()); }
-            1 => { let _ = executor.payment(&workload.generate_payment()); }
-            2 => { let _ = executor.order_status(&workload.generate_order_status()); }
-            3 => { let _ = executor.delivery(&workload.generate_delivery()); }
-            4 => { let _ = executor.stock_level(&workload.generate_stock_level()); }
+            0 => {
+                let _ = executor.new_order(&workload.generate_new_order());
+            }
+            1 => {
+                let _ = executor.payment(&workload.generate_payment());
+            }
+            2 => {
+                let _ = executor.order_status(&workload.generate_order_status());
+            }
+            3 => {
+                let _ = executor.delivery(&workload.generate_delivery());
+            }
+            4 => {
+                let _ = executor.stock_level(&workload.generate_stock_level());
+            }
             _ => unreachable!(),
         }
     }
@@ -390,20 +426,14 @@ fn main() {
 
     // Get configuration from environment
     // Scale factor can be fractional (e.g., 0.01 for micro mode)
-    let scale_factor: f64 = env::var("TPCC_SCALE_FACTOR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1.0);
+    let scale_factor: f64 =
+        env::var("TPCC_SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
 
-    let duration_secs: u64 = env::var("TPCC_DURATION_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(60);
+    let duration_secs: u64 =
+        env::var("TPCC_DURATION_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(60);
 
-    let warmup_secs: u64 = env::var("TPCC_WARMUP_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
+    let warmup_secs: u64 =
+        env::var("TPCC_WARMUP_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(10);
 
     let duration = Duration::from_secs(duration_secs);
     let warmup = Duration::from_secs(warmup_secs);
@@ -413,7 +443,10 @@ fn main() {
         match TransactionType::from_str(&args[1]) {
             Some(t) => t,
             None => {
-                eprintln!("Error: Unknown transaction type '{}'. Run with --help for usage.", args[1]);
+                eprintln!(
+                    "Error: Unknown transaction type '{}'. Run with --help for usage.",
+                    args[1]
+                );
                 std::process::exit(1);
             }
         }
@@ -445,7 +478,8 @@ fn main() {
     eprintln!("\n--- VibeSQL Benchmark ---");
     tpcc::transactions::reset_profile_counters();
     let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
-    let vibesql_results = run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
+    let vibesql_results =
+        run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
     print_results(&vibesql_results, transaction_type);
     tpcc::transactions::print_profile_summary();
 
@@ -462,7 +496,14 @@ fn main() {
         eprintln!("SQLite loaded in {:?}", sqlite_load_start.elapsed());
 
         let sqlite_executor = SqliteTransactionExecutor::new(&sqlite_conn);
-        let sqlite_results = run_benchmark(&sqlite_executor, transaction_type, num_warehouses, duration, warmup, true);
+        let sqlite_results = run_benchmark(
+            &sqlite_executor,
+            transaction_type,
+            num_warehouses,
+            duration,
+            warmup,
+            true,
+        );
         print_results(&sqlite_results, transaction_type);
 
         // DuckDB benchmark
@@ -473,7 +514,14 @@ fn main() {
         eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
 
         let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
-        let duckdb_results = run_benchmark(&duckdb_executor, transaction_type, num_warehouses, duration, warmup, true);
+        let duckdb_results = run_benchmark(
+            &duckdb_executor,
+            transaction_type,
+            num_warehouses,
+            duration,
+            warmup,
+            true,
+        );
         print_results(&duckdb_results, transaction_type);
 
         // MySQL benchmark (if MYSQL_URL is set)
@@ -517,11 +565,31 @@ fn main() {
             }
         }
 
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, compute_avg(&vibesql_results));
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "SQLite", sqlite_results.transactions_per_second, compute_avg(&sqlite_results));
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "DuckDB", duckdb_results.transactions_per_second, compute_avg(&duckdb_results));
+        eprintln!(
+            "{:<12} {:>12.2} {:>12.2}",
+            "VibeSQL",
+            vibesql_results.transactions_per_second,
+            compute_avg(&vibesql_results)
+        );
+        eprintln!(
+            "{:<12} {:>12.2} {:>12.2}",
+            "SQLite",
+            sqlite_results.transactions_per_second,
+            compute_avg(&sqlite_results)
+        );
+        eprintln!(
+            "{:<12} {:>12.2} {:>12.2}",
+            "DuckDB",
+            duckdb_results.transactions_per_second,
+            compute_avg(&duckdb_results)
+        );
         if let Some(ref mysql_res) = mysql_results {
-            eprintln!("{:<12} {:>12.2} {:>12.2}", "MySQL", mysql_res.transactions_per_second, compute_avg(mysql_res));
+            eprintln!(
+                "{:<12} {:>12.2} {:>12.2}",
+                "MySQL",
+                mysql_res.transactions_per_second,
+                compute_avg(mysql_res)
+            );
         }
     }
 
@@ -544,7 +612,12 @@ fn main() {
         eprintln!("Transaction type: {}", transaction_type.name());
         eprintln!("{:<12} {:>12} {:>12}", "Database", "TPS", "Avg (us)");
         eprintln!("{:-<12} {:->12} {:->12}", "", "", "");
-        eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, compute_avg(&vibesql_results));
+        eprintln!(
+            "{:<12} {:>12.2} {:>12.2}",
+            "VibeSQL",
+            vibesql_results.transactions_per_second,
+            compute_avg(&vibesql_results)
+        );
     }
 
     eprintln!("\n=== Done ===");

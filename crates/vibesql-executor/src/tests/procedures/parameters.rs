@@ -26,16 +26,13 @@ fn test_call_procedure_with_in_parameter() {
             },
             ProceduralStatement::Set {
                 name: "greeting".to_string(),
-                value: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "name".to_string(),
-                }),
+                value: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
             },
         ]),
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
@@ -81,22 +78,16 @@ fn test_call_procedure_with_multiple_parameters() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "a".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "b".to_string(),
-                    }),
+                    right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
                 }),
             },
         ]),
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
@@ -134,20 +125,19 @@ fn test_declare_with_default_value() {
             ProceduralStatement::Declare {
                 name: "message".to_string(),
                 data_type: DataType::Varchar { max_length: Some(20) },
-                default_value: Some(Box::new(Expression::Literal(SqlValue::Varchar("Hello".to_string())))),
+                default_value: Some(Box::new(Expression::Literal(SqlValue::Varchar(
+                    "Hello".to_string(),
+                )))),
             },
         ]),
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "test_defaults".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "test_defaults".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_ok());
@@ -180,10 +170,7 @@ fn test_variable_in_expression() {
             ProceduralStatement::Set {
                 name: "y".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "x".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
@@ -192,14 +179,11 @@ fn test_variable_in_expression() {
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "test_math".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "test_math".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_ok());
@@ -239,15 +223,9 @@ fn test_concat_function_in_procedure() {
                 value: Box::new(Expression::Function {
                     name: "CONCAT".to_string(),
                     args: vec![
-                        Expression::ColumnRef {
-                            table: None,
-                            column: "first".to_string(),
-                        },
+                        Expression::ColumnRef { table: None, column: "first".to_string() },
                         Expression::Literal(SqlValue::Varchar(" ".to_string())),
-                        Expression::ColumnRef {
-                            table: None,
-                            column: "last".to_string(),
-                        },
+                        Expression::ColumnRef { table: None, column: "last".to_string() },
                     ],
                     character_unit: None,
                 }),
@@ -256,7 +234,7 @@ fn test_concat_function_in_procedure() {
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
@@ -287,15 +265,12 @@ fn test_parameter_count_mismatch() {
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
     // Call with no arguments (expects 1)
-    let call = CallStmt {
-        procedure_name: "needs_param".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "needs_param".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_err());
@@ -317,7 +292,7 @@ fn test_out_parameter_not_yet_supported() {
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
@@ -336,10 +311,7 @@ fn test_out_parameter_not_yet_supported() {
 fn test_procedure_not_found() {
     let mut db = setup_test_db();
 
-    let call = CallStmt {
-        procedure_name: "nonexistent".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "nonexistent".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_err());

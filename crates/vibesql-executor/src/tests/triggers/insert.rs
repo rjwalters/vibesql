@@ -1,9 +1,11 @@
 //! Tests for INSERT trigger firing behavior
 
-use vibesql_ast::{CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
-use vibesql_storage::Database;
+use super::{count_audit_rows, create_audit_table, create_users_table};
 use crate::InsertExecutor;
-use super::{create_users_table, create_audit_table, count_audit_rows};
+use vibesql_ast::{
+    CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
+};
+use vibesql_storage::Database;
 
 #[test]
 fn test_after_insert_trigger_fires() {
@@ -71,15 +73,21 @@ fn test_after_insert_trigger_fires_for_each_row() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "alice".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "bob".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("charlie".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "charlie".to_string(),
+                )),
             ],
         ]),
         conflict_clause: None,

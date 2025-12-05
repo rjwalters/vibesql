@@ -1,9 +1,11 @@
 //! Tests for UPDATE trigger firing behavior
 
-use vibesql_ast::{CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
-use vibesql_storage::Database;
+use super::{count_audit_rows, create_audit_table, create_users_table};
 use crate::{InsertExecutor, UpdateExecutor};
-use super::{create_users_table, create_audit_table, count_audit_rows};
+use vibesql_ast::{
+    CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
+};
+use vibesql_storage::Database;
 
 #[test]
 fn test_after_update_trigger_fires() {
@@ -44,16 +46,22 @@ fn test_after_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
-            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("alice_updated".to_string())),
+            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "alice_updated".to_string(),
+            )),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::BinaryOp {
-            op: vibesql_ast::BinaryOperator::Equal,
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                column: "id".to_string(),
-                table: None,
-            }),
-            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
-        })),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(
+            vibesql_ast::Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::Equal,
+                left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    column: "id".to_string(),
+                    table: None,
+                }),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(1),
+                )),
+            },
+        )),
     };
     UpdateExecutor::execute(&update, &mut db).expect("Failed to update");
 
@@ -100,16 +108,22 @@ fn test_before_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
-            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("alice_updated".to_string())),
+            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "alice_updated".to_string(),
+            )),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::BinaryOp {
-            op: vibesql_ast::BinaryOperator::Equal,
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                column: "id".to_string(),
-                table: None,
-            }),
-            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
-        })),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(
+            vibesql_ast::Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::Equal,
+                left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    column: "id".to_string(),
+                    table: None,
+                }),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(1),
+                )),
+            },
+        )),
     };
     UpdateExecutor::execute(&update, &mut db).expect("Failed to update");
 

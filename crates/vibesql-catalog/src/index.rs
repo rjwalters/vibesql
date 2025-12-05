@@ -87,13 +87,7 @@ impl IndexMetadata {
         columns: Vec<IndexedColumn>,
         is_unique: bool,
     ) -> Self {
-        Self {
-            name,
-            table_name,
-            index_type,
-            columns,
-            is_unique,
-        }
+        Self { name, table_name, index_type, columns, is_unique }
     }
 
     /// Get the fully qualified index name (table.index)
@@ -105,10 +99,7 @@ impl IndexMetadata {
     pub fn can_index_column(&self, column_name: &str) -> bool {
         // For now, check if the column is the first column in the index
         // More sophisticated matching can be added later (composite index prefixes)
-        self.columns
-            .first()
-            .map(|col| col.column_name == column_name)
-            .unwrap_or(false)
+        self.columns.first().map(|col| col.column_name == column_name).unwrap_or(false)
     }
 
     /// Check if this index can be used for the given columns

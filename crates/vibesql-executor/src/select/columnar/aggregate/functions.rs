@@ -112,11 +112,12 @@ pub(super) fn compute_sum(
                     }
                     float_sum += v;
                 }
-                SqlValue::Null => {}, // NULL values don't contribute to sum
+                SqlValue::Null => {} // NULL values don't contribute to sum
                 _ => {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        format!("Cannot compute SUM on non-numeric value: {:?}", value)
-                    ))
+                    return Err(ExecutorError::UnsupportedExpression(format!(
+                        "Cannot compute SUM on non-numeric value: {:?}",
+                        value
+                    )))
                 }
             }
             count += 1;
@@ -248,15 +249,9 @@ pub(super) fn compare_for_min_max(a: &SqlValue, b: &SqlValue) -> bool {
         (SqlValue::Integer(a), SqlValue::Integer(b)) => a.cmp(b),
         (SqlValue::Bigint(a), SqlValue::Bigint(b)) => a.cmp(b),
         (SqlValue::Smallint(a), SqlValue::Smallint(b)) => a.cmp(b),
-        (SqlValue::Float(a), SqlValue::Float(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Double(a), SqlValue::Double(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Numeric(a), SqlValue::Numeric(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
+        (SqlValue::Float(a), SqlValue::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (SqlValue::Double(a), SqlValue::Double(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (SqlValue::Numeric(a), SqlValue::Numeric(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         _ => Ordering::Equal,
     };
 
@@ -291,17 +286,17 @@ pub(super) fn compute_batch_sum(
     batch: &ColumnarBatch,
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
-    let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-            column_index: column_idx,
-            batch_columns: batch.column_count(),
-        })?;
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
             if let Some(null_mask) = nulls {
                 // Handle NULLs by filtering them out
-                let filtered: Vec<i64> = values.iter()
+                let filtered: Vec<i64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -321,7 +316,8 @@ pub(super) fn compute_batch_sum(
         }
         ColumnArray::Float64(values, nulls) => {
             if let Some(null_mask) = nulls {
-                let filtered: Vec<f64> = values.iter()
+                let filtered: Vec<f64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -343,9 +339,10 @@ pub(super) fn compute_batch_sum(
             // Fallback for mixed type columns
             compute_mixed_sum(values)
         }
-        _ => Err(ExecutorError::UnsupportedExpression(
-            format!("Cannot compute SUM on column type: {:?}", column.data_type())
-        )),
+        _ => Err(ExecutorError::UnsupportedExpression(format!(
+            "Cannot compute SUM on column type: {:?}",
+            column.data_type()
+        ))),
     }
 }
 
@@ -359,16 +356,16 @@ pub(super) fn compute_batch_avg(
     batch: &ColumnarBatch,
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
-    let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-            column_index: column_idx,
-            batch_columns: batch.column_count(),
-        })?;
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
             let (sum, count) = if let Some(null_mask) = nulls {
-                let filtered: Vec<i64> = values.iter()
+                let filtered: Vec<i64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -385,7 +382,8 @@ pub(super) fn compute_batch_avg(
         }
         ColumnArray::Float64(values, nulls) => {
             let (sum, count) = if let Some(null_mask) = nulls {
-                let filtered: Vec<f64> = values.iter()
+                let filtered: Vec<f64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -405,15 +403,18 @@ pub(super) fn compute_batch_avg(
             let sum_result = compute_mixed_sum(values)?;
             let count = values.iter().filter(|v| !matches!(v, SqlValue::Null)).count();
             match sum_result {
-                SqlValue::Integer(sum) if count > 0 => Ok(SqlValue::Double(sum as f64 / count as f64)),
+                SqlValue::Integer(sum) if count > 0 => {
+                    Ok(SqlValue::Double(sum as f64 / count as f64))
+                }
                 SqlValue::Double(sum) if count > 0 => Ok(SqlValue::Double(sum / count as f64)),
                 SqlValue::Null => Ok(SqlValue::Null),
                 _ => Ok(SqlValue::Null),
             }
         }
-        _ => Err(ExecutorError::UnsupportedExpression(
-            format!("Cannot compute AVG on column type: {:?}", column.data_type())
-        )),
+        _ => Err(ExecutorError::UnsupportedExpression(format!(
+            "Cannot compute AVG on column type: {:?}",
+            column.data_type()
+        ))),
     }
 }
 
@@ -422,16 +423,16 @@ pub(super) fn compute_batch_min(
     batch: &ColumnarBatch,
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
-    let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-            column_index: column_idx,
-            batch_columns: batch.column_count(),
-        })?;
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
             if let Some(null_mask) = nulls {
-                let filtered: Vec<i64> = values.iter()
+                let filtered: Vec<i64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -449,7 +450,8 @@ pub(super) fn compute_batch_min(
         }
         ColumnArray::Float64(values, nulls) => {
             if let Some(null_mask) = nulls {
-                let filtered: Vec<f64> = values.iter()
+                let filtered: Vec<f64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -466,9 +468,10 @@ pub(super) fn compute_batch_min(
             }
         }
         ColumnArray::Mixed(values) => compute_mixed_min(values),
-        _ => Err(ExecutorError::UnsupportedExpression(
-            format!("Cannot compute MIN on column type: {:?}", column.data_type())
-        )),
+        _ => Err(ExecutorError::UnsupportedExpression(format!(
+            "Cannot compute MIN on column type: {:?}",
+            column.data_type()
+        ))),
     }
 }
 
@@ -477,16 +480,16 @@ pub(super) fn compute_batch_max(
     batch: &ColumnarBatch,
     column_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
-    let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-            column_index: column_idx,
-            batch_columns: batch.column_count(),
-        })?;
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
 
     match column {
         ColumnArray::Int64(values, nulls) => {
             if let Some(null_mask) = nulls {
-                let filtered: Vec<i64> = values.iter()
+                let filtered: Vec<i64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -504,7 +507,8 @@ pub(super) fn compute_batch_max(
         }
         ColumnArray::Float64(values, nulls) => {
             if let Some(null_mask) = nulls {
-                let filtered: Vec<f64> = values.iter()
+                let filtered: Vec<f64> = values
+                    .iter()
                     .zip(null_mask.iter())
                     .filter(|(_, &is_null)| !is_null)
                     .map(|(&v, _)| v)
@@ -521,9 +525,10 @@ pub(super) fn compute_batch_max(
             }
         }
         ColumnArray::Mixed(values) => compute_mixed_max(values),
-        _ => Err(ExecutorError::UnsupportedExpression(
-            format!("Cannot compute MAX on column type: {:?}", column.data_type())
-        )),
+        _ => Err(ExecutorError::UnsupportedExpression(format!(
+            "Cannot compute MAX on column type: {:?}",
+            column.data_type()
+        ))),
     }
 }
 
@@ -593,9 +598,12 @@ fn compute_mixed_sum(values: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 count += 1;
             }
             SqlValue::Null => {}
-            _ => return Err(ExecutorError::UnsupportedExpression(
-                format!("Cannot compute SUM on value: {:?}", value)
-            )),
+            _ => {
+                return Err(ExecutorError::UnsupportedExpression(format!(
+                    "Cannot compute SUM on value: {:?}",
+                    value
+                )))
+            }
         }
     }
 

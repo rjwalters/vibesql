@@ -5,10 +5,13 @@
 //! This pattern enables finding rows that match an aggregate computed from the CTE.
 
 use super::super::*;
-use vibesql_parser::Parser;
 use vibesql_ast::Statement;
+use vibesql_parser::Parser;
 
-fn execute_sql(db: &mut vibesql_storage::Database, sql: &str) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+fn execute_sql(
+    db: &mut vibesql_storage::Database,
+    sql: &str,
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     let stmt = Parser::parse_sql(sql).map_err(|e| ExecutorError::ParseError(format!("{:?}", e)))?;
     match stmt {
         Statement::CreateTable(create_stmt) => {
@@ -23,7 +26,10 @@ fn execute_sql(db: &mut vibesql_storage::Database, sql: &str) -> Result<Vec<vibe
             let result = SelectExecutor::new(db).execute(&select_stmt)?;
             Ok(result)
         }
-        _ => Err(ExecutorError::UnsupportedFeature(format!("Unsupported statement type: {:?}", stmt))),
+        _ => Err(ExecutorError::UnsupportedFeature(format!(
+            "Unsupported statement type: {:?}",
+            stmt
+        ))),
     }
 }
 
@@ -205,7 +211,8 @@ fn test_cte_in_select_list_scalar_subquery() {
 fn test_cte_in_in_subquery() {
     let mut db = vibesql_storage::Database::new();
 
-    execute_sql(&mut db, "CREATE TABLE orders_cte_in(order_id INT, customer_id INT, amount INT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE orders_cte_in(order_id INT, customer_id INT, amount INT)")
+        .unwrap();
     execute_sql(&mut db, "INSERT INTO orders_cte_in VALUES (1, 1, 100)").unwrap();
     execute_sql(&mut db, "INSERT INTO orders_cte_in VALUES (2, 2, 200)").unwrap();
     execute_sql(&mut db, "INSERT INTO orders_cte_in VALUES (3, 1, 150)").unwrap();

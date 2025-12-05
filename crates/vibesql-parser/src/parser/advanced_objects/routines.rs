@@ -31,7 +31,7 @@ use crate::parser::{ParseError, Parser};
 use crate::token::Token;
 use vibesql_ast::{
     CallStmt, CreateFunctionStmt, CreateProcedureStmt, DropFunctionStmt, DropProcedureStmt,
-    FunctionParameter, ParameterMode, ProcedureBody, ProcedureParameter, ProceduralStatement,
+    FunctionParameter, ParameterMode, ProceduralStatement, ProcedureBody, ProcedureParameter,
     SqlSecurity,
 };
 
@@ -77,7 +77,8 @@ impl Parser {
         let return_type = self.parse_data_type()?;
 
         // Parse optional characteristics before body
-        let (deterministic, sql_security, comment, language) = self.parse_function_characteristics()?;
+        let (deterministic, sql_security, comment, language) =
+            self.parse_function_characteristics()?;
 
         let body = self.parse_procedure_body()?;
 
@@ -105,10 +106,7 @@ impl Parser {
 
         let procedure_name = self.parse_identifier()?;
 
-        Ok(DropProcedureStmt {
-            procedure_name,
-            if_exists,
-        })
+        Ok(DropProcedureStmt { procedure_name, if_exists })
     }
 
     /// Parse DROP FUNCTION statement
@@ -123,10 +121,7 @@ impl Parser {
 
         let function_name = self.parse_identifier()?;
 
-        Ok(DropFunctionStmt {
-            function_name,
-            if_exists,
-        })
+        Ok(DropFunctionStmt { function_name, if_exists })
     }
 
     /// Parse CALL statement
@@ -140,10 +135,7 @@ impl Parser {
         let arguments = self.parse_expression_list()?;
         self.expect_token(Token::RParen)?;
 
-        Ok(CallStmt {
-            procedure_name,
-            arguments,
-        })
+        Ok(CallStmt { procedure_name, arguments })
     }
 
     /// Parse procedure parameters: [param_mode] name data_type [, ...]
@@ -173,11 +165,7 @@ impl Parser {
             let name = self.parse_identifier()?;
             let data_type = self.parse_data_type()?;
 
-            parameters.push(ProcedureParameter {
-                mode,
-                name,
-                data_type,
-            });
+            parameters.push(ProcedureParameter { mode, name, data_type });
 
             if !self.try_consume(&Token::Comma) {
                 break;
@@ -226,9 +214,7 @@ impl Parser {
             Ok(ProcedureBody::BeginEnd(statements))
         } else {
             // For now, error - require BEGIN/END block
-            Err(ParseError {
-                message: "Expected BEGIN keyword for procedure body".to_string(),
-            })
+            Err(ParseError { message: "Expected BEGIN keyword for procedure body".to_string() })
         }
     }
 
@@ -299,11 +285,7 @@ impl Parser {
 
         self.expect_token(Token::Semicolon)?;
 
-        Ok(ProceduralStatement::Declare {
-            name,
-            data_type,
-            default_value,
-        })
+        Ok(ProceduralStatement::Declare { name, data_type, default_value })
     }
 
     /// Parse SET statement
@@ -315,10 +297,7 @@ impl Parser {
         let value = self.parse_expression()?;
         self.expect_token(Token::Semicolon)?;
 
-        Ok(ProceduralStatement::Set {
-            name,
-            value: Box::new(value),
-        })
+        Ok(ProceduralStatement::Set { name, value: Box::new(value) })
     }
 
     /// Parse IF statement
@@ -328,7 +307,8 @@ impl Parser {
         let condition = self.parse_expression()?;
         self.expect_keyword(Keyword::Then)?;
 
-        let then_statements = self.parse_procedural_statements_until(&[Keyword::Else, Keyword::End])?;
+        let then_statements =
+            self.parse_procedural_statements_until(&[Keyword::Else, Keyword::End])?;
 
         let else_statements = if self.try_consume_keyword(Keyword::Else) {
             Some(self.parse_procedural_statements_until(&[Keyword::End])?)
@@ -360,10 +340,7 @@ impl Parser {
         self.expect_keyword(Keyword::While)?;
         self.expect_token(Token::Semicolon)?;
 
-        Ok(ProceduralStatement::While {
-            condition: Box::new(condition),
-            statements,
-        })
+        Ok(ProceduralStatement::While { condition: Box::new(condition), statements })
     }
 
     /// Parse LOOP statement
@@ -390,10 +367,7 @@ impl Parser {
         self.expect_keyword(Keyword::Repeat)?;
         self.expect_token(Token::Semicolon)?;
 
-        Ok(ProceduralStatement::Repeat {
-            statements,
-            condition: Box::new(condition),
-        })
+        Ok(ProceduralStatement::Repeat { statements, condition: Box::new(condition) })
     }
 
     /// Parse procedural statements until one of the keywords is encountered
@@ -452,7 +426,9 @@ impl Parser {
     ///
     /// Returns: (sql_security, comment, language)
     #[allow(clippy::type_complexity)]
-    fn parse_procedure_characteristics(&mut self) -> Result<(Option<SqlSecurity>, Option<String>, Option<String>), ParseError> {
+    fn parse_procedure_characteristics(
+        &mut self,
+    ) -> Result<(Option<SqlSecurity>, Option<String>, Option<String>), ParseError> {
         let mut sql_security = None;
         let mut comment = None;
         let mut language = None;
@@ -495,7 +471,10 @@ impl Parser {
     ///
     /// Returns: (deterministic, sql_security, comment, language)
     #[allow(clippy::type_complexity)]
-    fn parse_function_characteristics(&mut self) -> Result<(Option<bool>, Option<SqlSecurity>, Option<String>, Option<String>), ParseError> {
+    fn parse_function_characteristics(
+        &mut self,
+    ) -> Result<(Option<bool>, Option<SqlSecurity>, Option<String>, Option<String>), ParseError>
+    {
         let mut deterministic = None;
         let mut sql_security = None;
         let mut comment = None;

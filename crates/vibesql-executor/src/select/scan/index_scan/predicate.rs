@@ -330,10 +330,7 @@ pub(crate) fn extract_prefix_equality_predicates(
         return None;
     }
 
-    Some(PrefixPredicateResult {
-        prefix_key,
-        covered_columns,
-    })
+    Some(PrefixPredicateResult { prefix_key, covered_columns })
 }
 
 /// Result of prefix + trailing range predicate extraction
@@ -468,11 +465,7 @@ fn filter_expression(
 ) -> Option<Expression> {
     match expr {
         // Check if this is a covered equality predicate: col = literal or literal = col
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::Equal,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal
             if let Expression::ColumnRef { column, .. } = left.as_ref() {
                 if covered_columns.contains(&column.to_uppercase())
@@ -495,11 +488,7 @@ fn filter_expression(
             Some(expr.clone())
         }
         // Handle AND: filter both sides and recombine
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             let left_filtered = filter_expression(left, covered_columns);
             let right_filtered = filter_expression(right, covered_columns);
 
@@ -533,11 +522,7 @@ fn collect_equality_predicates(
 ) {
     match expr {
         // Handle equality: col = value or value = col
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::Equal,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal (using ColumnRef variant)
             if let Expression::ColumnRef { column, .. } = left.as_ref() {
                 if let Expression::Literal(value) = right.as_ref() {
@@ -556,11 +541,7 @@ fn collect_equality_predicates(
             }
         }
         // Recursively process AND predicates
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             collect_equality_predicates(left, predicates);
             collect_equality_predicates(right, predicates);
         }
@@ -638,11 +619,7 @@ fn collect_predicates_with_in(
 ) {
     match expr {
         // Handle equality: col = value or value = col
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::Equal,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal
             if let Expression::ColumnRef { column, .. } = left.as_ref() {
                 if let Expression::Literal(value) = right.as_ref() {
@@ -690,11 +667,7 @@ fn collect_predicates_with_in(
             }
         }
         // Recursively process AND predicates
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             collect_predicates_with_in(left, equality_predicates, in_predicates);
             collect_predicates_with_in(right, equality_predicates, in_predicates);
         }
@@ -758,7 +731,8 @@ pub(crate) fn where_clause_fully_satisfied_by_composite_key(
 ) -> bool {
     // Count predicates to verify WHERE contains exactly the right predicates
     let mut predicate_count = 0;
-    let satisfied = check_composite_satisfaction(where_expr, index_column_names, &mut predicate_count);
+    let satisfied =
+        check_composite_satisfaction(where_expr, index_column_names, &mut predicate_count);
 
     // WHERE is fully satisfied only if all parts were handled
     // and we found the expected number of predicates (one per column)
@@ -773,11 +747,7 @@ fn check_composite_satisfaction(
 ) -> bool {
     match expr {
         // Equality predicate: col = val or val = col
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::Equal,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             let col_name = extract_column_name(left).or_else(|| extract_column_name(right));
             // Check for non-NULL literals (col = NULL requires special IS NULL handling)
             let has_non_null_literal = matches!(left.as_ref(), Expression::Literal(val) if !matches!(val, SqlValue::Null))
@@ -785,9 +755,8 @@ fn check_composite_satisfaction(
 
             if let Some(name) = col_name {
                 let name_upper = name.to_uppercase();
-                let is_index_col = index_column_names
-                    .iter()
-                    .any(|c| c.to_uppercase() == name_upper);
+                let is_index_col =
+                    index_column_names.iter().any(|c| c.to_uppercase() == name_upper);
 
                 if is_index_col && has_non_null_literal {
                     *predicate_count += 1;
@@ -804,14 +773,13 @@ fn check_composite_satisfaction(
 
             if let Some(col_name) = extract_column_name(col_expr) {
                 let name_upper = col_name.to_uppercase();
-                let is_index_col = index_column_names
-                    .iter()
-                    .any(|c| c.to_uppercase() == name_upper);
+                let is_index_col =
+                    index_column_names.iter().any(|c| c.to_uppercase() == name_upper);
 
                 // All values must be literals (no NULL for optimization)
-                let all_literals = values.iter().all(|v| {
-                    matches!(v, Expression::Literal(val) if !matches!(val, SqlValue::Null))
-                });
+                let all_literals = values.iter().all(
+                    |v| matches!(v, Expression::Literal(val) if !matches!(val, SqlValue::Null)),
+                );
 
                 if is_index_col && all_literals && !values.is_empty() {
                     *predicate_count += 1;
@@ -821,11 +789,7 @@ fn check_composite_satisfaction(
             false
         }
         // AND connector
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             let left_ok = check_composite_satisfaction(left, index_column_names, predicate_count);
             let right_ok = check_composite_satisfaction(right, index_column_names, predicate_count);
             left_ok && right_ok
@@ -849,7 +813,10 @@ fn extract_column_name(expr: &Expression) -> Option<&str> {
 /// - IN predicates: IN (value1, value2, ...)
 ///
 /// Returns None if no suitable predicate found for the column.
-pub(crate) fn extract_index_predicate(expr: &Expression, column_name: &str) -> Option<IndexPredicate> {
+pub(crate) fn extract_index_predicate(
+    expr: &Expression,
+    column_name: &str,
+) -> Option<IndexPredicate> {
     // FIRST: Check for contradictions (e.g., col = 70 AND col IN (74, 69, 10))
     // This must happen before extract_range_predicate() since it returns early
     // when finding a range (like col = 70), bypassing contradiction checks.
@@ -858,7 +825,13 @@ pub(crate) fn extract_index_predicate(expr: &Expression, column_name: &str) -> O
         let mut in_values: Option<Vec<SqlValue>> = None;
         let mut range_pred: Option<RangePredicate> = None;
 
-        collect_column_predicates(expr, column_name, &mut equality_values, &mut in_values, &mut range_pred);
+        collect_column_predicates(
+            expr,
+            column_name,
+            &mut equality_values,
+            &mut in_values,
+            &mut range_pred,
+        );
 
         // Check for equality + IN contradiction
         if let Some(in_vals) = &in_values {
@@ -1037,8 +1010,10 @@ pub(crate) fn where_clause_fully_satisfied_by_index(
                 }
                 // AND of range predicates on same column: col > 10 AND col < 20
                 vibesql_ast::BinaryOperator::And => {
-                    let left_satisfied = where_clause_fully_satisfied_by_index(left, indexed_column);
-                    let right_satisfied = where_clause_fully_satisfied_by_index(right, indexed_column);
+                    let left_satisfied =
+                        where_clause_fully_satisfied_by_index(left, indexed_column);
+                    let right_satisfied =
+                        where_clause_fully_satisfied_by_index(right, indexed_column);
                     left_satisfied && right_satisfied
                 }
                 _ => false,

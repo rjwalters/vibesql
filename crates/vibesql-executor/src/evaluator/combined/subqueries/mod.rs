@@ -15,10 +15,10 @@ mod correlation;
 mod schema_utils;
 
 // Evaluator modules (private - methods defined on CombinedExpressionEvaluator)
-mod scalar;
 mod exists;
-mod quantified;
 mod in_subquery;
+mod quantified;
+mod scalar;
 
 // Re-export cache clearing function for benchmarks
 pub use in_subquery::clear_in_subquery_cache;

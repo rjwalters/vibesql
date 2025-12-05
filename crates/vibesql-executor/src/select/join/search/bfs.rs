@@ -109,7 +109,9 @@ impl JoinOrderContext {
             let final_cost = best_cost.load(Ordering::Relaxed);
             eprintln!(
                 "[JOIN_REORDER] Search completed in {:?}, explored {} states across {} depths",
-                elapsed, total_states_explored, depth_reached + 1
+                elapsed,
+                total_states_explored,
+                depth_reached + 1
             );
             eprintln!(
                 "[JOIN_REORDER] Optimal order: [{}] (total cost: {})",
@@ -139,13 +141,11 @@ impl JoinOrderContext {
         // when the join graph is not fully connected (e.g., Cartesian products)
         let candidates: Vec<&String> = if state.joined_tables.is_empty() {
             // First table: any unjoined table
-            self.all_tables
-                .iter()
-                .filter(|t| !state.joined_tables.contains(*t))
-                .collect()
+            self.all_tables.iter().filter(|t| !state.joined_tables.contains(*t)).collect()
         } else {
             // Try to find tables with join edges first (connected subgraph)
-            let connected: Vec<&String> = self.all_tables
+            let connected: Vec<&String> = self
+                .all_tables
                 .iter()
                 .filter(|t| !state.joined_tables.contains(*t))
                 .filter(|t| self.has_join_edge(&state.joined_tables, t))
@@ -159,13 +159,12 @@ impl JoinOrderContext {
                 // Allow ANY remaining table (Cartesian product is unavoidable)
                 // For Cartesian products, order by cardinality (smallest first) to minimize
                 // intermediate result sizes
-                let mut unjoined: Vec<&String> = self.all_tables
-                    .iter()
-                    .filter(|t| !state.joined_tables.contains(*t))
-                    .collect();
+                let mut unjoined: Vec<&String> =
+                    self.all_tables.iter().filter(|t| !state.joined_tables.contains(*t)).collect();
 
                 // Sort by cardinality (smallest first) to minimize intermediate sizes
-                unjoined.sort_by_key(|t| self.table_cardinalities.get(*t).copied().unwrap_or(10000));
+                unjoined
+                    .sort_by_key(|t| self.table_cardinalities.get(*t).copied().unwrap_or(10000));
 
                 unjoined
             }

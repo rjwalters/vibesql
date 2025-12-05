@@ -48,7 +48,10 @@ pub fn test(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Resul
 
 /// Test with auto-dialect switching disabled.
 /// Use this when you want the original skip behavior based on labels.
-pub fn test_no_auto_switch(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Result<(), Failed> {
+pub fn test_no_auto_switch(
+    filename: impl AsRef<Path>,
+    make_conn: impl MakeConnection,
+) -> Result<(), Failed> {
     let mut tester = Runner::new(make_conn);
     tester.add_label("mysql");
     // Auto-switch is disabled by default, but we explicitly note it here

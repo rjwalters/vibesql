@@ -18,8 +18,8 @@ use crate::btree::BTreeIndex;
 use crate::page::PageManager;
 use crate::StorageError;
 
-use super::ivfflat::IVFFlatIndex;
 use super::hnsw::HnswIndex;
+use super::ivfflat::IVFFlatIndex;
 
 /// Normalize an index name to uppercase for case-insensitive comparison
 /// This follows SQL standard identifier rules
@@ -86,22 +86,13 @@ pub struct IndexMetadata {
 #[derive(Debug, Clone)]
 pub enum IndexData {
     /// In-memory BTreeMap (for small indexes or backward compatibility)
-    InMemory {
-        data: BTreeMap<Vec<SqlValue>, Vec<usize>>,
-    },
+    InMemory { data: BTreeMap<Vec<SqlValue>, Vec<usize>> },
     /// Disk-backed B+ tree (for large indexes or persistence)
     /// Note: The B+ tree stores (key, row_id) pairs. For non-unique indexes,
     /// we serialize Vec<usize> as the row_id value to support multiple rows per key.
-    DiskBacked {
-        btree: Arc<Mutex<BTreeIndex>>,
-        page_manager: Arc<PageManager>,
-    },
+    DiskBacked { btree: Arc<Mutex<BTreeIndex>>, page_manager: Arc<PageManager> },
     /// IVFFlat index for approximate nearest neighbor search on vectors
-    IVFFlat {
-        index: IVFFlatIndex,
-    },
+    IVFFlat { index: IVFFlatIndex },
     /// HNSW index for high-performance approximate nearest neighbor search
-    Hnsw {
-        index: HnswIndex,
-    },
+    Hnsw { index: HnswIndex },
 }

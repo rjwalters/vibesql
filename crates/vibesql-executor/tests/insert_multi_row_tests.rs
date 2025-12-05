@@ -1,7 +1,7 @@
 mod common;
 
-use vibesql_executor::{ExecutorError, InsertExecutor};
 use common::setup_users_table as setup_test_table;
+use vibesql_executor::{ExecutorError, InsertExecutor};
 
 #[test]
 fn test_multi_row_insert_atomic_success() {
@@ -16,15 +16,21 @@ fn test_multi_row_insert_atomic_success() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Charlie".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Charlie".to_string(),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -51,15 +57,21 @@ fn test_multi_row_insert_atomic_failure() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null), // id = NULL (violates NOT NULL)
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Charlie".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Charlie".to_string(),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -86,11 +98,15 @@ fn test_multi_row_insert_with_column_list() {
         columns: vec!["name".to_string(), "id".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             ],
             vec![
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             ],
         ]),
@@ -118,11 +134,17 @@ fn test_multi_row_insert_type_mismatch() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
             ],
             vec![
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("not_a_number".to_string())), /* Wrong type for id */
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "not_a_number".to_string(),
+                )), /* Wrong type for id */
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -145,13 +167,21 @@ fn test_multi_row_insert_various_data_types() {
     let schema = vibesql_catalog::TableSchema::new(
         "test_types".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
                 true,
             ),
-            vibesql_catalog::ColumnSchema::new("active".to_string(), vibesql_types::DataType::Boolean, true),
+            vibesql_catalog::ColumnSchema::new(
+                "active".to_string(),
+                vibesql_types::DataType::Boolean,
+                true,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "score".to_string(),
                 vibesql_types::DataType::Float { precision: 53 },
@@ -171,13 +201,17 @@ fn test_multi_row_insert_various_data_types() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(95.5)),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(false)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(87.2)),
             ],
@@ -207,7 +241,11 @@ fn test_multi_row_insert_primary_key_violation() {
     let schema = vibesql_catalog::TableSchema::with_primary_key(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -226,11 +264,15 @@ fn test_multi_row_insert_primary_key_violation() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)), // Duplicate primary key
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
             ],
         ]),
         conflict_clause: None,

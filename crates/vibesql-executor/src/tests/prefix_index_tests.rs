@@ -228,7 +228,7 @@ fn test_composite_prefix_index() {
         Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Varchar("alice@example.com".to_string()), // email: "alice@exam" prefix
-            SqlValue::Varchar("Alice Smith".to_string()), // name: "Alice" prefix
+            SqlValue::Varchar("Alice Smith".to_string()),       // name: "Alice" prefix
         ]),
     )
     .expect("First insert should succeed");
@@ -239,7 +239,7 @@ fn test_composite_prefix_index() {
         Row::new(vec![
             SqlValue::Integer(2),
             SqlValue::Varchar("alice@example.org".to_string()), // Same "alice@exam" prefix
-            SqlValue::Varchar("Alice Jones".to_string()), // Same "Alice" prefix
+            SqlValue::Varchar("Alice Jones".to_string()),       // Same "Alice" prefix
         ]),
     );
 
@@ -252,7 +252,7 @@ fn test_composite_prefix_index() {
         Row::new(vec![
             SqlValue::Integer(3),
             SqlValue::Varchar("bob@example.com".to_string()), // Different "bob@exampl" prefix
-            SqlValue::Varchar("Alice Smith".to_string()), // Same "Alice" prefix is OK
+            SqlValue::Varchar("Alice Smith".to_string()),     // Same "Alice" prefix is OK
         ]),
     );
 
@@ -353,4 +353,3 @@ fn test_non_unique_prefix_index_allows_duplicates() {
 
     assert!(result.is_ok(), "Non-unique index should allow duplicate prefixes: {:?}", result.err());
 }
-

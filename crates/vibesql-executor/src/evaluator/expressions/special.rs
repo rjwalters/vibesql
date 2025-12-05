@@ -155,14 +155,12 @@ impl ExpressionEvaluator<'_> {
         // Full UDF support will require refactoring the evaluator to support mutable access.
         if let Some(db) = self.database {
             if db.catalog.function_exists(name) {
-                return Err(ExecutorError::UnsupportedFeature(
-                    format!(
-                        "User-defined function '{}' found but cannot be executed in this context. \
+                return Err(ExecutorError::UnsupportedFeature(format!(
+                    "User-defined function '{}' found but cannot be executed in this context. \
                          UDF execution from SELECT expressions requires mutable database access. \
                          This is a known limitation that will be addressed in a future phase.",
-                        name
-                    )
-                ));
+                    name
+                )));
             }
         }
 

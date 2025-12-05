@@ -118,9 +118,7 @@ impl SysbenchData {
     /// Generate random IDs for point select queries.
     /// Returns `count` random IDs in the range [1, table_size].
     pub fn random_ids(&mut self, count: usize) -> Vec<i64> {
-        (0..count)
-            .map(|_| self.rng.random_range(1..=self.table_size as i64))
-            .collect()
+        (0..count).map(|_| self.rng.random_range(1..=self.table_size as i64)).collect()
     }
 
     /// Generate a random range for range queries.

@@ -38,10 +38,7 @@ fn test_drop_procedure_simple() {
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
     assert!(db.catalog.procedure_exists("test_proc"));
 
-    let drop_proc = DropProcedureStmt {
-        procedure_name: "test_proc".to_string(),
-        if_exists: false,
-    };
+    let drop_proc = DropProcedureStmt { procedure_name: "test_proc".to_string(), if_exists: false };
 
     let result = advanced_objects::execute_drop_procedure(&drop_proc, &mut db);
     assert!(result.is_ok());
@@ -52,10 +49,8 @@ fn test_drop_procedure_simple() {
 fn test_drop_procedure_if_exists_not_found() {
     let mut db = setup_test_db();
 
-    let drop_proc = DropProcedureStmt {
-        procedure_name: "nonexistent".to_string(),
-        if_exists: true,
-    };
+    let drop_proc =
+        DropProcedureStmt { procedure_name: "nonexistent".to_string(), if_exists: true };
 
     // Should not error with if_exists
     let result = advanced_objects::execute_drop_procedure(&drop_proc, &mut db);
@@ -66,10 +61,8 @@ fn test_drop_procedure_if_exists_not_found() {
 fn test_drop_procedure_without_if_exists_not_found() {
     let mut db = setup_test_db();
 
-    let drop_proc = DropProcedureStmt {
-        procedure_name: "nonexistent".to_string(),
-        if_exists: false,
-    };
+    let drop_proc =
+        DropProcedureStmt { procedure_name: "nonexistent".to_string(), if_exists: false };
 
     // Should error without if_exists
     let result = advanced_objects::execute_drop_procedure(&drop_proc, &mut db);
@@ -88,14 +81,11 @@ fn test_call_procedure_simple() {
         sql_security: None,
         comment: None,
         language: None,
-        };
+    };
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "test_proc".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "test_proc".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     // Phase 2: Empty procedures should execute successfully

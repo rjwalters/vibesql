@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::{cte::CteResult, from_iterator::FromIterator};
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::combine_with_and,
     schema::CombinedSchema, timeout::TimeoutContext,
 };
-use super::{cte::CteResult, from_iterator::FromIterator};
 
 mod expression_mapper;
+mod hash_anti_join;
 pub(crate) mod hash_join;
 mod hash_join_iterator;
 mod hash_semi_join;
-mod hash_anti_join;
 mod join_analyzer;
 mod nested_loop;
 pub mod reorder;
@@ -22,9 +22,11 @@ mod tests;
 
 // Re-export join reorder analyzer for public tests
 // Re-export hash_join functions for internal use
-use hash_join::{hash_join_inner, hash_join_inner_arithmetic, hash_join_inner_multi, hash_join_left_outer};
-use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 use hash_anti_join::{hash_anti_join, hash_anti_join_with_filter};
+use hash_join::{
+    hash_join_inner, hash_join_inner_arithmetic, hash_join_inner_multi, hash_join_left_outer,
+};
+use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 // Re-export hash join iterator for public use
 pub use hash_join_iterator::HashJoinIterator;
 // Re-export nested loop join variants for internal use
@@ -85,8 +87,12 @@ impl FromData {
             {
                 let materialize_time = materialize_start.elapsed();
                 if let Self::Materialized(rows) = self {
-                    eprintln!("[Q6 PROFILE] Row materialization (collect_vec): {:?} ({} rows, {:?}/row)",
-                        materialize_time, rows.len(), materialize_time / rows.len() as u32);
+                    eprintln!(
+                        "[Q6 PROFILE] Row materialization (collect_vec): {:?} ({} rows, {:?}/row)",
+                        materialize_time,
+                        rows.len(),
+                        materialize_time / rows.len() as u32
+                    );
                 }
             }
         }
@@ -140,7 +146,10 @@ impl FromResult {
     ///
     /// This variant is used when CTE rows can be shared without cloning,
     /// enabling O(1) memory usage for CTE references without filtering.
-    pub(super) fn from_shared_rows(schema: CombinedSchema, rows: Arc<Vec<vibesql_storage::Row>>) -> Self {
+    pub(super) fn from_shared_rows(
+        schema: CombinedSchema,
+        rows: Arc<Vec<vibesql_storage::Row>>,
+    ) -> Self {
         Self { schema, data: FromData::SharedRows(rows), sorted_by: None, where_filtered: false }
     }
 
@@ -150,7 +159,12 @@ impl FromResult {
         rows: Vec<vibesql_storage::Row>,
         sorted_by: Vec<(String, vibesql_ast::OrderDirection)>,
     ) -> Self {
-        Self { schema, data: FromData::Materialized(rows), sorted_by: Some(sorted_by), where_filtered: false }
+        Self {
+            schema,
+            data: FromData::Materialized(rows),
+            sorted_by: Some(sorted_by),
+            where_filtered: false,
+        }
     }
 
     /// Create a FromResult from materialized rows with WHERE filtering already applied
@@ -220,7 +234,10 @@ impl FromResult {
 /// Helper function to combine two rows without unnecessary cloning
 /// Only creates a single combined row, avoiding intermediate clones
 #[inline]
-fn combine_rows(left_row: &vibesql_storage::Row, right_row: &vibesql_storage::Row) -> vibesql_storage::Row {
+fn combine_rows(
+    left_row: &vibesql_storage::Row,
+    right_row: &vibesql_storage::Row,
+) -> vibesql_storage::Row {
     let mut combined_values = Vec::with_capacity(left_row.values.len() + right_row.values.len());
     combined_values.extend_from_slice(&left_row.values);
     combined_values.extend_from_slice(&right_row.values);
@@ -359,8 +376,15 @@ pub(super) fn nested_loop_join(
 
                     // Apply remaining conditions as post-join filter
                     if !multi_result.remaining_conditions.is_empty() {
-                        if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
-                            result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        if let Some(filter_expr) =
+                            combine_with_and(multi_result.remaining_conditions)
+                        {
+                            result = apply_post_join_filter(
+                                result,
+                                &filter_expr,
+                                database,
+                                cte_results,
+                            )?;
                         }
                     }
 
@@ -372,7 +396,16 @@ pub(super) fn nested_loop_join(
                             let right_schema_for_removal = CombinedSchema {
                                 table_schemas: vec![(
                                     right_table_name_for_natural.clone(),
-                                    (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                    (
+                                        0,
+                                        right_schema_orig
+                                            .table_schemas
+                                            .values()
+                                            .next()
+                                            .unwrap()
+                                            .1
+                                            .clone(),
+                                    ),
                                 )]
                                 .into_iter()
                                 .collect(),
@@ -407,7 +440,8 @@ pub(super) fn nested_loop_join(
                 // Apply remaining conditions as post-join filter
                 if !multi_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result =
+                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -419,7 +453,16 @@ pub(super) fn nested_loop_join(
                         let right_schema_for_removal = CombinedSchema {
                             table_schemas: vec![(
                                 right_table_name_for_natural.clone(),
-                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                (
+                                    0,
+                                    right_schema_orig
+                                        .table_schemas
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                ),
                             )]
                             .into_iter()
                             .collect(),
@@ -461,7 +504,8 @@ pub(super) fn nested_loop_join(
                 // Apply remaining OR conditions as post-join filter
                 if !or_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(or_result.remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result =
+                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -473,7 +517,16 @@ pub(super) fn nested_loop_join(
                         let right_schema_for_removal = CombinedSchema {
                             table_schemas: vec![(
                                 right_table_name_for_natural.clone(),
-                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                (
+                                    0,
+                                    right_schema_orig
+                                        .table_schemas
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                ),
                             )]
                             .into_iter()
                             .collect(),
@@ -520,7 +573,16 @@ pub(super) fn nested_loop_join(
                         let right_schema_for_removal = CombinedSchema {
                             table_schemas: vec![(
                                 right_table_name_for_natural.clone(),
-                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                (
+                                    0,
+                                    right_schema_orig
+                                        .table_schemas
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                ),
                             )]
                             .into_iter()
                             .collect(),
@@ -569,7 +631,8 @@ pub(super) fn nested_loop_join(
 
                 if !remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result =
+                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -581,7 +644,16 @@ pub(super) fn nested_loop_join(
                         let right_schema_for_removal = CombinedSchema {
                             table_schemas: vec![(
                                 right_table_name_for_natural.clone(),
-                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                (
+                                    0,
+                                    right_schema_orig
+                                        .table_schemas
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                ),
                             )]
                             .into_iter()
                             .collect(),
@@ -632,7 +704,8 @@ pub(super) fn nested_loop_join(
 
                 if !remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result =
+                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -644,7 +717,16 @@ pub(super) fn nested_loop_join(
                         let right_schema_for_removal = CombinedSchema {
                             table_schemas: vec![(
                                 right_table_name_for_natural.clone(),
-                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                (
+                                    0,
+                                    right_schema_orig
+                                        .table_schemas
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                ),
                             )]
                             .into_iter()
                             .collect(),
@@ -713,8 +795,11 @@ pub(super) fn nested_loop_join(
 
                 // Apply remaining conditions from compound AND as post-join filter
                 if !compound_result.remaining_conditions.is_empty() {
-                    if let Some(filter_expr) = combine_with_and(compound_result.remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                    if let Some(filter_expr) =
+                        combine_with_and(compound_result.remaining_conditions)
+                    {
+                        result =
+                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -726,7 +811,16 @@ pub(super) fn nested_loop_join(
                         let right_schema_for_removal = CombinedSchema {
                             table_schemas: vec![(
                                 right_table_name_for_natural.clone(),
-                                (0, right_schema_orig.table_schemas.values().next().unwrap().1.clone()),
+                                (
+                                    0,
+                                    right_schema_orig
+                                        .table_schemas
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                ),
                             )]
                             .into_iter()
                             .collect(),
@@ -885,7 +979,12 @@ pub(super) fn nested_loop_join(
 
                     if !remaining_conditions.is_empty() {
                         if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                            result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                            result = apply_post_join_filter(
+                                result,
+                                &filter_expr,
+                                database,
+                                cte_results,
+                            )?;
                         }
                     }
 
@@ -896,9 +995,11 @@ pub(super) fn nested_loop_join(
             // Try arithmetic equijoins for hash join (TPC-DS Q2 optimization)
             // For expressions like `col1 = col2 - 53` in WHERE clause
             for (idx, equijoin) in additional_equijoins.iter().enumerate() {
-                if let Some(arith_info) =
-                    join_analyzer::analyze_arithmetic_equi_join(equijoin, &temp_schema, left_col_count)
-                {
+                if let Some(arith_info) = join_analyzer::analyze_arithmetic_equi_join(
+                    equijoin,
+                    &temp_schema,
+                    left_col_count,
+                ) {
                     // Found an arithmetic equijoin suitable for hash join!
                     let mut result = hash_join_inner_arithmetic(
                         left,
@@ -918,7 +1019,12 @@ pub(super) fn nested_loop_join(
 
                     if !remaining_conditions.is_empty() {
                         if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                            result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                            result = apply_post_join_filter(
+                                result,
+                                &filter_expr,
+                                database,
+                                cte_results,
+                            )?;
                         }
                     }
 
@@ -947,7 +1053,9 @@ pub(super) fn nested_loop_join(
     };
 
     let mut result = match join_type {
-        vibesql_ast::JoinType::Inner => nested_loop_inner_join(left, right, &combined_condition, database, timeout_ctx),
+        vibesql_ast::JoinType::Inner => {
+            nested_loop_inner_join(left, right, &combined_condition, database, timeout_ctx)
+        }
         vibesql_ast::JoinType::LeftOuter => {
             nested_loop_left_outer_join(left, right, &combined_condition, database, timeout_ctx)
         }
@@ -957,15 +1065,24 @@ pub(super) fn nested_loop_join(
         vibesql_ast::JoinType::FullOuter => {
             nested_loop_full_outer_join(left, right, &combined_condition, database, timeout_ctx)
         }
-        vibesql_ast::JoinType::Cross => nested_loop_cross_join(left, right, &combined_condition, database, timeout_ctx),
-        vibesql_ast::JoinType::Semi => nested_loop_semi_join(left, right, &combined_condition, database, timeout_ctx),
-        vibesql_ast::JoinType::Anti => nested_loop_anti_join(left, right, &combined_condition, database, timeout_ctx),
+        vibesql_ast::JoinType::Cross => {
+            nested_loop_cross_join(left, right, &combined_condition, database, timeout_ctx)
+        }
+        vibesql_ast::JoinType::Semi => {
+            nested_loop_semi_join(left, right, &combined_condition, database, timeout_ctx)
+        }
+        vibesql_ast::JoinType::Anti => {
+            nested_loop_anti_join(left, right, &combined_condition, database, timeout_ctx)
+        }
     }?;
 
     // For NATURAL JOIN, remove duplicate columns from the result
     if natural {
-        if let (Some(left_schema), Some(right_schema)) = (left_schema_for_natural, right_schema_for_natural) {
-            result = remove_duplicate_columns_for_natural_join(result, &left_schema, &right_schema)?;
+        if let (Some(left_schema), Some(right_schema)) =
+            (left_schema_for_natural, right_schema_for_natural)
+        {
+            result =
+                remove_duplicate_columns_for_natural_join(result, &left_schema, &right_schema)?;
         }
     }
 
@@ -989,10 +1106,11 @@ fn remove_duplicate_columns_for_natural_join(
     for (table_name, (_table_idx, table_schema)) in &left_schema.table_schemas {
         for col in &table_schema.columns {
             let lowercase = col.name.to_lowercase();
-            left_column_map
-                .entry(lowercase)
-                .or_default()
-                .push((table_name.clone(), col.name.clone(), col_idx));
+            left_column_map.entry(lowercase).or_default().push((
+                table_name.clone(),
+                col.name.clone(),
+                col_idx,
+            ));
             col_idx += 1;
         }
     }
@@ -1019,9 +1137,8 @@ fn remove_duplicate_columns_for_natural_join(
 
     // Project out the duplicate columns from the result
     let total_cols = left_col_count + col_idx;
-    let keep_indices: Vec<usize> = (0..total_cols)
-        .filter(|i| !right_duplicate_indices.contains(i))
-        .collect();
+    let keep_indices: Vec<usize> =
+        (0..total_cols).filter(|i| !right_duplicate_indices.contains(i)).collect();
 
     // Build new schema without duplicate columns
     let mut new_schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
@@ -1038,14 +1155,11 @@ fn remove_duplicate_columns_for_natural_join(
         }
 
         if !new_cols.is_empty() {
-            let new_table_schema = vibesql_catalog::TableSchema::new(
-                table_schema.name.clone(),
-                new_cols,
-            );
-            new_schema.table_schemas.insert(
-                table_name.clone(),
-                (new_schema.total_columns, new_table_schema.clone()),
-            );
+            let new_table_schema =
+                vibesql_catalog::TableSchema::new(table_schema.name.clone(), new_cols);
+            new_schema
+                .table_schemas
+                .insert(table_name.clone(), (new_schema.total_columns, new_table_schema.clone()));
             new_schema.total_columns += new_table_schema.columns.len();
         }
     }
@@ -1055,10 +1169,8 @@ fn remove_duplicate_columns_for_natural_join(
     let new_rows: Vec<vibesql_storage::Row> = rows
         .iter()
         .map(|row| {
-            let new_values: Vec<vibesql_types::SqlValue> = keep_indices
-                .iter()
-                .filter_map(|&i| row.values.get(i).cloned())
-                .collect();
+            let new_values: Vec<vibesql_types::SqlValue> =
+                keep_indices.iter().filter_map(|&i| row.values.get(i).cloned()).collect();
             vibesql_storage::Row::new(new_values)
         })
         .collect();

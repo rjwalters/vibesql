@@ -9,11 +9,11 @@ use vibesql_storage::Database as VibeDB;
 #[cfg(feature = "benchmark-comparison")]
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
-use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "benchmark-comparison")]
 use mysql::prelude::*;
 #[cfg(feature = "benchmark-comparison")]
 use mysql::{Pool, PooledConn};
+#[cfg(feature = "benchmark-comparison")]
+use rusqlite::Connection as SqliteConn;
 
 // =============================================================================
 // Database Loaders
@@ -55,8 +55,15 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
 
     // Compute statistics for join order optimization
     for table_name in [
-        "warehouse", "district", "customer", "history",
-        "orders", "new_order", "order_line", "item", "stock",
+        "warehouse",
+        "district",
+        "customer",
+        "history",
+        "orders",
+        "new_order",
+        "order_line",
+        "item",
+        "stock",
     ] {
         if let Some(table) = db.get_table_mut(table_name) {
             table.analyze();
@@ -182,8 +189,16 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("w_city".to_string(), varchar(), false),
             ColumnSchema::new("w_state".to_string(), varchar(), false),
             ColumnSchema::new("w_zip".to_string(), varchar(), false),
-            ColumnSchema::new("w_tax".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-            ColumnSchema::new("w_ytd".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
+            ColumnSchema::new(
+                "w_tax".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
+            ColumnSchema::new(
+                "w_ytd".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
         ],
         vec!["w_id".to_string()],
     ))
@@ -201,8 +216,16 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("d_city".to_string(), varchar(), false),
             ColumnSchema::new("d_state".to_string(), varchar(), false),
             ColumnSchema::new("d_zip".to_string(), varchar(), false),
-            ColumnSchema::new("d_tax".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-            ColumnSchema::new("d_ytd".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
+            ColumnSchema::new(
+                "d_tax".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
+            ColumnSchema::new(
+                "d_ytd".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
             ColumnSchema::new("d_next_o_id".to_string(), DataType::Integer, false),
         ],
         vec!["d_w_id".to_string(), "d_id".to_string()],
@@ -227,10 +250,26 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("c_phone".to_string(), varchar(), false),
             ColumnSchema::new("c_since".to_string(), varchar(), false),
             ColumnSchema::new("c_credit".to_string(), varchar(), false),
-            ColumnSchema::new("c_credit_lim".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-            ColumnSchema::new("c_discount".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-            ColumnSchema::new("c_balance".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-            ColumnSchema::new("c_ytd_payment".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
+            ColumnSchema::new(
+                "c_credit_lim".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
+            ColumnSchema::new(
+                "c_discount".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
+            ColumnSchema::new(
+                "c_balance".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
+            ColumnSchema::new(
+                "c_ytd_payment".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
             ColumnSchema::new("c_payment_cnt".to_string(), DataType::Integer, false),
             ColumnSchema::new("c_delivery_cnt".to_string(), DataType::Integer, false),
             ColumnSchema::new("c_data".to_string(), varchar(), false),
@@ -249,7 +288,11 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("h_d_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("h_w_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("h_date".to_string(), varchar(), false),
-            ColumnSchema::new("h_amount".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
+            ColumnSchema::new(
+                "h_amount".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
             ColumnSchema::new("h_data".to_string(), varchar(), false),
         ],
     ))
@@ -296,10 +339,19 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("ol_supply_w_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("ol_delivery_d".to_string(), varchar(), true),
             ColumnSchema::new("ol_quantity".to_string(), DataType::Integer, false),
-            ColumnSchema::new("ol_amount".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
+            ColumnSchema::new(
+                "ol_amount".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
             ColumnSchema::new("ol_dist_info".to_string(), varchar(), false),
         ],
-        vec!["ol_w_id".to_string(), "ol_d_id".to_string(), "ol_o_id".to_string(), "ol_number".to_string()],
+        vec![
+            "ol_w_id".to_string(),
+            "ol_d_id".to_string(),
+            "ol_o_id".to_string(),
+            "ol_number".to_string(),
+        ],
     ))
     .unwrap();
 
@@ -310,7 +362,11 @@ fn create_tpcc_schema_vibesql(db: &mut VibeDB) {
             ColumnSchema::new("i_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("i_im_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("i_name".to_string(), varchar(), false),
-            ColumnSchema::new("i_price".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
+            ColumnSchema::new(
+                "i_price".to_string(),
+                DataType::Decimal { precision: 15, scale: 2 },
+                false,
+            ),
             ColumnSchema::new("i_data".to_string(), varchar(), false),
         ],
         vec!["i_id".to_string()],
@@ -367,21 +423,24 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         "new_order".to_string(),
         true,
         vec![col("no_w_id"), col("no_d_id"), col("no_o_id")],
-    ).ok();
+    )
+    .ok();
 
     db.create_index(
         "pk_orders".to_string(),
         "orders".to_string(),
         true,
         vec![col("o_w_id"), col("o_d_id"), col("o_id")],
-    ).ok();
+    )
+    .ok();
 
     db.create_index(
         "pk_order_line".to_string(),
         "order_line".to_string(),
         true,
         vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id"), col("ol_number")],
-    ).ok();
+    )
+    .ok();
 
     // Secondary indexes for queries - these match the indexes created by
     // SQLite, DuckDB, and MySQL for fair benchmark comparison.
@@ -390,7 +449,8 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         "customer".to_string(),
         false,
         vec![col("c_w_id"), col("c_d_id"), col("c_last"), col("c_first")],
-    ).ok();
+    )
+    .ok();
 
     // Include o_id in the index to support ORDER BY o_id DESC LIMIT 1 efficiently.
     // This allows the Order-Status transaction to find a customer's most recent order
@@ -400,7 +460,8 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         "orders".to_string(),
         false,
         vec![col("o_w_id"), col("o_d_id"), col("o_c_id"), col("o_id")],
-    ).ok();
+    )
+    .ok();
 
     // Stock-Level transaction index: enables efficient range scans on order_line
     // for the last 20 orders per TPC-C spec 2.8. This matches the idx_order_line_district
@@ -410,7 +471,8 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         "order_line".to_string(),
         false,
         vec![col("ol_w_id"), col("ol_d_id"), col("ol_o_id")],
-    ).ok();
+    )
+    .ok();
 
     // Stock-Level optimization: index for filtering low-quantity stock items (#3221)
     // The Stock-Level transaction has a subquery:
@@ -422,7 +484,8 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
         "stock".to_string(),
         false,
         vec![col("s_w_id"), col("s_quantity"), col("s_i_id")],
-    ).ok();
+    )
+    .ok();
 }
 
 fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCCData) {
@@ -778,16 +841,19 @@ fn create_tpcc_indexes_sqlite(conn: &SqliteConn) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCCData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO item VALUES (?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO item VALUES (?, ?, ?, ?, ?)").unwrap();
 
     let num_items = data.num_items();
     for i_id in 1..=num_items {
         let item = data.gen_item(i_id);
         stmt.execute(rusqlite::params![
-            item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data
-        ]).unwrap();
+            item.i_id,
+            item.i_im_id,
+            item.i_name,
+            item.i_price,
+            item.i_data
+        ])
+        .unwrap();
     }
 }
 
@@ -797,27 +863,49 @@ fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCCData, w_id: i32) {
     conn.execute(
         "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
-            warehouse.w_id, warehouse.w_name, warehouse.w_street_1, warehouse.w_street_2,
-            warehouse.w_city, warehouse.w_state, warehouse.w_zip, warehouse.w_tax, warehouse.w_ytd
+            warehouse.w_id,
+            warehouse.w_name,
+            warehouse.w_street_1,
+            warehouse.w_street_2,
+            warehouse.w_city,
+            warehouse.w_state,
+            warehouse.w_zip,
+            warehouse.w_tax,
+            warehouse.w_ytd
         ],
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_stock_sqlite(conn: &SqliteConn, data: &mut TPCCData, w_id: i32) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     let num_items = data.num_items();
     for i_id in 1..=num_items {
         let stock = data.gen_stock(i_id, w_id);
         stmt.execute(rusqlite::params![
-            stock.s_i_id, stock.s_w_id, stock.s_quantity,
-            stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05,
-            stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10,
-            stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data
-        ]).unwrap();
+            stock.s_i_id,
+            stock.s_w_id,
+            stock.s_quantity,
+            stock.s_dist_01,
+            stock.s_dist_02,
+            stock.s_dist_03,
+            stock.s_dist_04,
+            stock.s_dist_05,
+            stock.s_dist_06,
+            stock.s_dist_07,
+            stock.s_dist_08,
+            stock.s_dist_09,
+            stock.s_dist_10,
+            stock.s_ytd,
+            stock.s_order_cnt,
+            stock.s_remote_cnt,
+            stock.s_data
+        ])
+        .unwrap();
     }
 }
 
@@ -827,10 +915,20 @@ fn load_district_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id:
     conn.execute(
         "INSERT INTO district VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
-            district.d_id, district.d_w_id, district.d_name, district.d_street_1, district.d_street_2,
-            district.d_city, district.d_state, district.d_zip, district.d_tax, district.d_ytd, district.d_next_o_id
+            district.d_id,
+            district.d_w_id,
+            district.d_name,
+            district.d_street_1,
+            district.d_street_2,
+            district.d_city,
+            district.d_state,
+            district.d_zip,
+            district.d_tax,
+            district.d_ytd,
+            district.d_next_o_id
         ],
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -838,27 +936,51 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id:
     let mut cust_stmt = conn.prepare(
         "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
-    let mut hist_stmt = conn.prepare(
-        "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut hist_stmt =
+        conn.prepare("INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     let customers_per_district = data.customers_per_district();
     for c_id in 1..=customers_per_district {
         let customer = data.gen_customer(c_id, d_id, w_id);
-        cust_stmt.execute(rusqlite::params![
-            customer.c_id, customer.c_d_id, customer.c_w_id,
-            customer.c_first, customer.c_middle, customer.c_last,
-            customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip,
-            customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim,
-            customer.c_discount, customer.c_balance, customer.c_ytd_payment,
-            customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data
-        ]).unwrap();
+        cust_stmt
+            .execute(rusqlite::params![
+                customer.c_id,
+                customer.c_d_id,
+                customer.c_w_id,
+                customer.c_first,
+                customer.c_middle,
+                customer.c_last,
+                customer.c_street_1,
+                customer.c_street_2,
+                customer.c_city,
+                customer.c_state,
+                customer.c_zip,
+                customer.c_phone,
+                customer.c_since,
+                customer.c_credit,
+                customer.c_credit_lim,
+                customer.c_discount,
+                customer.c_balance,
+                customer.c_ytd_payment,
+                customer.c_payment_cnt,
+                customer.c_delivery_cnt,
+                customer.c_data
+            ])
+            .unwrap();
 
         let history = data.gen_history(c_id, d_id, w_id);
-        hist_stmt.execute(rusqlite::params![
-            history.h_c_id, history.h_c_d_id, history.h_c_w_id,
-            history.h_d_id, history.h_w_id, history.h_date, history.h_amount, history.h_data
-        ]).unwrap();
+        hist_stmt
+            .execute(rusqlite::params![
+                history.h_c_id,
+                history.h_c_d_id,
+                history.h_c_w_id,
+                history.h_d_id,
+                history.h_w_id,
+                history.h_date,
+                history.h_amount,
+                history.h_data
+            ])
+            .unwrap();
     }
 }
 
@@ -874,33 +996,46 @@ fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i
         c_ids.swap(i, j);
     }
 
-    let mut order_stmt = conn.prepare(
-        "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
-    let mut ol_stmt = conn.prepare(
-        "INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
-    let mut no_stmt = conn.prepare(
-        "INSERT INTO new_order VALUES (?, ?, ?)"
-    ).unwrap();
+    let mut order_stmt =
+        conn.prepare("INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
+    let mut ol_stmt =
+        conn.prepare("INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
+    let mut no_stmt = conn.prepare("INSERT INTO new_order VALUES (?, ?, ?)").unwrap();
 
     for o_id in 1..=orders_per_district {
         let c_id = c_ids[(o_id - 1) as usize];
         let order = data.gen_order(o_id, d_id, w_id, c_id);
 
-        order_stmt.execute(rusqlite::params![
-            order.o_id, order.o_d_id, order.o_w_id, order.o_c_id,
-            order.o_entry_d, order.o_carrier_id, order.o_ol_cnt, order.o_all_local
-        ]).unwrap();
+        order_stmt
+            .execute(rusqlite::params![
+                order.o_id,
+                order.o_d_id,
+                order.o_w_id,
+                order.o_c_id,
+                order.o_entry_d,
+                order.o_carrier_id,
+                order.o_ol_cnt,
+                order.o_all_local
+            ])
+            .unwrap();
 
         let delivered = o_id <= delivered_threshold;
         for ol_number in 1..=order.o_ol_cnt {
             let ol = data.gen_order_line(o_id, d_id, w_id, ol_number, delivered);
-            ol_stmt.execute(rusqlite::params![
-                ol.ol_o_id, ol.ol_d_id, ol.ol_w_id, ol.ol_number,
-                ol.ol_i_id, ol.ol_supply_w_id, ol.ol_delivery_d,
-                ol.ol_quantity, ol.ol_amount, ol.ol_dist_info
-            ]).unwrap();
+            ol_stmt
+                .execute(rusqlite::params![
+                    ol.ol_o_id,
+                    ol.ol_d_id,
+                    ol.ol_w_id,
+                    ol.ol_number,
+                    ol.ol_i_id,
+                    ol.ol_supply_w_id,
+                    ol.ol_delivery_d,
+                    ol.ol_quantity,
+                    ol.ol_amount,
+                    ol.ol_dist_info
+                ])
+                .unwrap();
         }
 
         if o_id > delivered_threshold {
@@ -1061,16 +1196,19 @@ fn create_tpcc_indexes_duckdb(conn: &DuckDBConn) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_item_duckdb(conn: &DuckDBConn, data: &mut TPCCData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO item VALUES (?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO item VALUES (?, ?, ?, ?, ?)").unwrap();
 
     let num_items = data.num_items();
     for i_id in 1..=num_items {
         let item = data.gen_item(i_id);
         stmt.execute(duckdb::params![
-            item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data
-        ]).unwrap();
+            item.i_id,
+            item.i_im_id,
+            item.i_name,
+            item.i_price,
+            item.i_data
+        ])
+        .unwrap();
     }
 }
 
@@ -1080,27 +1218,49 @@ fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCCData, w_id: i32) {
     conn.execute(
         "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         duckdb::params![
-            warehouse.w_id, warehouse.w_name, warehouse.w_street_1, warehouse.w_street_2,
-            warehouse.w_city, warehouse.w_state, warehouse.w_zip, warehouse.w_tax, warehouse.w_ytd
+            warehouse.w_id,
+            warehouse.w_name,
+            warehouse.w_street_1,
+            warehouse.w_street_2,
+            warehouse.w_city,
+            warehouse.w_state,
+            warehouse.w_zip,
+            warehouse.w_tax,
+            warehouse.w_ytd
         ],
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_stock_duckdb(conn: &DuckDBConn, data: &mut TPCCData, w_id: i32) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     let num_items = data.num_items();
     for i_id in 1..=num_items {
         let stock = data.gen_stock(i_id, w_id);
         stmt.execute(duckdb::params![
-            stock.s_i_id, stock.s_w_id, stock.s_quantity,
-            stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05,
-            stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10,
-            stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data
-        ]).unwrap();
+            stock.s_i_id,
+            stock.s_w_id,
+            stock.s_quantity,
+            stock.s_dist_01,
+            stock.s_dist_02,
+            stock.s_dist_03,
+            stock.s_dist_04,
+            stock.s_dist_05,
+            stock.s_dist_06,
+            stock.s_dist_07,
+            stock.s_dist_08,
+            stock.s_dist_09,
+            stock.s_dist_10,
+            stock.s_ytd,
+            stock.s_order_cnt,
+            stock.s_remote_cnt,
+            stock.s_data
+        ])
+        .unwrap();
     }
 }
 
@@ -1110,10 +1270,20 @@ fn load_district_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id:
     conn.execute(
         "INSERT INTO district VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         duckdb::params![
-            district.d_id, district.d_w_id, district.d_name, district.d_street_1, district.d_street_2,
-            district.d_city, district.d_state, district.d_zip, district.d_tax, district.d_ytd, district.d_next_o_id
+            district.d_id,
+            district.d_w_id,
+            district.d_name,
+            district.d_street_1,
+            district.d_street_2,
+            district.d_city,
+            district.d_state,
+            district.d_zip,
+            district.d_tax,
+            district.d_ytd,
+            district.d_next_o_id
         ],
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -1121,27 +1291,51 @@ fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id:
     let mut cust_stmt = conn.prepare(
         "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).unwrap();
-    let mut hist_stmt = conn.prepare(
-        "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut hist_stmt =
+        conn.prepare("INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     let customers_per_district = data.customers_per_district();
     for c_id in 1..=customers_per_district {
         let customer = data.gen_customer(c_id, d_id, w_id);
-        cust_stmt.execute(duckdb::params![
-            customer.c_id, customer.c_d_id, customer.c_w_id,
-            customer.c_first, customer.c_middle, customer.c_last,
-            customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip,
-            customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim,
-            customer.c_discount, customer.c_balance, customer.c_ytd_payment,
-            customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data
-        ]).unwrap();
+        cust_stmt
+            .execute(duckdb::params![
+                customer.c_id,
+                customer.c_d_id,
+                customer.c_w_id,
+                customer.c_first,
+                customer.c_middle,
+                customer.c_last,
+                customer.c_street_1,
+                customer.c_street_2,
+                customer.c_city,
+                customer.c_state,
+                customer.c_zip,
+                customer.c_phone,
+                customer.c_since,
+                customer.c_credit,
+                customer.c_credit_lim,
+                customer.c_discount,
+                customer.c_balance,
+                customer.c_ytd_payment,
+                customer.c_payment_cnt,
+                customer.c_delivery_cnt,
+                customer.c_data
+            ])
+            .unwrap();
 
         let history = data.gen_history(c_id, d_id, w_id);
-        hist_stmt.execute(duckdb::params![
-            history.h_c_id, history.h_c_d_id, history.h_c_w_id,
-            history.h_d_id, history.h_w_id, history.h_date, history.h_amount, history.h_data
-        ]).unwrap();
+        hist_stmt
+            .execute(duckdb::params![
+                history.h_c_id,
+                history.h_c_d_id,
+                history.h_c_w_id,
+                history.h_d_id,
+                history.h_w_id,
+                history.h_date,
+                history.h_amount,
+                history.h_data
+            ])
+            .unwrap();
     }
 }
 
@@ -1157,33 +1351,46 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i
         c_ids.swap(i, j);
     }
 
-    let mut order_stmt = conn.prepare(
-        "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
-    let mut ol_stmt = conn.prepare(
-        "INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
-    let mut no_stmt = conn.prepare(
-        "INSERT INTO new_order VALUES (?, ?, ?)"
-    ).unwrap();
+    let mut order_stmt =
+        conn.prepare("INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
+    let mut ol_stmt =
+        conn.prepare("INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
+    let mut no_stmt = conn.prepare("INSERT INTO new_order VALUES (?, ?, ?)").unwrap();
 
     for o_id in 1..=orders_per_district {
         let c_id = c_ids[(o_id - 1) as usize];
         let order = data.gen_order(o_id, d_id, w_id, c_id);
 
-        order_stmt.execute(duckdb::params![
-            order.o_id, order.o_d_id, order.o_w_id, order.o_c_id,
-            order.o_entry_d, order.o_carrier_id, order.o_ol_cnt, order.o_all_local
-        ]).unwrap();
+        order_stmt
+            .execute(duckdb::params![
+                order.o_id,
+                order.o_d_id,
+                order.o_w_id,
+                order.o_c_id,
+                order.o_entry_d,
+                order.o_carrier_id,
+                order.o_ol_cnt,
+                order.o_all_local
+            ])
+            .unwrap();
 
         let delivered = o_id <= delivered_threshold;
         for ol_number in 1..=order.o_ol_cnt {
             let ol = data.gen_order_line(o_id, d_id, w_id, ol_number, delivered);
-            ol_stmt.execute(duckdb::params![
-                ol.ol_o_id, ol.ol_d_id, ol.ol_w_id, ol.ol_number,
-                ol.ol_i_id, ol.ol_supply_w_id, ol.ol_delivery_d,
-                ol.ol_quantity, ol.ol_amount, ol.ol_dist_info
-            ]).unwrap();
+            ol_stmt
+                .execute(duckdb::params![
+                    ol.ol_o_id,
+                    ol.ol_d_id,
+                    ol.ol_w_id,
+                    ol.ol_number,
+                    ol.ol_i_id,
+                    ol.ol_supply_w_id,
+                    ol.ol_delivery_d,
+                    ol.ol_quantity,
+                    ol.ol_amount,
+                    ol.ol_dist_info
+                ])
+                .unwrap();
         }
 
         if o_id > delivered_threshold {
@@ -1388,15 +1595,14 @@ fn create_tpcc_schema_mysql(conn: &mut PooledConn) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
+    conn.query_drop("CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first)")
+        .unwrap();
+    conn.query_drop("CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id)")
+        .unwrap();
     conn.query_drop(
-        "CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first)"
-    ).unwrap();
-    conn.query_drop(
-        "CREATE INDEX idx_orders_customer ON orders (o_w_id, o_d_id, o_c_id, o_id)"
-    ).unwrap();
-    conn.query_drop(
-        "CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id)"
-    ).unwrap();
+        "CREATE INDEX idx_order_line_district ON order_line (ol_w_id, ol_d_id, ol_o_id)",
+    )
+    .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -1407,7 +1613,8 @@ fn load_item_mysql(conn: &mut PooledConn, data: &mut TPCCData) {
         conn.exec_drop(
             "INSERT INTO item VALUES (?, ?, ?, ?, ?)",
             (item.i_id, item.i_im_id, &item.i_name, item.i_price, &item.i_data),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -1417,10 +1624,18 @@ fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
     conn.exec_drop(
         "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            warehouse.w_id, &warehouse.w_name, &warehouse.w_street_1, &warehouse.w_street_2,
-            &warehouse.w_city, &warehouse.w_state, &warehouse.w_zip, warehouse.w_tax, warehouse.w_ytd
+            warehouse.w_id,
+            &warehouse.w_name,
+            &warehouse.w_street_1,
+            &warehouse.w_street_2,
+            &warehouse.w_city,
+            &warehouse.w_state,
+            &warehouse.w_zip,
+            warehouse.w_tax,
+            warehouse.w_ytd,
         ),
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -1453,7 +1668,8 @@ fn load_stock_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
         conn.exec_drop(
             "INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params,
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -1475,10 +1691,8 @@ fn load_district_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_
         Value::from(district.d_ytd),
         Value::from(district.d_next_o_id),
     ];
-    conn.exec_drop(
-        "INSERT INTO district VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        params,
-    ).unwrap();
+    conn.exec_drop("INSERT INTO district VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params)
+        .unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
@@ -1520,10 +1734,17 @@ fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_
         conn.exec_drop(
             "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                history.h_c_id, history.h_c_d_id, history.h_c_w_id,
-                history.h_d_id, history.h_w_id, &history.h_date, history.h_amount, &history.h_data
+                history.h_c_id,
+                history.h_c_d_id,
+                history.h_c_w_id,
+                history.h_d_id,
+                history.h_w_id,
+                &history.h_date,
+                history.h_amount,
+                &history.h_data,
             ),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -1548,10 +1769,17 @@ fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id
         conn.exec_drop(
             "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                order.o_id, order.o_d_id, order.o_w_id, order.o_c_id,
-                &order.o_entry_d, order.o_carrier_id, order.o_ol_cnt, order.o_all_local
+                order.o_id,
+                order.o_d_id,
+                order.o_w_id,
+                order.o_c_id,
+                &order.o_entry_d,
+                order.o_carrier_id,
+                order.o_ol_cnt,
+                order.o_all_local,
             ),
-        ).unwrap();
+        )
+        .unwrap();
 
         let delivered = o_id <= delivered_threshold;
         for ol_number in 1..=order.o_ol_cnt {
@@ -1568,10 +1796,8 @@ fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id
                 Value::from(ol.ol_amount),
                 Value::from(ol.ol_dist_info),
             ];
-            conn.exec_drop(
-                "INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                params,
-            ).unwrap();
+            conn.exec_drop("INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params)
+                .unwrap();
         }
 
         if o_id > delivered_threshold {
@@ -1579,7 +1805,8 @@ fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id
             conn.exec_drop(
                 "INSERT INTO new_order VALUES (?, ?, ?)",
                 (no.no_o_id, no.no_d_id, no.no_w_id),
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
 }

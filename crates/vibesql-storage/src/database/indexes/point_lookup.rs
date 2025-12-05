@@ -77,15 +77,13 @@ impl IndexData {
             IndexData::DiskBacked { btree, .. } => {
                 // Safely acquire lock and check if key exists
                 match acquire_btree_lock(btree) {
-                    Ok(guard) => {
-                        match guard.lookup(&normalized_key) {
-                            Ok(row_ids) => !row_ids.is_empty(),
-                            Err(e) => {
-                                log::warn!("BTreeIndex lookup failed in contains_key: {}", e);
-                                false
-                            }
+                    Ok(guard) => match guard.lookup(&normalized_key) {
+                        Ok(row_ids) => !row_ids.is_empty(),
+                        Err(e) => {
+                            log::warn!("BTreeIndex lookup failed in contains_key: {}", e);
+                            false
                         }
-                    }
+                    },
                     Err(e) => {
                         log::warn!("BTreeIndex lock acquisition failed in contains_key: {}", e);
                         false
@@ -144,10 +142,8 @@ impl IndexData {
 
                 // Normalize values for consistent lookup (matches insertion-time normalization)
                 // Convert SqlValue values to Key (Vec<SqlValue>) format
-                let keys: Vec<Vec<SqlValue>> = unique_values
-                    .iter()
-                    .map(|v| vec![normalize_for_comparison(v)])
-                    .collect();
+                let keys: Vec<Vec<SqlValue>> =
+                    unique_values.iter().map(|v| vec![normalize_for_comparison(v)]).collect();
 
                 // Safely acquire lock and call BTreeIndex::multi_lookup
                 match acquire_btree_lock(btree) {

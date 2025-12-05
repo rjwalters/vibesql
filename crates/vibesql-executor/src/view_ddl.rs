@@ -20,10 +20,9 @@ impl ViewExecutor {
             let view_exists = database.catalog.get_view(&stmt.view_name).is_some();
             if view_exists {
                 // Drop the existing view (no cascade needed for OR REPLACE)
-                database
-                    .catalog
-                    .drop_view(&stmt.view_name, false)
-                    .map_err(|e| ExecutorError::StorageError(format!("Failed to drop existing view: {:?}", e)))?;
+                database.catalog.drop_view(&stmt.view_name, false).map_err(|e| {
+                    ExecutorError::StorageError(format!("Failed to drop existing view: {:?}", e))
+                })?;
             }
         }
 
@@ -66,15 +65,15 @@ impl ViewExecutor {
         };
 
         // Drop the view
-        let result = database
-            .catalog
-            .drop_view_with_behavior(&stmt.view_name, drop_behavior);
+        let result = database.catalog.drop_view_with_behavior(&stmt.view_name, drop_behavior);
 
         match result {
             Ok(()) => Ok(format!("View '{}' dropped", stmt.view_name)),
             Err(e) => {
                 // If IF EXISTS and view doesn't exist, that's OK
-                if stmt.if_exists && matches!(e, vibesql_catalog::errors::CatalogError::ViewNotFound(_)) {
+                if stmt.if_exists
+                    && matches!(e, vibesql_catalog::errors::CatalogError::ViewNotFound(_))
+                {
                     Ok(format!("View '{}' does not exist (skipped)", stmt.view_name))
                 } else {
                     Err(ExecutorError::StorageError(format!("Failed to drop view: {:?}", e)))

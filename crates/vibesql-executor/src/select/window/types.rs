@@ -24,7 +24,10 @@ pub struct WindowFunctionKey {
 
 impl WindowFunctionKey {
     /// Create a key from a window function expression
-    pub fn from_expression(function: &WindowFunctionSpec, window: &vibesql_ast::WindowSpec) -> Self {
+    pub fn from_expression(
+        function: &WindowFunctionSpec,
+        window: &vibesql_ast::WindowSpec,
+    ) -> Self {
         let mut key_parts = Vec::new();
 
         // Add function name and args

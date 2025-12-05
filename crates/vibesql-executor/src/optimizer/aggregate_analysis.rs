@@ -8,9 +8,9 @@
 #![allow(clippy::redundant_closure, clippy::unnecessary_map_or)]
 
 use std::collections::HashSet;
-use vibesql_ast::{Expression, SelectStmt};
 #[cfg(test)]
 use vibesql_ast::GroupByClause;
+use vibesql_ast::{Expression, SelectStmt};
 
 /// Analysis of aggregate operations in a query
 ///
@@ -172,11 +172,7 @@ impl AggregateAnalysis {
                 Self::contains_aggregate(left) || Self::contains_aggregate(right)
             }
             Expression::UnaryOp { expr, .. } => Self::contains_aggregate(expr),
-            Expression::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => {
+            Expression::Case { operand, when_clauses, else_result } => {
                 if let Some(op) = operand {
                     if Self::contains_aggregate(op) {
                         return true;
@@ -199,7 +195,9 @@ impl AggregateAnalysis {
                 }
                 false
             }
-            Expression::Function { args, .. } => args.iter().any(|arg| Self::contains_aggregate(arg)),
+            Expression::Function { args, .. } => {
+                args.iter().any(|arg| Self::contains_aggregate(arg))
+            }
             Expression::IsNull { expr, .. } => Self::contains_aggregate(expr),
             Expression::In { expr, .. } => Self::contains_aggregate(expr),
             Expression::InList { expr, values, .. } => {
@@ -238,11 +236,7 @@ impl AggregateAnalysis {
             Expression::UnaryOp { expr, .. } => {
                 Self::extract_table_refs(expr, tables);
             }
-            Expression::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => {
+            Expression::Case { operand, when_clauses, else_result } => {
                 if let Some(op) = operand {
                     Self::extract_table_refs(op, tables);
                 }
@@ -319,11 +313,7 @@ impl AggregateAnalysis {
             Expression::UnaryOp { expr, .. } => {
                 Self::extract_aggregate_tables(expr, tables);
             }
-            Expression::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => {
+            Expression::Case { operand, when_clauses, else_result } => {
                 if let Some(op) = operand {
                     Self::extract_aggregate_tables(op, tables);
                 }
@@ -368,7 +358,8 @@ impl AggregateAnalysis {
                     }
                     _ => {
                         // Check if comparing aggregate to constant
-                        let has_aggregate = Self::contains_aggregate(left) || Self::contains_aggregate(right);
+                        let has_aggregate =
+                            Self::contains_aggregate(left) || Self::contains_aggregate(right);
                         let has_constant = matches!(left.as_ref(), Expression::Literal(_))
                             || matches!(right.as_ref(), Expression::Literal(_));
 
@@ -378,7 +369,9 @@ impl AggregateAnalysis {
                                 Equal => 0.05,
 
                                 // Range comparisons moderately selective (10-30%)
-                                GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual => 0.25,
+                                GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual => {
+                                    0.25
+                                }
 
                                 // Inequality less selective (50-95%)
                                 NotEqual => 0.75,
@@ -496,18 +489,11 @@ mod tests {
     use vibesql_ast::{Expression, SelectItem, SelectStmt};
 
     fn make_column_ref(table: &str, column: &str) -> Expression {
-        Expression::ColumnRef {
-            table: Some(table.to_string()),
-            column: column.to_string(),
-        }
+        Expression::ColumnRef { table: Some(table.to_string()), column: column.to_string() }
     }
 
     fn make_aggregate(name: &str, arg: Expression) -> Expression {
-        Expression::AggregateFunction {
-            name: name.to_string(),
-            distinct: false,
-            args: vec![arg],
-        }
+        Expression::AggregateFunction { name: name.to_string(), distinct: false, args: vec![arg] }
     }
 
     #[test]

@@ -98,10 +98,7 @@ pub struct GraphQLError {
 
 impl GraphQLError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            extensions: None,
-        }
+        Self { message: message.into(), extensions: None }
     }
 }
 
@@ -248,10 +245,7 @@ fn parse_not_clause(value: &JsonValue) -> Result<WhereClause, String> {
 fn parse_field_conditions(field_name: &str, value: &JsonValue) -> Result<Vec<WhereClause>, String> {
     match value {
         // Direct equality: { field: "value" }
-        JsonValue::String(_)
-        | JsonValue::Number(_)
-        | JsonValue::Bool(_)
-        | JsonValue::Null => {
+        JsonValue::String(_) | JsonValue::Number(_) | JsonValue::Bool(_) | JsonValue::Null => {
             Ok(vec![WhereClause::Condition(FieldCondition {
                 field: field_name.to_string(),
                 op: ComparisonOp::Eq,
@@ -308,18 +302,14 @@ pub fn where_clause_to_sql(
     match clause {
         WhereClause::Condition(cond) => condition_to_sql(cond, params),
         WhereClause::And(clauses) => {
-            let sql_parts: Result<Vec<String>, String> = clauses
-                .iter()
-                .map(|c| where_clause_to_sql(c, params))
-                .collect();
+            let sql_parts: Result<Vec<String>, String> =
+                clauses.iter().map(|c| where_clause_to_sql(c, params)).collect();
             let parts = sql_parts?;
             Ok(format!("({})", parts.join(" AND ")))
         }
         WhereClause::Or(clauses) => {
-            let sql_parts: Result<Vec<String>, String> = clauses
-                .iter()
-                .map(|c| where_clause_to_sql(c, params))
-                .collect();
+            let sql_parts: Result<Vec<String>, String> =
+                clauses.iter().map(|c| where_clause_to_sql(c, params)).collect();
             let parts = sql_parts?;
             Ok(format!("({})", parts.join(" OR ")))
         }
@@ -387,37 +377,25 @@ fn condition_to_sql(
             Ok(format!("LOWER({}) LIKE LOWER(${})", field, param_idx))
         }
         ComparisonOp::Contains => {
-            let value_str = cond
-                .value
-                .as_str()
-                .ok_or("contains requires a string value")?;
+            let value_str = cond.value.as_str().ok_or("contains requires a string value")?;
             let param_idx = params.len() + 1;
             params.push(vibesql_types::SqlValue::Varchar(format!("%{}%", value_str)));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::StartsWith => {
-            let value_str = cond
-                .value
-                .as_str()
-                .ok_or("startsWith requires a string value")?;
+            let value_str = cond.value.as_str().ok_or("startsWith requires a string value")?;
             let param_idx = params.len() + 1;
             params.push(vibesql_types::SqlValue::Varchar(format!("{}%", value_str)));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::EndsWith => {
-            let value_str = cond
-                .value
-                .as_str()
-                .ok_or("endsWith requires a string value")?;
+            let value_str = cond.value.as_str().ok_or("endsWith requires a string value")?;
             let param_idx = params.len() + 1;
             params.push(vibesql_types::SqlValue::Varchar(format!("%{}", value_str)));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::In => {
-            let arr = cond
-                .value
-                .as_array()
-                .ok_or("IN requires an array value")?;
+            let arr = cond.value.as_array().ok_or("IN requires an array value")?;
             if arr.is_empty() {
                 // Empty IN list is always false
                 return Ok("FALSE".to_string());
@@ -431,10 +409,7 @@ fn condition_to_sql(
             Ok(format!("{} IN ({})", field, placeholders.join(", ")))
         }
         ComparisonOp::NotIn => {
-            let arr = cond
-                .value
-                .as_array()
-                .ok_or("NOT IN requires an array value")?;
+            let arr = cond.value.as_array().ok_or("NOT IN requires an array value")?;
             if arr.is_empty() {
                 // Empty NOT IN list is always true
                 return Ok("TRUE".to_string());
@@ -448,10 +423,7 @@ fn condition_to_sql(
             Ok(format!("{} NOT IN ({})", field, placeholders.join(", ")))
         }
         ComparisonOp::IsNull => {
-            let is_null = cond
-                .value
-                .as_bool()
-                .ok_or("isNull requires a boolean value")?;
+            let is_null = cond.value.as_bool().ok_or("isNull requires a boolean value")?;
             if is_null {
                 Ok(format!("{} IS NULL", field))
             } else {
@@ -464,10 +436,7 @@ fn condition_to_sql(
 /// Escape an identifier to prevent SQL injection
 fn escape_identifier(identifier: &str) -> String {
     // Basic identifier validation - only allow alphanumeric and underscore
-    if identifier
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == '_')
-    {
+    if identifier.chars().all(|c| c.is_alphanumeric() || c == '_') {
         identifier.to_string()
     } else {
         // Quote the identifier if it contains special characters
@@ -632,12 +601,12 @@ fn get_table_fields(db: &Arc<Database>, table_name: &str) -> Vec<JsonValue> {
     // to determine column names
 
     // Execute a query to get column information
-    if let Ok(mut session) = crate::session::Session::new(
-        "graphql".to_string(),
-        "graphql_introspection".to_string(),
-    ) {
+    if let Ok(mut session) =
+        crate::session::Session::new("graphql".to_string(), "graphql_introspection".to_string())
+    {
         let query = format!("SELECT * FROM {} LIMIT 1", table_name);
-        if let Ok(crate::session::ExecutionResult::Select { columns, .. }) = session.execute(&query) {
+        if let Ok(crate::session::ExecutionResult::Select { columns, .. }) = session.execute(&query)
+        {
             for column in columns {
                 // Default to String type since we don't have column type info from the API
                 // In a real implementation, we would use PRAGMA table_info or similar
@@ -727,24 +696,12 @@ pub struct GraphQLField {
 impl GraphQLField {
     /// Create a simple field without nesting
     pub fn simple(name: String) -> Self {
-        Self {
-            name,
-            nested: None,
-            where_clause: None,
-            limit: None,
-            offset: None,
-        }
+        Self { name, nested: None, where_clause: None, limit: None, offset: None }
     }
 
     /// Create a nested field with sub-selections
     pub fn nested(name: String, fields: Vec<GraphQLField>) -> Self {
-        Self {
-            name,
-            nested: Some(fields),
-            where_clause: None,
-            limit: None,
-            offset: None,
-        }
+        Self { name, nested: Some(fields), where_clause: None, limit: None, offset: None }
     }
 }
 
@@ -798,10 +755,7 @@ pub fn build_relationship_map(
                 pk_columns: fk.parent_column_names.clone(),
                 direction: RelationshipDirection::OneToMany,
             };
-            relationships
-                .entry(fk.parent_table.clone())
-                .or_default()
-                .push(reverse_rel);
+            relationships.entry(fk.parent_table.clone()).or_default().push(reverse_rel);
         }
     }
 
@@ -876,7 +830,8 @@ fn parse_graphql_select_query(query: &str) -> Result<GraphQLQueryInfo, String> {
         }
     } else {
         content.find('{')
-    }.ok_or("Missing field list")?;
+    }
+    .ok_or("Missing field list")?;
 
     // Find the matching closing brace for the field list
     let fields_content = find_matching_braces(&content[fields_start..])?;
@@ -885,11 +840,8 @@ fn parse_graphql_select_query(query: &str) -> Result<GraphQLQueryInfo, String> {
     let nested_fields = parse_field_selections(&fields_content)?;
 
     // Extract simple field names for backwards compatibility
-    let fields: Vec<String> = nested_fields
-        .iter()
-        .filter(|f| f.nested.is_none())
-        .map(|f| f.name.clone())
-        .collect();
+    let fields: Vec<String> =
+        nested_fields.iter().filter(|f| f.nested.is_none()).map(|f| f.name.clone()).collect();
 
     // Try to extract structured where clause (JSON object)
     let (where_clause, where_clause_raw) = extract_where_clauses(content)?;
@@ -996,7 +948,9 @@ fn parse_field_selections(content: &str) -> Result<Vec<GraphQLField>, String> {
                 // Whitespace - could be separator or just before a nested selection
                 // Look ahead to see if next non-whitespace is '{'
                 let mut lookahead = idx + 1;
-                while lookahead < bytes.len() && (bytes[lookahead] == b' ' || bytes[lookahead] == b'\t') {
+                while lookahead < bytes.len()
+                    && (bytes[lookahead] == b' ' || bytes[lookahead] == b'\t')
+                {
                     lookahead += 1;
                 }
 
@@ -1051,8 +1005,8 @@ fn parse_graphql_mutation(mutation: &str) -> Result<GraphQLQueryInfo, String> {
 
 fn parse_graphql_insert_mutation(mutation: &str) -> Result<GraphQLQueryInfo, String> {
     // Simple format: mutation { insertInto(table: "users", values: {...}) { id } }
-    let table_part = extract_quoted_value(mutation, "table")
-        .ok_or("Missing table name in insert mutation")?;
+    let table_part =
+        extract_quoted_value(mutation, "table").ok_or("Missing table name in insert mutation")?;
 
     let data = extract_json_value(mutation, "values");
 
@@ -1066,8 +1020,8 @@ fn parse_graphql_insert_mutation(mutation: &str) -> Result<GraphQLQueryInfo, Str
 }
 
 fn parse_graphql_update_mutation(mutation: &str) -> Result<GraphQLQueryInfo, String> {
-    let table_part = extract_quoted_value(mutation, "table")
-        .ok_or("Missing table name in update mutation")?;
+    let table_part =
+        extract_quoted_value(mutation, "table").ok_or("Missing table name in update mutation")?;
 
     let data = extract_json_value(mutation, "values");
     let (where_clause, where_clause_raw) = extract_where_clauses(mutation)?;
@@ -1082,8 +1036,8 @@ fn parse_graphql_update_mutation(mutation: &str) -> Result<GraphQLQueryInfo, Str
 }
 
 fn parse_graphql_delete_mutation(mutation: &str) -> Result<GraphQLQueryInfo, String> {
-    let table_part = extract_quoted_value(mutation, "table")
-        .ok_or("Missing table name in delete mutation")?;
+    let table_part =
+        extract_quoted_value(mutation, "table").ok_or("Missing table name in delete mutation")?;
 
     let (where_clause, where_clause_raw) = extract_where_clauses(mutation)?;
 
@@ -1115,10 +1069,7 @@ fn extract_quoted_value(input: &str, param_name: &str) -> Option<String> {
 }
 
 /// Extract a JSON value from a parameter
-fn extract_json_value(
-    input: &str,
-    param_name: &str,
-) -> Option<serde_json::Map<String, JsonValue>> {
+fn extract_json_value(input: &str, param_name: &str) -> Option<serde_json::Map<String, JsonValue>> {
     let pattern = format!("{}:", param_name);
     let start = input.find(&pattern)?;
     let after_pattern = &input[start + pattern.len()..];
@@ -1185,9 +1136,8 @@ fn extract_where_clauses(query: &str) -> Result<(Option<WhereClause>, Option<Str
             }
         }
         Err("Unmatched brace in WHERE clause".to_string())
-    } else if content.starts_with('"') {
+    } else if let Some(stripped) = content.strip_prefix('"') {
         // Raw string WHERE clause (legacy format)
-        let stripped = &content[1..];
         if let Some(end) = stripped.find('"') {
             Ok((None, Some(stripped[..end].to_string())))
         } else {
@@ -1215,11 +1165,7 @@ pub fn graphql_to_sql(
             let select_list = if fields.is_empty() || fields.contains(&"*".to_string()) {
                 "*".to_string()
             } else {
-                fields
-                    .iter()
-                    .map(|f| escape_identifier(f))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                fields.iter().map(|f| escape_identifier(f)).collect::<Vec<_>>().join(", ")
             };
 
             let table = escape_identifier(table_name);
@@ -1294,9 +1240,7 @@ pub fn graphql_to_sql(
                         let set_clause = data
                             .keys()
                             .enumerate()
-                            .map(|(i, col)| {
-                                format!("{} = ${}", escape_identifier(col), i + 1)
-                            })
+                            .map(|(i, col)| format!("{} = ${}", escape_identifier(col), i + 1))
                             .collect::<Vec<_>>()
                             .join(", ");
 
@@ -1467,11 +1411,8 @@ pub fn generate_nested_query_sql(
         }
     }
 
-    let select_list = if select_columns.is_empty() {
-        "*".to_string()
-    } else {
-        select_columns.join(", ")
-    };
+    let select_list =
+        if select_columns.is_empty() { "*".to_string() } else { select_columns.join(", ") };
 
     let mut sql = format!("SELECT {} FROM {}", select_list, nested.related_table);
 
@@ -1566,7 +1507,7 @@ fn value_to_string(v: &JsonValue) -> String {
 
 /// Attach nested results to parent rows
 pub fn attach_nested_results(
-    parent_rows: &mut Vec<serde_json::Map<String, JsonValue>>,
+    parent_rows: &mut [serde_json::Map<String, JsonValue>],
     nested: &NestedQueryInfo,
     nested_grouped: HashMap<String, Vec<serde_json::Map<String, JsonValue>>>,
 ) {
@@ -1597,10 +1538,8 @@ pub fn attach_nested_results(
             match nested.direction {
                 RelationshipDirection::OneToMany => {
                     // One parent has many children - attach as array
-                    let nested_array: Vec<JsonValue> = nested_rows
-                        .into_iter()
-                        .map(JsonValue::Object)
-                        .collect();
+                    let nested_array: Vec<JsonValue> =
+                        nested_rows.into_iter().map(JsonValue::Object).collect();
                     row.insert(nested.field_name.clone(), JsonValue::Array(nested_array));
                 }
                 RelationshipDirection::ManyToOne => {
@@ -1629,11 +1568,7 @@ pub fn has_nested_fields(query_info: &GraphQLQueryInfo) -> bool {
 
 /// Get simple column names from nested fields (excluding relationship fields)
 pub fn get_simple_columns(fields: &[GraphQLField]) -> Vec<String> {
-    fields
-        .iter()
-        .filter(|f| f.nested.is_none())
-        .map(|f| f.name.clone())
-        .collect()
+    fields.iter().filter(|f| f.nested.is_none()).map(|f| f.name.clone()).collect()
 }
 
 #[cfg(test)]
@@ -2100,7 +2035,11 @@ mod tests {
             "users".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(255) },
+                    false,
+                ),
             ],
         );
         schemas.insert("users".to_string(), users_schema);
@@ -2110,7 +2049,11 @@ mod tests {
             "posts".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("title".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+                ColumnSchema::new(
+                    "title".to_string(),
+                    DataType::Varchar { max_length: Some(255) },
+                    false,
+                ),
                 ColumnSchema::new("user_id".to_string(), DataType::Integer, false),
             ],
         );

@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 
 use rand::Rng;
 
-use crate::output::{RecordOutput, ColumnTypeValidator, Normalizer, Validator};
-use crate::parser::*;
 use crate::executor::Runner;
-use crate::{ColumnType, AsyncDB, MakeConnection};
+use crate::output::{ColumnTypeValidator, Normalizer, RecordOutput, Validator};
+use crate::parser::*;
+use crate::{AsyncDB, ColumnType, MakeConnection};
 
 /// Updates the specified [`Record`] with the [`QueryOutput`] produced
 /// by a Database, returning `Some(new_record)`.
@@ -34,9 +34,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 expected: mut expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
                 retry,
             },
-            RecordOutput::Query {
-                error: None, rows, ..
-            },
+            RecordOutput::Query { error: None, rows, .. },
         ) => {
             // statement ok
             // SELECT ...
@@ -49,25 +47,11 @@ pub fn update_record_with_output<T: ColumnType>(
                 *expected_count = rows.len() as u64;
             }
 
-            Some(Record::Statement {
-                sql,
-                loc,
-                conditions,
-                connection,
-                expected,
-                retry,
-            })
+            Some(Record::Statement { sql, loc, conditions, connection, expected, retry })
         }
         // query, statement
         (
-            Record::Query {
-                sql,
-                loc,
-                conditions,
-                connection,
-                expected: _,
-                retry,
-            },
+            Record::Query { sql, loc, conditions, connection, expected: _, retry },
             RecordOutput::Statement { error: None, count },
         ) => Some(Record::Statement {
             sql,
@@ -79,14 +63,7 @@ pub fn update_record_with_output<T: ColumnType>(
         }),
         // statement, statement
         (
-            Record::Statement {
-                loc,
-                conditions,
-                connection,
-                sql,
-                expected,
-                retry,
-            },
+            Record::Statement { loc, conditions, connection, sql, expected, retry },
             RecordOutput::Statement { count, error },
         ) => match (error, expected) {
             // Ok
@@ -128,14 +105,7 @@ pub fn update_record_with_output<T: ColumnType>(
         },
         // query, query
         (
-            Record::Query {
-                loc,
-                conditions,
-                connection,
-                sql,
-                expected,
-                retry,
-            },
+            Record::Query { loc, conditions, connection, sql, expected, retry },
             RecordOutput::Query { types, rows, error },
         ) => match (error, expected) {
             // Error match
@@ -165,19 +135,21 @@ pub fn update_record_with_output<T: ColumnType>(
             (None, expected) => {
                 let results = match &expected {
                     // If validation is successful, we respect the original file's expected results.
-                    QueryExpect::Results {
-                        results: expected_results,
-                        ..
-                    } if validator(normalizer, rows, expected_results) => expected_results.clone(),
+                    QueryExpect::Results { results: expected_results, .. }
+                        if validator(normalizer, rows, expected_results) =>
+                    {
+                        expected_results.clone()
+                    }
                     // Flatten the rows so each column value becomes its own line (SQLLogicTest format)
                     _ => rows.iter().flat_map(|cols| cols.iter().cloned()).collect(),
                 };
                 let types = match &expected {
                     // If validation is successful, we respect the original file's expected types.
-                    QueryExpect::Results {
-                        types: expected_types,
-                        ..
-                    } if column_type_validator(types, expected_types) => expected_types.clone(),
+                    QueryExpect::Results { types: expected_types, .. }
+                        if column_type_validator(types, expected_types) =>
+                    {
+                        expected_types.clone()
+                    }
                     _ => types.clone(),
                 };
                 Some(Record::Query {
@@ -186,18 +158,9 @@ pub fn update_record_with_output<T: ColumnType>(
                     conditions,
                     connection,
                     expected: match expected {
-                        QueryExpect::Results {
-                            sort_mode,
-                            label,
-                            result_mode,
-                            ..
-                        } => QueryExpect::Results {
-                            results,
-                            types,
-                            sort_mode,
-                            result_mode,
-                            label,
-                        },
+                        QueryExpect::Results { sort_mode, label, result_mode, .. } => {
+                            QueryExpect::Results { results, types, sort_mode, result_mode, label }
+                        }
                         QueryExpect::Error(_) => QueryExpect::Results {
                             results,
                             types,
@@ -211,17 +174,8 @@ pub fn update_record_with_output<T: ColumnType>(
             }
         },
         (
-            Record::System {
-                loc,
-                conditions,
-                command,
-                stdout: _,
-                retry,
-            },
-            RecordOutput::System {
-                stdout: actual_stdout,
-                error,
-            },
+            Record::System { loc, conditions, command, stdout: _, retry },
+            RecordOutput::System { stdout: actual_stdout, error },
         ) => {
             if let Some(error) = error {
                 tracing::error!(
@@ -230,13 +184,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     "system command failed while updating the record. It will be unchanged."
                 );
             }
-            Some(Record::System {
-                loc,
-                conditions,
-                command,
-                stdout: actual_stdout.clone(),
-                retry,
-            })
+            Some(Record::System { loc, conditions, command, stdout: actual_stdout.clone(), retry })
         }
 
         // No update possible, return the original record
@@ -337,12 +285,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         }];
 
         for record in records {
-            let Item {
-                filename,
-                outfilename,
-                outfile,
-                halt,
-            } = stack.last_mut().unwrap();
+            let Item { filename, outfilename, outfile, halt } = stack.last_mut().unwrap();
 
             match &record {
                 Record::Injected(Injected::BeginInclude(filename)) => {
@@ -386,12 +329,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             }
         }
 
-        let Item {
-            filename,
-            outfilename,
-            outfile,
-            halt: _,
-        } = stack.last_mut().unwrap();
+        let Item { filename, outfilename, outfile, halt: _ } = stack.last_mut().unwrap();
         override_with_outfile(filename, outfilename, outfile)?;
 
         Ok(())

@@ -13,12 +13,19 @@ fn test_in_list_basic() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -28,9 +35,16 @@ fn test_in_list_basic() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -44,7 +58,8 @@ fn test_in_list_basic() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2); // 1 and 5 match
@@ -55,12 +70,19 @@ fn test_not_in_list() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -70,9 +92,16 @@ fn test_not_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -86,7 +115,8 @@ fn test_not_in_list() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // Only 2 doesn't match
@@ -98,10 +128,15 @@ fn test_in_list_with_null_value() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, true)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            true,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
     db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Null])).unwrap();
 
     let executor = SelectExecutor::new(&db);
@@ -112,9 +147,16 @@ fn test_in_list_with_null_value() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -128,7 +170,8 @@ fn test_in_list_with_null_value() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // NULL doesn't match, only 1 matches
@@ -140,10 +183,15 @@ fn test_in_list_with_null_in_list() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -154,9 +202,16 @@ fn test_in_list_with_null_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
@@ -170,7 +225,8 @@ fn test_in_list_with_null_in_list() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 0); // NULL in list causes unknown result for non-matching value
@@ -181,11 +237,17 @@ fn test_empty_in_list() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -196,9 +258,16 @@ fn test_empty_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             values: vec![],
             negated: false,
         }),
@@ -208,7 +277,8 @@ fn test_empty_in_list() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 0); // Empty IN list always returns false
@@ -219,11 +289,17 @@ fn test_empty_not_in_list() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("val".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "val".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)])).unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
+    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -234,9 +310,16 @@ fn test_empty_not_in_list() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "val".to_string(),
+            }),
             values: vec![],
             negated: true,
         }),
@@ -246,7 +329,8 @@ fn test_empty_not_in_list() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2); // Empty NOT IN list always returns true
@@ -259,7 +343,11 @@ fn test_null_in_empty_subquery() {
     // Create empty table
     let schema = vibesql_catalog::TableSchema::new(
         "empty_table".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("x".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
@@ -280,7 +368,11 @@ fn test_null_in_empty_subquery() {
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table { name: "empty_table".to_string(), alias: None, column_aliases: None }),
+                    from: Some(vibesql_ast::FromClause::Table {
+                        name: "empty_table".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -288,7 +380,8 @@ fn test_null_in_empty_subquery() {
                     limit: None,
                     offset: None,
                     into_table: None,
-                    into_variables: None,                }),
+                    into_variables: None,
+                }),
                 negated: false,
             },
             alias: None,
@@ -301,7 +394,8 @@ fn test_null_in_empty_subquery() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -315,7 +409,11 @@ fn test_null_not_in_empty_subquery() {
     // Create empty table
     let schema = vibesql_catalog::TableSchema::new(
         "empty_table".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("x".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
@@ -336,7 +434,11 @@ fn test_null_not_in_empty_subquery() {
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table { name: "empty_table".to_string(), alias: None, column_aliases: None }),
+                    from: Some(vibesql_ast::FromClause::Table {
+                        name: "empty_table".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -344,7 +446,8 @@ fn test_null_not_in_empty_subquery() {
                     limit: None,
                     offset: None,
                     into_table: None,
-                    into_variables: None,                }),
+                    into_variables: None,
+                }),
                 negated: true,
             },
             alias: None,
@@ -357,7 +460,8 @@ fn test_null_not_in_empty_subquery() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -371,7 +475,11 @@ fn test_value_in_empty_subquery() {
     // Create empty table
     let schema = vibesql_catalog::TableSchema::new(
         "empty_table".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("x".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
@@ -385,13 +493,19 @@ fn test_value_in_empty_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    1,
+                ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table { name: "empty_table".to_string(), alias: None, column_aliases: None }),
+                    from: Some(vibesql_ast::FromClause::Table {
+                        name: "empty_table".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     where_clause: None,
                     group_by: None,
                     having: None,
@@ -399,7 +513,8 @@ fn test_value_in_empty_subquery() {
                     limit: None,
                     offset: None,
                     into_table: None,
-                    into_variables: None,                }),
+                    into_variables: None,
+                }),
                 negated: false,
             },
             alias: None,
@@ -412,7 +527,8 @@ fn test_value_in_empty_subquery() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);

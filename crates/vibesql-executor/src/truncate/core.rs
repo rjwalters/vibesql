@@ -13,7 +13,10 @@ use super::triggers::validate_no_delete_triggers;
 ///
 /// Finds all AUTO_INCREMENT columns in the table and resets their associated sequences
 /// to the initial value (1).
-pub fn reset_auto_increment_sequences(database: &mut Database, table_name: &str) -> Result<(), ExecutorError> {
+pub fn reset_auto_increment_sequences(
+    database: &mut Database,
+    table_name: &str,
+) -> Result<(), ExecutorError> {
     // Get table schema to find AUTO_INCREMENT columns
     let table_schema = database
         .catalog
@@ -171,13 +174,7 @@ fn collect_fk_dependencies(
         Ok(())
     }
 
-    visit(
-        database,
-        root_table,
-        &mut visited,
-        &mut order,
-        &mut recursion_stack,
-    )?;
+    visit(database, root_table, &mut visited, &mut order, &mut recursion_stack)?;
 
     Ok(order)
 }

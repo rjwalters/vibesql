@@ -8,19 +8,46 @@ VibeSQL has achieved **100% SQL:1999 compliance** and **100% SQLLogicTest confor
 |--------|--------|
 | SQL:1999 Core (sqltest) | 739/739 (100%) |
 | SQLLogicTest | 623/623 files (100%) |
-| Unit tests | 2,991+ |
-| Code coverage | 86% |
+| Unit tests | 4,800+ |
+| TPC-H | 22/22 queries |
+| TPC-C | All transactions |
+| TPC-DS | 97/99 queries |
 
 See [HISTORY.md](HISTORY.md) for development timeline.
 
+## Recently Completed
+
+### Server & Real-Time Features
+- PostgreSQL wire protocol (compatible with psql, JDBC, ODBC)
+- HTTP REST API with full CRUD operations
+- GraphQL API with schema introspection
+- Real-time subscriptions with delta updates
+- Server-Sent Events (SSE) for HTTP streaming
+
+### Columnar Execution Engine
+- SIMD-accelerated analytical queries
+- Lazy columnar cache with automatic invalidation
+- Cost-based join reordering for multi-way joins
+- Subquery-to-join transformation
+
+### Extended SQL Features
+- Vector types (VECTOR(n)) for AI/ML embeddings
+- Vector similarity search (cosine, euclidean, dot product)
+- Vector indexes (HNSW, IVFFlat)
+- File/blob storage with STORAGE_URL/STORAGE_SIZE functions
+- Scheduled functions (SCHEDULE AFTER/AT, CREATE CRON)
+
+### Parallelism
+- Hardware-aware parallel execution
+- Parallel table scans, hash join build, aggregation, sorting
+- 4-8x speedup on analytical queries
+
 ## Current Focus
 
-The project is in **maintenance mode**:
-
-1. **Bug fixes** - Address issues as discovered
-2. **Documentation** - Keep guides current, improve API docs
-3. **Code quality** - Technical debt, test coverage
-4. **Community** - Issue triage, contributions
+1. **Performance optimization** - TPC-C OLTP throughput improvements
+2. **Bug fixes** - Address issues as discovered
+3. **Documentation** - Keep guides current, improve API docs
+4. **Code quality** - Technical debt, test coverage
 
 ## Future Ideas
 
@@ -30,9 +57,9 @@ These are potential enhancements, not committed work. They would only be pursued
 
 Compile SQL to native code for hot queries using LLVM or Cranelift. Could provide 5-10x speedup but requires significant architectural changes.
 
-### Columnar Storage Engine
+### Persistent Storage
 
-Alternative storage format for scan-heavy analytical queries. Column-oriented layout with SIMD execution and compression. Major undertaking - current row storage works well for general workloads.
+Durable on-disk storage with WAL and recovery. Current in-memory storage works well for many use cases.
 
 ### Distributed Execution
 
@@ -42,15 +69,10 @@ Multi-node query execution with partitioning and replication. Would require comp
 
 Pre-computed aggregations with incremental refresh. Useful for repeated complex queries.
 
-## Deferred Work
+## Known Gaps
 
-### Predicate Pushdown (Phase 2-3)
-
-Infrastructure is complete. Scanner and join-level integration deferred - not blocking functionality.
-
-### Parallelism (Phase 2+)
-
-Phase 1 delivers 4-8x speedup. Concurrent query execution and morsel-driven execution deferred - no immediate need.
+### TPC-DS (2 remaining queries)
+- Q14, Q95: CTE table resolution issues
 
 ## Contributing
 

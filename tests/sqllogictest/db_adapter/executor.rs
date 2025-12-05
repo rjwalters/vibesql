@@ -4,15 +4,15 @@
 //! executors. It coordinates with caching, batching, and timing modules to optimize
 //! and instrument query execution.
 
-use std::{collections::HashSet, env};
 use sqllogictest::{DBOutput, DefaultColumnType};
+use std::{collections::HashSet, env};
 use vibesql_executor::{IntrospectionExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-use super::{batching::BatchingManager, cache::CacheManager, timing::truncate_sql};
 use super::super::execution::TestError;
+use super::{batching::BatchingManager, cache::CacheManager, timing::truncate_sql};
 
 /// Execute a SQL statement with caching, batching, and timing support.
 pub fn execute_sql(
@@ -57,16 +57,20 @@ pub fn execute_sql(
 
             // Log profiling info if enabled
             if let (Some(parse_elapsed), Some(exec_elapsed), Some(total_elapsed)) =
-               (parse_time, exec_time, total_start.map(|s| s.elapsed())) {
-                if exec_elapsed.as_millis() > 10 {  // Only log queries >10ms
+                (parse_time, exec_time, total_start.map(|s| s.elapsed()))
+            {
+                if exec_elapsed.as_millis() > 10 {
+                    // Only log queries >10ms
                     let sql_preview = truncate_sql(sql, 80);
                     let query_count = 0; // Query count would need to be passed in
-                    eprintln!("🔍 Query #{}: parse={:.2}ms, exec={:.2}ms, total={:.2}ms | {}",
+                    eprintln!(
+                        "🔍 Query #{}: parse={:.2}ms, exec={:.2}ms, total={:.2}ms | {}",
                         query_count,
                         parse_elapsed.as_secs_f64() * 1000.0,
                         exec_elapsed.as_secs_f64() * 1000.0,
                         total_elapsed.as_secs_f64() * 1000.0,
-                        sql_preview);
+                        sql_preview
+                    );
                 }
             }
 
@@ -80,14 +84,17 @@ pub fn execute_sql(
 
                 // Create a simple schema from the result rows
                 let schema = if let Some(first_row) = rows.first() {
-                    let columns: Vec<ColumnSchema> = first_row.values.iter().enumerate().map(|(i, val)| {
-                        ColumnSchema {
+                    let columns: Vec<ColumnSchema> = first_row
+                        .values
+                        .iter()
+                        .enumerate()
+                        .map(|(i, val)| ColumnSchema {
                             name: format!("col{}", i),
                             data_type: val.get_type(),
                             nullable: val.is_null(),
                             default_value: None,
-                        }
-                    }).collect();
+                        })
+                        .collect();
                     let table_schema = TableSchema::new("result".to_string(), columns);
                     CombinedSchema::from_table("result".to_string(), table_schema)
                 } else {
@@ -122,9 +129,8 @@ pub fn execute_sql(
                 cache_manager.invalidate_table(&insert_stmt.table_name);
             }
 
-            let rows_affected =
-                vibesql_executor::InsertExecutor::execute(db, &insert_stmt)
-                    .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            let rows_affected = vibesql_executor::InsertExecutor::execute(db, &insert_stmt)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(rows_affected as u64))
         }
         vibesql_ast::Statement::Update(update_stmt) => {
@@ -136,9 +142,8 @@ pub fn execute_sql(
                 cache_manager.invalidate_table(&update_stmt.table_name);
             }
 
-            let rows_affected =
-                vibesql_executor::UpdateExecutor::execute(&update_stmt, db)
-                    .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            let rows_affected = vibesql_executor::UpdateExecutor::execute(&update_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(rows_affected as u64))
         }
         vibesql_ast::Statement::Delete(delete_stmt) => {
@@ -150,9 +155,8 @@ pub fn execute_sql(
                 cache_manager.invalidate_table(&delete_stmt.table_name);
             }
 
-            let rows_affected =
-                vibesql_executor::DeleteExecutor::execute(&delete_stmt, db)
-                    .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            let rows_affected = vibesql_executor::DeleteExecutor::execute(&delete_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(rows_affected as u64))
         }
         vibesql_ast::Statement::DropTable(drop_stmt) => {
@@ -296,11 +300,8 @@ pub fn execute_sql(
             // Commit any pending implicit transaction before DDL
             batching_manager.commit_if_needed(db)?;
 
-            vibesql_executor::advanced_objects::execute_drop_assertion(
-                &drop_assertion_stmt,
-                db,
-            )
-            .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            vibesql_executor::advanced_objects::execute_drop_assertion(&drop_assertion_stmt, db)
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(0))
         }
         vibesql_ast::Statement::CreateView(create_view_stmt) => {
@@ -356,7 +357,8 @@ pub fn execute_sql(
             batching_manager.commit_if_needed(db)?;
 
             let executor = IntrospectionExecutor::new(db);
-            let result = executor.execute_show_tables(&stmt)
+            let result = executor
+                .execute_show_tables(&stmt)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             format_query_result(result.rows)
         }
@@ -365,7 +367,8 @@ pub fn execute_sql(
             batching_manager.commit_if_needed(db)?;
 
             let executor = IntrospectionExecutor::new(db);
-            let result = executor.execute_show_databases(&stmt)
+            let result = executor
+                .execute_show_databases(&stmt)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             format_query_result(result.rows)
         }
@@ -374,7 +377,8 @@ pub fn execute_sql(
             batching_manager.commit_if_needed(db)?;
 
             let executor = IntrospectionExecutor::new(db);
-            let result = executor.execute_show_columns(&stmt)
+            let result = executor
+                .execute_show_columns(&stmt)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             format_query_result(result.rows)
         }
@@ -383,7 +387,8 @@ pub fn execute_sql(
             batching_manager.commit_if_needed(db)?;
 
             let executor = IntrospectionExecutor::new(db);
-            let result = executor.execute_describe(&stmt)
+            let result = executor
+                .execute_describe(&stmt)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             format_query_result(result.rows)
         }
@@ -392,7 +397,8 @@ pub fn execute_sql(
             batching_manager.commit_if_needed(db)?;
 
             let executor = IntrospectionExecutor::new(db);
-            let result = executor.execute_show_index(&stmt)
+            let result = executor
+                .execute_show_index(&stmt)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             format_query_result(result.rows)
         }
@@ -401,7 +407,8 @@ pub fn execute_sql(
             batching_manager.commit_if_needed(db)?;
 
             let executor = IntrospectionExecutor::new(db);
-            let result = executor.execute_show_create_table(&stmt)
+            let result = executor
+                .execute_show_create_table(&stmt)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             format_query_result(result.rows)
         }
@@ -484,15 +491,10 @@ pub fn execute_sql(
             };
 
             // Return as single-column text output
-            let rows: Vec<Vec<String>> = plan_text
-                .lines()
-                .map(|line| vec![line.to_string()])
-                .collect();
+            let rows: Vec<Vec<String>> =
+                plan_text.lines().map(|line| vec![line.to_string()]).collect();
 
-            Ok(DBOutput::Rows {
-                types: vec![DefaultColumnType::Text],
-                rows,
-            })
+            Ok(DBOutput::Rows { types: vec![DefaultColumnType::Text], rows })
         }
 
         // Sequence statements (HIGH priority)
@@ -586,8 +588,11 @@ pub fn execute_sql(
             // Commit any pending implicit transaction before DDL
             batching_manager.commit_if_needed(db)?;
 
-            vibesql_executor::advanced_objects::execute_create_character_set(&create_charset_stmt, db)
-                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            vibesql_executor::advanced_objects::execute_create_character_set(
+                &create_charset_stmt,
+                db,
+            )
+            .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(0))
         }
         vibesql_ast::Statement::DropCharacterSet(drop_charset_stmt) => {
@@ -653,10 +658,9 @@ fn format_query_result(
             | SqlValue::Smallint(_)
             | SqlValue::Bigint(_)
             | SqlValue::Unsigned(_) => DefaultColumnType::Integer,
-            SqlValue::Float(_)
-            | SqlValue::Real(_)
-            | SqlValue::Double(_)
-            | SqlValue::Numeric(_) => DefaultColumnType::FloatingPoint,
+            SqlValue::Float(_) | SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) => {
+                DefaultColumnType::FloatingPoint
+            }
             SqlValue::Varchar(_)
             | SqlValue::Character(_)
             | SqlValue::Date(_)
@@ -696,18 +700,11 @@ fn extract_table_names(select: &vibesql_ast::SelectStmt) -> HashSet<String> {
     tables
 }
 
-fn extract_table_names_from_from(
-    from: &vibesql_ast::FromClause,
-    tables: &mut HashSet<String>,
-) {
+fn extract_table_names_from_from(from: &vibesql_ast::FromClause, tables: &mut HashSet<String>) {
     match from {
         vibesql_ast::FromClause::Table { name, .. } => {
             // Handle schema.table format
-            let table_name = if let Some(pos) = name.rfind('.') {
-                &name[pos + 1..]
-            } else {
-                name
-            };
+            let table_name = if let Some(pos) = name.rfind('.') { &name[pos + 1..] } else { name };
             tables.insert(table_name.to_string());
         }
         vibesql_ast::FromClause::Join { left, right, .. } => {

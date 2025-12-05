@@ -2,9 +2,9 @@
 //!
 //! Extract coordinates and metadata from geometries.
 
-use super::{Geometry, sql_value_to_geometry};
-use vibesql_types::SqlValue;
+use super::{sql_value_to_geometry, Geometry};
 use crate::errors::ExecutorError;
+use vibesql_types::SqlValue;
 
 /// ST_X(point) - Get X coordinate from POINT
 pub fn st_x(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
@@ -14,7 +14,7 @@ pub fn st_x(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
@@ -37,7 +37,7 @@ pub fn st_y(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
@@ -60,7 +60,7 @@ pub fn st_geometry_type(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
@@ -78,7 +78,7 @@ pub fn st_dimension(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
@@ -97,7 +97,7 @@ pub fn st_as_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
@@ -116,7 +116,7 @@ pub fn st_as_binary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
@@ -137,7 +137,7 @@ pub fn st_as_geojson(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             args.len()
         )));
     }
-    
+
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
@@ -152,17 +152,11 @@ pub fn st_as_geojson(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 fn geometry_to_geojson(geom: &Geometry) -> String {
     match geom {
         Geometry::Point { x, y } => {
-            format!(
-                r#"{{"type":"Point","coordinates":[{},{}]}}"#,
-                x, y
-            )
+            format!(r#"{{"type":"Point","coordinates":[{},{}]}}"#, x, y)
         }
         Geometry::LineString { points } => {
-            let coords = points
-                .iter()
-                .map(|(x, y)| format!("[{},{}]", x, y))
-                .collect::<Vec<_>>()
-                .join(",");
+            let coords =
+                points.iter().map(|(x, y)| format!("[{},{}]", x, y)).collect::<Vec<_>>().join(",");
             format!(r#"{{"type":"LineString","coordinates":[{}]}}"#, coords)
         }
         Geometry::Polygon { rings } => {
@@ -181,11 +175,8 @@ fn geometry_to_geojson(geom: &Geometry) -> String {
             format!(r#"{{"type":"Polygon","coordinates":[{}]}}"#, rings_str)
         }
         Geometry::MultiPoint { points } => {
-            let coords = points
-                .iter()
-                .map(|(x, y)| format!("[{},{}]", x, y))
-                .collect::<Vec<_>>()
-                .join(",");
+            let coords =
+                points.iter().map(|(x, y)| format!("[{},{}]", x, y)).collect::<Vec<_>>().join(",");
             format!(r#"{{"type":"MultiPoint","coordinates":[{}]}}"#, coords)
         }
         Geometry::MultiLineString { lines } => {
@@ -230,7 +221,7 @@ fn geometry_to_geojson(geom: &Geometry) -> String {
                 .iter()
                 .map(|g| {
                     // Extract just the geometry object without the full GeoJSON wrapper
-                    
+
                     geometry_to_geojson(g)
                 })
                 .collect::<Vec<_>>()

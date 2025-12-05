@@ -262,9 +262,7 @@ impl Parser {
         } else if self.try_consume_keyword(Keyword::Columnar) {
             vibesql_ast::StorageFormat::Columnar
         } else {
-            return Err(ParseError {
-                message: "Expected ROW or COLUMNAR for STORAGE".to_string(),
-            });
+            return Err(ParseError { message: "Expected ROW or COLUMNAR for STORAGE".to_string() });
         };
         Ok(vibesql_ast::TableOption::Storage(format))
     }

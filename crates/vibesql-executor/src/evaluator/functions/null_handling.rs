@@ -7,7 +7,9 @@ use crate::errors::ExecutorError;
 ///
 /// Uses lazy evaluation for eager arguments to short-circuit on first non-NULL value.
 /// This is implemented as a special form at the expression evaluator level for efficiency.
-pub(super) fn coalesce(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn coalesce(
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.is_empty() {
         return Err(ExecutorError::UnsupportedFeature(
             "COALESCE requires at least one argument".to_string(),
@@ -30,7 +32,9 @@ pub(super) fn coalesce(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types
 
 /// NULLIF(val1, val2) - returns NULL if val1 = val2, otherwise val1
 /// SQL:1999 Section 6.13: NULLIF expression
-pub(super) fn nullif(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn nullif(
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "NULLIF requires exactly 2 arguments, got {}",
@@ -42,7 +46,9 @@ pub(super) fn nullif(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::
     let val2 = &args[1];
 
     // If either is NULL, comparison is undefined - return val1
-    if matches!(val1, vibesql_types::SqlValue::Null) || matches!(val2, vibesql_types::SqlValue::Null) {
+    if matches!(val1, vibesql_types::SqlValue::Null)
+        || matches!(val2, vibesql_types::SqlValue::Null)
+    {
         return Ok(val1.clone());
     }
 

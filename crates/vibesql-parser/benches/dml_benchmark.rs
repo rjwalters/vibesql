@@ -16,7 +16,8 @@ use vibesql_parser::Parser;
 // ============================================================================
 
 /// Simple INSERT with VALUES
-const INSERT_SIMPLE: &str = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')";
+const INSERT_SIMPLE: &str =
+    "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')";
 
 /// INSERT with multiple rows (batch insert)
 const INSERT_MULTI_ROW: &str = r#"INSERT INTO orders (id, customer_id, product_id, quantity, price) VALUES
@@ -331,22 +332,15 @@ fn bench_insert_batch_scaling(c: &mut Criterion) {
         for i in 0..count {
             values.push(format!("({}, 'user{}', 'user{}@example.com')", i, i, i));
         }
-        let sql = format!(
-            "INSERT INTO users (id, name, email) VALUES {}",
-            values.join(", ")
-        );
+        let sql = format!("INSERT INTO users (id, name, email) VALUES {}", values.join(", "));
 
         let name = format!("{}_rows", count);
         group.throughput(Throughput::Bytes(sql.len() as u64));
 
         // Standard parser
-        group.bench_with_input(
-            BenchmarkId::new("standard", &name),
-            &sql,
-            |b, sql| {
-                b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("standard", &name), &sql, |b, sql| {
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
+        });
 
         // Arena parser with reuse
         group.bench_with_input(BenchmarkId::new("arena_reuse", &name), &sql, |b, sql| {

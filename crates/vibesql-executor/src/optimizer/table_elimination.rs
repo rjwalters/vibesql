@@ -12,9 +12,7 @@
 //! interactions with derived tables from EXISTS/IN transformations.
 
 use std::collections::{HashMap, HashSet};
-use vibesql_ast::{
-    BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt,
-};
+use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
 /// Apply table elimination optimization to a SELECT statement
 ///
@@ -67,10 +65,18 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
     }
 
     // Build table name set
-    let table_names: HashSet<String> = tables
-        .iter()
-        .map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase())
-        .collect();
+    let table_names: HashSet<String> =
+        tables.iter().map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase()).collect();
+
+    // Don't apply when query has global aggregates (like COUNT(*)) without GROUP BY.
+    // Such aggregates operate over the entire Cartesian product, so eliminating tables
+    // would change the result (e.g., COUNT(*) on cross join should count all product rows).
+    if stmt.group_by.is_none() && has_global_aggregates(&stmt.select_list, &table_names) {
+        if verbose {
+            eprintln!("[TABLE_ELIM_OPT] Skipping: query has global aggregates without GROUP BY");
+        }
+        return stmt.clone();
+    }
 
     // Collect unqualified column names from SELECT for later checking
     let unqualified_columns = collect_unqualified_columns(&stmt.select_list);
@@ -98,13 +104,40 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         eprintln!("[TABLE_ELIM_OPT] Tables in SELECT: {:?}", select_tables);
     }
 
-    // Find tables in equijoins (WHERE clause predicates)
+    // Safety check: If there are unqualified columns that don't match ANY known table prefix,
+    // we can't reliably determine which table they belong to. Skip optimization to be safe.
+    // This handles CTEs and other cases where derived prefixes don't match actual column names.
+    if !unqualified_columns.is_empty() {
+        let known_prefixes: Vec<_> = table_column_prefixes.values().collect();
+        let has_unknown_columns = unqualified_columns.iter().any(|col| {
+            let col_lower = col.to_lowercase();
+            !known_prefixes.iter().any(|prefix| col_lower.starts_with(*prefix))
+        });
+        if has_unknown_columns {
+            if verbose {
+                eprintln!(
+                    "[TABLE_ELIM_OPT] Skipping: unqualified columns don't match any known prefix"
+                );
+            }
+            return stmt.clone();
+        }
+    }
+
+    // Find tables in equijoins (WHERE clause predicates AND JOIN ON conditions)
     // Uses prefix matching to detect joins with unqualified column refs
-    let equijoin_tables = if let Some(where_expr) = &stmt.where_clause {
+    let mut equijoin_tables = if let Some(where_expr) = &stmt.where_clause {
         extract_equijoin_tables(where_expr, &table_names, &table_column_prefixes)
     } else {
         HashSet::new()
     };
+
+    // Also extract tables from JOIN ON conditions in the FROM clause (#3572)
+    // This ensures we don't eliminate tables that are part of explicit JOIN conditions
+    if let Some(from_clause) = &stmt.from {
+        let on_condition_tables =
+            extract_equijoin_tables_from_joins(from_clause, &table_names, &table_column_prefixes);
+        equijoin_tables.extend(on_condition_tables);
+    }
 
     if verbose {
         eprintln!("[TABLE_ELIM_OPT] Tables in equijoins: {:?}", equijoin_tables);
@@ -122,11 +155,7 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
     let mut kept_tables = Vec::new();
 
     for table in tables {
-        let table_key = table
-            .alias
-            .as_ref()
-            .unwrap_or(&table.name)
-            .to_lowercase();
+        let table_key = table.alias.as_ref().unwrap_or(&table.name).to_lowercase();
 
         // Check if table is referenced by qualified columns in SELECT
         let in_select_qualified = select_tables.contains(&table_key);
@@ -137,9 +166,8 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         let in_select_unqualified = if !unqualified_columns.is_empty() {
             if let Some(prefix) = table_column_prefixes.get(&table_key) {
                 // We know this table's column prefix - check for matches
-                let matches_prefix = unqualified_columns
-                    .iter()
-                    .any(|col| col.to_lowercase().starts_with(prefix));
+                let matches_prefix =
+                    unqualified_columns.iter().any(|col| col.to_lowercase().starts_with(prefix));
                 if verbose && matches_prefix {
                     eprintln!(
                         "[TABLE_ELIM_OPT] Table '{}' might be referenced by unqualified cols (prefix '{}')",
@@ -172,9 +200,13 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
             );
         }
 
-        // Table can be eliminated if not in SELECT and not in equijoin
-        if !in_select && !in_equijoin {
-            let filter = local_predicates.get(&table_key).cloned();
+        // Table can be eliminated if:
+        // 1. Not in SELECT list
+        // 2. Not in any equijoin condition
+        // 3. HAS a local predicate/filter (otherwise it's an intentional cross join
+        //    that multiplies rows, and we must preserve that row count)
+        let filter = local_predicates.get(&table_key).cloned();
+        if !in_select && !in_equijoin && filter.is_some() {
             if verbose {
                 eprintln!(
                     "[TABLE_ELIM_OPT] ✓ Eliminating table '{}' with filter: {:?}",
@@ -187,12 +219,30 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
                 filter,
             });
         } else {
+            if verbose && !in_select && !in_equijoin && filter.is_none() {
+                eprintln!(
+                    "[TABLE_ELIM_OPT] ✗ Keeping table '{}': no filter (cross join multiplies rows)",
+                    table_key
+                );
+            }
             kept_tables.push(table);
         }
     }
 
     // If no tables eliminated, return unchanged
     if eliminated.is_empty() {
+        return stmt.clone();
+    }
+
+    // If ALL tables would be eliminated, return unchanged.
+    // Eliminating all tables would leave no FROM clause, causing incorrect
+    // semantics for WHERE clauses that evaluate to FALSE (like NULL IS NOT NULL).
+    if kept_tables.is_empty() {
+        if verbose {
+            eprintln!(
+                "[TABLE_ELIM_OPT] Skipping: would eliminate all tables, leaving no FROM clause"
+            );
+        }
         return stmt.clone();
     }
 
@@ -203,16 +253,12 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
     let exists_checks = build_exists_checks(&eliminated);
 
     // Build eliminated table names set
-    let eliminated_names: HashSet<String> = eliminated
-        .iter()
-        .map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase())
-        .collect();
+    let eliminated_names: HashSet<String> =
+        eliminated.iter().map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase()).collect();
 
     // Build prefixes for eliminated tables
-    let eliminated_prefixes: HashSet<String> = eliminated_names
-        .iter()
-        .filter_map(|t| table_column_prefixes.get(t).cloned())
-        .collect();
+    let eliminated_prefixes: HashSet<String> =
+        eliminated_names.iter().filter_map(|t| table_column_prefixes.get(t).cloned()).collect();
 
     // Remove eliminated table predicates from WHERE
     let filtered_where = if let Some(where_expr) = &stmt.where_clause {
@@ -265,10 +311,7 @@ struct EliminatedTable {
 fn flatten_from_clause(from: &FromClause, tables: &mut Vec<TableInfo>) {
     match from {
         FromClause::Table { name, alias, .. } => {
-            tables.push(TableInfo {
-                name: name.clone(),
-                alias: alias.clone(),
-            });
+            tables.push(TableInfo { name: name.clone(), alias: alias.clone() });
         }
         FromClause::Join { left, right, .. } => {
             flatten_from_clause(left, tables);
@@ -306,6 +349,86 @@ fn extract_tables_from_select(
     }
 
     tables
+}
+
+/// Check if the SELECT list contains "global" aggregate functions.
+///
+/// A global aggregate is one that:
+/// 1. Is an aggregate function (COUNT, SUM, MIN, MAX, AVG, etc.)
+/// 2. Does NOT reference any specific table columns (e.g., COUNT(*), MIN(42))
+///
+/// When such aggregates exist without GROUP BY, they operate over the entire
+/// result set (including Cartesian products from cross joins). Eliminating tables
+/// would incorrectly reduce the number of rows being aggregated.
+fn has_global_aggregates(select_list: &[SelectItem], table_names: &HashSet<String>) -> bool {
+    for item in select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            if expr_has_global_aggregate(expr, table_names) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursively check if an expression contains a global aggregate
+fn expr_has_global_aggregate(expr: &Expression, _table_names: &HashSet<String>) -> bool {
+    match expr {
+        Expression::AggregateFunction { args, .. } => {
+            // Check if this aggregate references any table columns
+            let mut referenced_tables = HashSet::new();
+            for arg in args {
+                extract_tables_from_expr(arg, &mut referenced_tables);
+            }
+            // Also check for unqualified column references
+            let mut has_column_ref = false;
+            for arg in args {
+                if has_any_column_ref(arg) {
+                    has_column_ref = true;
+                    break;
+                }
+            }
+            // Global if no table refs AND no column refs (e.g., COUNT(*) or MIN(42))
+            referenced_tables.is_empty() && !has_column_ref
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            expr_has_global_aggregate(left, _table_names)
+                || expr_has_global_aggregate(right, _table_names)
+        }
+        Expression::UnaryOp { expr, .. } => expr_has_global_aggregate(expr, _table_names),
+        Expression::Function { args, .. } => {
+            args.iter().any(|a| expr_has_global_aggregate(a, _table_names))
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|o| expr_has_global_aggregate(o, _table_names))
+                || when_clauses.iter().any(|c| {
+                    c.conditions.iter().any(|cond| expr_has_global_aggregate(cond, _table_names))
+                        || expr_has_global_aggregate(&c.result, _table_names)
+                })
+                || else_result.as_ref().is_some_and(|e| expr_has_global_aggregate(e, _table_names))
+        }
+        _ => false,
+    }
+}
+
+/// Check if expression contains any column reference (qualified or unqualified)
+/// Note: The special "*" wildcard (used in COUNT(*)) is NOT considered a real column reference
+fn has_any_column_ref(expr: &Expression) -> bool {
+    match expr {
+        Expression::ColumnRef { column, .. } => {
+            // The special "*" wildcard in COUNT(*) is not a real column reference
+            column != "*"
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            has_any_column_ref(left) || has_any_column_ref(right)
+        }
+        Expression::UnaryOp { expr, .. } => has_any_column_ref(expr),
+        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+            args.iter().any(has_any_column_ref)
+        }
+        Expression::Cast { expr, .. } => has_any_column_ref(expr),
+        _ => false,
+    }
 }
 
 /// Check if expression contains any unqualified column references
@@ -384,6 +507,47 @@ fn extract_tables_from_expr(expr: &Expression, tables: &mut HashSet<String>) {
     }
 }
 
+/// Extract tables that participate in equijoin conditions from JOIN ON clauses (#3572)
+///
+/// Recursively walks the FROM clause tree and extracts tables referenced in ON conditions.
+/// This ensures tables joined via explicit ON conditions are not incorrectly eliminated.
+fn extract_equijoin_tables_from_joins(
+    from: &FromClause,
+    table_names: &HashSet<String>,
+    table_prefixes: &HashMap<String, String>,
+) -> HashSet<String> {
+    let mut tables = HashSet::new();
+    extract_join_on_tables(from, &mut tables, table_names, table_prefixes);
+    tables
+}
+
+fn extract_join_on_tables(
+    from: &FromClause,
+    tables: &mut HashSet<String>,
+    table_names: &HashSet<String>,
+    table_prefixes: &HashMap<String, String>,
+) {
+    match from {
+        FromClause::Table { .. } => {
+            // Leaf node - no ON conditions
+        }
+        FromClause::Join { left, right, condition, .. } => {
+            // Recursively process left and right subtrees
+            extract_join_on_tables(left, tables, table_names, table_prefixes);
+            extract_join_on_tables(right, tables, table_names, table_prefixes);
+
+            // Extract tables from this join's ON condition
+            if let Some(cond) = condition {
+                let on_tables = extract_equijoin_tables(cond, table_names, table_prefixes);
+                tables.extend(on_tables);
+            }
+        }
+        FromClause::Subquery { .. } => {
+            // Subqueries are opaque - don't examine their internals
+        }
+    }
+}
+
 /// Extract tables that participate in equijoin conditions
 fn extract_equijoin_tables(
     expr: &Expression,
@@ -403,6 +567,13 @@ fn find_equijoin_tables(
 ) {
     match expr {
         Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
+            find_equijoin_tables(left, tables, _table_names, table_prefixes);
+            find_equijoin_tables(right, tables, _table_names, table_prefixes);
+        }
+        // Also recurse into OR branches to find equijoins
+        // This is critical for queries like TPC-H Q19 where the join condition
+        // (p_partkey = l_partkey) appears inside multiple OR branches
+        Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
             find_equijoin_tables(left, tables, _table_names, table_prefixes);
             find_equijoin_tables(right, tables, _table_names, table_prefixes);
         }
@@ -474,10 +645,7 @@ fn extract_local_predicates(
     collect_local_predicates(expr, &mut predicates, table_names, table_prefixes);
 
     // Combine predicates for each table
-    predicates
-        .into_iter()
-        .map(|(table, preds)| (table, combine_predicates(preds)))
-        .collect()
+    predicates.into_iter().map(|(table, preds)| (table, combine_predicates(preds))).collect()
 }
 
 fn collect_local_predicates(
@@ -632,10 +800,7 @@ fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Expression> {
                 set_operation: None,
             };
 
-            Expression::Exists {
-                subquery: Box::new(subquery),
-                negated: false,
-            }
+            Expression::Exists { subquery: Box::new(subquery), negated: false }
         })
         .collect()
 }
@@ -682,21 +847,20 @@ fn remove_eliminated_predicates(
         collect_unqualified_columns_from_expr(&pred, &mut unqualified_cols);
 
         // Check if all qualified refs are to eliminated tables
-        let qualified_all_eliminated =
-            qualified_refs.is_empty() || qualified_refs.iter().all(|t| eliminated_tables.contains(t));
+        let qualified_all_eliminated = qualified_refs.is_empty()
+            || qualified_refs.iter().all(|t| eliminated_tables.contains(t));
 
         // Check if all unqualified columns match eliminated table prefixes
         let unqualified_all_eliminated = unqualified_cols.is_empty()
             || unqualified_cols.iter().all(|col| {
                 let col_lower = col.to_lowercase();
-                eliminated_prefixes
-                    .iter()
-                    .any(|prefix| col_lower.starts_with(prefix))
+                eliminated_prefixes.iter().any(|prefix| col_lower.starts_with(prefix))
             });
 
         // A predicate should be removed if ALL its column references
         // (both qualified and unqualified) belong to eliminated tables
-        let should_remove = qualified_all_eliminated && unqualified_all_eliminated
+        let should_remove = qualified_all_eliminated
+            && unqualified_all_eliminated
             && (!qualified_refs.is_empty() || !unqualified_cols.is_empty());
 
         if !should_remove {
@@ -737,7 +901,10 @@ fn collect_unqualified_columns(select_list: &[SelectItem]) -> HashSet<String> {
 fn collect_unqualified_columns_from_expr(expr: &Expression, columns: &mut HashSet<String>) {
     match expr {
         Expression::ColumnRef { table: None, column } => {
-            columns.insert(column.to_lowercase());
+            // Skip the special "*" wildcard (used in COUNT(*))
+            if column != "*" {
+                columns.insert(column.to_lowercase());
+            }
         }
         Expression::BinaryOp { left, right, .. } => {
             collect_unqualified_columns_from_expr(left, columns);
@@ -779,7 +946,10 @@ fn collect_unqualified_columns_from_expr(expr: &Expression, columns: &mut HashSe
 ///
 /// For tables with no qualified refs, we derive a potential prefix from the table name
 /// (e.g., `date_dim` → `d_`, `customer` → `c_`) for TPC-DS style naming conventions.
-fn build_column_prefix_map(stmt: &SelectStmt, table_names: &HashSet<String>) -> HashMap<String, String> {
+fn build_column_prefix_map(
+    stmt: &SelectStmt,
+    table_names: &HashSet<String>,
+) -> HashMap<String, String> {
     let mut table_columns: HashMap<String, Vec<String>> = HashMap::new();
 
     // Collect qualified columns from entire statement
@@ -896,10 +1066,7 @@ fn collect_qualified_columns_from_expr(
 ) {
     match expr {
         Expression::ColumnRef { table: Some(t), column } => {
-            table_columns
-                .entry(t.to_lowercase())
-                .or_default()
-                .push(column.to_lowercase());
+            table_columns.entry(t.to_lowercase()).or_default().push(column.to_lowercase());
         }
         Expression::BinaryOp { left, right, .. } => {
             collect_qualified_columns_from_expr(left, table_columns);
@@ -1337,6 +1504,101 @@ mod tests {
             // Both tables should be kept due to SELECT *
             assert!(matches!(result.from, Some(FromClause::Join { .. })));
         }
+
+        #[test]
+        fn cross_join_without_filter_preserved() {
+            // Regression test: tables in cross joins without filters should NOT be eliminated
+            // because cross joins multiply rows intentionally.
+            // Example: SELECT 86 * - cor0.col2 FROM tab1, tab2 AS cor0
+            // This should return 9 rows (3x3), not 3 rows.
+            let stmt = SelectStmt {
+                with_clause: None,
+                distinct: false,
+                // SELECT only references cor0.col2
+                select_list: vec![SelectItem::Expression {
+                    expr: Expression::BinaryOp {
+                        op: BinaryOperator::Multiply,
+                        left: Box::new(Expression::Literal(SqlValue::Integer(86))),
+                        right: Box::new(Expression::UnaryOp {
+                            op: vibesql_ast::UnaryOperator::Minus,
+                            expr: Box::new(make_column_ref(Some("cor0"), "col2")),
+                        }),
+                    },
+                    alias: Some("col0".to_string()),
+                }],
+                into_table: None,
+                into_variables: None,
+                // Cross join - tab1 is NOT referenced but has no filter
+                from: Some(make_cross_join(
+                    make_table("tab1", None),
+                    make_table("tab2", Some("cor0")),
+                )),
+                // No WHERE clause
+                where_clause: None,
+                group_by: None,
+                having: None,
+                order_by: None,
+                limit: None,
+                offset: None,
+                set_operation: None,
+            };
+
+            let result = eliminate_unused_tables(&stmt);
+            // Both tables should be kept - tab1 has no filter, so cross join
+            // must be preserved to maintain correct row count
+            assert!(
+                matches!(result.from, Some(FromClause::Join { .. })),
+                "Expected cross join to be preserved, got {:?}",
+                result.from
+            );
+        }
+
+        #[test]
+        fn all_tables_eliminable_keeps_unchanged() {
+            // Regression test: when ALL tables could be eliminated,
+            // we should keep them all to preserve FROM clause.
+            // This ensures WHERE clauses like NULL IS NOT NULL work correctly.
+            // Example: SELECT - 0 FROM tab0, tab0 cor0 WHERE NULL IS NOT NULL
+            let stmt = SelectStmt {
+                with_clause: None,
+                distinct: false,
+                // SELECT with literal (no column refs)
+                select_list: vec![SelectItem::Expression {
+                    expr: Expression::UnaryOp {
+                        op: vibesql_ast::UnaryOperator::Minus,
+                        expr: Box::new(Expression::Literal(SqlValue::Integer(0))),
+                    },
+                    alias: Some("col3".to_string()),
+                }],
+                into_table: None,
+                into_variables: None,
+                // Cross join of same table
+                from: Some(make_cross_join(
+                    make_table("tab0", None),
+                    make_table("tab0", Some("cor0")),
+                )),
+                // WHERE clause with no column refs (NULL IS NOT NULL)
+                where_clause: Some(Expression::IsNull {
+                    expr: Box::new(Expression::Literal(SqlValue::Null)),
+                    negated: true,
+                }),
+                group_by: None,
+                having: None,
+                order_by: None,
+                limit: None,
+                offset: None,
+                set_operation: None,
+            };
+
+            let result = eliminate_unused_tables(&stmt);
+            // Both tables should be kept (not eliminated) because eliminating
+            // both would leave no FROM clause
+            assert!(
+                matches!(result.from, Some(FromClause::Join { .. })),
+                "Expected FROM clause to be preserved, got {:?}",
+                result.from
+            );
+        }
     }
 
     mod helper_function_tests {
@@ -1394,10 +1656,7 @@ mod tests {
         fn collect_unqualified_columns_finds_refs() {
             let select_list = vec![
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "col1".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "col1".to_string() },
                     alias: None,
                 },
                 SelectItem::Expression {
@@ -1415,16 +1674,11 @@ mod tests {
 
         #[test]
         fn has_unqualified_column_ref_detects_unqualified() {
-            let qualified = Expression::ColumnRef {
-                table: Some("t1".to_string()),
-                column: "col1".to_string(),
-            };
+            let qualified =
+                Expression::ColumnRef { table: Some("t1".to_string()), column: "col1".to_string() };
             assert!(!has_unqualified_column_ref(&qualified));
 
-            let unqualified = Expression::ColumnRef {
-                table: None,
-                column: "col1".to_string(),
-            };
+            let unqualified = Expression::ColumnRef { table: None, column: "col1".to_string() };
             assert!(has_unqualified_column_ref(&unqualified));
         }
     }

@@ -13,7 +13,9 @@
 use crate::errors::ExecutorError;
 
 /// VERSION() - Return database version
-pub(super) fn version(args: &[vibesql_types::SqlValue]) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn version(
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if !args.is_empty() {
         return Err(ExecutorError::UnsupportedFeature("VERSION takes no arguments".to_string()));
     }
@@ -38,7 +40,10 @@ pub(super) fn database(
 }
 
 /// USER() / CURRENT_USER() - Return current user
-pub(super) fn user(args: &[vibesql_types::SqlValue], name: &str) -> Result<vibesql_types::SqlValue, ExecutorError> {
+pub(super) fn user(
+    args: &[vibesql_types::SqlValue],
+    name: &str,
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if !args.is_empty() {
         return Err(ExecutorError::UnsupportedFeature(format!("{} takes no arguments", name)));
     }

@@ -18,7 +18,9 @@ impl Parser {
     }
 
     /// Parse scalar subquery or parenthesized expression
-    pub(super) fn parse_parenthesized(&mut self) -> Result<Option<vibesql_ast::Expression>, ParseError> {
+    pub(super) fn parse_parenthesized(
+        &mut self,
+    ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         match self.peek() {
             Token::LParen => {
                 self.advance(); // consume '('

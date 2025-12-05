@@ -6,6 +6,16 @@
 - [PYTHON_BINDINGS.md](PYTHON_BINDINGS.md) - Python integration
 - [ODBC_JDBC_CONNECTIVITY.md](ODBC_JDBC_CONNECTIVITY.md) - Database connectivity via PostgreSQL wire protocol
 
+## Server & APIs
+
+- [http-api.md](http-api.md) - HTTP REST API endpoints
+- [scheduled-functions.md](scheduled-functions.md) - Cron jobs and scheduled tasks
+
+## Extended Features
+
+- [vector-search.md](vector-search.md) - AI/ML embeddings and similarity search
+- [file-storage.md](file-storage.md) - Blob storage with SQL integration
+
 ## Reference
 
 - [reference/FEATURE_STATUS.md](reference/FEATURE_STATUS.md) - SQL feature implementation status

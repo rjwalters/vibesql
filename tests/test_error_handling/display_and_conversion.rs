@@ -17,12 +17,21 @@ fn test_catalog_error_display_formats() {
             CatalogError::TableAlreadyExists("mytable".to_string()),
             vec!["Table", "mytable", "already exists"],
         ),
-        (CatalogError::TableNotFound { table_name: "missing".to_string() }, vec!["Table", "missing", "not found"]),
+        (
+            CatalogError::TableNotFound { table_name: "missing".to_string() },
+            vec!["Table", "missing", "not found"],
+        ),
         (
             CatalogError::ColumnAlreadyExists("mycolumn".to_string()),
             vec!["Column", "mycolumn", "already exists"],
         ),
-        (CatalogError::ColumnNotFound { column_name: "badcol".to_string(), table_name: "test_table".to_string() }, vec!["Column", "badcol", "not found"]),
+        (
+            CatalogError::ColumnNotFound {
+                column_name: "badcol".to_string(),
+                table_name: "test_table".to_string(),
+            },
+            vec!["Column", "badcol", "not found"],
+        ),
         (
             CatalogError::SchemaAlreadyExists("myschema".to_string()),
             vec!["Schema", "myschema", "already exists"],
@@ -137,7 +146,8 @@ fn test_catalog_to_executor_error_conversion() {
 #[test]
 fn test_error_implements_std_error_trait() {
     // Verify all error types implement std::error::Error trait
-    let catalog_err: Box<dyn Error> = Box::new(CatalogError::TableNotFound { table_name: "test".to_string() });
+    let catalog_err: Box<dyn Error> =
+        Box::new(CatalogError::TableNotFound { table_name: "test".to_string() });
     assert!(catalog_err.to_string().contains("not found"));
 
     let executor_err: Box<dyn Error> = Box::new(ExecutorError::DivisionByZero);

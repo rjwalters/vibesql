@@ -13,8 +13,8 @@
 mod aggregation;
 mod arena_execution;
 mod builder;
-mod columns;
 mod columnar_execution;
+mod columns;
 mod execute;
 mod fast_path;
 mod index_optimization;

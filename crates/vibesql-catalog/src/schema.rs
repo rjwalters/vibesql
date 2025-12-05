@@ -19,12 +19,13 @@ impl Schema {
     }
 
     /// Create a table in this schema
-    pub fn create_table_with_case_mode(&mut self, schema: TableSchema, case_sensitive: bool) -> Result<(), CatalogError> {
-        let table_name = if case_sensitive {
-            schema.name.clone()
-        } else {
-            schema.name.to_uppercase()
-        };
+    pub fn create_table_with_case_mode(
+        &mut self,
+        schema: TableSchema,
+        case_sensitive: bool,
+    ) -> Result<(), CatalogError> {
+        let table_name =
+            if case_sensitive { schema.name.clone() } else { schema.name.to_uppercase() };
 
         // Check if table already exists (case-insensitive if needed)
         if case_sensitive {
@@ -67,25 +68,18 @@ impl Schema {
             if self.tables.remove(name).is_some() {
                 Ok(())
             } else {
-                Err(CatalogError::TableNotFound {
-                    table_name: name.to_string(),
-                })
+                Err(CatalogError::TableNotFound { table_name: name.to_string() })
             }
         } else {
             // Case-insensitive: find the actual name first
             let name_upper = name.to_uppercase();
-            let actual_name = self.tables
-                .keys()
-                .find(|k| k.to_uppercase() == name_upper)
-                .cloned();
+            let actual_name = self.tables.keys().find(|k| k.to_uppercase() == name_upper).cloned();
 
             if let Some(actual_name) = actual_name {
                 self.tables.remove(&actual_name);
                 Ok(())
             } else {
-                Err(CatalogError::TableNotFound {
-                    table_name: name.to_string(),
-                })
+                Err(CatalogError::TableNotFound { table_name: name.to_string() })
             }
         }
     }

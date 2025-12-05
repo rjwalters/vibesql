@@ -122,13 +122,23 @@ impl VibesqlPreparedStatements {
 
         Self {
             point_select: session.prepare("SELECT c FROM sbtest1 WHERE id = ?").unwrap(),
-            simple_range: session.prepare("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap(),
-            sum_range: session.prepare("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap(),
-            order_range: session.prepare("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap(),
-            distinct_range: session.prepare("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap(),
+            simple_range: session
+                .prepare("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
+                .unwrap(),
+            sum_range: session
+                .prepare("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?")
+                .unwrap(),
+            order_range: session
+                .prepare("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
+                .unwrap(),
+            distinct_range: session
+                .prepare("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
+                .unwrap(),
             delete: session.prepare("DELETE FROM sbtest1 WHERE id = ?").unwrap(),
             // Note: column is named "padding" because PAD is a SQL keyword
-            insert: session.prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)").unwrap(),
+            insert: session
+                .prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)")
+                .unwrap(),
             update_non_index: session.prepare("UPDATE sbtest1 SET c = ? WHERE id = ?").unwrap(),
             cache,
         }
@@ -156,14 +166,19 @@ const RANDOM_POINTS_COUNT: usize = 10;
 /// This uses pre-prepared statements to avoid SQL parsing overhead in the hot path,
 /// providing a fair comparison with SQLite's `prepare_cached()`.
 fn vibesql_point_select(session: &Session, stmt: &PreparedStatement, id: i64) -> usize {
-    let result = session
-        .execute_prepared(stmt, &[SqlValue::Integer(id)])
-        .unwrap();
+    let result = session.execute_prepared(stmt, &[SqlValue::Integer(id)]).unwrap();
     result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
 /// Execute an insert on VibeSQL using prepared statement
-fn vibesql_insert(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, k: i64, c: &str, pad: &str) {
+fn vibesql_insert(
+    session: &mut SessionMut,
+    stmt: &PreparedStatement,
+    id: i64,
+    k: i64,
+    c: &str,
+    pad: &str,
+) {
     session
         .execute_prepared_mut(
             stmt,
@@ -180,10 +195,7 @@ fn vibesql_insert(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, k
 /// Execute an update query on VibeSQL (update non-indexed column) using prepared statement
 fn vibesql_update_non_index(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, c: &str) {
     session
-        .execute_prepared_mut(
-            stmt,
-            &[SqlValue::Varchar(c.to_string()), SqlValue::Integer(id)],
-        )
+        .execute_prepared_mut(stmt, &[SqlValue::Varchar(c.to_string()), SqlValue::Integer(id)])
         .unwrap();
 }
 
@@ -225,13 +237,16 @@ fn vibesql_update_index(db: &mut VibeDB, id: i64) {
 
 /// Execute a delete query on VibeSQL using prepared statement
 fn vibesql_delete(session: &mut SessionMut, stmt: &PreparedStatement, id: i64) {
-    session
-        .execute_prepared_mut(stmt, &[SqlValue::Integer(id)])
-        .unwrap();
+    session.execute_prepared_mut(stmt, &[SqlValue::Integer(id)]).unwrap();
 }
 
 /// Execute a simple range query on VibeSQL using prepared statement
-fn vibesql_simple_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
+fn vibesql_simple_range(
+    session: &Session,
+    stmt: &PreparedStatement,
+    start: i64,
+    end: i64,
+) -> usize {
     let result = session
         .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
         .unwrap();
@@ -255,7 +270,12 @@ fn vibesql_order_range(session: &Session, stmt: &PreparedStatement, start: i64, 
 }
 
 /// Execute a distinct range query on VibeSQL using prepared statement
-fn vibesql_distinct_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
+fn vibesql_distinct_range(
+    session: &Session,
+    stmt: &PreparedStatement,
+    start: i64,
+    end: i64,
+) -> usize {
     let result = session
         .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
         .unwrap();
@@ -268,9 +288,7 @@ fn vibesql_distinct_range(session: &Session, stmt: &PreparedStatement, start: i6
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_point_select(conn: &SqliteConn, id: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
     let mut rows = stmt.query([id]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -281,41 +299,31 @@ fn sqlite_point_select(conn: &SqliteConn, id: i64) -> usize {
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_insert(conn: &SqliteConn, id: i64, k: i64, c: &str, pad: &str) {
-    let mut stmt = conn
-        .prepare_cached(sysbench::INSERT_SQL_NUMBERED)
-        .unwrap();
+    let mut stmt = conn.prepare_cached(sysbench::INSERT_SQL_NUMBERED).unwrap();
     stmt.execute(rusqlite::params![id, k, c, pad]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_update_non_index(conn: &SqliteConn, id: i64, c: &str) {
-    let mut stmt = conn
-        .prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
     stmt.execute(rusqlite::params![c, id]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_update_index(conn: &SqliteConn, id: i64) {
-    let mut stmt = conn
-        .prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
     stmt.execute(rusqlite::params![id]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_delete(conn: &SqliteConn, id: i64) {
-    let mut stmt = conn
-        .prepare_cached("DELETE FROM sbtest1 WHERE id = ?1")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
     stmt.execute(rusqlite::params![id]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -326,9 +334,8 @@ fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_sum_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?")
-        .unwrap();
+    let mut stmt =
+        conn.prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -339,9 +346,8 @@ fn sqlite_sum_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
 
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_order_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
-        .unwrap();
+    let mut stmt =
+        conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -369,9 +375,7 @@ fn sqlite_distinct_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_point_select(conn: &DuckDBConn, id: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
     let mut rows = stmt.query([id]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -382,41 +386,31 @@ fn duckdb_point_select(conn: &DuckDBConn, id: i64) -> usize {
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_insert(conn: &DuckDBConn, id: i64, k: i64, c: &str, pad: &str) {
-    let mut stmt = conn
-        .prepare_cached(sysbench::INSERT_SQL_NUMBERED)
-        .unwrap();
+    let mut stmt = conn.prepare_cached(sysbench::INSERT_SQL_NUMBERED).unwrap();
     stmt.execute(duckdb::params![id, k, c, pad]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_update_non_index(conn: &DuckDBConn, id: i64, c: &str) {
-    let mut stmt = conn
-        .prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
     stmt.execute(duckdb::params![c, id]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_update_index(conn: &DuckDBConn, id: i64) {
-    let mut stmt = conn
-        .prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
     stmt.execute(duckdb::params![id]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_delete(conn: &DuckDBConn, id: i64) {
-    let mut stmt = conn
-        .prepare_cached("DELETE FROM sbtest1 WHERE id = ?1")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
     stmt.execute(duckdb::params![id]).unwrap();
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_simple_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
-        .unwrap();
+    let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -427,9 +421,8 @@ fn duckdb_simple_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_sum_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?")
-        .unwrap();
+    let mut stmt =
+        conn.prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -440,9 +433,8 @@ fn duckdb_sum_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
 
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_order_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
-    let mut stmt = conn
-        .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
-        .unwrap();
+    let mut stmt =
+        conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
     let mut count = 0;
     while rows.next().unwrap().is_some() {
@@ -1062,7 +1054,10 @@ fn benchmark_read_write_vibesql(c: &mut Criterion) {
                 // 10 point selects (use read-only session via database reference)
                 for _ in 0..10 {
                     let id = rng.random_range(1..=TABLE_SIZE as i64);
-                    let read_session = Session::with_shared_cache(session_mut.database(), Arc::clone(&stmts.cache));
+                    let read_session = Session::with_shared_cache(
+                        session_mut.database(),
+                        Arc::clone(&stmts.cache),
+                    );
                     black_box(vibesql_point_select(&read_session, &stmts.point_select, id));
                 }
 

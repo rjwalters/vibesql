@@ -121,9 +121,5 @@ fn test_advanced_sql_examples() {
 
     // Many advanced features are still being implemented
     // For now, just require at least some tests to pass
-    assert!(
-        passed >= 1,
-        "Expected at least 1 advanced example to pass, got {}",
-        passed
-    );
+    assert!(passed >= 1, "Expected at least 1 advanced example to pass, got {}", passed);
 }

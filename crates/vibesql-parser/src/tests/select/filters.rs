@@ -13,7 +13,8 @@ fn test_parse_select_with_where() {
                 vibesql_ast::Expression::BinaryOp { op, left, right } => {
                     assert_eq!(*op, vibesql_ast::BinaryOperator::Equal);
                     match **left {
-                        vibesql_ast::Expression::ColumnRef { ref column, .. } if column == "ID" => {}
+                        vibesql_ast::Expression::ColumnRef { ref column, .. } if column == "ID" => {
+                        }
                         _ => panic!("Expected id column in WHERE"),
                     }
                     match **right {
@@ -121,13 +122,16 @@ fn test_parse_precedence() {
                         assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
                         // Left should be 1
                         match **left {
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)) => {}
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                                1,
+                            )) => {}
                             _ => panic!("Expected left = 1"),
                         }
                         // Right should be 2 * 3
                         match **right {
                             vibesql_ast::Expression::BinaryOp {
-                                op: vibesql_ast::BinaryOperator::Multiply, ..
+                                op: vibesql_ast::BinaryOperator::Multiply,
+                                ..
                             } => {}
                             _ => panic!("Expected right = 2 * 3"),
                         }
@@ -156,12 +160,17 @@ fn test_parse_parentheses() {
                         assert_eq!(*op, vibesql_ast::BinaryOperator::Multiply);
                         // Left should be (1 + 2)
                         match **left {
-                            vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Plus, .. } => {}
+                            vibesql_ast::Expression::BinaryOp {
+                                op: vibesql_ast::BinaryOperator::Plus,
+                                ..
+                            } => {}
                             _ => panic!("Expected left = 1 + 2"),
                         }
                         // Right should be 3
                         match **right {
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)) => {}
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                                3,
+                            )) => {}
                             _ => panic!("Expected right = 3"),
                         }
                     }
@@ -233,7 +242,10 @@ fn test_parse_complex_where() {
                     assert_eq!(*op, vibesql_ast::BinaryOperator::And);
                     // Right side should be OR (in parentheses)
                     match **right {
-                        vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Or, .. } => {} /* Success */
+                        vibesql_ast::Expression::BinaryOp {
+                            op: vibesql_ast::BinaryOperator::Or,
+                            ..
+                        } => {} /* Success */
                         _ => panic!("Expected OR in right side"),
                     }
                 }

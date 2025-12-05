@@ -9,8 +9,10 @@ use std::sync::Arc;
 
 use vibesql_types::{DataType, SqlValue};
 
-use super::index_metadata::{acquire_btree_lock, normalize_index_name, IndexData, IndexMetadata, DISK_BACKED_THRESHOLD};
 use super::index_manager::IndexManager;
+use super::index_metadata::{
+    acquire_btree_lock, normalize_index_name, IndexData, IndexMetadata, DISK_BACKED_THRESHOLD,
+};
 use super::ivfflat::IVFFlatIndex;
 use crate::btree::{BTreeIndex, Key};
 use crate::page::PageManager;
@@ -83,8 +85,12 @@ impl IndexManager {
         }
 
         // Store index metadata (use normalized name as key)
-        let metadata =
-            IndexMetadata { index_name: index_name.clone(), table_name: table_name.clone(), unique, columns: columns.clone() };
+        let metadata = IndexMetadata {
+            index_name: index_name.clone(),
+            table_name: table_name.clone(),
+            unique,
+            columns: columns.clone(),
+        };
 
         self.indexes.insert(normalized_name.clone(), metadata);
 
@@ -96,11 +102,14 @@ impl IndexManager {
         let (index_data, memory_bytes, disk_bytes, backend) = if use_disk_backed {
             // Create disk-backed B+ tree index using proper database path
             let index_file = self.get_index_file_path(&table_name, &index_name)?;
-            let index_file_str = index_file.to_str()
+            let index_file_str = index_file
+                .to_str()
                 .ok_or_else(|| StorageError::IoError("Invalid index file path".to_string()))?;
 
-            let page_manager = Arc::new(PageManager::new(index_file_str, self.storage.clone())
-                .map_err(|e| StorageError::IoError(format!("Failed to create index file: {}", e)))?);
+            let page_manager =
+                Arc::new(PageManager::new(index_file_str, self.storage.clone()).map_err(|e| {
+                    StorageError::IoError(format!("Failed to create index file: {}", e))
+                })?);
 
             // Build key schema from indexed columns
             let key_schema: Vec<DataType> = column_indices
@@ -133,8 +142,11 @@ impl IndexManager {
             let btree_key_schema = key_schema;
 
             // Use bulk_load for efficient index creation
-            let btree = BTreeIndex::bulk_load(sorted_entries, btree_key_schema, page_manager.clone())
-                .map_err(|e| StorageError::IoError(format!("Failed to bulk load index: {}", e)))?;
+            let btree =
+                BTreeIndex::bulk_load(sorted_entries, btree_key_schema, page_manager.clone())
+                    .map_err(|e| {
+                        StorageError::IoError(format!("Failed to bulk load index: {}", e))
+                    })?;
 
             // Calculate disk size
             let disk_bytes = if let Ok(file_meta) = std::fs::metadata(&index_file) {
@@ -225,7 +237,9 @@ impl IndexManager {
                             let value = &row.values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length);
                             // Normalize numeric types for consistent ordering/comparison
-                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                            crate::database::indexes::index_operations::normalize_for_comparison(
+                                &truncated,
+                            )
                         })
                         .collect();
 
@@ -241,7 +255,11 @@ impl IndexManager {
                                 Ok(mut guard) => {
                                     if let Err(e) = guard.insert(key_values, row_index) {
                                         // Log error if insert fails for other reasons
-                                        log::warn!("Failed to insert into disk-backed index '{}': {:?}", index_name, e);
+                                        log::warn!(
+                                            "Failed to insert into disk-backed index '{}': {:?}",
+                                            index_name,
+                                            e
+                                        );
                                     }
                                 }
                                 Err(e) => {
@@ -300,7 +318,9 @@ impl IndexManager {
                                 .expect("Index column should exist");
                             let value = &old_row.values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length);
-                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                            crate::database::indexes::index_operations::normalize_for_comparison(
+                                &truncated,
+                            )
                         })
                         .collect();
 
@@ -313,7 +333,9 @@ impl IndexManager {
                                 .expect("Index column should exist");
                             let value = &new_row.values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length);
-                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                            crate::database::indexes::index_operations::normalize_for_comparison(
+                                &truncated,
+                            )
                         })
                         .collect();
 
@@ -331,10 +353,7 @@ impl IndexManager {
                                 }
 
                                 // Add new key
-                                data
-                                    .entry(new_key_values)
-                                    .or_insert_with(Vec::new)
-                                    .push(row_index);
+                                data.entry(new_key_values).or_insert_with(Vec::new).push(row_index);
                             }
                             IndexData::DiskBacked { btree, .. } => {
                                 // Safely acquire lock and update B+tree: delete old key, insert new key
@@ -344,7 +363,11 @@ impl IndexManager {
                                     Ok(mut guard) => {
                                         let _ = guard.delete_specific(&old_key_values, row_index);
                                         if let Err(e) = guard.insert(new_key_values, row_index) {
-                                            log::warn!("Failed to update disk-backed index '{}': {:?}", index_name, e);
+                                            log::warn!(
+                                                "Failed to update disk-backed index '{}': {:?}",
+                                                index_name,
+                                                e
+                                            );
                                         }
                                     }
                                     Err(e) => {
@@ -402,7 +425,9 @@ impl IndexManager {
                             let value = &row.values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length);
                             // Normalize numeric types for consistent ordering/comparison
-                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                            crate::database::indexes::index_operations::normalize_for_comparison(
+                                &truncated,
+                            )
                         })
                         .collect();
 
@@ -604,8 +629,7 @@ impl IndexManager {
                         for row_indices in data.values_mut() {
                             for row_idx in row_indices.iter_mut() {
                                 // Binary search gives count of deleted indices < row_idx
-                                let decrement =
-                                    deleted_indices.partition_point(|&d| d < *row_idx);
+                                let decrement = deleted_indices.partition_point(|&d| d < *row_idx);
                                 *row_idx -= decrement;
                             }
                         }
@@ -663,6 +687,7 @@ impl IndexManager {
     /// * `dimensions` - Number of dimensions in the vectors
     /// * `lists` - Number of clusters for the IVFFlat algorithm
     /// * `metric` - Distance metric to use (L2, Cosine, InnerProduct)
+    #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index(
         &mut self,
         index_name: String,
@@ -698,7 +723,8 @@ impl IndexManager {
         let vector_count = vectors.len();
 
         // Build the index using k-means clustering
-        ivfflat.build(vectors)
+        ivfflat
+            .build(vectors)
             .map_err(|e| StorageError::IoError(format!("Failed to build IVFFlat index: {}", e)))?;
 
         // Store index metadata
@@ -742,6 +768,7 @@ impl IndexManager {
     ///
     /// This is the main entry point for creating IVFFlat indexes when the
     /// table rows have already been accessed by the caller (executor layer).
+    #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index_with_vectors(
         &mut self,
         index_name: String,
@@ -766,7 +793,8 @@ impl IndexManager {
         let vector_count = vectors.len();
 
         // Build the index using k-means clustering
-        ivfflat.build(vectors)
+        ivfflat
+            .build(vectors)
             .map_err(|e| StorageError::IoError(format!("Failed to build IVFFlat index: {}", e)))?;
 
         // Store index metadata
@@ -831,41 +859,36 @@ impl IndexManager {
     ) -> Result<Vec<(usize, f64)>, StorageError> {
         let normalized_name = normalize_index_name(index_name);
 
-        let index_data = self.index_data.get(&normalized_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .index_data
+            .get(&normalized_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         match index_data {
-            IndexData::IVFFlat { index } => {
-                index.search(query_vector, k).map_err(|e| {
-                    StorageError::Other(format!("IVFFlat search error: {}", e))
-                })
+            IndexData::IVFFlat { index } => index
+                .search(query_vector, k)
+                .map_err(|e| StorageError::Other(format!("IVFFlat search error: {}", e))),
+            _ => {
+                Err(StorageError::Other(format!("Index '{}' is not an IVFFlat index", index_name)))
             }
-            _ => Err(StorageError::Other(format!(
-                "Index '{}' is not an IVFFlat index",
-                index_name
-            ))),
         }
     }
 
     /// Get all IVFFlat indexes for a specific table
     ///
     /// Returns index metadata and access to search for each IVFFlat index on the table.
-    pub fn get_ivfflat_indexes_for_table(&self, table_name: &str) -> Vec<(&IndexMetadata, &IVFFlatIndex)> {
+    pub fn get_ivfflat_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(&IndexMetadata, &IVFFlatIndex)> {
         let search_name_upper = table_name.to_uppercase();
-        let search_table_only = search_name_upper
-            .rsplit('.')
-            .next()
-            .unwrap_or(&search_name_upper);
+        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
 
         self.indexes
             .iter()
             .filter_map(|(normalized_name, metadata)| {
                 let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or(&stored_upper);
+                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
 
                 // Check if table matches
                 if stored_upper != search_name_upper && stored_table_only != search_table_only {
@@ -893,19 +916,19 @@ impl IndexManager {
     ) -> Result<(), StorageError> {
         let normalized_name = normalize_index_name(index_name);
 
-        let index_data = self.index_data.get_mut(&normalized_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .index_data
+            .get_mut(&normalized_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         match index_data {
             IndexData::IVFFlat { index } => {
                 index.set_probes(probes);
                 Ok(())
             }
-            _ => Err(StorageError::Other(format!(
-                "Index '{}' is not an IVFFlat index",
-                index_name
-            ))),
+            _ => {
+                Err(StorageError::Other(format!("Index '{}' is not an IVFFlat index", index_name)))
+            }
         }
     }
 
@@ -917,6 +940,7 @@ impl IndexManager {
     ///
     /// This is the main entry point for creating HNSW indexes when the
     /// table rows have already been accessed by the caller (executor layer).
+    #[allow(clippy::too_many_arguments)]
     pub fn create_hnsw_index_with_vectors(
         &mut self,
         index_name: String,
@@ -966,7 +990,9 @@ impl IndexManager {
 
         // Register with resource tracker (estimate memory based on vector count and dimensions)
         // HNSW has more overhead due to graph structure: ~m*2 neighbors per node
-        let estimated_memory = vector_count * (dimensions * std::mem::size_of::<f64>() + m as usize * 2 * std::mem::size_of::<usize>());
+        let estimated_memory = vector_count
+            * (dimensions * std::mem::size_of::<f64>()
+                + m as usize * 2 * std::mem::size_of::<usize>());
         self.resource_tracker.register_index(
             normalized_name,
             estimated_memory,
@@ -995,41 +1021,34 @@ impl IndexManager {
     ) -> Result<Vec<(usize, f64)>, StorageError> {
         let normalized_name = normalize_index_name(index_name);
 
-        let index_data = self.index_data.get(&normalized_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .index_data
+            .get(&normalized_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         match index_data {
-            IndexData::Hnsw { index } => {
-                index.search(query_vector, k).map_err(|e| {
-                    StorageError::Other(format!("HNSW search error: {}", e))
-                })
-            }
-            _ => Err(StorageError::Other(format!(
-                "Index '{}' is not an HNSW index",
-                index_name
-            ))),
+            IndexData::Hnsw { index } => index
+                .search(query_vector, k)
+                .map_err(|e| StorageError::Other(format!("HNSW search error: {}", e))),
+            _ => Err(StorageError::Other(format!("Index '{}' is not an HNSW index", index_name))),
         }
     }
 
     /// Get all HNSW indexes for a specific table
     ///
     /// Returns index metadata and access to search for each HNSW index on the table.
-    pub fn get_hnsw_indexes_for_table(&self, table_name: &str) -> Vec<(&IndexMetadata, &super::hnsw::HnswIndex)> {
+    pub fn get_hnsw_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(&IndexMetadata, &super::hnsw::HnswIndex)> {
         let search_name_upper = table_name.to_uppercase();
-        let search_table_only = search_name_upper
-            .rsplit('.')
-            .next()
-            .unwrap_or(&search_name_upper);
+        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
 
         self.indexes
             .iter()
             .filter_map(|(normalized_name, metadata)| {
                 let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or(&stored_upper);
+                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
 
                 // Check if table matches
                 if stored_upper != search_name_upper && stored_table_only != search_table_only {
@@ -1057,19 +1076,17 @@ impl IndexManager {
     ) -> Result<(), StorageError> {
         let normalized_name = normalize_index_name(index_name);
 
-        let index_data = self.index_data.get_mut(&normalized_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .index_data
+            .get_mut(&normalized_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         match index_data {
             IndexData::Hnsw { index } => {
                 index.set_ef_search(ef_search);
                 Ok(())
             }
-            _ => Err(StorageError::Other(format!(
-                "Index '{}' is not an HNSW index",
-                index_name
-            ))),
+            _ => Err(StorageError::Other(format!("Index '{}' is not an HNSW index", index_name))),
         }
     }
 
@@ -1110,10 +1127,7 @@ impl IndexManager {
         let search_name_upper = table_name.to_uppercase();
 
         // Extract just the table name part if qualified (e.g., "public.users" -> "users")
-        let search_table_only = search_name_upper
-            .rsplit('.')
-            .next()
-            .unwrap_or(&search_name_upper);
+        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
 
         // Collect index names to drop (can't modify while iterating)
         // Match if:
@@ -1124,10 +1138,7 @@ impl IndexManager {
             .iter()
             .filter(|(_, metadata)| {
                 let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or(&stored_upper);
+                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
 
                 // Match if full names match OR unqualified parts match
                 stored_upper == search_name_upper || stored_table_only == search_table_only

@@ -32,7 +32,10 @@ impl Addition {
             (Null, Interval(_)) | (Interval(_), Null) => return Ok(Null),
             (Null, Date(_)) | (Date(_), Null) => return Ok(Null),
             (Null, Timestamp(_)) | (Timestamp(_), Null) => return Ok(Null),
-            (Null, Varchar(_)) | (Varchar(_), Null) | (Null, Character(_)) | (Character(_), Null) => {
+            (Null, Varchar(_))
+            | (Varchar(_), Null)
+            | (Null, Character(_))
+            | (Character(_), Null) => {
                 // Check if this is date arithmetic with NULL
                 if matches!(left, Interval(_)) || matches!(right, Interval(_)) {
                     return Ok(Null);
@@ -113,17 +116,11 @@ fn apply_interval_to_date(
         // TODO: Handle compound intervals properly in Phase 4
         let parts: Vec<&str> = amount_str.split('-').collect();
         parts[0].parse().map_err(|_| {
-            ExecutorError::UnsupportedFeature(format!(
-                "Invalid interval amount: '{}'",
-                amount_str
-            ))
+            ExecutorError::UnsupportedFeature(format!("Invalid interval amount: '{}'", amount_str))
         })?
     } else {
         amount_str.parse().map_err(|_| {
-            ExecutorError::UnsupportedFeature(format!(
-                "Invalid interval amount: '{}'",
-                amount_str
-            ))
+            ExecutorError::UnsupportedFeature(format!("Invalid interval amount: '{}'", amount_str))
         })?
     };
 

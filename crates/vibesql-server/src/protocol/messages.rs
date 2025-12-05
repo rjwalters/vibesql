@@ -82,10 +82,7 @@ pub enum BackendMessage {
     },
 
     /// Subscription error (0xF3) - subscription error notification
-    SubscriptionError {
-        subscription_id: [u8; 16],
-        message: String,
-    },
+    SubscriptionError { subscription_id: [u8; 16], message: String },
 }
 
 /// Transaction status
@@ -127,10 +124,7 @@ pub struct FieldDescription {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FrontendMessage {
     /// Startup message
-    Startup {
-        protocol_version: i32,
-        params: HashMap<String, String>,
-    },
+    Startup { protocol_version: i32, params: HashMap<String, String> },
 
     /// Password message
     Password { password: String },
@@ -145,10 +139,7 @@ pub enum FrontendMessage {
     SSLRequest,
 
     /// Subscribe message (0xF0) - subscribe to query
-    Subscribe {
-        query: String,
-        params: Vec<Option<Vec<u8>>>,
-    },
+    Subscribe { query: String, params: Vec<Option<Vec<u8>>> },
 
     /// Unsubscribe message (0xF1) - cancel subscription
     Unsubscribe { subscription_id: [u8; 16] },
@@ -185,10 +176,7 @@ impl BackendMessage {
                 put_cstring(buf, value);
             }
 
-            BackendMessage::BackendKeyData {
-                process_id,
-                secret_key,
-            } => {
+            BackendMessage::BackendKeyData { process_id, secret_key } => {
                 buf.put_u8(b'K'); // BackendKeyData
                 buf.put_i32(12);
                 buf.put_i32(*process_id);
@@ -274,11 +262,7 @@ impl BackendMessage {
                 buf.put_i32(4);
             }
 
-            BackendMessage::SubscriptionData {
-                subscription_id,
-                update_type,
-                rows,
-            } => {
+            BackendMessage::SubscriptionData { subscription_id, update_type, rows } => {
                 buf.put_u8(0xF2); // SubscriptionData
 
                 // Calculate total length
@@ -314,10 +298,7 @@ impl BackendMessage {
                 }
             }
 
-            BackendMessage::SubscriptionError {
-                subscription_id,
-                message,
-            } => {
+            BackendMessage::SubscriptionError { subscription_id, message } => {
                 buf.put_u8(0xF3); // SubscriptionError
 
                 let msg_bytes = message.as_bytes();
@@ -462,10 +443,7 @@ impl FrontendMessage {
             params.insert(key, value);
         }
 
-        Ok(Some(FrontendMessage::Startup {
-            protocol_version,
-            params,
-        }))
+        Ok(Some(FrontendMessage::Startup { protocol_version, params }))
     }
 }
 
@@ -522,10 +500,7 @@ mod tests {
     #[test]
     fn test_ready_for_query_encoding() {
         let mut buf = BytesMut::new();
-        BackendMessage::ReadyForQuery {
-            status: TransactionStatus::Idle,
-        }
-        .encode(&mut buf);
+        BackendMessage::ReadyForQuery { status: TransactionStatus::Idle }.encode(&mut buf);
 
         assert_eq!(buf[0], b'Z');
         assert_eq!(&buf[1..5], &[0, 0, 0, 5]);
@@ -553,14 +528,14 @@ mod tests {
         let mut content = BytesMut::new();
         content.put_slice(b"SELECT * FROM users\0");
         content.put_i16(0); // No params
-    
+
         buf.put_i32((4 + content.len()) as i32);
         buf.extend(content);
-    
+
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Subscribe { query, params }) 
+            Some(FrontendMessage::Subscribe { query, params })
             if query == "SELECT * FROM users" && params.is_empty()
         ));
     }
@@ -581,7 +556,7 @@ mod tests {
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Subscribe { query, params }) 
+            Some(FrontendMessage::Subscribe { query, params })
             if query == "SELECT * FROM users WHERE id = $1" && params.len() == 1
         ));
     }
@@ -596,7 +571,7 @@ mod tests {
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Unsubscribe { subscription_id }) 
+            Some(FrontendMessage::Unsubscribe { subscription_id })
             if subscription_id == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         ));
     }

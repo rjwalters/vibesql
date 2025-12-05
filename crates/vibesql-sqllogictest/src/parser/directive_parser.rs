@@ -155,9 +155,7 @@ mod tests {
 
     #[test]
     fn test_condition_should_skip_onlyif() {
-        let cond = Condition::OnlyIf {
-            label: "postgres".to_string(),
-        };
+        let cond = Condition::OnlyIf { label: "postgres".to_string() };
         assert!(!cond.should_skip(vec!["postgres"]));
         assert!(cond.should_skip(vec!["sqlite"]));
         assert!(cond.should_skip(vec![]));
@@ -165,9 +163,7 @@ mod tests {
 
     #[test]
     fn test_condition_should_skip_skipif() {
-        let cond = Condition::SkipIf {
-            label: "postgres".to_string(),
-        };
+        let cond = Condition::SkipIf { label: "postgres".to_string() };
         assert!(cond.should_skip(vec!["postgres"]));
         assert!(!cond.should_skip(vec!["sqlite"]));
         assert!(!cond.should_skip(vec![]));
@@ -176,9 +172,6 @@ mod tests {
     #[test]
     fn test_connection_new() {
         assert_eq!(Connection::new("default"), Connection::Default);
-        assert_eq!(
-            Connection::new("conn1"),
-            Connection::Named("conn1".to_string())
-        );
+        assert_eq!(Connection::new("conn1"), Connection::Named("conn1".to_string()));
     }
 }

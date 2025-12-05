@@ -78,10 +78,7 @@ fn test_drop_sequence_cascade_removes_column_defaults() {
     // Verify the table still exists but the column default is gone
     let table = db.catalog.get_table("USERS").expect("Table should exist");
     let id_column = table.get_column("ID").expect("Column should exist");
-    assert!(
-        id_column.default_value.is_none(),
-        "Column default should have been removed"
-    );
+    assert!(id_column.default_value.is_none(), "Column default should have been removed");
 }
 
 #[test]
@@ -102,11 +99,7 @@ fn test_drop_sequence_restrict_fails_when_in_use() {
 
     // DROP SEQUENCE RESTRICT should fail because sequence is in use
     let err = execute_err(&mut db, "DROP SEQUENCE user_id_seq RESTRICT");
-    assert!(
-        err.contains("still in use"),
-        "Expected 'still in use' error, got: {}",
-        err
-    );
+    assert!(err.contains("still in use"), "Expected 'still in use' error, got: {}", err);
 
     // Verify the sequence still exists
     assert!(db.catalog.get_sequence_mut("USER_ID_SEQ").is_ok());
@@ -180,19 +173,13 @@ fn test_drop_view_cascade_drops_dependent_views() {
     execute_ok(&mut db, "CREATE VIEW active_users AS SELECT * FROM users");
 
     // Create another view that depends on the first view
-    execute_ok(
-        &mut db,
-        "CREATE VIEW admin_users AS SELECT * FROM active_users",
-    );
+    execute_ok(&mut db, "CREATE VIEW admin_users AS SELECT * FROM active_users");
 
     // DROP VIEW CASCADE should drop all dependent views
     execute_ok(&mut db, "DROP VIEW active_users CASCADE");
 
     // Verify both views were dropped
-    assert!(
-        db.catalog.get_view("ACTIVE_USERS").is_none(),
-        "active_users view should be dropped"
-    );
+    assert!(db.catalog.get_view("ACTIVE_USERS").is_none(), "active_users view should be dropped");
     assert!(
         db.catalog.get_view("ADMIN_USERS").is_none(),
         "admin_users view (dependent) should also be dropped"
@@ -213,18 +200,11 @@ fn test_drop_view_restrict_fails_when_has_dependents() {
     execute_ok(&mut db, "CREATE VIEW active_users AS SELECT * FROM users");
 
     // Create another view that depends on the first view
-    execute_ok(
-        &mut db,
-        "CREATE VIEW admin_users AS SELECT * FROM active_users",
-    );
+    execute_ok(&mut db, "CREATE VIEW admin_users AS SELECT * FROM active_users");
 
     // DROP VIEW RESTRICT should fail because there are dependent views
     let err = execute_err(&mut db, "DROP VIEW active_users RESTRICT");
-    assert!(
-        err.contains("still in use"),
-        "Expected 'still in use' error, got: {}",
-        err
-    );
+    assert!(err.contains("still in use"), "Expected 'still in use' error, got: {}", err);
 
     // Verify views still exist
     assert!(db.catalog.get_view("ACTIVE_USERS").is_some());
@@ -315,14 +295,8 @@ fn test_cascade_operations_isolation() {
     execute_ok(&mut db, "CREATE SEQUENCE seq2");
 
     // Create tables using different sequences
-    execute_ok(
-        &mut db,
-        "CREATE TABLE table1 (id INTEGER DEFAULT NEXT VALUE FOR seq1)",
-    );
-    execute_ok(
-        &mut db,
-        "CREATE TABLE table2 (id INTEGER DEFAULT NEXT VALUE FOR seq2)",
-    );
+    execute_ok(&mut db, "CREATE TABLE table1 (id INTEGER DEFAULT NEXT VALUE FOR seq1)");
+    execute_ok(&mut db, "CREATE TABLE table2 (id INTEGER DEFAULT NEXT VALUE FOR seq2)");
 
     // Drop seq1 CASCADE
     execute_ok(&mut db, "DROP SEQUENCE seq1 CASCADE");

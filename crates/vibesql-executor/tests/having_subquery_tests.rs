@@ -13,9 +13,21 @@ fn setup_test_database() -> vibesql_storage::Database {
     let sales_schema = vibesql_catalog::TableSchema::new(
         "SALES".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("ID".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("DEPT".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("AMOUNT".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "ID".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "DEPT".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "AMOUNT".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(sales_schema).unwrap();
@@ -71,7 +83,11 @@ fn setup_test_database() -> vibesql_storage::Database {
     let targets_schema = vibesql_catalog::TableSchema::new(
         "TARGETS".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("ID".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "ID".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "TARGET_AMOUNT".to_string(),
                 vibesql_types::DataType::Integer,
@@ -84,7 +100,10 @@ fn setup_test_database() -> vibesql_storage::Database {
     // Insert target data
     db.insert_row(
         "TARGETS",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Integer(200)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(200),
+        ]),
     )
     .unwrap();
 

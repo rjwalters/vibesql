@@ -51,10 +51,7 @@ fn test_vector_dims_basic() {
 
     db.insert_row(
         "EMBEDDINGS",
-        Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Vector(vec![1.0, 2.0, 3.0]),
-        ]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Vector(vec![1.0, 2.0, 3.0])]),
     )
     .unwrap();
 
@@ -79,10 +76,7 @@ fn test_vector_norm_basic() {
     // 3-4-5 triangle
     db.insert_row(
         "EMBEDDINGS",
-        Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Vector(vec![3.0, 4.0]),
-        ]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Vector(vec![3.0, 4.0])]),
     )
     .unwrap();
 
@@ -260,8 +254,7 @@ fn test_inner_product_basic() {
     )
     .unwrap();
 
-    let results =
-        execute_select(&db, "SELECT INNER_PRODUCT(VEC1, VEC2) FROM EMBEDDINGS").unwrap();
+    let results = execute_select(&db, "SELECT INNER_PRODUCT(VEC1, VEC2) FROM EMBEDDINGS").unwrap();
     assert_eq!(results.len(), 1);
 
     if let SqlValue::Double(product) = results[0].values[0] {
@@ -296,8 +289,7 @@ fn test_inner_product_orthogonal() {
     )
     .unwrap();
 
-    let results =
-        execute_select(&db, "SELECT INNER_PRODUCT(VEC1, VEC2) FROM EMBEDDINGS").unwrap();
+    let results = execute_select(&db, "SELECT INNER_PRODUCT(VEC1, VEC2) FROM EMBEDDINGS").unwrap();
     assert_eq!(results.len(), 1);
 
     if let SqlValue::Double(product) = results[0].values[0] {
@@ -320,11 +312,7 @@ fn test_vector_functions_with_null() {
     let mut db = Database::new();
     db.create_table(schema).unwrap();
 
-    db.insert_row(
-        "EMBEDDINGS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Null]),
-    )
-    .unwrap();
+    db.insert_row("EMBEDDINGS", Row::new(vec![SqlValue::Integer(1), SqlValue::Null])).unwrap();
 
     // VECTOR_DIMS with NULL should return NULL
     let results = execute_select(&db, "SELECT VECTOR_DIMS(VEC) FROM EMBEDDINGS").unwrap();

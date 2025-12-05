@@ -98,10 +98,7 @@ pub fn get_memory_usage() -> Option<MemoryStats> {
         let vsize_pages: usize = parts[0].parse().ok()?;
         let rss_pages: usize = parts[1].parse().ok()?;
 
-        Some(MemoryStats {
-            rss_bytes: rss_pages * page_size,
-            vsize_bytes: vsize_pages * page_size,
-        })
+        Some(MemoryStats { rss_bytes: rss_pages * page_size, vsize_bytes: vsize_pages * page_size })
     } else {
         None
     }
@@ -124,11 +121,7 @@ impl MemoryTracker {
     /// Create a new memory tracker
     pub fn new(warning_threshold_mb: f64) -> Self {
         let initial_rss = get_memory_usage().map(|s| s.rss_bytes).unwrap_or(0);
-        Self {
-            initial_rss,
-            peak_rss: initial_rss,
-            warning_threshold_mb,
-        }
+        Self { initial_rss, peak_rss: initial_rss, warning_threshold_mb }
     }
 
     /// Record current memory usage and return stats
@@ -193,9 +186,7 @@ pub fn hint_memory_release() {
 
     // Purge all arenas to release memory back to the OS
     // "arenas.purge" is a write-only command that forces immediate page purging
-    let purge_result = unsafe {
-        raw::write(b"arena.0.purge\0", ())
-    };
+    let purge_result = unsafe { raw::write(b"arena.0.purge\0", ()) };
     if let Err(e) = purge_result {
         // Arena 0 might not exist; try the global purge
         let _ = unsafe { raw::write(b"arenas.purge\0", ()) };

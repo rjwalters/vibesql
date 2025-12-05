@@ -12,10 +12,10 @@ fn test_tpcds_schema_loads_without_type_mismatch() {
     // by directly using the storage types to create the same schema structure.
     // This is a compile-time verification that the types are correct.
 
+    use std::str::FromStr;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::{Database, Row};
     use vibesql_types::{DataType, Date, SqlValue};
-    use std::str::FromStr;
 
     let mut db = Database::new();
 
@@ -70,10 +70,10 @@ fn test_tpcds_schema_loads_without_type_mismatch() {
 /// Test that web_site table also uses correct DATE type for web_rec_start_date.
 #[test]
 fn test_web_site_date_columns() {
+    use std::str::FromStr;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::{Database, Row};
     use vibesql_types::{DataType, Date, SqlValue};
-    use std::str::FromStr;
 
     let mut db = Database::new();
 
@@ -158,7 +158,7 @@ fn test_integer_into_date_column_fails() {
     // Try to insert INTEGER into DATE column - this should fail
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Integer(19980101),  // Wrong type - should be SqlValue::Date
+        SqlValue::Integer(19980101), // Wrong type - should be SqlValue::Date
     ]);
 
     let result = db.insert_row("test_table", row);
@@ -169,6 +169,7 @@ fn test_integer_into_date_column_fails() {
     let err_string = format!("{:?}", err);
     assert!(
         err_string.contains("TypeMismatch") || err_string.contains("type mismatch"),
-        "Error should be TypeMismatch, got: {}", err_string
+        "Error should be TypeMismatch, got: {}",
+        err_string
     );
 }

@@ -506,13 +506,8 @@ mod tests {
 
     #[test]
     fn test_hit_rate() {
-        let stats = CacheStats {
-            hits: 80,
-            misses: 20,
-            evictions: 0,
-            conversions: 0,
-            invalidations: 0,
-        };
+        let stats =
+            CacheStats { hits: 80, misses: 20, evictions: 0, conversions: 0, invalidations: 0 };
 
         assert!((stats.hit_rate() - 80.0).abs() < 0.001);
     }

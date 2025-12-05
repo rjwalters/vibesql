@@ -29,18 +29,12 @@ async fn test_simple_query_roundtrip() {
         messages.iter().any(|m| m.is_row_description()),
         "Expected RowDescription for SELECT query"
     );
-    assert!(
-        messages.iter().any(|m| m.is_data_row()),
-        "Expected DataRow for SELECT query"
-    );
+    assert!(messages.iter().any(|m| m.is_data_row()), "Expected DataRow for SELECT query");
     assert!(
         messages.iter().any(|m| m.is_command_complete()),
         "Expected CommandComplete for SELECT query"
     );
-    assert!(
-        messages.iter().any(|m| m.is_ready_for_query()),
-        "Expected ReadyForQuery after query"
-    );
+    assert!(messages.iter().any(|m| m.is_ready_for_query()), "Expected ReadyForQuery after query");
 
     // Verify command tag
     let cmd_complete = messages.iter().find(|m| m.is_command_complete()).unwrap();
@@ -115,7 +109,10 @@ async fn test_ddl_and_dml_roundtrip() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create table
-    client.send_query("CREATE TABLE test_table (id INT, name VARCHAR(100))").await.expect("Failed to send CREATE TABLE");
+    client
+        .send_query("CREATE TABLE test_table (id INT, name VARCHAR(100))")
+        .await
+        .expect("Failed to send CREATE TABLE");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read CREATE response");
     let messages = parse_backend_messages(&data);
     assert!(
@@ -124,7 +121,10 @@ async fn test_ddl_and_dml_roundtrip() {
     );
 
     // Insert data
-    client.send_query("INSERT INTO test_table VALUES (1, 'test')").await.expect("Failed to send INSERT");
+    client
+        .send_query("INSERT INTO test_table VALUES (1, 'test')")
+        .await
+        .expect("Failed to send INSERT");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read INSERT response");
     let messages = parse_backend_messages(&data);
 
@@ -154,14 +154,23 @@ async fn test_update_roundtrip() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create and populate table
-    client.send_query("CREATE TABLE update_test (id INT, value INT)").await.expect("Failed to send CREATE TABLE");
+    client
+        .send_query("CREATE TABLE update_test (id INT, value INT)")
+        .await
+        .expect("Failed to send CREATE TABLE");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
-    client.send_query("INSERT INTO update_test VALUES (1, 10)").await.expect("Failed to send INSERT");
+    client
+        .send_query("INSERT INTO update_test VALUES (1, 10)")
+        .await
+        .expect("Failed to send INSERT");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Update data
-    client.send_query("UPDATE update_test SET value = 20 WHERE id = 1").await.expect("Failed to send UPDATE");
+    client
+        .send_query("UPDATE update_test SET value = 20 WHERE id = 1")
+        .await
+        .expect("Failed to send UPDATE");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read UPDATE response");
     let messages = parse_backend_messages(&data);
 
@@ -183,7 +192,10 @@ async fn test_delete_roundtrip() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create and populate table
-    client.send_query("CREATE TABLE delete_test (id INT)").await.expect("Failed to send CREATE TABLE");
+    client
+        .send_query("CREATE TABLE delete_test (id INT)")
+        .await
+        .expect("Failed to send CREATE TABLE");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     client.send_query("INSERT INTO delete_test VALUES (1)").await.expect("Failed to send INSERT");
@@ -301,10 +313,16 @@ async fn test_row_description_fields() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create table with known columns
-    client.send_query("CREATE TABLE field_test (a INT, b INT, c INT)").await.expect("Failed to send CREATE");
+    client
+        .send_query("CREATE TABLE field_test (a INT, b INT, c INT)")
+        .await
+        .expect("Failed to send CREATE");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
-    client.send_query("INSERT INTO field_test VALUES (1, 2, 3)").await.expect("Failed to send INSERT");
+    client
+        .send_query("INSERT INTO field_test VALUES (1, 2, 3)")
+        .await
+        .expect("Failed to send INSERT");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Select all columns
@@ -330,10 +348,16 @@ async fn test_data_row_matches_row_description() {
     client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
-    client.send_query("CREATE TABLE match_test (x INT, y INT)").await.expect("Failed to send CREATE");
+    client
+        .send_query("CREATE TABLE match_test (x INT, y INT)")
+        .await
+        .expect("Failed to send CREATE");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
-    client.send_query("INSERT INTO match_test VALUES (10, 20)").await.expect("Failed to send INSERT");
+    client
+        .send_query("INSERT INTO match_test VALUES (10, 20)")
+        .await
+        .expect("Failed to send INSERT");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     client.send_query("SELECT * FROM match_test").await.expect("Failed to send SELECT");
@@ -347,10 +371,7 @@ async fn test_data_row_matches_row_description() {
     let desc_fields = i16::from_be_bytes([row_desc.payload[0], row_desc.payload[1]]);
     let row_fields = i16::from_be_bytes([data_row.payload[0], data_row.payload[1]]);
 
-    assert_eq!(
-        desc_fields, row_fields,
-        "DataRow field count should match RowDescription"
-    );
+    assert_eq!(desc_fields, row_fields, "DataRow field count should match RowDescription");
 
     client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
@@ -374,7 +395,10 @@ async fn test_select_no_rows() {
     let messages = parse_backend_messages(&data);
 
     // Should have RowDescription but no DataRow
-    assert!(messages.iter().any(|m| m.is_row_description()), "Should have RowDescription even for empty result");
+    assert!(
+        messages.iter().any(|m| m.is_row_description()),
+        "Should have RowDescription even for empty result"
+    );
     assert!(!messages.iter().any(|m| m.is_data_row()), "Should not have DataRow for empty result");
 
     // CommandComplete should say SELECT 0

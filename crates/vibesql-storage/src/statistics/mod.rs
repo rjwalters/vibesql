@@ -15,14 +15,14 @@
 //! - Predicate pushdown prioritization
 //! - Cost estimation
 
-mod table;
 mod column;
 mod cost;
-mod sampling;
 mod histogram;
+mod sampling;
+mod table;
 
-pub use table::TableStatistics;
 pub use column::ColumnStatistics;
-pub use cost::{CostEstimator, AccessMethod};
-pub use sampling::{SamplingConfig, SampleSize, SamplingMethod, SampleMetadata};
-pub use histogram::{Histogram, HistogramBucket, BucketStrategy};
+pub use cost::{AccessMethod, CostEstimator};
+pub use histogram::{BucketStrategy, Histogram, HistogramBucket};
+pub use sampling::{SampleMetadata, SampleSize, SamplingConfig, SamplingMethod};
+pub use table::TableStatistics;

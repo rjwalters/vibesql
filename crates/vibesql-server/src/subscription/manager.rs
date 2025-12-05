@@ -5,14 +5,14 @@
 //! dependencies, and handles change event notifications.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
-use vibesql_storage::Database;
 use vibesql_storage::change_events::RecvError;
+use vibesql_storage::Database;
 
 use super::{
     classify_error_str, compute_delta, extract_table_refs, hash_rows, Subscription,
@@ -131,7 +131,7 @@ impl SubscriptionManager {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break, // Successfully reserved a slot
+                Ok(_) => break,     // Successfully reserved a slot
                 Err(_) => continue, // Another thread changed the count, retry
             }
         }
@@ -169,10 +169,7 @@ impl SubscriptionManager {
 
         // Index by tables
         for table in tables {
-            self.table_index
-                .entry(table)
-                .or_default()
-                .insert(id);
+            self.table_index.entry(table).or_default().insert(id);
         }
 
         Ok(id)
@@ -208,10 +205,7 @@ impl SubscriptionManager {
 
     /// Get the tables being watched and their subscription counts
     pub fn watched_tables(&self) -> Vec<(String, usize)> {
-        self.table_index
-            .iter()
-            .map(|entry| (entry.key().clone(), entry.value().len()))
-            .collect()
+        self.table_index.iter().map(|entry| (entry.key().clone(), entry.value().len())).collect()
     }
 
     /// Find all subscriptions affected by a change to a given table
@@ -228,10 +222,7 @@ impl SubscriptionManager {
     /// Vector of subscription IDs that depend on this table
     pub fn find_affected_subscriptions(&self, table_name: &str) -> Vec<SubscriptionId> {
         let table = table_name.to_lowercase();
-        self.table_index
-            .get(&table)
-            .map(|ids| ids.iter().copied().collect())
-            .unwrap_or_default()
+        self.table_index.get(&table).map(|ids| ids.iter().copied().collect()).unwrap_or_default()
     }
 
     /// Handle a change event from the storage layer
@@ -310,12 +301,8 @@ impl SubscriptionManager {
                     subscription.retry_count = 0;
 
                     // Convert to Row format
-                    let result_rows: Vec<crate::Row> = rows
-                        .iter()
-                        .map(|r| crate::Row {
-                            values: r.values.clone(),
-                        })
-                        .collect();
+                    let result_rows: Vec<crate::Row> =
+                        rows.iter().map(|r| crate::Row { values: r.values.clone() }).collect();
 
                     // Hash results for comparison
                     let new_hash = hash_rows(&result_rows);
@@ -351,9 +338,7 @@ impl SubscriptionManager {
                                 delta
                             } else {
                                 // No delta (shouldn't happen if hash changed, but be safe)
-                                SubscriptionUpdate::Full {
-                                    rows: result_rows.clone(),
-                                }
+                                SubscriptionUpdate::Full { rows: result_rows.clone() }
                             }
                         } else {
                             // No previous results - send full (first update after initial)
@@ -361,9 +346,7 @@ impl SubscriptionManager {
                                 subscription_id = %id,
                                 "No previous result, sending full update"
                             );
-                            SubscriptionUpdate::Full {
-                                rows: result_rows.clone(),
-                            }
+                            SubscriptionUpdate::Full { rows: result_rows.clone() }
                         };
 
                         // Update stored state
@@ -374,11 +357,8 @@ impl SubscriptionManager {
                         let capacity = subscription.notify_tx.capacity();
                         let max_capacity = subscription.notify_tx.max_capacity();
                         let used = max_capacity.saturating_sub(capacity);
-                        let usage_percent = if max_capacity > 0 {
-                            (used * 100) / max_capacity
-                        } else {
-                            0
-                        };
+                        let usage_percent =
+                            if max_capacity > 0 { (used * 100) / max_capacity } else { 0 };
 
                         if usage_percent >= subscription.slow_consumer_threshold_percent as usize {
                             warn!(
@@ -540,17 +520,18 @@ impl SubscriptionManager {
     ///
     /// This method should be spawned as a tokio task at server startup using `tokio::spawn`.
     /// It will poll the change receiver and handle events until closed.
-    pub async fn run_event_loop(&self, mut change_rx: vibesql_storage::ChangeEventReceiver, db: Arc<Database>) {
+    pub async fn run_event_loop(
+        &self,
+        mut change_rx: vibesql_storage::ChangeEventReceiver,
+        db: Arc<Database>,
+    ) {
         loop {
             match change_rx.try_recv() {
                 Ok(event) => {
                     self.handle_change(event, &db).await;
                 }
                 Err(RecvError::Lagged(n)) => {
-                    warn!(
-                        lagged_count = n,
-                        "SubscriptionManager lagged behind change events"
-                    );
+                    warn!(lagged_count = n, "SubscriptionManager lagged behind change events");
                 }
                 Err(RecvError::Closed) => {
                     debug!("Change event channel closed, stopping subscription manager");
@@ -588,10 +569,7 @@ impl SubscriptionManager {
         id: SubscriptionId,
         db: &Database,
     ) -> Result<(), SubscriptionError> {
-        let mut sub_ref = self
-            .subscriptions
-            .get_mut(&id)
-            .ok_or(SubscriptionError::NotFound(id))?;
+        let mut sub_ref = self.subscriptions.get_mut(&id).ok_or(SubscriptionError::NotFound(id))?;
 
         let subscription = sub_ref.value_mut();
 
@@ -617,12 +595,8 @@ impl SubscriptionManager {
         }
 
         // Convert to Row format
-        let result_rows: Vec<crate::Row> = rows
-            .iter()
-            .map(|r| crate::Row {
-                values: r.values.clone(),
-            })
-            .collect();
+        let result_rows: Vec<crate::Row> =
+            rows.iter().map(|r| crate::Row { values: r.values.clone() }).collect();
 
         // Update hash and store result for delta computation
         subscription.last_result_hash = hash_rows(&result_rows);
@@ -657,16 +631,17 @@ impl SubscriptionManager {
     ///
     /// Returns metrics including updates sent, dropped, and channel health.
     /// Returns None if the subscription doesn't exist.
-    pub fn get_subscription_metrics(&self, id: SubscriptionId) -> Option<super::SubscriptionMetrics> {
-        self.subscriptions.get(&id).map(|sub| {
-            super::SubscriptionMetrics {
-                subscription_id: Some(sub.id),
-                updates_sent: sub.updates_sent,
-                updates_dropped: sub.updates_dropped,
-                channel_buffer_size: sub.channel_buffer_size,
-                channel_capacity: sub.notify_tx.capacity(),
-                slow_consumer_threshold_percent: sub.slow_consumer_threshold_percent,
-            }
+    pub fn get_subscription_metrics(
+        &self,
+        id: SubscriptionId,
+    ) -> Option<super::SubscriptionMetrics> {
+        self.subscriptions.get(&id).map(|sub| super::SubscriptionMetrics {
+            subscription_id: Some(sub.id),
+            updates_sent: sub.updates_sent,
+            updates_dropped: sub.updates_dropped,
+            channel_buffer_size: sub.channel_buffer_size,
+            channel_capacity: sub.notify_tx.capacity(),
+            slow_consumer_threshold_percent: sub.slow_consumer_threshold_percent,
         })
     }
 
@@ -749,10 +724,8 @@ mod tests {
         let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
-        let result = manager.subscribe(
-            "SELECT * FROM users u JOIN orders o ON u.id = o.user_id".to_string(),
-            tx,
-        );
+        let result = manager
+            .subscribe("SELECT * FROM users u JOIN orders o ON u.id = o.user_id".to_string(), tx);
         assert!(result.is_ok());
 
         // Should be indexed under both tables
@@ -767,9 +740,7 @@ mod tests {
         let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
-        let id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
         assert_eq!(manager.subscription_count(), 1);
 
         manager.unsubscribe(id);
@@ -807,9 +778,7 @@ mod tests {
         let db = setup_test_db();
 
         // Subscribe to users table
-        let _id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let _id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
         // Simulate a change to users table
         manager
@@ -842,9 +811,7 @@ mod tests {
         let db = setup_test_db();
 
         // Subscribe to users table
-        let _id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let _id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
         // Simulate a change to orders table (not subscribed)
         manager
@@ -869,16 +836,15 @@ mod tests {
         let mut db = setup_test_db();
 
         // Insert some data
-        let insert = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
-            .unwrap();
+        let insert =
+            vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
+                .unwrap();
         if let vibesql_ast::Statement::Insert(stmt) = insert {
             vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
         }
 
         // Subscribe
-        let id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
         // Send initial results
         manager.send_initial_results(id, &db).await.unwrap();
@@ -901,17 +867,16 @@ mod tests {
         let mut db = setup_test_db();
 
         // Subscribe before any data
-        let id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
         // Send initial (empty) results
         manager.send_initial_results(id, &db).await.unwrap();
         let _ = rx.recv().await; // Consume initial
 
         // Insert data
-        let insert = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
-            .unwrap();
+        let insert =
+            vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
+                .unwrap();
         if let vibesql_ast::Statement::Insert(stmt) = insert {
             vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
         }
@@ -930,11 +895,7 @@ mod tests {
         // Should receive update with new data (as Delta since we have previous results)
         let update = rx.recv().await.unwrap();
         match update {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 // The inserted row should appear as an insert
                 assert_eq!(inserts.len(), 1);
                 assert!(updates.is_empty());
@@ -955,9 +916,7 @@ mod tests {
         let db = setup_test_db();
 
         // Subscribe (empty table)
-        let id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
         // Send initial results
         manager.send_initial_results(id, &db).await.unwrap();
@@ -985,12 +944,9 @@ mod tests {
         let (tx1, _rx1) = mpsc::channel(16);
         let (tx2, _rx2) = mpsc::channel(16);
 
-        let _id1 = manager
-            .subscribe("SELECT * FROM users".to_string(), tx1)
-            .unwrap();
-        let _id2 = manager
-            .subscribe("SELECT * FROM users WHERE active = TRUE".to_string(), tx2)
-            .unwrap();
+        let _id1 = manager.subscribe("SELECT * FROM users".to_string(), tx1).unwrap();
+        let _id2 =
+            manager.subscribe("SELECT * FROM users WHERE active = TRUE".to_string(), tx2).unwrap();
 
         assert_eq!(manager.subscription_count(), 2);
 
@@ -1007,16 +963,15 @@ mod tests {
         let mut db = setup_test_db();
 
         // Insert initial data
-        let insert = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
-            .unwrap();
+        let insert =
+            vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
+                .unwrap();
         if let vibesql_ast::Statement::Insert(stmt) = insert {
             vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
         }
 
         // Subscribe and get initial results
-        let id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
         manager.send_initial_results(id, &db).await.unwrap();
 
         // Consume initial Full update
@@ -1029,8 +984,8 @@ mod tests {
         }
 
         // Insert another row
-        let insert2 = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (2, 'Bob', TRUE)")
-            .unwrap();
+        let insert2 =
+            vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (2, 'Bob', TRUE)").unwrap();
         if let vibesql_ast::Statement::Insert(stmt) = insert2 {
             vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
         }
@@ -1049,11 +1004,7 @@ mod tests {
         // Should receive a Delta update (not Full)
         let update = rx.recv().await.unwrap();
         match update {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
                 assert!(updates.is_empty());
@@ -1073,21 +1024,20 @@ mod tests {
         let mut db = setup_test_db();
 
         // Insert initial data
-        let insert1 = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
-            .unwrap();
+        let insert1 =
+            vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
+                .unwrap();
         if let vibesql_ast::Statement::Insert(stmt) = insert1 {
             vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
         }
-        let insert2 = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (2, 'Bob', TRUE)")
-            .unwrap();
+        let insert2 =
+            vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (2, 'Bob', TRUE)").unwrap();
         if let vibesql_ast::Statement::Insert(stmt) = insert2 {
             vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
         }
 
         // Subscribe and get initial results
-        let id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
         manager.send_initial_results(id, &db).await.unwrap();
 
         // Consume initial Full update
@@ -1100,8 +1050,7 @@ mod tests {
         }
 
         // Delete a row
-        let delete = vibesql_parser::Parser::parse_sql("DELETE FROM users WHERE id = 2")
-            .unwrap();
+        let delete = vibesql_parser::Parser::parse_sql("DELETE FROM users WHERE id = 2").unwrap();
         if let vibesql_ast::Statement::Delete(stmt) = delete {
             vibesql_executor::DeleteExecutor::execute(&stmt, &mut db).unwrap();
         }
@@ -1120,11 +1069,7 @@ mod tests {
         // Should receive a Delta update with delete
         let update = rx.recv().await.unwrap();
         match update {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 assert!(inserts.is_empty());
                 assert!(updates.is_empty());
                 assert_eq!(deletes.len(), 1);
@@ -1159,7 +1104,10 @@ mod tests {
 
         // Third subscription should fail with global limit exceeded
         let result = manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), tx3);
-        assert!(matches!(result, Err(SubscriptionError::GlobalLimitExceeded { current: 2, max: 2 })));
+        assert!(matches!(
+            result,
+            Err(SubscriptionError::GlobalLimitExceeded { current: 2, max: 2 })
+        ));
 
         // Metrics should reflect the limit exceeded event
         assert_eq!(manager.limit_exceeded_count(), 1);
@@ -1179,8 +1127,9 @@ mod tests {
         let mut db = setup_test_db();
 
         // Insert some data
-        let insert = vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
-            .unwrap();
+        let insert =
+            vibesql_parser::Parser::parse_sql("INSERT INTO users VALUES (1, 'Alice', TRUE)")
+                .unwrap();
         if let vibesql_ast::Statement::Insert(stmt) = insert {
             vibesql_executor::InsertExecutor::execute(&mut db, &stmt).unwrap();
         }
@@ -1294,12 +1243,7 @@ mod tests {
             slow_consumer_threshold_percent: 90,
         };
 
-        let sub = Subscription::with_config(
-            "SELECT * FROM users".to_string(),
-            tables,
-            tx,
-            &config,
-        );
+        let sub = Subscription::with_config("SELECT * FROM users".to_string(), tables, tx, &config);
 
         // Verify config values are applied
         assert_eq!(sub.updates_sent, 0);
@@ -1313,9 +1257,7 @@ mod tests {
         let manager = SubscriptionManager::new();
         let (tx, _rx) = mpsc::channel(16);
 
-        let id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
         // Get metrics for the subscription
         let metrics = manager.get_subscription_metrics(id);
@@ -1345,12 +1287,8 @@ mod tests {
         let (tx1, _rx1) = mpsc::channel(16);
         let (tx2, _rx2) = mpsc::channel(16);
 
-        manager
-            .subscribe("SELECT * FROM users".to_string(), tx1)
-            .unwrap();
-        manager
-            .subscribe("SELECT * FROM orders".to_string(), tx2)
-            .unwrap();
+        manager.subscribe("SELECT * FROM users".to_string(), tx1).unwrap();
+        manager.subscribe("SELECT * FROM orders".to_string(), tx2).unwrap();
 
         // Get all metrics
         let all_metrics = manager.get_all_metrics();

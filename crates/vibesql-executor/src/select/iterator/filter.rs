@@ -1,6 +1,8 @@
 //! Filter iterator implementation
 
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
+use crate::{
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
+};
 
 use super::RowIterator;
 
@@ -45,7 +47,11 @@ impl<'a, I: RowIterator> FilterIterator<'a, I> {
     /// * `source` - The source iterator to filter
     /// * `predicate` - The expression to evaluate for each row
     /// * `evaluator` - The evaluator to use for predicate evaluation
-    pub fn new(source: I, predicate: vibesql_ast::Expression, evaluator: CombinedExpressionEvaluator<'a>) -> Self {
+    pub fn new(
+        source: I,
+        predicate: vibesql_ast::Expression,
+        evaluator: CombinedExpressionEvaluator<'a>,
+    ) -> Self {
         Self { source, predicate, evaluator }
     }
 
@@ -63,10 +69,12 @@ impl<'a, I: RowIterator> FilterIterator<'a, I> {
             vibesql_types::SqlValue::Integer(0)
             | vibesql_types::SqlValue::Smallint(0)
             | vibesql_types::SqlValue::Bigint(0) => Ok(false),
-            vibesql_types::SqlValue::Integer(_) | vibesql_types::SqlValue::Smallint(_) | vibesql_types::SqlValue::Bigint(_) => {
-                Ok(true)
+            vibesql_types::SqlValue::Integer(_)
+            | vibesql_types::SqlValue::Smallint(_)
+            | vibesql_types::SqlValue::Bigint(_) => Ok(true),
+            vibesql_types::SqlValue::Float(f) | vibesql_types::SqlValue::Real(f) if *f == 0.0 => {
+                Ok(false)
             }
-            vibesql_types::SqlValue::Float(f) | vibesql_types::SqlValue::Real(f) if *f == 0.0 => Ok(false),
             vibesql_types::SqlValue::Float(_) | vibesql_types::SqlValue::Real(_) => Ok(true),
             vibesql_types::SqlValue::Double(f) if *f == 0.0 => Ok(false),
             vibesql_types::SqlValue::Double(_) => Ok(true),
@@ -92,9 +100,9 @@ impl<'a, I: RowIterator> Iterator for FilterIterator<'a, I> {
             // Evaluate the predicate for this row
             match self.evaluator.eval(&self.predicate, &row) {
                 Ok(value) => match Self::is_truthy(&value) {
-                    Ok(true) => return Some(Ok(row)),  // Row passes filter
-                    Ok(false) => continue,              // Row filtered out, try next
-                    Err(e) => return Some(Err(e)),     // Type error
+                    Ok(true) => return Some(Ok(row)), // Row passes filter
+                    Ok(false) => continue,            // Row filtered out, try next
+                    Err(e) => return Some(Err(e)),    // Type error
                 },
                 Err(e) => return Some(Err(e)), // Evaluation error
             }

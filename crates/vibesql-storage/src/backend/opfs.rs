@@ -15,16 +15,19 @@
 //! `OpfsStorage::new_async()` and uses internal async operations with synchronous
 //! wrappers via `wasm_bindgen_futures::spawn_local` for StorageBackend trait compatibility.
 
-use std::sync::mpsc::{channel, Sender, Receiver};
+use js_sys::{Object, Reflect, Uint8Array};
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemWritableFileStream};
-use js_sys::{Object, Reflect, Uint8Array};
 
-use crate::{StorageError, backend::{StorageBackend, StorageFile}};
+use crate::{
+    backend::{StorageBackend, StorageFile},
+    StorageError,
+};
 
 /// OPFS-specific error types
 #[derive(Debug)]
@@ -48,13 +51,21 @@ pub enum OpfsError {
 impl From<OpfsError> for StorageError {
     fn from(error: OpfsError) -> Self {
         match error {
-            OpfsError::NotSupported => StorageError::IoError("OPFS not supported in this browser".to_string()),
+            OpfsError::NotSupported => {
+                StorageError::IoError("OPFS not supported in this browser".to_string())
+            }
             OpfsError::QuotaExceeded => StorageError::IoError("Storage quota exceeded".to_string()),
-            OpfsError::SecurityError => StorageError::IoError("Security error accessing OPFS".to_string()),
+            OpfsError::SecurityError => {
+                StorageError::IoError("Security error accessing OPFS".to_string())
+            }
             OpfsError::NotFound => StorageError::IoError("File not found".to_string()),
-            OpfsError::InvalidState => StorageError::IoError("File handle in invalid state".to_string()),
+            OpfsError::InvalidState => {
+                StorageError::IoError("File handle in invalid state".to_string())
+            }
             OpfsError::JsError(msg) => StorageError::IoError(format!("OPFS error: {}", msg)),
-            OpfsError::ChannelError(msg) => StorageError::IoError(format!("Channel error: {}", msg)),
+            OpfsError::ChannelError(msg) => {
+                StorageError::IoError(format!("Channel error: {}", msg))
+            }
         }
     }
 }
@@ -62,9 +73,7 @@ impl From<OpfsError> for StorageError {
 impl From<JsValue> for OpfsError {
     fn from(js_error: JsValue) -> Self {
         // Try to extract error name
-        let error_name = Reflect::get(&js_error, &"name".into())
-            .ok()
-            .and_then(|v| v.as_string());
+        let error_name = Reflect::get(&js_error, &"name".into()).ok().and_then(|v| v.as_string());
 
         match error_name.as_deref() {
             Some("SecurityError") => OpfsError::SecurityError,
@@ -99,8 +108,7 @@ where
         let _ = tx.send(result);
     });
 
-    rx.recv()
-        .map_err(|e| OpfsError::ChannelError(e.to_string()))?
+    rx.recv().map_err(|e| OpfsError::ChannelError(e.to_string()))?
 }
 
 /// OPFS storage backend for browser-based storage
@@ -136,15 +144,12 @@ impl OpfsStorage {
     /// ```
     pub async fn new_async() -> Result<Self, OpfsError> {
         // Get window object
-        let window = web_sys::window()
-            .ok_or(OpfsError::NotSupported)?;
+        let window = web_sys::window().ok_or(OpfsError::NotSupported)?;
 
         let navigator = window.navigator();
 
         // Check if storage API exists
-        if !Reflect::has(&navigator, &"storage".into())
-            .unwrap_or(false)
-        {
+        if !Reflect::has(&navigator, &"storage".into()).unwrap_or(false) {
             return Err(OpfsError::NotSupported);
         }
 
@@ -152,15 +157,11 @@ impl OpfsStorage {
 
         // Try to get directory handle
         let root_promise = storage.get_directory();
-        let root_js = JsFuture::from(root_promise)
-            .await
-            .map_err(|e| OpfsError::from(e))?;
+        let root_js = JsFuture::from(root_promise).await.map_err(|e| OpfsError::from(e))?;
 
         let root: FileSystemDirectoryHandle = root_js.into();
 
-        Ok(Self {
-            root: Rc::new(RefCell::new(root)),
-        })
+        Ok(Self { root: Rc::new(RefCell::new(root)) })
     }
 
     /// Get a file handle, optionally creating it if it doesn't exist
@@ -180,9 +181,7 @@ impl OpfsStorage {
             root.get_file_handle(path)
         };
 
-        let handle_js = JsFuture::from(promise)
-            .await
-            .map_err(|e| OpfsError::from(e))?;
+        let handle_js = JsFuture::from(promise).await.map_err(|e| OpfsError::from(e))?;
 
         Ok(handle_js.into())
     }
@@ -190,27 +189,21 @@ impl OpfsStorage {
     /// Get a file handle (synchronous wrapper)
     fn get_file_handle(&self, path: &str, create: bool) -> Result<FileSystemFileHandle, OpfsError> {
         let path_owned = path.to_string();
-        let storage_clone = Self {
-            root: self.root.clone(),
-        };
+        let storage_clone = Self { root: self.root.clone() };
 
-        block_on(async move {
-            storage_clone.get_file_handle_async(&path_owned, create).await
-        })
+        block_on(async move { storage_clone.get_file_handle_async(&path_owned, create).await })
     }
 }
 
 impl StorageBackend for OpfsStorage {
     fn create_file(&self, path: &str) -> Result<Box<dyn StorageFile>, StorageError> {
-        let handle = self.get_file_handle(path, true)
-            .map_err(|e| StorageError::from(e))?;
+        let handle = self.get_file_handle(path, true).map_err(|e| StorageError::from(e))?;
 
         Ok(Box::new(OpfsFile::new(handle)))
     }
 
     fn open_file(&self, path: &str) -> Result<Box<dyn StorageFile>, StorageError> {
-        let handle = self.get_file_handle(path, true)
-            .map_err(|e| StorageError::from(e))?;
+        let handle = self.get_file_handle(path, true).map_err(|e| StorageError::from(e))?;
 
         Ok(Box::new(OpfsFile::new(handle)))
     }
@@ -222,9 +215,7 @@ impl StorageBackend for OpfsStorage {
         block_on(async move {
             let root_handle = root.borrow().clone();
             let promise = root_handle.remove_entry(&path_owned);
-            JsFuture::from(promise)
-                .await
-                .map_err(|e| OpfsError::from(e))?;
+            JsFuture::from(promise).await.map_err(|e| OpfsError::from(e))?;
             Ok(())
         })
         .map_err(|e: OpfsError| StorageError::from(e))
@@ -235,8 +226,7 @@ impl StorageBackend for OpfsStorage {
     }
 
     fn file_size(&self, path: &str) -> Result<u64, StorageError> {
-        let handle = self.get_file_handle(path, false)
-            .map_err(|e| StorageError::from(e))?;
+        let handle = self.get_file_handle(path, false).map_err(|e| StorageError::from(e))?;
 
         let file = OpfsFile::new(handle);
         file.size()
@@ -260,18 +250,14 @@ unsafe impl Sync for OpfsFile {}
 impl OpfsFile {
     /// Create a new OpfsFile from a file handle
     pub fn new(handle: FileSystemFileHandle) -> Self {
-        Self {
-            handle: Rc::new(RefCell::new(handle)),
-        }
+        Self { handle: Rc::new(RefCell::new(handle)) }
     }
 
     /// Get the File object for reading
     async fn get_file_async(&self) -> Result<web_sys::File, OpfsError> {
         let handle = self.handle.borrow().clone();
         let promise = handle.get_file();
-        let file_js = JsFuture::from(promise)
-            .await
-            .map_err(|e| OpfsError::from(e))?;
+        let file_js = JsFuture::from(promise).await.map_err(|e| OpfsError::from(e))?;
 
         Ok(file_js.into())
     }
@@ -281,13 +267,13 @@ impl OpfsFile {
         let file: web_sys::File = self.get_file_async().await?;
 
         let end = offset + buf.len() as u64;
-        let blob = file.slice_with_f64_and_f64(offset as f64, end as f64)
+        let blob = file
+            .slice_with_f64_and_f64(offset as f64, end as f64)
             .map_err(|e| OpfsError::from(e))?;
 
         let array_buffer_promise = blob.array_buffer();
-        let array_buffer = JsFuture::from(array_buffer_promise)
-            .await
-            .map_err(|e| OpfsError::from(e))?;
+        let array_buffer =
+            JsFuture::from(array_buffer_promise).await.map_err(|e| OpfsError::from(e))?;
 
         let uint8_array = Uint8Array::new(&array_buffer);
         let bytes_read = uint8_array.length() as usize;
@@ -304,9 +290,7 @@ impl OpfsFile {
 
         // Create writable stream
         let writable_promise = handle.create_writable();
-        let writable_js = JsFuture::from(writable_promise)
-            .await
-            .map_err(|e| OpfsError::from(e))?;
+        let writable_js = JsFuture::from(writable_promise).await.map_err(|e| OpfsError::from(e))?;
 
         let writable: FileSystemWritableFileStream = writable_js.into();
 
@@ -321,15 +305,12 @@ impl OpfsFile {
                 .map_err(|e| OpfsError::from(e))?;
 
             // Use Reflect to call the write method with the seek command object
-            let write_fn = Reflect::get(&writable, &"write".into())
-                .map_err(|e| OpfsError::from(e))?;
+            let write_fn =
+                Reflect::get(&writable, &"write".into()).map_err(|e| OpfsError::from(e))?;
 
-            let promise_js = Reflect::apply(
-                &write_fn.into(),
-                &writable,
-                &js_sys::Array::of1(&seek_cmd),
-            )
-            .map_err(|e| OpfsError::from(e))?;
+            let promise_js =
+                Reflect::apply(&write_fn.into(), &writable, &js_sys::Array::of1(&seek_cmd))
+                    .map_err(|e| OpfsError::from(e))?;
 
             JsFuture::from(js_sys::Promise::from(promise_js))
                 .await
@@ -338,17 +319,13 @@ impl OpfsFile {
 
         // Write data
         let uint8_array = Uint8Array::from(buf);
-        let write_promise = writable.write_with_buffer_source(&uint8_array)
-            .map_err(|e| OpfsError::from(e))?;
-        JsFuture::from(write_promise)
-            .await
-            .map_err(|e| OpfsError::from(e))?;
+        let write_promise =
+            writable.write_with_buffer_source(&uint8_array).map_err(|e| OpfsError::from(e))?;
+        JsFuture::from(write_promise).await.map_err(|e| OpfsError::from(e))?;
 
         // Close the writable stream
         let close_promise = writable.close();
-        JsFuture::from(close_promise)
-            .await
-            .map_err(|e| OpfsError::from(e))?;
+        JsFuture::from(close_promise).await.map_err(|e| OpfsError::from(e))?;
 
         Ok(buf.len())
     }
@@ -427,9 +404,7 @@ unsafe impl Sync for MemoryStorage {}
 impl MemoryStorage {
     /// Create a new in-memory storage backend
     pub fn new() -> Self {
-        Self {
-            files: Rc::new(RefCell::new(HashMap::new())),
-        }
+        Self { files: Rc::new(RefCell::new(HashMap::new())) }
     }
 }
 
@@ -437,19 +412,13 @@ impl StorageBackend for MemoryStorage {
     fn create_file(&self, path: &str) -> Result<Box<dyn StorageFile>, StorageError> {
         let mut files = self.files.borrow_mut();
         files.insert(path.to_string(), Vec::new());
-        Ok(Box::new(MemoryFile {
-            path: path.to_string(),
-            files: self.files.clone(),
-        }))
+        Ok(Box::new(MemoryFile { path: path.to_string(), files: self.files.clone() }))
     }
 
     fn open_file(&self, path: &str) -> Result<Box<dyn StorageFile>, StorageError> {
         let mut files = self.files.borrow_mut();
         files.entry(path.to_string()).or_insert_with(Vec::new);
-        Ok(Box::new(MemoryFile {
-            path: path.to_string(),
-            files: self.files.clone(),
-        }))
+        Ok(Box::new(MemoryFile { path: path.to_string(), files: self.files.clone() }))
     }
 
     fn delete_file(&self, path: &str) -> Result<(), StorageError> {

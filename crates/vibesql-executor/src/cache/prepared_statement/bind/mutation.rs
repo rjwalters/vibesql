@@ -741,7 +741,10 @@ fn bind_window_function_spec_named_mut(
 }
 
 #[cfg(test)]
-fn bind_window_spec_named_mut(spec: &mut vibesql_ast::WindowSpec, params: &HashMap<String, SqlValue>) {
+fn bind_window_spec_named_mut(
+    spec: &mut vibesql_ast::WindowSpec,
+    params: &HashMap<String, SqlValue>,
+) {
     if let Some(partition_by) = &mut spec.partition_by {
         for expr in partition_by {
             bind_expression_named_mut(expr, params);
@@ -758,7 +761,10 @@ fn bind_window_spec_named_mut(spec: &mut vibesql_ast::WindowSpec, params: &HashM
 }
 
 #[cfg(test)]
-fn bind_window_frame_named_mut(frame: &mut vibesql_ast::WindowFrame, params: &HashMap<String, SqlValue>) {
+fn bind_window_frame_named_mut(
+    frame: &mut vibesql_ast::WindowFrame,
+    params: &HashMap<String, SqlValue>,
+) {
     bind_frame_bound_named_mut(&mut frame.start, params);
     if let Some(end) = &mut frame.end {
         bind_frame_bound_named_mut(end, params);
@@ -766,7 +772,10 @@ fn bind_window_frame_named_mut(frame: &mut vibesql_ast::WindowFrame, params: &Ha
 }
 
 #[cfg(test)]
-fn bind_frame_bound_named_mut(bound: &mut vibesql_ast::FrameBound, params: &HashMap<String, SqlValue>) {
+fn bind_frame_bound_named_mut(
+    bound: &mut vibesql_ast::FrameBound,
+    params: &HashMap<String, SqlValue>,
+) {
     match bound {
         vibesql_ast::FrameBound::Preceding(expr) | vibesql_ast::FrameBound::Following(expr) => {
             bind_expression_named_mut(expr, params);
@@ -801,10 +810,7 @@ mod tests {
         use vibesql_ast::BinaryOperator;
         let mut expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
             right: Box::new(Expression::Placeholder(0)),
         };
         bind_expression_mut(&mut expr, &[SqlValue::Integer(42)]);
@@ -847,10 +853,7 @@ mod tests {
         if let Statement::Insert(insert) = stmt {
             if let InsertSource::Values(rows) = &insert.source {
                 assert_eq!(rows[0][0], Expression::Literal(SqlValue::Integer(1)));
-                assert_eq!(
-                    rows[0][1],
-                    Expression::Literal(SqlValue::Varchar("Alice".to_string()))
-                );
+                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar("Alice".to_string())));
             } else {
                 panic!("Expected VALUES insert source");
             }
@@ -915,7 +918,7 @@ mod tests {
 
         let mut stmt = stmt.clone();
         let params = vec![
-            SqlValue::Integer(42),              // $1
+            SqlValue::Integer(42),                // $1
             SqlValue::Varchar("Bob".to_string()), // $2
         ];
         bind_statement_mut(&mut stmt, &params);

@@ -109,7 +109,9 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
         SqlValue::Null => None,
 
         // Date/Time types: for now, return None (could implement increment by smallest unit)
-        SqlValue::Date(_) | SqlValue::Time(_) | SqlValue::Timestamp(_) | SqlValue::Interval(_) => None,
+        SqlValue::Date(_) | SqlValue::Time(_) | SqlValue::Timestamp(_) | SqlValue::Interval(_) => {
+            None
+        }
 
         // All other cases (overflow, already at max, etc.): return None
         _ => None,
@@ -162,9 +164,10 @@ pub fn smart_increment_value(value: &SqlValue) -> Option<SqlValue> {
             try_increment_sqlvalue(value)
         }
         // Integer SQL types: use +1 increment (only integers are possible)
-        SqlValue::Integer(_) | SqlValue::Smallint(_) | SqlValue::Bigint(_) | SqlValue::Unsigned(_) => {
-            calculate_next_value(value)
-        }
+        SqlValue::Integer(_)
+        | SqlValue::Smallint(_)
+        | SqlValue::Bigint(_)
+        | SqlValue::Unsigned(_) => calculate_next_value(value),
         // For other types, use calculate_next_value as fallback
         _ => calculate_next_value(value),
     }
@@ -176,46 +179,22 @@ mod tests {
 
     #[test]
     fn test_calculate_next_value_double() {
-        assert_eq!(
-            calculate_next_value(&SqlValue::Double(10.0)),
-            Some(SqlValue::Double(11.0))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Double(-5.5)),
-            Some(SqlValue::Double(-4.5))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Double(0.0)),
-            Some(SqlValue::Double(1.0))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Double(10.0)), Some(SqlValue::Double(11.0)));
+        assert_eq!(calculate_next_value(&SqlValue::Double(-5.5)), Some(SqlValue::Double(-4.5)));
+        assert_eq!(calculate_next_value(&SqlValue::Double(0.0)), Some(SqlValue::Double(1.0)));
     }
 
     #[test]
     fn test_calculate_next_value_integer() {
-        assert_eq!(
-            calculate_next_value(&SqlValue::Integer(42)),
-            Some(SqlValue::Integer(43))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Integer(-10)),
-            Some(SqlValue::Integer(-9))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Integer(0)),
-            Some(SqlValue::Integer(1))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Integer(42)), Some(SqlValue::Integer(43)));
+        assert_eq!(calculate_next_value(&SqlValue::Integer(-10)), Some(SqlValue::Integer(-9)));
+        assert_eq!(calculate_next_value(&SqlValue::Integer(0)), Some(SqlValue::Integer(1)));
     }
 
     #[test]
     fn test_calculate_next_value_smallint() {
-        assert_eq!(
-            calculate_next_value(&SqlValue::Smallint(100)),
-            Some(SqlValue::Smallint(101))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Smallint(-1)),
-            Some(SqlValue::Smallint(0))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Smallint(100)), Some(SqlValue::Smallint(101)));
+        assert_eq!(calculate_next_value(&SqlValue::Smallint(-1)), Some(SqlValue::Smallint(0)));
     }
 
     #[test]
@@ -224,47 +203,26 @@ mod tests {
             calculate_next_value(&SqlValue::Bigint(1_000_000_000)),
             Some(SqlValue::Bigint(1_000_000_001))
         );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Bigint(-999)),
-            Some(SqlValue::Bigint(-998))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Bigint(-999)), Some(SqlValue::Bigint(-998)));
     }
 
     #[test]
     fn test_calculate_next_value_unsigned() {
-        assert_eq!(
-            calculate_next_value(&SqlValue::Unsigned(0)),
-            Some(SqlValue::Unsigned(1))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Unsigned(999)),
-            Some(SqlValue::Unsigned(1000))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Unsigned(0)), Some(SqlValue::Unsigned(1)));
+        assert_eq!(calculate_next_value(&SqlValue::Unsigned(999)), Some(SqlValue::Unsigned(1000)));
     }
 
     #[test]
     fn test_calculate_next_value_float() {
         // Use simpler values for f32 to avoid precision issues
-        assert_eq!(
-            calculate_next_value(&SqlValue::Float(3.0)),
-            Some(SqlValue::Float(4.0))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Float(-2.5)),
-            Some(SqlValue::Float(-1.5))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Float(3.0)), Some(SqlValue::Float(4.0)));
+        assert_eq!(calculate_next_value(&SqlValue::Float(-2.5)), Some(SqlValue::Float(-1.5)));
     }
 
     #[test]
     fn test_calculate_next_value_real() {
-        assert_eq!(
-            calculate_next_value(&SqlValue::Real(7.5)),
-            Some(SqlValue::Real(8.5))
-        );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Real(0.0)),
-            Some(SqlValue::Real(1.0))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Real(7.5)), Some(SqlValue::Real(8.5)));
+        assert_eq!(calculate_next_value(&SqlValue::Real(0.0)), Some(SqlValue::Real(1.0)));
     }
 
     #[test]
@@ -273,10 +231,7 @@ mod tests {
             calculate_next_value(&SqlValue::Numeric(99.99)),
             Some(SqlValue::Numeric(100.99))
         );
-        assert_eq!(
-            calculate_next_value(&SqlValue::Numeric(-10.5)),
-            Some(SqlValue::Numeric(-9.5))
-        );
+        assert_eq!(calculate_next_value(&SqlValue::Numeric(-10.5)), Some(SqlValue::Numeric(-9.5)));
     }
 
     #[test]
@@ -328,9 +283,6 @@ mod tests {
         }
 
         // Integer zero should increment to 1
-        assert_eq!(
-            try_increment_sqlvalue(&SqlValue::Integer(0)),
-            Some(SqlValue::Integer(1))
-        );
+        assert_eq!(try_increment_sqlvalue(&SqlValue::Integer(0)), Some(SqlValue::Integer(1)));
     }
 }

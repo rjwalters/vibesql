@@ -49,7 +49,7 @@ fn test_aggregate_with_cross_join() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].values[0], SqlValue::Integer(-32)); // MIN of constant is the constant
-    assert_eq!(rows[0].values[1], SqlValue::Integer(81));  // 9 rows * 9 rows = 81
+    assert_eq!(rows[0].values[1], SqlValue::Integer(81)); // 9 rows * 9 rows = 81
 }
 
 #[test]
@@ -62,9 +62,8 @@ fn test_aggregate_count_all_in_cross_join() {
     execute_sql(&mut db, "INSERT INTO tab0 VALUES(87,21,10)").unwrap();
 
     // Test COUNT(*) in CROSS JOIN - should count cartesian product
-    let rows = execute_sql(&mut db,
-        "SELECT COUNT(*) FROM tab0 AS cor0 CROSS JOIN tab0 cor1"
-    ).unwrap();
+    let rows =
+        execute_sql(&mut db, "SELECT COUNT(*) FROM tab0 AS cor0 CROSS JOIN tab0 cor1").unwrap();
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].values[0], SqlValue::Integer(9)); // 3 * 3 = 9
@@ -96,9 +95,9 @@ fn test_aggregate_with_arithmetic_in_cross_join() {
     execute_sql(&mut db, "INSERT INTO tab1 VALUES(91,47,68)").unwrap();
 
     // Test aggregate with arithmetic: COUNT(*) * COUNT(*)
-    let rows = execute_sql(&mut db,
-        "SELECT COUNT(*) * COUNT(*) FROM (tab1 AS cor0 CROSS JOIN tab1 cor1)"
-    ).unwrap();
+    let rows =
+        execute_sql(&mut db, "SELECT COUNT(*) * COUNT(*) FROM (tab1 AS cor0 CROSS JOIN tab1 cor1)")
+            .unwrap();
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].values[0], SqlValue::Integer(81)); // (3*3) * (3*3) = 9 * 9 = 81
@@ -130,15 +129,17 @@ fn test_multiple_aggregates_same_query() {
     execute_sql(&mut db, "INSERT INTO tab2 VALUES(46,51,23)").unwrap();
 
     // Test multiple aggregates in same query
-    let rows = execute_sql(&mut db,
-        "SELECT MIN(col0), MAX(col1), AVG(col2), COUNT(*), SUM(col0) FROM tab2"
-    ).unwrap();
+    let rows = execute_sql(
+        &mut db,
+        "SELECT MIN(col0), MAX(col1), AVG(col2), COUNT(*), SUM(col0) FROM tab2",
+    )
+    .unwrap();
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].values[0], SqlValue::Integer(46));  // MIN(col0)
-    assert_eq!(rows[0].values[1], SqlValue::Integer(77));  // MAX(col1)
-    // AVG(col2) = (40 + 58 + 23) / 3 = 121 / 3 = 40.333...
-    assert_eq!(rows[0].values[3], SqlValue::Integer(3));   // COUNT(*)
+    assert_eq!(rows[0].values[0], SqlValue::Integer(46)); // MIN(col0)
+    assert_eq!(rows[0].values[1], SqlValue::Integer(77)); // MAX(col1)
+                                                          // AVG(col2) = (40 + 58 + 23) / 3 = 121 / 3 = 40.333...
+    assert_eq!(rows[0].values[3], SqlValue::Integer(3)); // COUNT(*)
     assert_eq!(rows[0].values[4], SqlValue::Integer(185)); // SUM(col0) = 64+75+46
 }
 
@@ -185,9 +186,8 @@ fn test_aggregate_rowsort_multiple_columns() {
     execute_sql(&mut db, "INSERT INTO tab2 VALUES(46,51,23)").unwrap();
 
     // Test query that returns multiple columns (tests hash verification for >8 values)
-    let rows = execute_sql(&mut db,
-        "SELECT DISTINCT * FROM tab2 WHERE -col2 + col1 IS NOT NULL"
-    ).unwrap();
+    let rows =
+        execute_sql(&mut db, "SELECT DISTINCT * FROM tab2 WHERE -col2 + col1 IS NOT NULL").unwrap();
 
     assert_eq!(rows.len(), 3);
     // Results should contain all 3 rows (9 values total)
@@ -207,7 +207,7 @@ fn test_aggregate_with_null_arithmetic() {
     let rows = execute_sql(&mut db, "SELECT COUNT(*), SUM(col0), SUM(col1) FROM tab0").unwrap();
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].values[0], SqlValue::Integer(3));  // COUNT(*) includes NULLs
+    assert_eq!(rows[0].values[0], SqlValue::Integer(3)); // COUNT(*) includes NULLs
     assert_eq!(rows[0].values[1], SqlValue::Integer(50)); // SUM(col0) = 20+30, ignores NULL
     assert_eq!(rows[0].values[2], SqlValue::Integer(50)); // SUM(col1) = 10+40, ignores NULL
 }

@@ -101,10 +101,18 @@ pub fn simd_min_i64_masked(values: &[i64], mask: &[bool]) -> Option<i64> {
 
     for i in 0..chunks {
         let off = i * 4;
-        if mask[off] { m0 = m0.min(values[off]); }
-        if mask[off + 1] { m1 = m1.min(values[off + 1]); }
-        if mask[off + 2] { m2 = m2.min(values[off + 2]); }
-        if mask[off + 3] { m3 = m3.min(values[off + 3]); }
+        if mask[off] {
+            m0 = m0.min(values[off]);
+        }
+        if mask[off + 1] {
+            m1 = m1.min(values[off + 1]);
+        }
+        if mask[off + 2] {
+            m2 = m2.min(values[off + 2]);
+        }
+        if mask[off + 3] {
+            m3 = m3.min(values[off + 3]);
+        }
     }
 
     let mut result = m0.min(m1).min(m2).min(m3);
@@ -135,20 +143,24 @@ pub fn simd_min_f64_masked(values: &[f64], mask: &[bool]) -> Option<f64> {
         return None;
     }
 
-    let (mut m0, mut m1, mut m2, mut m3) = (
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::INFINITY,
-    );
+    let (mut m0, mut m1, mut m2, mut m3) =
+        (f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let chunks = values.len() / 4;
 
     for i in 0..chunks {
         let off = i * 4;
-        if mask[off] { m0 = m0.min(values[off]); }
-        if mask[off + 1] { m1 = m1.min(values[off + 1]); }
-        if mask[off + 2] { m2 = m2.min(values[off + 2]); }
-        if mask[off + 3] { m3 = m3.min(values[off + 3]); }
+        if mask[off] {
+            m0 = m0.min(values[off]);
+        }
+        if mask[off + 1] {
+            m1 = m1.min(values[off + 1]);
+        }
+        if mask[off + 2] {
+            m2 = m2.min(values[off + 2]);
+        }
+        if mask[off + 3] {
+            m3 = m3.min(values[off + 3]);
+        }
     }
 
     let mut result = m0.min(m1).min(m2).min(m3);
@@ -181,10 +193,18 @@ pub fn simd_max_i64_masked(values: &[i64], mask: &[bool]) -> Option<i64> {
 
     for i in 0..chunks {
         let off = i * 4;
-        if mask[off] { m0 = m0.max(values[off]); }
-        if mask[off + 1] { m1 = m1.max(values[off + 1]); }
-        if mask[off + 2] { m2 = m2.max(values[off + 2]); }
-        if mask[off + 3] { m3 = m3.max(values[off + 3]); }
+        if mask[off] {
+            m0 = m0.max(values[off]);
+        }
+        if mask[off + 1] {
+            m1 = m1.max(values[off + 1]);
+        }
+        if mask[off + 2] {
+            m2 = m2.max(values[off + 2]);
+        }
+        if mask[off + 3] {
+            m3 = m3.max(values[off + 3]);
+        }
     }
 
     let mut result = m0.max(m1).max(m2).max(m3);
@@ -212,20 +232,24 @@ pub fn simd_max_f64_masked(values: &[f64], mask: &[bool]) -> Option<f64> {
         return None;
     }
 
-    let (mut m0, mut m1, mut m2, mut m3) = (
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    );
+    let (mut m0, mut m1, mut m2, mut m3) =
+        (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
     let chunks = values.len() / 4;
 
     for i in 0..chunks {
         let off = i * 4;
-        if mask[off] { m0 = m0.max(values[off]); }
-        if mask[off + 1] { m1 = m1.max(values[off + 1]); }
-        if mask[off + 2] { m2 = m2.max(values[off + 2]); }
-        if mask[off + 3] { m3 = m3.max(values[off + 3]); }
+        if mask[off] {
+            m0 = m0.max(values[off]);
+        }
+        if mask[off + 1] {
+            m1 = m1.max(values[off + 1]);
+        }
+        if mask[off + 2] {
+            m2 = m2.max(values[off + 2]);
+        }
+        if mask[off + 3] {
+            m3 = m3.max(values[off + 3]);
+        }
     }
 
     let mut result = m0.max(m1).max(m2).max(m3);

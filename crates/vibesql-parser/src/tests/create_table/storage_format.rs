@@ -61,14 +61,12 @@ fn test_parse_create_table_with_storage_equals_syntax() {
 
         let stmt = result.unwrap();
         match stmt {
-            vibesql_ast::Statement::CreateTable(create) => {
-                match &create.table_options[0] {
-                    vibesql_ast::TableOption::Storage(format) => {
-                        assert_eq!(format, &expected_format, "STORAGE value mismatch for {}", option);
-                    }
-                    _ => panic!("Expected Storage option for {}", option),
+            vibesql_ast::Statement::CreateTable(create) => match &create.table_options[0] {
+                vibesql_ast::TableOption::Storage(format) => {
+                    assert_eq!(format, &expected_format, "STORAGE value mismatch for {}", option);
                 }
-            }
+                _ => panic!("Expected Storage option for {}", option),
+            },
             _ => panic!("Expected CREATE TABLE statement for {}", option),
         }
     }
@@ -93,18 +91,17 @@ fn test_parse_create_table_with_invalid_storage_format() {
 fn test_parse_create_table_with_storage_and_other_options() {
     // Test STORAGE as the only option but with ENGINE keyword
     // (ENGINE may stop the options parsing, so just test STORAGE alone works)
-    let result = Parser::parse_sql(
-        "CREATE TABLE t1 (c1 INT) STORAGE COLUMNAR;",
-    );
+    let result = Parser::parse_sql("CREATE TABLE t1 (c1 INT) STORAGE COLUMNAR;");
     assert!(result.is_ok(), "Should parse STORAGE option");
 
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             // Find the Storage option
-            let storage_option = create.table_options.iter().find(|opt| {
-                matches!(opt, vibesql_ast::TableOption::Storage(_))
-            });
+            let storage_option = create
+                .table_options
+                .iter()
+                .find(|opt| matches!(opt, vibesql_ast::TableOption::Storage(_)));
             assert!(storage_option.is_some(), "Should have Storage option");
 
             match storage_option.unwrap() {

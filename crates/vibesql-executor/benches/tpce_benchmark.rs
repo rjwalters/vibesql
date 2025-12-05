@@ -31,9 +31,9 @@ mod tpce;
 
 use std::env;
 use std::time::{Duration, Instant};
+use tpce::data::TPCEData;
 use tpce::schema::load_vibesql;
 use tpce::transactions::*;
-use tpce::data::TPCEData;
 
 /// Transaction type enum
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,7 +97,8 @@ fn print_results(results: &TPCEBenchmarkResults, transaction_type: TransactionTy
     eprintln!("Transaction type: {}", transaction_type.name());
     eprintln!("Total transactions: {}", results.total_transactions);
     if results.total_transactions > 0 {
-        eprintln!("Successful: {} ({:.1}%)",
+        eprintln!(
+            "Successful: {} ({:.1}%)",
             results.successful_transactions,
             results.successful_transactions as f64 / results.total_transactions as f64 * 100.0
         );
@@ -108,40 +109,76 @@ fn print_results(results: &TPCEBenchmarkResults, transaction_type: TransactionTy
 
     eprintln!("\n--- Transaction Breakdown ---");
     if results.broker_volume_count > 0 {
-        eprintln!("Broker-Volume:      {:>6} txns, avg {:>10.2} us", results.broker_volume_count, results.broker_volume_avg_us);
+        eprintln!(
+            "Broker-Volume:      {:>6} txns, avg {:>10.2} us",
+            results.broker_volume_count, results.broker_volume_avg_us
+        );
     }
     if results.customer_position_count > 0 {
-        eprintln!("Customer-Position:  {:>6} txns, avg {:>10.2} us", results.customer_position_count, results.customer_position_avg_us);
+        eprintln!(
+            "Customer-Position:  {:>6} txns, avg {:>10.2} us",
+            results.customer_position_count, results.customer_position_avg_us
+        );
     }
     if results.market_watch_count > 0 {
-        eprintln!("Market-Watch:       {:>6} txns, avg {:>10.2} us", results.market_watch_count, results.market_watch_avg_us);
+        eprintln!(
+            "Market-Watch:       {:>6} txns, avg {:>10.2} us",
+            results.market_watch_count, results.market_watch_avg_us
+        );
     }
     if results.security_detail_count > 0 {
-        eprintln!("Security-Detail:    {:>6} txns, avg {:>10.2} us", results.security_detail_count, results.security_detail_avg_us);
+        eprintln!(
+            "Security-Detail:    {:>6} txns, avg {:>10.2} us",
+            results.security_detail_count, results.security_detail_avg_us
+        );
     }
     if results.trade_lookup_count > 0 {
-        eprintln!("Trade-Lookup:       {:>6} txns, avg {:>10.2} us", results.trade_lookup_count, results.trade_lookup_avg_us);
+        eprintln!(
+            "Trade-Lookup:       {:>6} txns, avg {:>10.2} us",
+            results.trade_lookup_count, results.trade_lookup_avg_us
+        );
     }
     if results.trade_order_count > 0 {
-        eprintln!("Trade-Order:        {:>6} txns, avg {:>10.2} us", results.trade_order_count, results.trade_order_avg_us);
+        eprintln!(
+            "Trade-Order:        {:>6} txns, avg {:>10.2} us",
+            results.trade_order_count, results.trade_order_avg_us
+        );
     }
     if results.trade_status_count > 0 {
-        eprintln!("Trade-Status:       {:>6} txns, avg {:>10.2} us", results.trade_status_count, results.trade_status_avg_us);
+        eprintln!(
+            "Trade-Status:       {:>6} txns, avg {:>10.2} us",
+            results.trade_status_count, results.trade_status_avg_us
+        );
     }
     if results.trade_update_count > 0 {
-        eprintln!("Trade-Update:       {:>6} txns, avg {:>10.2} us", results.trade_update_count, results.trade_update_avg_us);
+        eprintln!(
+            "Trade-Update:       {:>6} txns, avg {:>10.2} us",
+            results.trade_update_count, results.trade_update_avg_us
+        );
     }
     if results.market_feed_count > 0 {
-        eprintln!("Market-Feed:        {:>6} txns, avg {:>10.2} us", results.market_feed_count, results.market_feed_avg_us);
+        eprintln!(
+            "Market-Feed:        {:>6} txns, avg {:>10.2} us",
+            results.market_feed_count, results.market_feed_avg_us
+        );
     }
     if results.trade_result_count > 0 {
-        eprintln!("Trade-Result:       {:>6} txns, avg {:>10.2} us", results.trade_result_count, results.trade_result_avg_us);
+        eprintln!(
+            "Trade-Result:       {:>6} txns, avg {:>10.2} us",
+            results.trade_result_count, results.trade_result_avg_us
+        );
     }
     if results.data_maintenance_count > 0 {
-        eprintln!("Data-Maintenance:   {:>6} txns, avg {:>10.2} us", results.data_maintenance_count, results.data_maintenance_avg_us);
+        eprintln!(
+            "Data-Maintenance:   {:>6} txns, avg {:>10.2} us",
+            results.data_maintenance_count, results.data_maintenance_avg_us
+        );
     }
     if results.trade_cleanup_count > 0 {
-        eprintln!("Trade-Cleanup:      {:>6} txns, avg {:>10.2} us", results.trade_cleanup_count, results.trade_cleanup_avg_us);
+        eprintln!(
+            "Trade-Cleanup:      {:>6} txns, avg {:>10.2} us",
+            results.trade_cleanup_count, results.trade_cleanup_avg_us
+        );
     }
 }
 
@@ -180,18 +217,42 @@ fn run_benchmark<E: TPCEExecutor>(
         };
 
         match txn_type {
-            0 => { let _ = executor.broker_volume(&workload.generate_broker_volume()); }
-            1 => { let _ = executor.customer_position(&workload.generate_customer_position()); }
-            2 => { let _ = executor.market_watch(&workload.generate_market_watch()); }
-            3 => { let _ = executor.security_detail(&workload.generate_security_detail()); }
-            4 => { let _ = executor.trade_lookup(&workload.generate_trade_lookup()); }
-            5 => { let _ = executor.trade_order(&workload.generate_trade_order()); }
-            6 => { let _ = executor.trade_status(&workload.generate_trade_status()); }
-            7 => { let _ = executor.trade_update(&workload.generate_trade_update()); }
-            8 => { let _ = executor.market_feed(&workload.generate_market_feed()); }
-            9 => { let _ = executor.trade_result(&workload.generate_trade_result()); }
-            10 => { let _ = executor.data_maintenance(&workload.generate_data_maintenance()); }
-            11 => { let _ = executor.trade_cleanup(&workload.generate_trade_cleanup()); }
+            0 => {
+                let _ = executor.broker_volume(&workload.generate_broker_volume());
+            }
+            1 => {
+                let _ = executor.customer_position(&workload.generate_customer_position());
+            }
+            2 => {
+                let _ = executor.market_watch(&workload.generate_market_watch());
+            }
+            3 => {
+                let _ = executor.security_detail(&workload.generate_security_detail());
+            }
+            4 => {
+                let _ = executor.trade_lookup(&workload.generate_trade_lookup());
+            }
+            5 => {
+                let _ = executor.trade_order(&workload.generate_trade_order());
+            }
+            6 => {
+                let _ = executor.trade_status(&workload.generate_trade_status());
+            }
+            7 => {
+                let _ = executor.trade_update(&workload.generate_trade_update());
+            }
+            8 => {
+                let _ = executor.market_feed(&workload.generate_market_feed());
+            }
+            9 => {
+                let _ = executor.trade_result(&workload.generate_trade_result());
+            }
+            10 => {
+                let _ = executor.data_maintenance(&workload.generate_data_maintenance());
+            }
+            11 => {
+                let _ = executor.trade_cleanup(&workload.generate_trade_cleanup());
+            }
             _ => {}
         }
     }
@@ -393,20 +454,14 @@ fn main() {
     }
 
     // Get configuration from environment
-    let scale_factor: f64 = env::var("TPCE_SCALE_FACTOR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.1);
+    let scale_factor: f64 =
+        env::var("TPCE_SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.1);
 
-    let duration_secs: u64 = env::var("TPCE_DURATION_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(60);
+    let duration_secs: u64 =
+        env::var("TPCE_DURATION_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(60);
 
-    let warmup_secs: u64 = env::var("TPCE_WARMUP_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
+    let warmup_secs: u64 =
+        env::var("TPCE_WARMUP_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(10);
 
     let duration = Duration::from_secs(duration_secs);
     let warmup = Duration::from_secs(warmup_secs);
@@ -416,7 +471,10 @@ fn main() {
         match TransactionType::from_str(&args[1]) {
             Some(t) => t,
             None => {
-                eprintln!("Error: Unknown transaction type '{}'. Run with --help for usage.", args[1]);
+                eprintln!(
+                    "Error: Unknown transaction type '{}'. Run with --help for usage.",
+                    args[1]
+                );
                 std::process::exit(1);
             }
         }
@@ -456,7 +514,8 @@ fn main() {
     tpce::transactions::reset_profile_counters();
 
     let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
-    let vibesql_results = run_benchmark(&vibesql_executor, &mut workload, transaction_type, duration, warmup, true);
+    let vibesql_results =
+        run_benchmark(&vibesql_executor, &mut workload, transaction_type, duration, warmup, true);
     print_results(&vibesql_results, transaction_type);
 
     tpce::transactions::print_profile_summary();
@@ -468,11 +527,15 @@ fn main() {
     eprintln!("{:-<12} {:->12} {:->12}", "", "", "");
 
     let avg_time = if vibesql_results.total_transactions > 0 {
-        vibesql_results.total_duration_ms as f64 * 1000.0 / vibesql_results.total_transactions as f64
+        vibesql_results.total_duration_ms as f64 * 1000.0
+            / vibesql_results.total_transactions as f64
     } else {
         0.0
     };
-    eprintln!("{:<12} {:>12.2} {:>12.2}", "VibeSQL", vibesql_results.transactions_per_second, avg_time);
+    eprintln!(
+        "{:<12} {:>12.2} {:>12.2}",
+        "VibeSQL", vibesql_results.transactions_per_second, avg_time
+    );
 
     eprintln!("\n=== Done ===");
 }

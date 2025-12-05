@@ -8,24 +8,44 @@ pub type StorageResult<T> = Result<T, StorageError>;
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageError {
     TableNotFound(String),
-    ColumnCountMismatch { expected: usize, actual: usize },
-    ColumnIndexOutOfBounds { index: usize },
+    ColumnCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    ColumnIndexOutOfBounds {
+        index: usize,
+    },
     CatalogError(String),
     TransactionError(String),
     RowNotFound,
     IndexAlreadyExists(String),
     IndexNotFound(String),
-    ColumnNotFound { column_name: String, table_name: String },
-    NullConstraintViolation { column: String },
-    TypeMismatch { column: String, expected: String, actual: String },
+    ColumnNotFound {
+        column_name: String,
+        table_name: String,
+    },
+    NullConstraintViolation {
+        column: String,
+    },
+    TypeMismatch {
+        column: String,
+        expected: String,
+        actual: String,
+    },
     UniqueConstraintViolation(String),
     InvalidIndexColumn(String),
     NotImplemented(String),
     IoError(String),
-    InvalidPageSize { expected: usize, actual: usize },
+    InvalidPageSize {
+        expected: usize,
+        actual: usize,
+    },
     InvalidPageId(u64),
     LockError(String),
-    MemoryBudgetExceeded { used: usize, budget: usize },
+    MemoryBudgetExceeded {
+        used: usize,
+        budget: usize,
+    },
     NoIndexToEvict,
     /// Generic error for other cases
     Other(String),
@@ -69,7 +89,11 @@ impl std::fmt::Display for StorageError {
             StorageError::InvalidPageId(page_id) => write!(f, "Invalid page ID: {}", page_id),
             StorageError::LockError(msg) => write!(f, "Lock error: {}", msg),
             StorageError::MemoryBudgetExceeded { used, budget } => {
-                write!(f, "Memory budget exceeded: using {} bytes, budget is {} bytes", used, budget)
+                write!(
+                    f,
+                    "Memory budget exceeded: using {} bytes, budget is {} bytes",
+                    used, budget
+                )
             }
             StorageError::NoIndexToEvict => {
                 write!(f, "No index available to evict (all indexes are already disk-backed)")

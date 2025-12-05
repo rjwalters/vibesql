@@ -20,11 +20,7 @@ pub fn execute_procedural_statement(
     db: &mut Database,
 ) -> Result<ControlFlow, ExecutorError> {
     match stmt {
-        ProceduralStatement::Declare {
-            name,
-            data_type,
-            default_value,
-        } => {
+        ProceduralStatement::Declare { name, data_type, default_value } => {
             // Declare a local variable
             let value = if let Some(expr) = default_value {
                 // Evaluate default value expression
@@ -88,25 +84,21 @@ pub fn execute_procedural_statement(
             Ok(ControlFlow::Iterate(label.clone()))
         }
 
-        ProceduralStatement::If {
-            condition,
-            then_statements,
-            else_statements,
-        } => super::control_flow::execute_if(condition, then_statements, else_statements, ctx, db),
+        ProceduralStatement::If { condition, then_statements, else_statements } => {
+            super::control_flow::execute_if(condition, then_statements, else_statements, ctx, db)
+        }
 
-        ProceduralStatement::While {
-            condition,
-            statements,
-        } => super::control_flow::execute_while(condition, statements, ctx, db),
+        ProceduralStatement::While { condition, statements } => {
+            super::control_flow::execute_while(condition, statements, ctx, db)
+        }
 
         ProceduralStatement::Loop { statements } => {
             super::control_flow::execute_loop(statements, ctx, db)
         }
 
-        ProceduralStatement::Repeat {
-            statements,
-            condition,
-        } => super::control_flow::execute_repeat(statements, condition, ctx, db),
+        ProceduralStatement::Repeat { statements, condition } => {
+            super::control_flow::execute_repeat(statements, condition, ctx, db)
+        }
 
         ProceduralStatement::Sql(sql_stmt) => {
             // Execute SQL statement
@@ -133,20 +125,18 @@ pub fn evaluate_expression(
             // Check if it's a session variable (starts with @)
             if let Some(var_name) = column.strip_prefix('@') {
                 // Strip @ prefix
-                _db.get_session_variable(var_name)
-                    .cloned()
-                    .ok_or_else(|| ExecutorError::VariableNotFound {
+                _db.get_session_variable(var_name).cloned().ok_or_else(|| {
+                    ExecutorError::VariableNotFound {
                         variable_name: format!("@{}", var_name),
                         available_variables: vec![], // Session variables not listed
-                    })
+                    }
+                })
             } else {
                 // Regular variable or parameter reference
-                ctx.get_value(column)
-                    .cloned()
-                    .ok_or_else(|| ExecutorError::VariableNotFound {
-                        variable_name: column.clone(),
-                        available_variables: ctx.get_available_names(),
-                    })
+                ctx.get_value(column).cloned().ok_or_else(|| ExecutorError::VariableNotFound {
+                    variable_name: column.clone(),
+                    available_variables: ctx.get_available_names(),
+                })
             }
         }
 
@@ -166,43 +156,32 @@ pub fn evaluate_expression(
                             Ok(SqlValue::Integer(l + r))
                         }
                         _ => Err(ExecutorError::TypeError(
-                            "Binary operation only supports integers in Phase 2".to_string()
-                        ))
+                            "Binary operation only supports integers in Phase 2".to_string(),
+                        )),
                     }
                 }
-                BinaryOperator::Minus => {
-                    match (left_val, right_val) {
-                        (SqlValue::Integer(l), SqlValue::Integer(r)) => {
-                            Ok(SqlValue::Integer(l - r))
-                        }
-                        _ => Err(ExecutorError::TypeError(
-                            "Binary operation only supports integers in Phase 2".to_string()
-                        ))
-                    }
-                }
-                BinaryOperator::Multiply => {
-                    match (left_val, right_val) {
-                        (SqlValue::Integer(l), SqlValue::Integer(r)) => {
-                            Ok(SqlValue::Integer(l * r))
-                        }
-                        _ => Err(ExecutorError::TypeError(
-                            "Binary operation only supports integers in Phase 2".to_string()
-                        ))
-                    }
-                }
-                BinaryOperator::GreaterThan => {
-                    match (left_val, right_val) {
-                        (SqlValue::Integer(l), SqlValue::Integer(r)) => {
-                            Ok(SqlValue::Boolean(l > r))
-                        }
-                        _ => Err(ExecutorError::TypeError(
-                            "Comparison only supports integers in Phase 2".to_string()
-                        ))
-                    }
-                }
+                BinaryOperator::Minus => match (left_val, right_val) {
+                    (SqlValue::Integer(l), SqlValue::Integer(r)) => Ok(SqlValue::Integer(l - r)),
+                    _ => Err(ExecutorError::TypeError(
+                        "Binary operation only supports integers in Phase 2".to_string(),
+                    )),
+                },
+                BinaryOperator::Multiply => match (left_val, right_val) {
+                    (SqlValue::Integer(l), SqlValue::Integer(r)) => Ok(SqlValue::Integer(l * r)),
+                    _ => Err(ExecutorError::TypeError(
+                        "Binary operation only supports integers in Phase 2".to_string(),
+                    )),
+                },
+                BinaryOperator::GreaterThan => match (left_val, right_val) {
+                    (SqlValue::Integer(l), SqlValue::Integer(r)) => Ok(SqlValue::Boolean(l > r)),
+                    _ => Err(ExecutorError::TypeError(
+                        "Comparison only supports integers in Phase 2".to_string(),
+                    )),
+                },
                 _ => Err(ExecutorError::UnsupportedFeature(format!(
-                    "Binary operator {:?} not yet supported in procedural expressions", op
-                )))
+                    "Binary operator {:?} not yet supported in procedural expressions",
+                    op
+                ))),
             }
         }
 
@@ -218,8 +197,9 @@ pub fn evaluate_expression(
 
         // Other expressions not yet supported
         _ => Err(ExecutorError::UnsupportedFeature(format!(
-            "Expression type not yet supported in procedures: {:?}", expr
-        )))
+            "Expression type not yet supported in procedures: {:?}",
+            expr
+        ))),
     }
 }
 
@@ -279,17 +259,20 @@ fn execute_sql_statement(
         }
         Statement::Insert(insert_stmt) => {
             // Execute INSERT with procedural context
-            let _count = crate::InsertExecutor::execute_with_procedural_context(db, insert_stmt, ctx)?;
+            let _count =
+                crate::InsertExecutor::execute_with_procedural_context(db, insert_stmt, ctx)?;
             Ok(())
         }
         Statement::Update(update_stmt) => {
             // Execute UPDATE with procedural context
-            let _count = crate::UpdateExecutor::execute_with_procedural_context(update_stmt, db, ctx)?;
+            let _count =
+                crate::UpdateExecutor::execute_with_procedural_context(update_stmt, db, ctx)?;
             Ok(())
         }
         Statement::Delete(delete_stmt) => {
             // Execute DELETE with procedural context
-            let _count = crate::DeleteExecutor::execute_with_procedural_context(delete_stmt, db, ctx)?;
+            let _count =
+                crate::DeleteExecutor::execute_with_procedural_context(delete_stmt, db, ctx)?;
             Ok(())
         }
         _ => {
@@ -303,7 +286,10 @@ fn execute_sql_statement(
 }
 
 /// Cast a value to a specific data type
-fn cast_to_type(value: SqlValue, target_type: &vibesql_types::DataType) -> Result<SqlValue, ExecutorError> {
+fn cast_to_type(
+    value: SqlValue,
+    target_type: &vibesql_types::DataType,
+) -> Result<SqlValue, ExecutorError> {
     use vibesql_types::DataType;
 
     // If value is already NULL, return NULL regardless of target type
@@ -317,14 +303,11 @@ fn cast_to_type(value: SqlValue, target_type: &vibesql_types::DataType) -> Resul
             SqlValue::Bigint(b) => Ok(SqlValue::Integer(b)),
             SqlValue::Smallint(s) => Ok(SqlValue::Integer(s as i64)),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                s.parse::<i64>()
-                    .map(SqlValue::Integer)
-                    .map_err(|_| ExecutorError::TypeError(format!("Cannot convert '{}' to INTEGER", s)))
+                s.parse::<i64>().map(SqlValue::Integer).map_err(|_| {
+                    ExecutorError::TypeError(format!("Cannot convert '{}' to INTEGER", s))
+                })
             }
-            _ => Err(ExecutorError::TypeError(format!(
-                "Cannot convert {:?} to INTEGER",
-                value
-            ))),
+            _ => Err(ExecutorError::TypeError(format!("Cannot convert {:?} to INTEGER", value))),
         },
 
         DataType::Varchar { .. } | DataType::Character { .. } => {
@@ -342,16 +325,10 @@ fn cast_to_type(value: SqlValue, target_type: &vibesql_types::DataType) -> Resul
                 } else if s_upper == "FALSE" || s_upper == "F" || s_upper == "0" {
                     Ok(SqlValue::Boolean(false))
                 } else {
-                    Err(ExecutorError::TypeError(format!(
-                        "Cannot convert '{}' to BOOLEAN",
-                        s
-                    )))
+                    Err(ExecutorError::TypeError(format!("Cannot convert '{}' to BOOLEAN", s)))
                 }
             }
-            _ => Err(ExecutorError::TypeError(format!(
-                "Cannot convert {:?} to BOOLEAN",
-                value
-            ))),
+            _ => Err(ExecutorError::TypeError(format!("Cannot convert {:?} to BOOLEAN", value))),
         },
 
         // For other types, accept the value as-is for now

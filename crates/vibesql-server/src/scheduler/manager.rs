@@ -46,11 +46,7 @@ impl SchedulerManager {
     pub fn new(config: SchedulerManagerConfig) -> Self {
         let executor = Arc::new(ScheduleExecutor::new(config.executor_config.clone()));
 
-        Self {
-            config,
-            executor,
-            task_handle: Arc::new(RwLock::new(None)),
-        }
+        Self { config, executor, task_handle: Arc::new(RwLock::new(None)) }
     }
 
     /// Start the scheduler background task
@@ -65,9 +61,8 @@ impl SchedulerManager {
         let poll_interval_secs = self.config.poll_interval_secs;
 
         let task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                std::time::Duration::from_secs(poll_interval_secs)
-            );
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(poll_interval_secs));
 
             loop {
                 interval.tick().await;
@@ -127,7 +122,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager_start_stop() {
         let manager = SchedulerManager::new(SchedulerManagerConfig::default());
-        
+
         manager.start().await.expect("Failed to start scheduler");
         assert!(manager.is_running().await);
 
@@ -137,8 +132,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_disabled_scheduler() {
-        let mut config = SchedulerManagerConfig::default();
-        config.enabled = false;
+        let config = SchedulerManagerConfig { enabled: false, ..Default::default() };
 
         let manager = SchedulerManager::new(config);
         manager.start().await.expect("Should not fail when disabled");

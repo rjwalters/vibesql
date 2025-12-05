@@ -14,20 +14,12 @@ use super::types::{ColumnArray, ColumnType, ColumnarBatch};
 impl ColumnarBatch {
     /// Create a new empty columnar batch
     pub fn new(column_count: usize) -> Self {
-        Self {
-            row_count: 0,
-            columns: Vec::with_capacity(column_count),
-            column_names: None,
-        }
+        Self { row_count: 0, columns: Vec::with_capacity(column_count), column_names: None }
     }
 
     /// Create a columnar batch with specified capacity
     pub fn with_capacity(_row_count: usize, column_count: usize) -> Self {
-        Self {
-            row_count: 0,
-            columns: Vec::with_capacity(column_count),
-            column_names: None,
-        }
+        Self { row_count: 0, columns: Vec::with_capacity(column_count), column_names: None }
     }
 
     /// Create an empty batch with the specified number of columns
@@ -45,11 +37,7 @@ impl ColumnarBatch {
         column_names: Option<Vec<String>>,
     ) -> Result<Self, ExecutorError> {
         if columns.is_empty() {
-            return Ok(Self {
-                row_count: 0,
-                columns,
-                column_names,
-            });
+            return Ok(Self { row_count: 0, columns, column_names });
         }
 
         // Verify all columns have the same length
@@ -64,11 +52,7 @@ impl ColumnarBatch {
             }
         }
 
-        Ok(Self {
-            row_count,
-            columns,
-            column_names,
-        })
+        Ok(Self { row_count, columns, column_names })
     }
 
     /// Convert from row-oriented storage to columnar batch
@@ -94,11 +78,7 @@ impl ColumnarBatch {
             columns.push(column);
         }
 
-        Ok(Self {
-            row_count,
-            columns,
-            column_names: None,
-        })
+        Ok(Self { row_count, columns, column_names: None })
     }
 
     /// Extract a single column from rows into a typed array

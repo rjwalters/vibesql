@@ -4,7 +4,7 @@
 //! fail to return expected rows due to cross-type comparison issues
 //! in hash-based semi-join.
 
-use vibesql_executor::{CreateTableExecutor, InsertExecutor, SelectExecutor, IndexExecutor};
+use vibesql_executor::{CreateTableExecutor, IndexExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
@@ -37,10 +37,7 @@ fn test_issue_2599_simple_in_subquery() {
     let mut db = Database::new();
 
     // Create a simple table
-    execute_sql(
-        &mut db,
-        "CREATE TABLE tab1 (pk INTEGER PRIMARY KEY, col0 INTEGER, col3 INTEGER)",
-    );
+    execute_sql(&mut db, "CREATE TABLE tab1 (pk INTEGER PRIMARY KEY, col0 INTEGER, col3 INTEGER)");
 
     // Insert test data (simplified from sqllogictest)
     execute_sql(&mut db, "INSERT INTO tab1 VALUES (1, 10, 100)");
@@ -68,10 +65,7 @@ fn test_issue_2599_in_subquery_with_or() {
     let mut db = Database::new();
 
     // Create table matching the failing test schema
-    execute_sql(
-        &mut db,
-        "CREATE TABLE tab1 (pk INTEGER PRIMARY KEY, col0 INTEGER, col3 INTEGER)",
-    );
+    execute_sql(&mut db, "CREATE TABLE tab1 (pk INTEGER PRIMARY KEY, col0 INTEGER, col3 INTEGER)");
 
     // Insert a few test rows
     execute_sql(&mut db, "INSERT INTO tab1 VALUES (1, 10, 100)");
@@ -101,10 +95,7 @@ fn test_issue_2599_in_subquery_with_or() {
 
     // Show debug info
     let subquery = execute_sql(&mut db, "SELECT col0 FROM tab1 WHERE col3 > 100");
-    println!(
-        "Subquery result (col0 WHERE col3 > 100): {:?}",
-        subquery
-    );
+    println!("Subquery result (col0 WHERE col3 > 100): {:?}", subquery);
 
     let all_rows = execute_sql(&mut db, "SELECT pk, col0, col3 FROM tab1");
     println!("All rows: {:?}", all_rows);
@@ -161,16 +152,22 @@ fn test_issue_2599_complex_or_with_index() {
     println!("All rows: {:?}", all_rows);
 
     // Check that row 90 is in the result
-    let pks: Vec<i64> = result.iter().filter_map(|r| {
-        if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] {
-            Some(*pk)
-        } else {
-            None
-        }
-    }).collect();
+    let pks: Vec<i64> = result
+        .iter()
+        .filter_map(|r| {
+            if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] {
+                Some(*pk)
+            } else {
+                None
+            }
+        })
+        .collect();
 
     println!("Returned PKs: {:?}", pks);
-    assert!(pks.contains(&90), "Row 90 should be in the result because col3=665 is in subquery (col0=665 from row 77)");
+    assert!(
+        pks.contains(&90),
+        "Row 90 should be in the result because col3=665 is in subquery (col0=665 from row 77)"
+    );
 }
 
 #[test]
@@ -203,20 +200,32 @@ fn test_issue_2599_minimal_reproduction() {
     }
 
     println!("\n=== Step 1: Subquery result (col0 values where col3 >= 605 OR col3 > 273) ===");
-    let subquery_result = execute_sql(&mut db, "SELECT col0 FROM tab0 WHERE col3 >= 605 OR col3 > 273 ORDER BY col0");
-    let subquery_values: Vec<i64> = subquery_result.iter().filter_map(|r| {
-        if let vibesql_types::SqlValue::Integer(v) = &r.values[0] { Some(*v) } else { None }
-    }).collect();
+    let subquery_result =
+        execute_sql(&mut db, "SELECT col0 FROM tab0 WHERE col3 >= 605 OR col3 > 273 ORDER BY col0");
+    let subquery_values: Vec<i64> = subquery_result
+        .iter()
+        .filter_map(|r| {
+            if let vibesql_types::SqlValue::Integer(v) = &r.values[0] {
+                Some(*v)
+            } else {
+                None
+            }
+        })
+        .collect();
     println!("  Subquery returns col0 values: {:?}", subquery_values);
     // Expected: [1, 434, 665] (from rows 3, 90, 77 respectively)
 
     println!("\n=== Step 2: Check if col3 values are IN the subquery ===");
     // Check col3=1 IN subquery (row 71's col3)
-    let in_check_1 = execute_sql(&mut db, "SELECT 1 IN (SELECT col0 FROM tab0 WHERE col3 >= 605 OR col3 > 273)");
+    let in_check_1 =
+        execute_sql(&mut db, "SELECT 1 IN (SELECT col0 FROM tab0 WHERE col3 >= 605 OR col3 > 273)");
     println!("  col3=1 IN subquery: {:?}", in_check_1);
 
     // Check col3=665 IN subquery (row 90's col3)
-    let in_check_665 = execute_sql(&mut db, "SELECT 665 IN (SELECT col0 FROM tab0 WHERE col3 >= 605 OR col3 > 273)");
+    let in_check_665 = execute_sql(
+        &mut db,
+        "SELECT 665 IN (SELECT col0 FROM tab0 WHERE col3 >= 605 OR col3 > 273)",
+    );
     println!("  col3=665 IN subquery: {:?}", in_check_665);
 
     println!("\n=== Step 3: Check col3 > 89 ===");
@@ -234,9 +243,16 @@ fn test_issue_2599_minimal_reproduction() {
         &mut db,
         "SELECT pk FROM tab0 WHERE ((col3 IN (SELECT col0 FROM tab0 WHERE col3 >= 605 OR col3 > 273) AND col3 > 89) OR col3 = 76) AND col1 > 194.50 ORDER BY pk",
     );
-    let pks: Vec<i64> = result.iter().filter_map(|r| {
-        if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] { Some(*pk) } else { None }
-    }).collect();
+    let pks: Vec<i64> = result
+        .iter()
+        .filter_map(|r| {
+            if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] {
+                Some(*pk)
+            } else {
+                None
+            }
+        })
+        .collect();
     println!("  Query result PKs: {:?}", pks);
 
     // Expected: [90] only
@@ -244,7 +260,10 @@ fn test_issue_2599_minimal_reproduction() {
     // - Row 90: col3=665 IN subquery (TRUE) AND col3=665 > 89 (TRUE) = TRUE => TRUE
 
     // Assert the key check: row 90 should be in result
-    assert!(pks.contains(&90), "Row 90 should be in result: col3=665 is IN subquery AND col3=665 > 89");
+    assert!(
+        pks.contains(&90),
+        "Row 90 should be in result: col3=665 is IN subquery AND col3=665 > 89"
+    );
 
     // Row 71 should NOT be in result (col3=1 > 89 is FALSE)
     // But if it IS in the result, that would be a different bug
@@ -384,9 +403,16 @@ fn test_issue_2599_full_100rows_with_index() {
         &mut db,
         "SELECT pk FROM tab0 WHERE (col3 IN (SELECT col0 FROM tab0 WHERE col3 >= 605 OR (((col0 >= 64) OR (col4 IN (454.84,354.12,41.93,180.48)) OR col3 > 273 OR (((col1 > 334.28 AND (col1 < 615.55 OR (((col4 IS NULL))) OR (col0 > 101) AND col0 IN (384,766,604,640,327) AND col3 IS NULL AND col0 < 384 AND ((((col0 >= 622 AND col0 < 894 OR (col1 > 899.10))))))) AND col1 < 994.43 AND (col0 > 912 AND (col3 <= 992)) AND ((col0 > 759 AND col1 > 738.84 AND col3 IN (992,363,791,703))) OR col0 <= 404 AND col1 >= 792.80 AND col4 >= 133.79 OR col3 >= 565 AND ((col4 <= 340.72)) AND (col3 < 389) AND (((col4 IS NULL AND col0 > 176))) OR (col3 > 703)) OR col1 IS NULL)) AND col3 > 89) OR col3 = 76)) AND col1 > 194.50 ORDER BY pk",
     );
-    let pks_tab0: Vec<i64> = result_tab0.iter().filter_map(|r| {
-        if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] { Some(*pk) } else { None }
-    }).collect();
+    let pks_tab0: Vec<i64> = result_tab0
+        .iter()
+        .filter_map(|r| {
+            if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] {
+                Some(*pk)
+            } else {
+                None
+            }
+        })
+        .collect();
     println!("tab0 result (no indexes): {:?}", pks_tab0);
 
     // Test on tab1 (with indexes) - this is the failing case
@@ -394,9 +420,16 @@ fn test_issue_2599_full_100rows_with_index() {
         &mut db,
         "SELECT pk FROM tab1 WHERE (col3 IN (SELECT col0 FROM tab1 WHERE col3 >= 605 OR (((col0 >= 64) OR (col4 IN (454.84,354.12,41.93,180.48)) OR col3 > 273 OR (((col1 > 334.28 AND (col1 < 615.55 OR (((col4 IS NULL))) OR (col0 > 101) AND col0 IN (384,766,604,640,327) AND col3 IS NULL AND col0 < 384 AND ((((col0 >= 622 AND col0 < 894 OR (col1 > 899.10))))))) AND col1 < 994.43 AND (col0 > 912 AND (col3 <= 992)) AND ((col0 > 759 AND col1 > 738.84 AND col3 IN (992,363,791,703))) OR col0 <= 404 AND col1 >= 792.80 AND col4 >= 133.79 OR col3 >= 565 AND ((col4 <= 340.72)) AND (col3 < 389) AND (((col4 IS NULL AND col0 > 176))) OR (col3 > 703)) OR col1 IS NULL)) AND col3 > 89) OR col3 = 76)) AND col1 > 194.50 ORDER BY pk",
     );
-    let pks_tab1: Vec<i64> = result_tab1.iter().filter_map(|r| {
-        if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] { Some(*pk) } else { None }
-    }).collect();
+    let pks_tab1: Vec<i64> = result_tab1
+        .iter()
+        .filter_map(|r| {
+            if let vibesql_types::SqlValue::Integer(pk) = &r.values[0] {
+                Some(*pk)
+            } else {
+                None
+            }
+        })
+        .collect();
     println!("tab1 result (with indexes): {:?}", pks_tab1);
 
     // Expected: [26, 54, 67, 70, 71, 90, 97]

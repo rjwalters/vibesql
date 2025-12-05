@@ -1,29 +1,48 @@
-use std::{
-    cmp::Ordering,
-    collections::HashSet,
-};
+use std::{cmp::Ordering, collections::HashSet};
 
 /// Accumulator for aggregate functions
 #[derive(Debug, Clone)]
 pub enum AggregateAccumulator {
-    Count { count: i64, distinct: bool, seen: Option<HashSet<vibesql_types::SqlValue>> },
-    Sum { sum: vibesql_types::SqlValue, count: i64, distinct: bool, seen: Option<HashSet<vibesql_types::SqlValue>> },
-    Avg { sum: vibesql_types::SqlValue, count: i64, distinct: bool, seen: Option<HashSet<vibesql_types::SqlValue>> },
-    Min { value: Option<vibesql_types::SqlValue>, distinct: bool, seen: Option<HashSet<vibesql_types::SqlValue>> },
-    Max { value: Option<vibesql_types::SqlValue>, distinct: bool, seen: Option<HashSet<vibesql_types::SqlValue>> },
+    Count {
+        count: i64,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
+    Sum {
+        sum: vibesql_types::SqlValue,
+        count: i64,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
+    Avg {
+        sum: vibesql_types::SqlValue,
+        count: i64,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
+    Min {
+        value: Option<vibesql_types::SqlValue>,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
+    Max {
+        value: Option<vibesql_types::SqlValue>,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
 }
 
 impl AggregateAccumulator {
-    pub fn new(
-        function_name: &str,
-        distinct: bool,
-    ) -> Result<Self, crate::errors::ExecutorError> {
+    pub fn new(function_name: &str, distinct: bool) -> Result<Self, crate::errors::ExecutorError> {
         let seen = if distinct { Some(HashSet::new()) } else { None };
         match function_name.to_uppercase().as_str() {
             "COUNT" => Ok(AggregateAccumulator::Count { count: 0, distinct, seen }),
-            "SUM" => {
-                Ok(AggregateAccumulator::Sum { sum: vibesql_types::SqlValue::Integer(0), count: 0, distinct, seen })
-            }
+            "SUM" => Ok(AggregateAccumulator::Sum {
+                sum: vibesql_types::SqlValue::Integer(0),
+                count: 0,
+                distinct,
+                seen,
+            }),
             "AVG" => Ok(AggregateAccumulator::Avg {
                 sum: vibesql_types::SqlValue::Integer(0),
                 count: 0,
@@ -197,11 +216,13 @@ impl AggregateAccumulator {
     pub fn combine(&mut self, other: Self) -> Result<(), crate::errors::ExecutorError> {
         match (self, other) {
             // COUNT: Sum the counts
-            (AggregateAccumulator::Count { count: c1, distinct: d1, seen: s1 },
-             AggregateAccumulator::Count { count: c2, distinct: d2, seen: s2 }) => {
+            (
+                AggregateAccumulator::Count { count: c1, distinct: d1, seen: s1 },
+                AggregateAccumulator::Count { count: c2, distinct: d2, seen: s2 },
+            ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
-                        "Cannot combine COUNT with different DISTINCT flags".into()
+                        "Cannot combine COUNT with different DISTINCT flags".into(),
                     ));
                 }
 
@@ -217,11 +238,13 @@ impl AggregateAccumulator {
             }
 
             // SUM: Add the sums
-            (AggregateAccumulator::Sum { sum: s1, count: c1, distinct: d1, seen: seen1 },
-             AggregateAccumulator::Sum { sum: s2, count: c2, distinct: d2, seen: seen2 }) => {
+            (
+                AggregateAccumulator::Sum { sum: s1, count: c1, distinct: d1, seen: seen1 },
+                AggregateAccumulator::Sum { sum: s2, count: c2, distinct: d2, seen: seen2 },
+            ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
-                        "Cannot combine SUM with different DISTINCT flags".into()
+                        "Cannot combine SUM with different DISTINCT flags".into(),
                     ));
                 }
 
@@ -230,8 +253,10 @@ impl AggregateAccumulator {
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Recalculate sum and count from merged set
-                        *s1 = s1_set.iter()
-                            .fold(vibesql_types::SqlValue::Integer(0), |acc, val| add_sql_values(&acc, val));
+                        *s1 =
+                            s1_set.iter().fold(vibesql_types::SqlValue::Integer(0), |acc, val| {
+                                add_sql_values(&acc, val)
+                            });
                         *c1 = s1_set.len() as i64;
                     }
                 } else {
@@ -241,11 +266,13 @@ impl AggregateAccumulator {
             }
 
             // AVG: Combine sums and counts
-            (AggregateAccumulator::Avg { sum: s1, count: c1, distinct: d1, seen: seen1 },
-             AggregateAccumulator::Avg { sum: s2, count: c2, distinct: d2, seen: seen2 }) => {
+            (
+                AggregateAccumulator::Avg { sum: s1, count: c1, distinct: d1, seen: seen1 },
+                AggregateAccumulator::Avg { sum: s2, count: c2, distinct: d2, seen: seen2 },
+            ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
-                        "Cannot combine AVG with different DISTINCT flags".into()
+                        "Cannot combine AVG with different DISTINCT flags".into(),
                     ));
                 }
 
@@ -254,8 +281,10 @@ impl AggregateAccumulator {
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Recalculate sum and count from merged set
-                        *s1 = s1_set.iter()
-                            .fold(vibesql_types::SqlValue::Integer(0), |acc, val| add_sql_values(&acc, val));
+                        *s1 =
+                            s1_set.iter().fold(vibesql_types::SqlValue::Integer(0), |acc, val| {
+                                add_sql_values(&acc, val)
+                            });
                         *c1 = s1_set.len() as i64;
                     }
                 } else {
@@ -265,11 +294,13 @@ impl AggregateAccumulator {
             }
 
             // MIN: Take minimum of minimums
-            (AggregateAccumulator::Min { value: v1, distinct: d1, seen: seen1 },
-             AggregateAccumulator::Min { value: v2, distinct: d2, seen: seen2 }) => {
+            (
+                AggregateAccumulator::Min { value: v1, distinct: d1, seen: seen1 },
+                AggregateAccumulator::Min { value: v2, distinct: d2, seen: seen2 },
+            ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
-                        "Cannot combine MIN with different DISTINCT flags".into()
+                        "Cannot combine MIN with different DISTINCT flags".into(),
                     ));
                 }
 
@@ -278,9 +309,7 @@ impl AggregateAccumulator {
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Find minimum from merged set
-                        *v1 = s1_set.iter()
-                            .min_by(|a, b| compare_sql_values(a, b))
-                            .cloned();
+                        *v1 = s1_set.iter().min_by(|a, b| compare_sql_values(a, b)).cloned();
                     }
                 } else {
                     match (v1.as_ref(), v2) {
@@ -296,11 +325,13 @@ impl AggregateAccumulator {
             }
 
             // MAX: Take maximum of maximums
-            (AggregateAccumulator::Max { value: v1, distinct: d1, seen: seen1 },
-             AggregateAccumulator::Max { value: v2, distinct: d2, seen: seen2 }) => {
+            (
+                AggregateAccumulator::Max { value: v1, distinct: d1, seen: seen1 },
+                AggregateAccumulator::Max { value: v2, distinct: d2, seen: seen2 },
+            ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
-                        "Cannot combine MAX with different DISTINCT flags".into()
+                        "Cannot combine MAX with different DISTINCT flags".into(),
                     ));
                 }
 
@@ -309,9 +340,7 @@ impl AggregateAccumulator {
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Find maximum from merged set
-                        *v1 = s1_set.iter()
-                            .max_by(|a, b| compare_sql_values(a, b))
-                            .cloned();
+                        *v1 = s1_set.iter().max_by(|a, b| compare_sql_values(a, b)).cloned();
                     }
                 } else {
                     match (v1.as_ref(), v2) {
@@ -328,7 +357,7 @@ impl AggregateAccumulator {
 
             _ => {
                 return Err(crate::errors::ExecutorError::UnsupportedExpression(
-                    "Cannot combine incompatible aggregate types".into()
+                    "Cannot combine incompatible aggregate types".into(),
                 ));
             }
         }
@@ -354,13 +383,21 @@ impl AggregateAccumulator {
 /// - This choice prevents integer overflow and aligns with SQLLogicTest requirements
 ///
 /// See: https://github.com/rjwalters/vibesql/pull/871
-fn add_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlValue) -> vibesql_types::SqlValue {
+fn add_sql_values(
+    a: &vibesql_types::SqlValue,
+    b: &vibesql_types::SqlValue,
+) -> vibesql_types::SqlValue {
     // Use the proper arithmetic addition operator that preserves types
     // Integer + Integer → Integer, Float + anything → Float, etc.
     use crate::evaluator::operators::OperatorRegistry;
     use vibesql_ast::BinaryOperator;
 
-    match OperatorRegistry::eval_binary_op(a, &BinaryOperator::Plus, b, vibesql_types::SqlMode::default()) {
+    match OperatorRegistry::eval_binary_op(
+        a,
+        &BinaryOperator::Plus,
+        b,
+        vibesql_types::SqlMode::default(),
+    ) {
         Ok(result) => result,
         Err(_) => vibesql_types::SqlValue::Null, // If addition fails, return NULL
     }
@@ -480,16 +517,8 @@ mod tests {
         seen2.insert(SqlValue::Integer(2));
         seen2.insert(SqlValue::Integer(3));
 
-        let mut acc1 = AggregateAccumulator::Count {
-            count: 2,
-            distinct: true,
-            seen: Some(seen1)
-        };
-        let acc2 = AggregateAccumulator::Count {
-            count: 2,
-            distinct: true,
-            seen: Some(seen2)
-        };
+        let mut acc1 = AggregateAccumulator::Count { count: 2, distinct: true, seen: Some(seen1) };
+        let acc2 = AggregateAccumulator::Count { count: 2, distinct: true, seen: Some(seen2) };
 
         acc1.combine(acc2).unwrap();
 
@@ -508,13 +537,13 @@ mod tests {
             sum: SqlValue::Integer(10),
             count: 3,
             distinct: false,
-            seen: None
+            seen: None,
         };
         let acc2 = AggregateAccumulator::Sum {
             sum: SqlValue::Integer(5),
             count: 2,
             distinct: false,
-            seen: None
+            seen: None,
         };
 
         acc1.combine(acc2).unwrap();
@@ -538,13 +567,13 @@ mod tests {
             sum: SqlValue::Integer(100),
             count: 10,
             distinct: false,
-            seen: None
+            seen: None,
         };
         let acc2 = AggregateAccumulator::Avg {
             sum: SqlValue::Integer(50),
             count: 5,
             distinct: false,
-            seen: None
+            seen: None,
         };
 
         acc1.combine(acc2).unwrap();
@@ -567,12 +596,12 @@ mod tests {
         let mut acc1 = AggregateAccumulator::Min {
             value: Some(SqlValue::Integer(5)),
             distinct: false,
-            seen: None
+            seen: None,
         };
         let acc2 = AggregateAccumulator::Min {
             value: Some(SqlValue::Integer(3)),
             distinct: false,
-            seen: None
+            seen: None,
         };
 
         acc1.combine(acc2).unwrap();
@@ -590,12 +619,12 @@ mod tests {
         let mut acc1 = AggregateAccumulator::Max {
             value: Some(SqlValue::Integer(5)),
             distinct: false,
-            seen: None
+            seen: None,
         };
         let acc2 = AggregateAccumulator::Max {
             value: Some(SqlValue::Integer(10)),
             distinct: false,
-            seen: None
+            seen: None,
         };
 
         acc1.combine(acc2).unwrap();
@@ -615,7 +644,7 @@ mod tests {
             sum: SqlValue::Integer(10),
             count: 3,
             distinct: false,
-            seen: None
+            seen: None,
         };
 
         let result = acc1.combine(acc2);
@@ -625,11 +654,8 @@ mod tests {
     #[test]
     fn test_combine_different_distinct_flags_fails() {
         let mut acc1 = AggregateAccumulator::Count { count: 5, distinct: false, seen: None };
-        let acc2 = AggregateAccumulator::Count {
-            count: 3,
-            distinct: true,
-            seen: Some(HashSet::new())
-        };
+        let acc2 =
+            AggregateAccumulator::Count { count: 3, distinct: true, seen: Some(HashSet::new()) };
 
         let result = acc1.combine(acc2);
         assert!(result.is_err());
@@ -674,7 +700,7 @@ mod tests {
         // Finalize should return 0, not NULL
         let result = acc.finalize();
         match result {
-            SqlValue::Integer(0) => {}, // OK
+            SqlValue::Integer(0) => {} // OK
             _ => panic!("SUM of values that sum to 0 should return 0, got {:?}", result),
         }
     }

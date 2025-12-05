@@ -82,40 +82,49 @@ fn apply_int64_op(
     right: &ArrayRef,
     op: &BinaryOperator,
 ) -> Result<ArrayRef, ExecutorError> {
-    let left_arr = left
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+    let left_arr = left.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+        ExecutorError::ArrowDowncastError {
             expected_type: "Int64Array".to_string(),
             context: "apply_int64_op (left)".to_string(),
-        })?;
-    let right_arr = right
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+        }
+    })?;
+    let right_arr = right.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+        ExecutorError::ArrowDowncastError {
             expected_type: "Int64Array".to_string(),
             context: "apply_int64_op (right)".to_string(),
-        })?;
+        }
+    })?;
 
     let result: ArrayRef = match op {
-        BinaryOperator::Plus => add(left_arr, right_arr)
-            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "add".to_string(), reason: e.to_string() })?,
-        BinaryOperator::Minus => sub(left_arr, right_arr)
-            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "subtract".to_string(), reason: e.to_string() })?,
-        BinaryOperator::Multiply => mul(left_arr, right_arr)
-            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "multiply".to_string(), reason: e.to_string() })?,
+        BinaryOperator::Plus => {
+            add(left_arr, right_arr).map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "add".to_string(),
+                reason: e.to_string(),
+            })?
+        }
+        BinaryOperator::Minus => {
+            sub(left_arr, right_arr).map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "subtract".to_string(),
+                reason: e.to_string(),
+            })?
+        }
+        BinaryOperator::Multiply => {
+            mul(left_arr, right_arr).map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "multiply".to_string(),
+                reason: e.to_string(),
+            })?
+        }
         BinaryOperator::Divide => {
             // For integer division, cast to float64 first
             let left_f64 = cast_int64_to_float64(left_arr)?;
             let right_f64 = cast_int64_to_float64(right_arr)?;
-            div(&left_f64, &right_f64)
-                .map_err(|e| ExecutorError::SimdOperationFailed { operation: "divide".to_string(), reason: e.to_string() })?
+            div(&left_f64, &right_f64).map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "divide".to_string(),
+                reason: e.to_string(),
+            })?
         }
         _ => {
-            return Err(ExecutorError::UnsupportedFeature(format!(
-                "arithmetic operator {:?}",
-                op
-            )))
+            return Err(ExecutorError::UnsupportedFeature(format!("arithmetic operator {:?}", op)))
         }
     };
 
@@ -128,39 +137,46 @@ fn apply_float64_op(
     right: &ArrayRef,
     op: &BinaryOperator,
 ) -> Result<ArrayRef, ExecutorError> {
-    let left_arr = left
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+    let left_arr = left.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+        ExecutorError::ArrowDowncastError {
             expected_type: "Float64Array".to_string(),
             context: "apply_float64_op (left)".to_string(),
-        })?;
-    let right_arr = right
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .ok_or_else(|| ExecutorError::ArrowDowncastError {
+        }
+    })?;
+    let right_arr = right.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+        ExecutorError::ArrowDowncastError {
             expected_type: "Float64Array".to_string(),
             context: "apply_float64_op (right)".to_string(),
-        })?;
+        }
+    })?;
 
     let result: ArrayRef = match op {
         BinaryOperator::Plus => add(left_arr, right_arr)
-            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "add".to_string(), reason: e.to_string() })?
+            .map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "add".to_string(),
+                reason: e.to_string(),
+            })?
             .into(),
         BinaryOperator::Minus => sub(left_arr, right_arr)
-            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "subtract".to_string(), reason: e.to_string() })?
+            .map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "subtract".to_string(),
+                reason: e.to_string(),
+            })?
             .into(),
         BinaryOperator::Multiply => mul(left_arr, right_arr)
-            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "multiply".to_string(), reason: e.to_string() })?
+            .map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "multiply".to_string(),
+                reason: e.to_string(),
+            })?
             .into(),
         BinaryOperator::Divide => div(left_arr, right_arr)
-            .map_err(|e| ExecutorError::SimdOperationFailed { operation: "divide".to_string(), reason: e.to_string() })?
+            .map_err(|e| ExecutorError::SimdOperationFailed {
+                operation: "divide".to_string(),
+                reason: e.to_string(),
+            })?
             .into(),
         _ => {
-            return Err(ExecutorError::UnsupportedFeature(format!(
-                "arithmetic operator {:?}",
-                op
-            )))
+            return Err(ExecutorError::UnsupportedFeature(format!("arithmetic operator {:?}", op)))
         }
     };
 
@@ -170,9 +186,8 @@ fn apply_float64_op(
 /// Get a numeric column from the RecordBatch
 fn get_numeric_column(batch: &RecordBatch, col_name: &str) -> Result<ArrayRef, ExecutorError> {
     let schema = batch.schema();
-    let (col_idx, _) = schema
-        .column_with_name(col_name)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+    let (col_idx, _) =
+        schema.column_with_name(col_name).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: 0, // Column referenced by name
             batch_columns: schema.fields().len(),
         })?;
@@ -197,9 +212,7 @@ fn create_literal_array(value: &SqlValue, len: usize) -> Result<ArrayRef, Execut
         SqlValue::Integer(i) | SqlValue::Bigint(i) => {
             Ok(Arc::new(Int64Array::from(vec![*i; len])) as ArrayRef)
         }
-        SqlValue::Smallint(i) => {
-            Ok(Arc::new(Int64Array::from(vec![*i as i64; len])) as ArrayRef)
-        }
+        SqlValue::Smallint(i) => Ok(Arc::new(Int64Array::from(vec![*i as i64; len])) as ArrayRef),
         SqlValue::Float(f) | SqlValue::Real(f) => {
             Ok(Arc::new(Float64Array::from(vec![*f as f64; len])) as ArrayRef)
         }
@@ -222,13 +235,12 @@ fn create_literal_array(value: &SqlValue, len: usize) -> Result<ArrayRef, Execut
 fn cast_to_float64(array: &ArrayRef) -> Result<ArrayRef, ExecutorError> {
     match array.data_type() {
         arrow::datatypes::DataType::Int64 => {
-            let int_arr = array
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let int_arr = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Int64Array".to_string(),
                     context: "cast_to_float64".to_string(),
-                })?;
+                }
+            })?;
             Ok(Arc::new(cast_int64_to_float64(int_arr)?) as ArrayRef)
         }
         arrow::datatypes::DataType::Float64 => Ok(array.clone()),
@@ -271,15 +283,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "quantity".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -297,14 +303,10 @@ mod tests {
         // Test: price * 0.9 (10% discount)
         let schema = Schema::new(vec![Field::new("price", DataType::Float64, false)]);
         let price_array = Float64Array::from(vec![100.0, 200.0, 300.0]);
-        let batch =
-            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::Literal(SqlValue::Float(0.9))),
         };
@@ -336,10 +338,7 @@ mod tests {
 
         // price * (1 - discount)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Float(1.0))),
@@ -371,22 +370,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(vec![10.0, 20.0, 30.0, 40.0]);
         let b_array = Float64Array::from(vec![1.0, 2.0, 3.0, 4.0]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -406,22 +397,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(vec![100.0, 200.0, 300.0, 400.0]);
         let b_array = Float64Array::from(vec![10.0, 20.0, 30.0, 40.0]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -441,22 +424,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(vec![100.0, 200.0, 300.0, 400.0]);
         let b_array = Float64Array::from(vec![10.0, 20.0, 30.0, 40.0]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -478,23 +453,15 @@ mod tests {
         ]);
         let a_array = Int64Array::from(vec![10, 20, 30, 40]);
         let b_array = Int64Array::from(vec![2, 3, 4, 5]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         // Test addition
         let add_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &add_expr).unwrap();
@@ -504,15 +471,9 @@ mod tests {
 
         // Test multiplication
         let mul_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &mul_expr).unwrap();
@@ -531,22 +492,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(Vec::<f64>::new());
         let b_array = Float64Array::from(Vec::<f64>::new());
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -561,22 +514,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(vec![5.0]);
         let b_array = Float64Array::from(vec![3.0]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -595,22 +540,14 @@ mod tests {
         let b_vals: Vec<f64> = (0..size).map(|i| (i * 2) as f64).collect();
         let a_array = Float64Array::from(a_vals);
         let b_array = Float64Array::from(b_vals);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -629,22 +566,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(vec![-10.0, -20.0, -30.0]);
         let b_array = Float64Array::from(vec![5.0, 10.0, 15.0]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -663,22 +592,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
         let b_array = Float64Array::from(vec![2.0, 0.0, 5.0]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -697,22 +618,14 @@ mod tests {
         ]);
         let a_array = Float64Array::from(vec![0.0, 5.0, 0.0, 10.0]);
         let b_array = Float64Array::from(vec![10.0, 0.0, 0.0, 20.0]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(a_array), Arc::new(b_array)],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array), Arc::new(b_array)])
+                .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -733,10 +646,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Float(5.0))),
         };
@@ -756,10 +666,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         };
@@ -789,38 +696,21 @@ mod tests {
         let d_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
         let batch = RecordBatch::try_new(
             Arc::new(schema),
-            vec![
-                Arc::new(a_array),
-                Arc::new(b_array),
-                Arc::new(c_array),
-                Arc::new(d_array),
-            ],
+            vec![Arc::new(a_array), Arc::new(b_array), Arc::new(c_array), Arc::new(d_array)],
         )
         .unwrap();
 
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "a".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
                 op: BinaryOperator::Plus,
-                right: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "b".to_string(),
-                }),
+                right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
             }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c".to_string() }),
                 op: BinaryOperator::Minus,
-                right: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "d".to_string(),
-                }),
+                right: Box::new(Expression::ColumnRef { table: None, column: "d".to_string() }),
             }),
         };
 
@@ -843,10 +733,7 @@ mod tests {
         let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
-        let expr = Expression::ColumnRef {
-            table: None,
-            column: "a".to_string(),
-        };
+        let expr = Expression::ColumnRef { table: None, column: "a".to_string() };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
         let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -864,16 +751,12 @@ mod tests {
         // Expected: All results should be NULL (NULL propagation)
         let schema = Schema::new(vec![Field::new("price", DataType::Float64, true)]);
         let price_array = Float64Array::from(vec![Some(10.0), Some(20.0), Some(30.0)]);
-        let batch =
-            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Null)),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -892,14 +775,10 @@ mod tests {
         // Expected: All results should be NULL (NULL propagation)
         let schema = Schema::new(vec![Field::new("price", DataType::Float64, true)]);
         let price_array = Float64Array::from(vec![Some(10.0), Some(20.0), Some(30.0)]);
-        let batch =
-            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Null)),
         };
@@ -932,15 +811,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "quantity".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "discount".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -999,10 +872,7 @@ mod tests {
 
         // price * (1 - discount)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Float(1.0))),
@@ -1044,15 +914,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "quantity".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -1075,7 +939,8 @@ mod tests {
             Field::new("revenue", DataType::Float64, true),
             Field::new("cost", DataType::Float64, true),
         ]);
-        let revenue_array = Float64Array::from(vec![Some(1000.0), Some(2000.0), None, Some(4000.0)]);
+        let revenue_array =
+            Float64Array::from(vec![Some(1000.0), Some(2000.0), None, Some(4000.0)]);
         let cost_array = Float64Array::from(vec![Some(600.0), None, Some(1500.0), Some(2500.0)]);
         let batch = RecordBatch::try_new(
             Arc::new(schema),
@@ -1084,15 +949,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "revenue".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "revenue".to_string() }),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "cost".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "cost".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();

@@ -2,7 +2,9 @@ use super::*;
 
 impl Parser {
     /// Parse special SQL forms (CASE, CAST, EXISTS, NOT EXISTS, CURRENT_DATE/TIME/TIMESTAMP)
-    pub(super) fn parse_special_form(&mut self) -> Result<Option<vibesql_ast::Expression>, ParseError> {
+    pub(super) fn parse_special_form(
+        &mut self,
+    ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         match self.peek() {
             // CURRENT_DATE, CURRENT_TIME, CURRENT_TIMESTAMP (as identifiers)
             Token::Identifier(ref id) if id.to_uppercase() == "CURRENT_DATE" => {
@@ -161,7 +163,10 @@ impl Parser {
                 // Expect closing parenthesis
                 self.expect_token(Token::RParen)?;
 
-                Ok(Some(vibesql_ast::Expression::Exists { subquery: Box::new(subquery), negated: false }))
+                Ok(Some(vibesql_ast::Expression::Exists {
+                    subquery: Box::new(subquery),
+                    negated: false,
+                }))
             }
             // DEFAULT keyword: DEFAULT
             Token::Keyword(Keyword::Default) => {
@@ -346,18 +351,17 @@ impl Parser {
                 self.advance(); // consume IN
                 if self.peek_keyword(Keyword::Boolean) {
                     self.advance(); // consume BOOLEAN
-                    // MODE is a required keyword after BOOLEAN in MySQL syntax
-                    // It might be a keyword or identifier depending on lexer
-                    if matches!(self.peek(), Token::Identifier(s) | Token::DelimitedIdentifier(s) if s.eq_ignore_ascii_case("MODE")) {
+                                    // MODE is a required keyword after BOOLEAN in MySQL syntax
+                                    // It might be a keyword or identifier depending on lexer
+                    if matches!(self.peek(), Token::Identifier(s) | Token::DelimitedIdentifier(s) if s.eq_ignore_ascii_case("MODE"))
+                    {
                         self.advance(); // consume MODE
                     } else if self.peek_keyword(Keyword::Mode) {
                         self.advance(); // consume MODE keyword if it exists
                     }
                     vibesql_ast::FulltextMode::Boolean
                 } else {
-                    return Err(ParseError {
-                        message: "Expected BOOLEAN after IN".to_string(),
-                    });
+                    return Err(ParseError { message: "Expected BOOLEAN after IN".to_string() });
                 }
             } else if self.peek_keyword(Keyword::With) {
                 self.advance(); // consume WITH
@@ -370,11 +374,7 @@ impl Parser {
 
             self.expect_token(Token::RParen)?;
 
-            Ok(Some(vibesql_ast::Expression::MatchAgainst {
-                columns,
-                search_modifier,
-                mode,
-            }))
+            Ok(Some(vibesql_ast::Expression::MatchAgainst { columns, search_modifier, mode }))
         } else {
             Ok(None)
         }

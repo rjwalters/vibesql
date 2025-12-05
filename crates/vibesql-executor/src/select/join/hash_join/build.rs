@@ -20,10 +20,8 @@ impl CompositeKey {
     /// Create a composite key from a row using the specified column indices
     #[inline]
     pub fn from_row(row: &vibesql_storage::Row, col_indices: &[usize]) -> Self {
-        let values: Vec<vibesql_types::SqlValue> = col_indices
-            .iter()
-            .map(|&idx| row.values[idx].clone())
-            .collect();
+        let values: Vec<vibesql_types::SqlValue> =
+            col_indices.iter().map(|&idx| row.values[idx].clone()).collect();
         CompositeKey(values)
     }
 
@@ -41,7 +39,8 @@ pub(crate) fn build_hash_table_composite_sequential(
     build_rows: &[vibesql_storage::Row],
     build_col_indices: &[usize],
 ) -> AHashMap<CompositeKey, Vec<usize>> {
-    let mut hash_table: AHashMap<CompositeKey, Vec<usize>> = AHashMap::with_capacity(build_rows.len());
+    let mut hash_table: AHashMap<CompositeKey, Vec<usize>> =
+        AHashMap::with_capacity(build_rows.len());
     for (idx, row) in build_rows.iter().enumerate() {
         let key = CompositeKey::from_row(row, build_col_indices);
         // Skip rows with any NULL key values - they never match in equi-joins
@@ -86,13 +85,12 @@ pub(crate) fn build_hash_table_composite_parallel(
         .collect();
 
     // Phase 2: Sequential merge of partial tables
-    partial_tables.into_iter()
-        .fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
-            for (key, mut indices) in partial {
-                acc.entry(key).or_default().append(&mut indices);
-            }
-            acc
-        })
+    partial_tables.into_iter().fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
+        for (key, mut indices) in partial {
+            acc.entry(key).or_default().append(&mut indices);
+        }
+        acc
+    })
 }
 
 #[cfg(not(feature = "parallel"))]
@@ -154,7 +152,8 @@ pub(crate) fn build_hash_table_parallel(
             .enumerate()
             .map(|(chunk_idx, chunk)| {
                 let base_idx = chunk_idx * chunk_size;
-                let mut local_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
+                let mut local_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> =
+                    AHashMap::new();
                 for (i, row) in chunk.iter().enumerate() {
                     let key = row.values[build_col_idx].clone();
                     if key != vibesql_types::SqlValue::Null {
@@ -167,13 +166,12 @@ pub(crate) fn build_hash_table_parallel(
 
         // Phase 2: Sequential merge of partial tables
         // This is fast because we only touch keys that appear in multiple partitions
-        partial_tables.into_iter()
-            .fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
-                for (key, mut indices) in partial {
-                    acc.entry(key).or_default().append(&mut indices);
-                }
-                acc
-            })
+        partial_tables.into_iter().fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
+            for (key, mut indices) in partial {
+                acc.entry(key).or_default().append(&mut indices);
+            }
+            acc
+        })
     }
 
     #[cfg(not(feature = "parallel"))]

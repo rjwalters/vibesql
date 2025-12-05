@@ -122,9 +122,7 @@ impl IndexManager {
     /// Ok on successful initialization, Err if OPFS is not supported or initialization fails
     #[cfg(target_arch = "wasm32")]
     pub async fn init_opfs_async(&mut self) -> Result<(), StorageError> {
-        let opfs_storage = OpfsStorage::new_async()
-            .await
-            .map_err(|e| StorageError::from(e))?;
+        let opfs_storage = OpfsStorage::new_async().await.map_err(|e| StorageError::from(e))?;
 
         self.storage = Arc::new(opfs_storage);
         Ok(())
@@ -190,8 +188,13 @@ impl IndexManager {
                                 .get_column_index(&col.column_name)
                                 .expect("Index column should exist");
                             let value = &row.values[col_idx];
-                            let truncated = super::index_maintenance::apply_prefix_truncation(value, col.prefix_length);
-                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                            let truncated = super::index_maintenance::apply_prefix_truncation(
+                                value,
+                                col.prefix_length,
+                            );
+                            crate::database::indexes::index_operations::normalize_for_comparison(
+                                &truncated,
+                            )
                         })
                         .collect();
 
@@ -256,15 +259,21 @@ impl IndexManager {
     // ========================================================================
 
     /// Get the file path for an index file
-    pub(super) fn get_index_file_path(&self, table_name: &str, index_name: &str) -> Result<PathBuf, StorageError> {
-        let index_dir = self.database_path
+    pub(super) fn get_index_file_path(
+        &self,
+        table_name: &str,
+        index_name: &str,
+    ) -> Result<PathBuf, StorageError> {
+        let index_dir = self
+            .database_path
             .as_ref()
             .map(|p| p.join("indexes"))
             .unwrap_or_else(|| std::env::temp_dir().join("vibesql_indexes"));
 
         // Create indexes directory if needed
-        std::fs::create_dir_all(&index_dir)
-            .map_err(|e| StorageError::IoError(format!("Failed to create index directory: {}", e)))?;
+        std::fs::create_dir_all(&index_dir).map_err(|e| {
+            StorageError::IoError(format!("Failed to create index directory: {}", e))
+        })?;
 
         // Sanitize names for filesystem
         let safe_table = table_name.replace('/', "_");
@@ -296,7 +305,8 @@ impl IndexManager {
                 }
                 SpillPolicy::SpillToDisk => {
                     // Find coldest in-memory index and spill it
-                    let coldest = self.resource_tracker
+                    let coldest = self
+                        .resource_tracker
                         .find_coldest_in_memory_index()
                         .ok_or(StorageError::NoIndexToEvict)?;
 
@@ -314,7 +324,8 @@ impl IndexManager {
                 }
                 SpillPolicy::BestEffort => {
                     // Try to spill, but don't fail if we can't
-                    if let Some((coldest, _)) = self.resource_tracker.find_coldest_in_memory_index() {
+                    if let Some((coldest, _)) = self.resource_tracker.find_coldest_in_memory_index()
+                    {
                         let _ = self.spill_index_to_disk(&coldest);
                     } else {
                         // No more indexes to evict, give up
@@ -337,7 +348,9 @@ impl IndexManager {
     /// Convert an InMemory index to DiskBacked (eviction/spilling)
     fn spill_index_to_disk(&mut self, index_name: &str) -> Result<(), StorageError> {
         // Get the index data
-        let index_data = self.index_data.remove(index_name)
+        let index_data = self
+            .index_data
+            .remove(index_name)
             .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         // Extract InMemory data, or return if already DiskBacked or IVFFlat
@@ -363,17 +376,22 @@ impl IndexManager {
         };
 
         // Get metadata for this index
-        let metadata = self.indexes.get(index_name)
+        let metadata = self
+            .indexes
+            .get(index_name)
             .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?
             .clone();
 
         // Create disk-backed version
         let index_file = self.get_index_file_path(&metadata.table_name, index_name)?;
-        let index_file_str = index_file.to_str()
+        let index_file_str = index_file
+            .to_str()
             .ok_or_else(|| StorageError::IoError("Invalid index file path".to_string()))?;
 
-        let page_manager = Arc::new(PageManager::new(index_file_str, self.storage.clone())
-            .map_err(|e| StorageError::IoError(format!("Failed to create index file: {}", e)))?);
+        let page_manager =
+            Arc::new(PageManager::new(index_file_str, self.storage.clone()).map_err(|e| {
+                StorageError::IoError(format!("Failed to create index file: {}", e))
+            })?);
 
         // Convert BTreeMap to sorted entries for bulk_load
         // Use native duplicate key support - don't extend keys with row_id
@@ -389,13 +407,24 @@ impl IndexManager {
         // Note: We need access to table schema to get column data types
         // For now, we'll estimate based on SqlValue types in the data
         let key_schema: Vec<DataType> = if let Some((first_key, _)) = sorted_entries.first() {
-            first_key.iter().map(|v| match v {
-                SqlValue::Null => DataType::Integer,  // Placeholder
-                SqlValue::Integer(_) | SqlValue::Smallint(_) | SqlValue::Bigint(_) | SqlValue::Unsigned(_) => DataType::Integer,
-                SqlValue::Real(_) | SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Numeric(_) => DataType::Real,
-                SqlValue::Character(_) | SqlValue::Varchar(_) => DataType::Varchar { max_length: None },
-                _ => DataType::Integer,  // Fallback for other types
-            }).collect()
+            first_key
+                .iter()
+                .map(|v| match v {
+                    SqlValue::Null => DataType::Integer, // Placeholder
+                    SqlValue::Integer(_)
+                    | SqlValue::Smallint(_)
+                    | SqlValue::Bigint(_)
+                    | SqlValue::Unsigned(_) => DataType::Integer,
+                    SqlValue::Real(_)
+                    | SqlValue::Float(_)
+                    | SqlValue::Double(_)
+                    | SqlValue::Numeric(_) => DataType::Real,
+                    SqlValue::Character(_) | SqlValue::Varchar(_) => {
+                        DataType::Varchar { max_length: None }
+                    }
+                    _ => DataType::Integer, // Fallback for other types
+                })
+                .collect()
         } else {
             // Empty index, use Integer as placeholder
             vec![DataType::Integer; metadata.columns.len()]
@@ -414,16 +443,12 @@ impl IndexManager {
 
         // Replace with disk-backed version
         #[cfg(not(target_arch = "wasm32"))]
-        let disk_backed = IndexData::DiskBacked {
-            btree: Arc::new(parking_lot::Mutex::new(btree)),
-            page_manager,
-        };
+        let disk_backed =
+            IndexData::DiskBacked { btree: Arc::new(parking_lot::Mutex::new(btree)), page_manager };
 
         #[cfg(target_arch = "wasm32")]
-        let disk_backed = IndexData::DiskBacked {
-            btree: Arc::new(std::sync::Mutex::new(btree)),
-            page_manager,
-        };
+        let disk_backed =
+            IndexData::DiskBacked { btree: Arc::new(std::sync::Mutex::new(btree)), page_manager };
 
         self.index_data.insert(index_name.to_string(), disk_backed);
 

@@ -3246,11 +3246,11 @@ pub const TPCDS_QUERIES: &[(&str, &str)] = &[
     ("Q1", TPCDS_Q1),
     ("Q2", TPCDS_Q2),
     ("Q3", TPCDS_Q3),
-    ("Q4", TPCDS_Q4),   // Cross-channel customer growth comparison
-    ("Q5", TPCDS_Q5),   // Multi-channel sales/returns with ROLLUP
+    ("Q4", TPCDS_Q4), // Cross-channel customer growth comparison
+    ("Q5", TPCDS_Q5), // Multi-channel sales/returns with ROLLUP
     ("Q6", TPCDS_Q6),
     ("Q7", TPCDS_Q7),
-    ("Q8", TPCDS_Q8),   // Store sales by ZIP code with INTERSECT
+    ("Q8", TPCDS_Q8), // Store sales by ZIP code with INTERSECT
     ("Q9", TPCDS_Q9),
     ("Q10", TPCDS_Q10),
     ("Q11", TPCDS_Q11), // Customer web vs store sales growth

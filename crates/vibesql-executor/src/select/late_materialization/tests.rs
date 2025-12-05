@@ -8,9 +8,9 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::{gather, lazy_batch, row_ref};
-use super::{SelectionVector, RowReference, LazyMaterializedBatch, gather_columns};
-use gather::gather_join_output;
+use super::{gather_columns, LazyMaterializedBatch, RowReference, SelectionVector};
 use crate::select::columnar::{ColumnArray, ColumnarBatch};
+use gather::gather_join_output;
 
 /// Create a sample dataset simulating TPC-H lineitem style data
 fn create_tpch_lineitem_sample(row_count: usize) -> ColumnarBatch {
@@ -44,7 +44,8 @@ fn create_tpch_lineitem_sample(row_count: usize) -> ColumnarBatch {
             "l_discount".into(),
             "l_tax".into(),
         ]),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 #[test]
@@ -83,7 +84,8 @@ fn test_filter_with_late_materialization() {
         },
         lazy_batch.selection(),
         &[4, 5], // extendedprice, discount
-    ).unwrap();
+    )
+    .unwrap();
 
     // Verify we got the right columns
     assert_eq!(result.len(), selection.len());
@@ -106,7 +108,8 @@ fn test_join_with_late_materialization() {
     let orders = ColumnarBatch::from_columns(
         orders_columns,
         Some(vec!["o_orderkey".into(), "o_custkey".into(), "o_comment".into()]),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Right: customers table (100 rows)
     let customers_columns = vec![
@@ -116,7 +119,8 @@ fn test_join_with_late_materialization() {
     let customers = ColumnarBatch::from_columns(
         customers_columns,
         Some(vec!["c_custkey".into(), "c_name".into()]),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Build selection for orders (simulate filter: orderkey < 50)
     let order_filter: Vec<bool> = (0..1000).map(|i| i < 50).collect();
@@ -142,7 +146,8 @@ fn test_join_with_late_materialization() {
         &right_indices,
         Some(&[0, 2]), // o_orderkey, o_comment
         Some(&[1]),    // c_name
-    ).unwrap();
+    )
+    .unwrap();
 
     assert_eq!(result.len(), 50); // 50 orders matched
 
@@ -161,9 +166,7 @@ fn test_multi_filter_chain() {
     let batch = create_tpch_lineitem_sample(5000);
 
     // First filter: quantity > 10
-    let filter1: Vec<bool> = (0..5000)
-        .map(|i| (i % 50) as f64 + 1.0 > 10.0)
-        .collect();
+    let filter1: Vec<bool> = (0..5000).map(|i| (i % 50) as f64 + 1.0 > 10.0).collect();
     let sel1 = SelectionVector::from_bitmap(&filter1);
 
     // Second filter on sel1 result: discount > 0.05
@@ -255,10 +258,10 @@ fn test_row_reference_based_join() {
 
     // Join result: track which rows matched
     let join_pairs: Vec<(RowReference, RowReference)> = vec![
-        (left_source.reference(0), right_source.reference(0)),  // Alice - Order-A
-        (left_source.reference(0), right_source.reference(1)),  // Alice - Order-B
-        (left_source.reference(1), right_source.reference(2)),  // Bob - Order-C
-        // Carol has no orders
+        (left_source.reference(0), right_source.reference(0)), // Alice - Order-A
+        (left_source.reference(0), right_source.reference(1)), // Alice - Order-B
+        (left_source.reference(1), right_source.reference(2)), // Bob - Order-C
+                                                               // Carol has no orders
     ];
 
     // Only materialize at output

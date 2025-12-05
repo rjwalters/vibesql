@@ -96,7 +96,7 @@ fn test_index_scan_with_email_index() {
         false, // not unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -131,7 +131,7 @@ fn test_index_scan_with_age_index() {
         false,
         vec![IndexColumn {
             column_name: "age".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -197,7 +197,7 @@ fn test_index_scan_with_comparison_operator() {
         false,
         vec![IndexColumn {
             column_name: "age".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -241,7 +241,7 @@ fn test_index_scan_with_and_condition() {
         false,
         vec![IndexColumn {
             column_name: "age".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -274,7 +274,7 @@ fn test_unique_index_enforcement() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     );
@@ -336,12 +336,21 @@ fn test_index_scan_where_order_by_no_double_filtering() {
             prefix_length: None,
             direction: OrderDirection::Asc,
         }],
-    ).unwrap();
+    )
+    .unwrap();
 
     // Insert test data - pk=2 with col3=652.0 should be included (col3 > 221)
     let test_data = vec![
-        (0, 846.0), (1, 562.0), (2, 652.0), (3, 51.0), (4, 256.0),
-        (5, 957.0), (6, 656.0), (7, 294.0), (8, 878.0), (9, 105.0),
+        (0, 846.0),
+        (1, 562.0),
+        (2, 652.0),
+        (3, 51.0),
+        (4, 256.0),
+        (5, 957.0),
+        (6, 656.0),
+        (7, 294.0),
+        (8, 878.0),
+        (9, 105.0),
     ];
 
     for (pk, col3_val) in test_data {
@@ -353,7 +362,8 @@ fn test_index_scan_where_order_by_no_double_filtering() {
                 SqlValue::Real(pk as f32 * 20.0),
                 SqlValue::Real(col3_val as f32),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     let executor = SelectExecutor::new(&db);

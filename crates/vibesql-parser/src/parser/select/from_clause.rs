@@ -93,7 +93,7 @@ impl Parser {
                         }
                         _ => {
                             return Err(ParseError {
-                                message: "Derived table must have an alias".to_string()
+                                message: "Derived table must have an alias".to_string(),
                             })
                         }
                     };
@@ -155,11 +155,8 @@ impl Parser {
                 // Parse optional column aliases: AS alias (col1, col2, ...)
                 // SQL:1999 Feature E051-09
                 // Note: column_aliases requires an alias to be present
-                let column_aliases = if alias.is_some() {
-                    self.parse_column_alias_list()?
-                } else {
-                    None
-                };
+                let column_aliases =
+                    if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
                 Ok(vibesql_ast::FromClause::Table { name, alias, column_aliases })
             }
@@ -236,18 +233,12 @@ impl Parser {
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::FullOuter
             }
-            _ => {
-                return Err(ParseError {
-                    message: "Expected JOIN keyword".to_string(),
-                })
-            }
+            _ => return Err(ParseError { message: "Expected JOIN keyword".to_string() }),
         };
 
         // NATURAL CROSS JOIN is not valid in SQL
         if is_natural && join_type == vibesql_ast::JoinType::Cross {
-            return Err(ParseError {
-                message: "NATURAL CROSS JOIN is not valid SQL".to_string(),
-            });
+            return Err(ParseError { message: "NATURAL CROSS JOIN is not valid SQL".to_string() });
         }
 
         Ok((join_type, is_natural))

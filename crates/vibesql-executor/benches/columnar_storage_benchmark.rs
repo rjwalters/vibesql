@@ -106,22 +106,22 @@ fn generate_lineitem_data(row_count: usize) -> Vec<Row> {
         let line_status = ["O", "F"][i % 2];
 
         let row = Row::new(vec![
-            SqlValue::Integer((i / 7 + 1) as i64),                      // l_orderkey
-            SqlValue::Integer(((i * 13) % 200000 + 1) as i64),         // l_partkey
-            SqlValue::Integer(((i * 17) % 100 + 1) as i64),            // l_suppkey
-            SqlValue::Integer(((i % 7) + 1) as i64),                   // l_linenumber
-            SqlValue::Numeric(quantity),                                // l_quantity
-            SqlValue::Numeric(extendedprice),                           // l_extendedprice
-            SqlValue::Numeric(discount),                                // l_discount
-            SqlValue::Numeric(tax),                                     // l_tax
-            SqlValue::Varchar(return_flag.to_string()),                // l_returnflag
-            SqlValue::Varchar(line_status.to_string()),                // l_linestatus
-            SqlValue::Date(ship_date),                                  // l_shipdate
-            SqlValue::Date(commit_date),                                // l_commitdate
-            SqlValue::Date(receipt_date),                               // l_receiptdate
-            SqlValue::Varchar("DELIVER IN PERSON".to_string()),        // l_shipinstruct
-            SqlValue::Varchar("TRUCK".to_string()),                    // l_shipmode
-            SqlValue::Varchar("test comment".to_string()),             // l_comment
+            SqlValue::Integer((i / 7 + 1) as i64),             // l_orderkey
+            SqlValue::Integer(((i * 13) % 200000 + 1) as i64), // l_partkey
+            SqlValue::Integer(((i * 17) % 100 + 1) as i64),    // l_suppkey
+            SqlValue::Integer(((i % 7) + 1) as i64),           // l_linenumber
+            SqlValue::Numeric(quantity),                       // l_quantity
+            SqlValue::Numeric(extendedprice),                  // l_extendedprice
+            SqlValue::Numeric(discount),                       // l_discount
+            SqlValue::Numeric(tax),                            // l_tax
+            SqlValue::Varchar(return_flag.to_string()),        // l_returnflag
+            SqlValue::Varchar(line_status.to_string()),        // l_linestatus
+            SqlValue::Date(ship_date),                         // l_shipdate
+            SqlValue::Date(commit_date),                       // l_commitdate
+            SqlValue::Date(receipt_date),                      // l_receiptdate
+            SqlValue::Varchar("DELIVER IN PERSON".to_string()), // l_shipinstruct
+            SqlValue::Varchar("TRUCK".to_string()),            // l_shipmode
+            SqlValue::Varchar("test comment".to_string()),     // l_comment
         ]);
 
         rows.push(row);
@@ -137,18 +137,54 @@ fn lineitem_schema() -> Vec<ColumnSchema> {
         ColumnSchema::new("l_partkey".to_string(), DataType::Integer, false),
         ColumnSchema::new("l_suppkey".to_string(), DataType::Integer, false),
         ColumnSchema::new("l_linenumber".to_string(), DataType::Integer, false),
-        ColumnSchema::new("l_quantity".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-        ColumnSchema::new("l_extendedprice".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-        ColumnSchema::new("l_discount".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-        ColumnSchema::new("l_tax".to_string(), DataType::Decimal { precision: 15, scale: 2 }, false),
-        ColumnSchema::new("l_returnflag".to_string(), DataType::Varchar { max_length: Some(1) }, false),
-        ColumnSchema::new("l_linestatus".to_string(), DataType::Varchar { max_length: Some(1) }, false),
+        ColumnSchema::new(
+            "l_quantity".to_string(),
+            DataType::Decimal { precision: 15, scale: 2 },
+            false,
+        ),
+        ColumnSchema::new(
+            "l_extendedprice".to_string(),
+            DataType::Decimal { precision: 15, scale: 2 },
+            false,
+        ),
+        ColumnSchema::new(
+            "l_discount".to_string(),
+            DataType::Decimal { precision: 15, scale: 2 },
+            false,
+        ),
+        ColumnSchema::new(
+            "l_tax".to_string(),
+            DataType::Decimal { precision: 15, scale: 2 },
+            false,
+        ),
+        ColumnSchema::new(
+            "l_returnflag".to_string(),
+            DataType::Varchar { max_length: Some(1) },
+            false,
+        ),
+        ColumnSchema::new(
+            "l_linestatus".to_string(),
+            DataType::Varchar { max_length: Some(1) },
+            false,
+        ),
         ColumnSchema::new("l_shipdate".to_string(), DataType::Date, false),
         ColumnSchema::new("l_commitdate".to_string(), DataType::Date, false),
         ColumnSchema::new("l_receiptdate".to_string(), DataType::Date, false),
-        ColumnSchema::new("l_shipinstruct".to_string(), DataType::Varchar { max_length: Some(25) }, false),
-        ColumnSchema::new("l_shipmode".to_string(), DataType::Varchar { max_length: Some(10) }, false),
-        ColumnSchema::new("l_comment".to_string(), DataType::Varchar { max_length: Some(44) }, true),
+        ColumnSchema::new(
+            "l_shipinstruct".to_string(),
+            DataType::Varchar { max_length: Some(25) },
+            false,
+        ),
+        ColumnSchema::new(
+            "l_shipmode".to_string(),
+            DataType::Varchar { max_length: Some(10) },
+            false,
+        ),
+        ColumnSchema::new(
+            "l_comment".to_string(),
+            DataType::Varchar { max_length: Some(44) },
+            true,
+        ),
     ]
 }
 
@@ -233,16 +269,12 @@ fn bench_tpch_q6(c: &mut Criterion) {
         let columnar_db = create_columnar_database(row_count);
 
         // Benchmark row storage (with columnar cache)
-        group.bench_with_input(
-            BenchmarkId::new("row_storage", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let count = execute_query(&row_db, TPCH_Q6);
-                    black_box(count);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("row_storage", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let count = execute_query(&row_db, TPCH_Q6);
+                black_box(count);
+            });
+        });
 
         // Benchmark native columnar storage
         group.bench_with_input(
@@ -277,16 +309,12 @@ fn bench_tpch_q1(c: &mut Criterion) {
         let columnar_db = create_columnar_database(row_count);
 
         // Benchmark row storage
-        group.bench_with_input(
-            BenchmarkId::new("row_storage", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let count = execute_query(&row_db, TPCH_Q1);
-                    black_box(count);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("row_storage", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let count = execute_query(&row_db, TPCH_Q1);
+                black_box(count);
+            });
+        });
 
         // Benchmark native columnar storage
         group.bench_with_input(
@@ -319,26 +347,22 @@ fn bench_insert_performance(c: &mut Criterion) {
         let rows = generate_lineitem_data(batch_size);
 
         // Benchmark INSERT into row storage
-        group.bench_with_input(
-            BenchmarkId::new("row_storage", batch_size),
-            &batch_size,
-            |b, _| {
-                b.iter(|| {
-                    let mut db = Database::new();
-                    let schema = TableSchema::with_storage_format(
-                        "LINEITEM".to_string(),
-                        lineitem_schema(),
-                        StorageFormat::Row,
-                    );
-                    db.create_table(schema).unwrap();
+        group.bench_with_input(BenchmarkId::new("row_storage", batch_size), &batch_size, |b, _| {
+            b.iter(|| {
+                let mut db = Database::new();
+                let schema = TableSchema::with_storage_format(
+                    "LINEITEM".to_string(),
+                    lineitem_schema(),
+                    StorageFormat::Row,
+                );
+                db.create_table(schema).unwrap();
 
-                    for row in &rows {
-                        db.insert_row("LINEITEM", row.clone()).unwrap();
-                    }
-                    black_box(db);
-                });
-            },
-        );
+                for row in &rows {
+                    db.insert_row("LINEITEM", row.clone()).unwrap();
+                }
+                black_box(db);
+            });
+        });
 
         // Benchmark INSERT into native columnar storage
         group.bench_with_input(
@@ -402,7 +426,10 @@ fn bench_bulk_insert_into_existing(c: &mut Criterion) {
     // Benchmark INSERT into native columnar storage with existing data
     // This should show the O(n) rebuild cost
     group.bench_function(
-        BenchmarkId::new("columnar_storage", format!("{}+{}", initial_row_count, insert_batch_size)),
+        BenchmarkId::new(
+            "columnar_storage",
+            format!("{}+{}", initial_row_count, insert_batch_size),
+        ),
         |b| {
             b.iter_batched(
                 || create_columnar_database(initial_row_count),
@@ -504,16 +531,12 @@ fn bench_full_table_scan(c: &mut Criterion) {
         let row_db = create_row_database(row_count);
         let columnar_db = create_columnar_database(row_count);
 
-        group.bench_with_input(
-            BenchmarkId::new("row_storage", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let count = execute_query(&row_db, COUNT_QUERY);
-                    black_box(count);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("row_storage", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let count = execute_query(&row_db, COUNT_QUERY);
+                black_box(count);
+            });
+        });
 
         group.bench_with_input(
             BenchmarkId::new("columnar_storage", row_count),

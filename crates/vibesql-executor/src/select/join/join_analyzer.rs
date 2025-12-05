@@ -205,10 +205,7 @@ pub fn analyze_compound_equi_join(
 ) -> Option<CompoundEquiJoinResult> {
     // First try as a simple equi-join
     if let Some(equi_join) = analyze_single_equi_join(condition, schema, left_column_count) {
-        return Some(CompoundEquiJoinResult {
-            equi_join,
-            remaining_conditions: vec![],
-        });
+        return Some(CompoundEquiJoinResult { equi_join, remaining_conditions: vec![] });
     }
 
     // Try to extract from AND conditions
@@ -319,7 +316,8 @@ pub fn analyze_or_equi_join(
         match branch {
             Expression::BinaryOp { op: BinaryOperator::Equal, .. } => {
                 // Single equality - check if it's an equi-join
-                if let Some(equi_join) = analyze_single_equi_join(branch, schema, left_column_count) {
+                if let Some(equi_join) = analyze_single_equi_join(branch, schema, left_column_count)
+                {
                     branch_joins.push(equi_join);
                 }
             }
@@ -329,7 +327,9 @@ pub fn analyze_or_equi_join(
                 flatten_and_conditions(branch, &mut and_conditions);
 
                 for cond in and_conditions {
-                    if let Some(equi_join) = analyze_single_equi_join(cond, schema, left_column_count) {
+                    if let Some(equi_join) =
+                        analyze_single_equi_join(cond, schema, left_column_count)
+                    {
                         branch_joins.push(equi_join);
                     }
                 }
@@ -409,11 +409,13 @@ pub fn analyze_arithmetic_equi_join(
     match condition {
         Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
             // Pattern 1: col1 = col2 +/- constant
-            if let Some(info) = try_extract_arithmetic_join(left, right, schema, left_column_count) {
+            if let Some(info) = try_extract_arithmetic_join(left, right, schema, left_column_count)
+            {
                 return Some(info);
             }
             // Pattern 2: col2 +/- constant = col1 (swapped)
-            if let Some(info) = try_extract_arithmetic_join(right, left, schema, left_column_count) {
+            if let Some(info) = try_extract_arithmetic_join(right, left, schema, left_column_count)
+            {
                 return Some(info);
             }
             None

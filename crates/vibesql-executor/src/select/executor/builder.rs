@@ -1,10 +1,10 @@
 //! SelectExecutor construction and initialization
 
+use instant::Instant;
 use std::{
     cell::{Cell, OnceCell, RefCell},
     collections::HashMap,
 };
-use instant::Instant;
 
 use crate::{
     errors::ExecutorError,

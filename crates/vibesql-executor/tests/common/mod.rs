@@ -10,7 +10,11 @@ use vibesql_executor::ExpressionEvaluator;
 pub fn create_test_evaluator() -> (ExpressionEvaluator<'static>, vibesql_storage::Row) {
     let schema = Box::leak(Box::new(vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "id".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     )));
 
     let evaluator = ExpressionEvaluator::new(schema);
@@ -27,13 +31,21 @@ pub fn setup_test_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::new(
         "employees".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
                 false,
             ),
-            vibesql_catalog::ColumnSchema::new("salary".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "salary".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "department".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -87,7 +99,11 @@ pub fn setup_users_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -106,13 +122,21 @@ pub fn setup_users_table_with_active(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
                 false,
             ),
-            vibesql_catalog::ColumnSchema::new("active".to_string(), vibesql_types::DataType::Boolean, false),
+            vibesql_catalog::ColumnSchema::new(
+                "active".to_string(),
+                vibesql_types::DataType::Boolean,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();

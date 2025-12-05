@@ -48,11 +48,7 @@ impl ColumnarBatch {
             columns.push(column);
         }
 
-        Ok(Self {
-            row_count,
-            columns,
-            column_names: Some(column_names),
-        })
+        Ok(Self { row_count, columns, column_names: Some(column_names) })
     }
 }
 
@@ -69,13 +65,12 @@ fn convert_arrow_array(
 
     match data_type {
         ArrowDataType::Int64 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Int64Array".to_string(),
                     context: "Arrow batch conversion".to_string(),
-                })?;
+                }
+            })?;
 
             let values: Vec<i64> = (0..arr.len()).map(|i| arr.value(i)).collect();
             let nulls = if arr.null_count() > 0 {
@@ -88,13 +83,12 @@ fn convert_arrow_array(
         }
 
         ArrowDataType::Int32 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Int32Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Int32Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Int32Array".to_string(),
                     context: "Arrow batch conversion".to_string(),
-                })?;
+                }
+            })?;
 
             let values: Vec<i32> = (0..arr.len()).map(|i| arr.value(i)).collect();
             let nulls = if arr.null_count() > 0 {
@@ -107,13 +101,12 @@ fn convert_arrow_array(
         }
 
         ArrowDataType::Float64 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Float64Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Float64Array".to_string(),
                     context: "Arrow batch conversion".to_string(),
-                })?;
+                }
+            })?;
 
             let values: Vec<f64> = (0..arr.len()).map(|i| arr.value(i)).collect();
             let nulls = if arr.null_count() > 0 {
@@ -126,13 +119,12 @@ fn convert_arrow_array(
         }
 
         ArrowDataType::Float32 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Float32Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Float32Array".to_string(),
                     context: "Arrow batch conversion".to_string(),
-                })?;
+                }
+            })?;
 
             let values: Vec<f32> = (0..arr.len()).map(|i| arr.value(i)).collect();
             let nulls = if arr.null_count() > 0 {
@@ -145,13 +137,12 @@ fn convert_arrow_array(
         }
 
         ArrowDataType::Utf8 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "StringArray".to_string(),
                     context: "Arrow batch conversion".to_string(),
-                })?;
+                }
+            })?;
 
             let values: Vec<String> = (0..arr.len()).map(|i| arr.value(i).to_string()).collect();
             let nulls = if arr.null_count() > 0 {
@@ -164,17 +155,15 @@ fn convert_arrow_array(
         }
 
         ArrowDataType::Boolean => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<BooleanArray>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<BooleanArray>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "BooleanArray".to_string(),
                     context: "Arrow batch conversion".to_string(),
-                })?;
+                }
+            })?;
 
-            let values: Vec<u8> = (0..arr.len())
-                .map(|i| if arr.value(i) { 1 } else { 0 })
-                .collect();
+            let values: Vec<u8> =
+                (0..arr.len()).map(|i| if arr.value(i) { 1 } else { 0 }).collect();
             let nulls = if arr.null_count() > 0 {
                 Some(Arc::new((0..arr.len()).map(|i| arr.is_null(i)).collect()))
             } else {
@@ -185,13 +174,12 @@ fn convert_arrow_array(
         }
 
         ArrowDataType::Date32 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Date32Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Date32Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Date32Array".to_string(),
                     context: "Arrow batch conversion".to_string(),
-                })?;
+                }
+            })?;
 
             let values: Vec<i32> = (0..arr.len()).map(|i| arr.value(i)).collect();
             let nulls = if arr.null_count() > 0 {
@@ -204,12 +192,12 @@ fn convert_arrow_array(
         }
 
         ArrowDataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, _) => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<TimestampMicrosecondArray>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
-                    expected_type: "TimestampMicrosecondArray".to_string(),
-                    context: "Arrow batch conversion".to_string(),
+            let arr =
+                array.as_any().downcast_ref::<TimestampMicrosecondArray>().ok_or_else(|| {
+                    ExecutorError::ArrowDowncastError {
+                        expected_type: "TimestampMicrosecondArray".to_string(),
+                        context: "Arrow batch conversion".to_string(),
+                    }
                 })?;
 
             let values: Vec<i64> = (0..arr.len()).map(|i| arr.value(i)).collect();

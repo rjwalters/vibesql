@@ -38,4 +38,3 @@ macro_rules! impl_simple_enum_serialization {
         }
     };
 }
-

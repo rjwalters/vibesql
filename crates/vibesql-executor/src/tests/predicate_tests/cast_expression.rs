@@ -20,7 +20,9 @@ fn test_cast_integer_to_varchar() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    123,
+                ))),
                 data_type: vibesql_types::DataType::Varchar { max_length: Some(10) },
             },
             alias: Some("result".to_string()),
@@ -33,7 +35,8 @@ fn test_cast_integer_to_varchar() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -67,7 +70,8 @@ fn test_cast_varchar_to_integer() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -99,7 +103,8 @@ fn test_cast_null() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -118,7 +123,9 @@ fn test_cast_integer_to_unsigned() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    42,
+                ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
             alias: Some("result".to_string()),
@@ -131,7 +138,8 @@ fn test_cast_integer_to_unsigned() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -150,7 +158,9 @@ fn test_cast_negative_integer_to_unsigned() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-1))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    -1,
+                ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
             alias: Some("result".to_string()),
@@ -163,7 +173,8 @@ fn test_cast_negative_integer_to_unsigned() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -198,7 +209,8 @@ fn test_cast_varchar_to_unsigned() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -209,7 +221,9 @@ fn test_cast_varchar_to_unsigned() {
 fn test_cast_float_to_unsigned() {
     let mut db = vibesql_storage::Database::new();
     // Use MySQL mode for rounding behavior
-    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL {
+        flags: vibesql_types::MySqlModeFlags::default(),
+    });
     let executor = SelectExecutor::new(&db);
 
     // SELECT CAST(5.7 AS UNSIGNED) - should round to nearest (MySQL behavior)
@@ -219,7 +233,9 @@ fn test_cast_float_to_unsigned() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(5.7))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(
+                    5.7,
+                ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
             alias: Some("result".to_string()),
@@ -232,7 +248,8 @@ fn test_cast_float_to_unsigned() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -252,7 +269,9 @@ fn test_cast_as_signed_positive() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    42,
+                ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
             alias: Some("result".to_string()),
@@ -288,7 +307,9 @@ fn test_cast_as_signed_negative() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-4))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    -4,
+                ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
             alias: Some("result".to_string()),
@@ -316,7 +337,9 @@ fn test_cast_as_signed_negative() {
 fn test_cast_as_signed_from_float() {
     let mut db = vibesql_storage::Database::new();
     // Use MySQL mode for rounding behavior
-    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL {
+        flags: vibesql_types::MySqlModeFlags::default(),
+    });
     let executor = SelectExecutor::new(&db);
 
     // SELECT CAST(5.7 AS SIGNED) - should round to Bigint (MySQL behavior)
@@ -326,7 +349,9 @@ fn test_cast_as_signed_from_float() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(5.7))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Float(
+                    5.7,
+                ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
             alias: Some("result".to_string()),
@@ -355,7 +380,9 @@ fn test_cast_as_signed_from_float() {
 fn test_cast_negative_float_to_signed_rounds() {
     let mut db = vibesql_storage::Database::new();
     // Use MySQL mode for rounding behavior
-    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL {
+        flags: vibesql_types::MySqlModeFlags::default(),
+    });
     let executor = SelectExecutor::new(&db);
 
     // SELECT CAST(-0.7 AS SIGNED) - should round to -1 (MySQL behavior)
@@ -366,7 +393,9 @@ fn test_cast_negative_float_to_signed_rounds() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(-0.7))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(
+                    -0.7,
+                ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
             alias: Some("result".to_string()),
@@ -392,7 +421,9 @@ fn test_cast_negative_float_to_signed_rounds() {
 fn test_cast_rounding_edge_cases() {
     let mut db = vibesql_storage::Database::new();
     // Use MySQL mode for rounding behavior
-    db.set_sql_mode(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() });
+    db.set_sql_mode(vibesql_types::SqlMode::MySQL {
+        flags: vibesql_types::MySqlModeFlags::default(),
+    });
     let executor = SelectExecutor::new(&db);
 
     // Helper to run CAST and extract result
@@ -403,7 +434,9 @@ fn test_cast_rounding_edge_cases() {
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Cast {
-                    expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(value))),
+                    expr: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Numeric(value),
+                    )),
                     data_type: vibesql_types::DataType::Bigint,
                 },
                 alias: Some("result".to_string()),
@@ -426,12 +459,12 @@ fn test_cast_rounding_edge_cases() {
     };
 
     // Test positive rounding
-    assert_eq!(cast_to_signed(0.4), 0);   // rounds down
-    assert_eq!(cast_to_signed(0.5), 1);   // rounds up at 0.5
-    assert_eq!(cast_to_signed(0.7), 1);   // rounds up
+    assert_eq!(cast_to_signed(0.4), 0); // rounds down
+    assert_eq!(cast_to_signed(0.5), 1); // rounds up at 0.5
+    assert_eq!(cast_to_signed(0.7), 1); // rounds up
 
     // Test negative rounding (Rust's round() rounds away from zero)
-    assert_eq!(cast_to_signed(-0.4), 0);  // rounds toward zero
+    assert_eq!(cast_to_signed(-0.4), 0); // rounds toward zero
     assert_eq!(cast_to_signed(-0.5), -1); // rounds away from zero at -0.5
     assert_eq!(cast_to_signed(-0.7), -1); // rounds away from zero
 }

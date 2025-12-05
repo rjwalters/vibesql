@@ -16,10 +16,7 @@ impl Database {
 
     /// Get the current session role (defaults to "PUBLIC" if not set)
     pub fn get_current_role(&self) -> String {
-        self.lifecycle
-            .current_role()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "PUBLIC".to_string())
+        self.lifecycle.current_role().map(|s| s.to_string()).unwrap_or_else(|| "PUBLIC".to_string())
     }
 
     /// Check if security enforcement is enabled
@@ -101,7 +98,8 @@ impl Database {
                 }
                 // Add common MySQL defaults if no specific flags are set
                 if modes.is_empty() {
-                    "NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION".to_string()
+                    "NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+                        .to_string()
                 } else {
                     modes.join(",")
                 }
@@ -109,10 +107,8 @@ impl Database {
             vibesql_types::SqlMode::SQLite => "SQLITE".to_string(),
         };
 
-        self.metadata.set_session_variable(
-            "SQL_MODE",
-            vibesql_types::SqlValue::Varchar(mode_string),
-        );
+        self.metadata
+            .set_session_variable("SQL_MODE", vibesql_types::SqlValue::Varchar(mode_string));
     }
 }
 
@@ -133,9 +129,7 @@ mod tests {
         assert!(matches!(db.sql_mode(), SqlMode::SQLite));
 
         // Change back to MySQL
-        db.set_sql_mode(SqlMode::MySQL {
-            flags: MySqlModeFlags::default(),
-        });
+        db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
     }
 
@@ -144,16 +138,16 @@ mod tests {
         let mut db = Database::new();
 
         // Set to MySQL mode
-        db.set_sql_mode(SqlMode::MySQL {
-            flags: MySqlModeFlags::default(),
-        });
+        db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
 
         // Check session variable reflects the change
         let sql_mode_var = db.get_session_variable("SQL_MODE");
         assert!(sql_mode_var.is_some());
         if let Some(SqlValue::Varchar(mode_str)) = sql_mode_var {
             // Default MySQL flags should include common MySQL defaults
-            assert!(mode_str.contains("NO_ZERO_IN_DATE") || mode_str.contains("NO_ENGINE_SUBSTITUTION"));
+            assert!(
+                mode_str.contains("NO_ZERO_IN_DATE") || mode_str.contains("NO_ENGINE_SUBSTITUTION")
+            );
         } else {
             panic!("Expected SQL_MODE to be a Varchar");
         }
@@ -190,16 +184,16 @@ mod tests {
         let mut db = Database::new();
 
         // Set MySQL with default flags (all false)
-        db.set_sql_mode(SqlMode::MySQL {
-            flags: MySqlModeFlags::default(),
-        });
+        db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
 
         // Check session variable has default MySQL modes
         let sql_mode_var = db.get_session_variable("SQL_MODE");
         assert!(sql_mode_var.is_some());
         if let Some(SqlValue::Varchar(mode_str)) = sql_mode_var {
             // Default should include common MySQL defaults
-            assert!(mode_str.contains("NO_ZERO_IN_DATE") || mode_str.contains("NO_ENGINE_SUBSTITUTION"));
+            assert!(
+                mode_str.contains("NO_ZERO_IN_DATE") || mode_str.contains("NO_ENGINE_SUBSTITUTION")
+            );
         } else {
             panic!("Expected SQL_MODE to be a Varchar");
         }

@@ -6,8 +6,7 @@
 use crate::{
     errors::ExecutorError,
     select::vectorized::{
-        filter_record_batch_simd, record_batch_to_rows, rows_to_record_batch,
-        VECTORIZE_THRESHOLD,
+        filter_record_batch_simd, record_batch_to_rows, rows_to_record_batch, VECTORIZE_THRESHOLD,
     },
 };
 
@@ -71,7 +70,11 @@ pub(super) fn try_simd_filter(
     let filtered_batch = match filter_record_batch_simd(&batch, where_expr) {
         Ok(filtered) => {
             if simd_debug {
-                eprintln!("[SIMD] Filter succeeded: {} rows -> {} rows", batch.num_rows(), filtered.num_rows());
+                eprintln!(
+                    "[SIMD] Filter succeeded: {} rows -> {} rows",
+                    batch.num_rows(),
+                    filtered.num_rows()
+                );
             }
             filtered
         }

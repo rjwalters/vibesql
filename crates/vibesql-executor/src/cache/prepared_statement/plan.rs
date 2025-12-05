@@ -194,10 +194,7 @@ fn analyze_select_list(select_list: &[SelectItem]) -> Option<ProjectionPlan> {
                         return None;
                     }
                 };
-                columns.push(ColumnProjection {
-                    column_name,
-                    alias: alias.clone(),
-                });
+                columns.push(ColumnProjection { column_name, alias: alias.clone() });
             }
         }
     }
@@ -220,10 +217,7 @@ fn extract_pk_param_mappings(expr: &Expression) -> Option<Vec<(usize, String)>> 
 }
 
 /// Recursively collect parameter-to-column mappings
-fn collect_pk_param_mappings(
-    expr: &Expression,
-    mappings: &mut Vec<(usize, String)>,
-) -> Option<()> {
+fn collect_pk_param_mappings(expr: &Expression, mappings: &mut Vec<(usize, String)>) -> Option<()> {
     match expr {
         Expression::BinaryOp { left, op, right } => {
             match op {
@@ -256,7 +250,10 @@ fn collect_pk_param_mappings(
 }
 
 /// Extract (param_index, column_name) from an equality expression
-fn extract_column_placeholder_pair(left: &Expression, right: &Expression) -> Option<(usize, String)> {
+fn extract_column_placeholder_pair(
+    left: &Expression,
+    right: &Expression,
+) -> Option<(usize, String)> {
     // Try col = ?
     if let Expression::ColumnRef { column, .. } = left {
         if let Expression::Placeholder(idx) = right {
@@ -334,7 +331,8 @@ mod tests {
 
     #[test]
     fn test_not_cacheable_join() {
-        let plan = parse_to_plan("SELECT * FROM users u JOIN orders o ON u.id = o.user_id WHERE u.id = ?");
+        let plan =
+            parse_to_plan("SELECT * FROM users u JOIN orders o ON u.id = o.user_id WHERE u.id = ?");
         assert!(matches!(plan, CachedPlan::Standard));
     }
 

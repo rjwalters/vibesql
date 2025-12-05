@@ -6,9 +6,9 @@ use std::cmp::Ordering;
 #[cfg(feature = "parallel")]
 use rayon::slice::ParallelSliceMut;
 
+use super::grouping::compare_sql_values;
 #[cfg(feature = "parallel")]
 use super::parallel::ParallelConfig;
-use super::grouping::compare_sql_values;
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 /// Row with optional sort keys for ORDER BY
@@ -63,7 +63,9 @@ pub(super) fn apply_order_by(
                     // Compare non-NULL values, respecting direction
                     match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
-                        vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                        vibesql_ast::OrderDirection::Desc => {
+                            compare_sql_values(val_a, val_b).reverse()
+                        }
                     }
                 }
             };
@@ -125,10 +127,7 @@ pub(crate) fn resolve_order_by_for_aggregates(
                 } else {
                     format!("col{}", idx + 1)
                 };
-                return vibesql_ast::Expression::ColumnRef {
-                    table: None,
-                    column: col_name,
-                };
+                return vibesql_ast::Expression::ColumnRef { table: None, column: col_name };
             }
         }
     }
@@ -184,35 +183,28 @@ pub(crate) fn resolve_order_by_for_aggregates(
     // This handles cases like GROUPING(a) + GROUPING(b) matching an alias like "lochierarchy"
     // before we try to recursively decompose the expression
     if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-        return vibesql_ast::Expression::ColumnRef {
-            table: None,
-            column: alias,
-        };
+        return vibesql_ast::Expression::ColumnRef { table: None, column: alias };
     }
 
     // Handle CASE expressions by recursively resolving sub-expressions
     if let vibesql_ast::Expression::Case { operand, when_clauses, else_result } = order_expr {
-        let resolved_operand = operand.as_ref().map(|op| {
-            Box::new(resolve_order_by_for_aggregates(op, select_list))
-        });
+        let resolved_operand =
+            operand.as_ref().map(|op| Box::new(resolve_order_by_for_aggregates(op, select_list)));
 
         let resolved_when_clauses: Vec<vibesql_ast::CaseWhen> = when_clauses
             .iter()
-            .map(|clause| {
-                vibesql_ast::CaseWhen {
-                    conditions: clause
-                        .conditions
-                        .iter()
-                        .map(|cond| resolve_order_by_for_aggregates(cond, select_list))
-                        .collect(),
-                    result: resolve_order_by_for_aggregates(&clause.result, select_list),
-                }
+            .map(|clause| vibesql_ast::CaseWhen {
+                conditions: clause
+                    .conditions
+                    .iter()
+                    .map(|cond| resolve_order_by_for_aggregates(cond, select_list))
+                    .collect(),
+                result: resolve_order_by_for_aggregates(&clause.result, select_list),
             })
             .collect();
 
-        let resolved_else = else_result.as_ref().map(|e| {
-            Box::new(resolve_order_by_for_aggregates(e, select_list))
-        });
+        let resolved_else =
+            else_result.as_ref().map(|e| Box::new(resolve_order_by_for_aggregates(e, select_list)));
 
         return vibesql_ast::Expression::Case {
             operand: resolved_operand,
@@ -241,10 +233,7 @@ pub(crate) fn resolve_order_by_for_aggregates(
         if name.eq_ignore_ascii_case("GROUPING") || name.eq_ignore_ascii_case("GROUPING_ID") {
             // Try to find a matching GROUPING expression in the SELECT list
             if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-                return vibesql_ast::Expression::ColumnRef {
-                    table: None,
-                    column: alias,
-                };
+                return vibesql_ast::Expression::ColumnRef { table: None, column: alias };
             }
         }
     }
@@ -283,10 +272,7 @@ fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -
             vibesql_ast::Expression::ColumnRef { table: t2, column: c2 },
         ) => t1 == t2 && c1.eq_ignore_ascii_case(c2),
 
-        (
-            vibesql_ast::Expression::Literal(v1),
-            vibesql_ast::Expression::Literal(v2),
-        ) => v1 == v2,
+        (vibesql_ast::Expression::Literal(v1), vibesql_ast::Expression::Literal(v2)) => v1 == v2,
 
         (
             vibesql_ast::Expression::BinaryOp { left: l1, op: o1, right: r1 },
@@ -382,21 +368,15 @@ mod tests {
         // Small dataset with pre-populated sort keys
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
-                Row {
-                    values: vec![SqlValue::Integer(3)],
-                },
+                Row { values: vec![SqlValue::Integer(3)] },
                 Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row {
-                    values: vec![SqlValue::Integer(1)],
-                },
+                Row { values: vec![SqlValue::Integer(1)] },
                 Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row {
-                    values: vec![SqlValue::Integer(2)],
-                },
+                Row { values: vec![SqlValue::Integer(2)] },
                 Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc)]),
             ),
         ];
@@ -413,7 +393,9 @@ mod tests {
                     (false, true) => return Ordering::Less,
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
-                        vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                        vibesql_ast::OrderDirection::Desc => {
+                            compare_sql_values(val_a, val_b).reverse()
+                        }
                     },
                 };
 
@@ -451,9 +433,7 @@ mod tests {
         let mut rows: Vec<RowWithSortKeys> = Vec::new();
         for i in (0..15000).rev() {
             rows.push((
-                Row {
-                    values: vec![SqlValue::Integer(i)],
-                },
+                Row { values: vec![SqlValue::Integer(i)] },
                 Some(vec![(SqlValue::Integer(i), vibesql_ast::OrderDirection::Asc)]),
             ));
         }
@@ -469,7 +449,9 @@ mod tests {
                     (false, true) => return Ordering::Less,
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
-                        vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                        vibesql_ast::OrderDirection::Desc => {
+                            compare_sql_values(val_a, val_b).reverse()
+                        }
                     },
                 };
 
@@ -508,21 +490,15 @@ mod tests {
     fn test_sort_descending_with_keys() {
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
-                Row {
-                    values: vec![SqlValue::Integer(1)],
-                },
+                Row { values: vec![SqlValue::Integer(1)] },
                 Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Desc)]),
             ),
             (
-                Row {
-                    values: vec![SqlValue::Integer(3)],
-                },
+                Row { values: vec![SqlValue::Integer(3)] },
                 Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Desc)]),
             ),
             (
-                Row {
-                    values: vec![SqlValue::Integer(2)],
-                },
+                Row { values: vec![SqlValue::Integer(2)] },
                 Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Desc)]),
             ),
         ];
@@ -538,7 +514,9 @@ mod tests {
                     (false, true) => return Ordering::Less,
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
-                        vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                        vibesql_ast::OrderDirection::Desc => {
+                            compare_sql_values(val_a, val_b).reverse()
+                        }
                     },
                 };
 
@@ -574,21 +552,15 @@ mod tests {
         // NULLs should always sort last regardless of ASC/DESC
         let mut rows_asc: Vec<RowWithSortKeys> = vec![
             (
-                Row {
-                    values: vec![SqlValue::Integer(2)],
-                },
+                Row { values: vec![SqlValue::Integer(2)] },
                 Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row {
-                    values: vec![SqlValue::Null],
-                },
+                Row { values: vec![SqlValue::Null] },
                 Some(vec![(SqlValue::Null, vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row {
-                    values: vec![SqlValue::Integer(1)],
-                },
+                Row { values: vec![SqlValue::Integer(1)] },
                 Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc)]),
             ),
         ];
@@ -604,7 +576,9 @@ mod tests {
                     (false, true) => return Ordering::Less,
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
-                        vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                        vibesql_ast::OrderDirection::Desc => {
+                            compare_sql_values(val_a, val_b).reverse()
+                        }
                     },
                 };
 

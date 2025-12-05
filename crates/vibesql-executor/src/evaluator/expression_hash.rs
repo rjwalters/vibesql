@@ -46,9 +46,17 @@ impl ExpressionHasher {
                 // (aggregate functions should not be cached at row level)
                 if matches!(
                     name_upper.as_str(),
-                    "RAND" | "RANDOM" | "NOW" | "CURRENT_DATE" | "CURRENT_TIME"
+                    "RAND"
+                        | "RANDOM"
+                        | "NOW"
+                        | "CURRENT_DATE"
+                        | "CURRENT_TIME"
                         | "CURRENT_TIMESTAMP"
-                        | "COUNT" | "SUM" | "AVG" | "MIN" | "MAX"
+                        | "COUNT"
+                        | "SUM"
+                        | "AVG"
+                        | "MIN"
+                        | "MAX"
                 ) {
                     return false;
                 }
@@ -72,11 +80,7 @@ impl ExpressionHasher {
 
             vibesql_ast::Expression::UnaryOp { expr, .. } => Self::is_deterministic(expr),
 
-            vibesql_ast::Expression::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => {
+            vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
                 // Check operand
                 if let Some(op) = operand {
                     if !Self::is_deterministic(op) {
@@ -205,11 +209,7 @@ impl ExpressionHasher {
                 Self::hash_expression(expr, hasher);
             }
 
-            vibesql_ast::Expression::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => {
+            vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
                 if let Some(op) = operand {
                     Self::hash_expression(op, hasher);
                 }
@@ -226,13 +226,7 @@ impl ExpressionHasher {
                 }
             }
 
-            vibesql_ast::Expression::Between {
-                expr,
-                low,
-                high,
-                negated,
-                symmetric,
-            } => {
+            vibesql_ast::Expression::Between { expr, low, high, negated, symmetric } => {
                 Self::hash_expression(expr, hasher);
                 Self::hash_expression(low, hasher);
                 Self::hash_expression(high, hasher);
@@ -265,11 +259,7 @@ impl ExpressionHasher {
                 negated.hash(hasher);
             }
 
-            vibesql_ast::Expression::Function {
-                name,
-                args,
-                character_unit,
-            } => {
+            vibesql_ast::Expression::Function { name, args, character_unit } => {
                 name.hash(hasher);
                 args.len().hash(hasher);
                 for arg in args {
@@ -280,11 +270,7 @@ impl ExpressionHasher {
                 }
             }
 
-            vibesql_ast::Expression::Position {
-                substring,
-                string,
-                character_unit,
-            } => {
+            vibesql_ast::Expression::Position { substring, string, character_unit } => {
                 Self::hash_expression(substring, hasher);
                 Self::hash_expression(string, hasher);
                 if let Some(unit) = character_unit {
@@ -292,11 +278,7 @@ impl ExpressionHasher {
                 }
             }
 
-            vibesql_ast::Expression::Trim {
-                position,
-                removal_char,
-                string,
-            } => {
+            vibesql_ast::Expression::Trim { position, removal_char, string } => {
                 if let Some(pos) = position {
                     std::mem::discriminant(pos).hash(hasher);
                 }
@@ -412,7 +394,8 @@ impl ExpressionHasher {
                 name.hash(hasher);
             }
 
-            vibesql_ast::Expression::Conjunction(children) | vibesql_ast::Expression::Disjunction(children) => {
+            vibesql_ast::Expression::Conjunction(children)
+            | vibesql_ast::Expression::Disjunction(children) => {
                 children.len().hash(hasher);
                 for child in children {
                     Self::hash_expression(child, hasher);
@@ -434,7 +417,9 @@ impl ExpressionHasher {
             vibesql_types::SqlValue::Float(f) => f.to_bits().hash(hasher),
             vibesql_types::SqlValue::Real(r) => r.to_bits().hash(hasher),
             vibesql_types::SqlValue::Double(d) => d.to_bits().hash(hasher),
-            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => s.hash(hasher),
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                s.hash(hasher)
+            }
             vibesql_types::SqlValue::Boolean(b) => b.hash(hasher),
             vibesql_types::SqlValue::Date(d) => d.hash(hasher),
             vibesql_types::SqlValue::Time(t) => t.hash(hasher),
@@ -457,7 +442,8 @@ impl ExpressionHasher {
             vibesql_types::DataType::Smallint => {}
             vibesql_types::DataType::Bigint => {}
             vibesql_types::DataType::Unsigned => {}
-            vibesql_types::DataType::Numeric { precision, scale } | vibesql_types::DataType::Decimal { precision, scale } => {
+            vibesql_types::DataType::Numeric { precision, scale }
+            | vibesql_types::DataType::Decimal { precision, scale } => {
                 precision.hash(hasher);
                 scale.hash(hasher);
             }
@@ -536,10 +522,7 @@ mod tests {
         // Column references are NOT deterministic because they depend on row data
         // Caching expressions with column references would cause incorrect results
         // when evaluating across multiple rows with different column values
-        let expr = vibesql_ast::Expression::ColumnRef {
-            table: None,
-            column: "col1".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "col1".to_string() };
         assert!(!ExpressionHasher::is_deterministic(&expr));
     }
 

@@ -57,10 +57,8 @@ impl BTreeIndex {
         // This handles the case where large row_id lists are split across multiple entries
         loop {
             // Use binary search to find the first entry with matching key
-            let start_idx = current_leaf
-                .entries
-                .binary_search_by(|(k, _)| k.cmp(key))
-                .unwrap_or_else(|i| i);
+            let start_idx =
+                current_leaf.entries.binary_search_by(|(k, _)| k.cmp(key)).unwrap_or_else(|i| i);
 
             // Collect all consecutive entries with matching key
             for idx in start_idx..current_leaf.entries.len() {
@@ -339,9 +337,7 @@ impl BTreeIndex {
         for _ in 0..self.height - 1 {
             let internal = self.read_internal_node(current_page_id)?;
             if internal.children.is_empty() {
-                return Err(StorageError::IoError(
-                    "Internal node has no children".to_string(),
-                ));
+                return Err(StorageError::IoError("Internal node has no children".to_string()));
             }
             // Always take first child (leftmost)
             current_page_id = internal.children[0];
@@ -362,9 +358,7 @@ impl BTreeIndex {
         for _ in 0..self.height - 1 {
             let internal = self.read_internal_node(current_page_id)?;
             if internal.children.is_empty() {
-                return Err(StorageError::IoError(
-                    "Internal node has no children".to_string(),
-                ));
+                return Err(StorageError::IoError("Internal node has no children".to_string()));
             }
             // Always take last child (rightmost)
             current_page_id = *internal.children.last().unwrap();

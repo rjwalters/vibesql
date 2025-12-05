@@ -241,7 +241,9 @@ fn run_query(db: &Database, query: &str) {
                     .iter()
                     .enumerate()
                     .map(|(i, item)| match item {
-                        vibesql::ast::SelectItem::Expression { alias: Some(alias), .. } => alias.clone(),
+                        vibesql::ast::SelectItem::Expression { alias: Some(alias), .. } => {
+                            alias.clone()
+                        }
                         vibesql::ast::SelectItem::Expression { alias: None, .. } => {
                             format!("column{}", i + 1)
                         }

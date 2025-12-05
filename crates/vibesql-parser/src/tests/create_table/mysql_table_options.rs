@@ -60,14 +60,16 @@ fn test_parse_create_table_with_insert_method_variants() {
 
         let stmt = result.unwrap();
         match stmt {
-            vibesql_ast::Statement::CreateTable(create) => {
-                match &create.table_options[0] {
-                    vibesql_ast::TableOption::InsertMethod(method) => {
-                        assert_eq!(method, &expected_method, "INSERT_METHOD value mismatch for {}", option);
-                    }
-                    _ => panic!("Expected InsertMethod option for {}", option),
+            vibesql_ast::Statement::CreateTable(create) => match &create.table_options[0] {
+                vibesql_ast::TableOption::InsertMethod(method) => {
+                    assert_eq!(
+                        method, &expected_method,
+                        "INSERT_METHOD value mismatch for {}",
+                        option
+                    );
                 }
-            }
+                _ => panic!("Expected InsertMethod option for {}", option),
+            },
             _ => panic!("Expected CREATE TABLE statement for {}", option),
         }
     }

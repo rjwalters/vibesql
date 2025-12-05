@@ -1,5 +1,6 @@
 use std::{env, fs};
 
+use regex::Regex;
 /**
  * Batch Results Generator for Web Demo Examples
  *
@@ -10,7 +11,6 @@ use std::{env, fs};
  */
 use vibesql::catalog::{ColumnSchema, TableSchema};
 use vibesql::parser::Parser;
-use regex::Regex;
 use vibesql::storage::{Database, Row};
 use vibesql::types::{DataType, SqlValue};
 
@@ -512,17 +512,22 @@ fn main() {
                             .iter()
                             .enumerate()
                             .map(|(i, item)| match item {
-                                vibesql::ast::SelectItem::Expression { alias: Some(alias), .. } => {
-                                    alias.clone()
-                                }
+                                vibesql::ast::SelectItem::Expression {
+                                    alias: Some(alias), ..
+                                } => alias.clone(),
                                 vibesql::ast::SelectItem::Expression { alias: None, expr } => {
                                     // Try to extract column name from expression
                                     match expr {
-                                        vibesql::ast::Expression::ColumnRef { column, .. } => column.clone(),
+                                        vibesql::ast::Expression::ColumnRef { column, .. } => {
+                                            column.clone()
+                                        }
                                         _ => format!("col{}", i + 1),
                                     }
                                 }
-                                vibesql::ast::SelectItem::QualifiedWildcard { qualifier, alias: _ } => {
+                                vibesql::ast::SelectItem::QualifiedWildcard {
+                                    qualifier,
+                                    alias: _,
+                                } => {
                                     format!("{}.*", qualifier)
                                 }
                                 vibesql::ast::SelectItem::Wildcard { alias: _ } => "*".to_string(),

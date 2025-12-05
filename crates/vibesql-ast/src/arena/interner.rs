@@ -21,8 +21,8 @@
 //! assert_eq!(name, "users");
 //! ```
 
-use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
+use bumpalo::Bump;
 use std::collections::HashMap;
 
 /// A symbol representing an interned string.
@@ -66,22 +66,14 @@ pub struct ArenaInterner<'arena> {
 impl<'arena> ArenaInterner<'arena> {
     /// Creates a new interner using the given arena for string storage.
     pub fn new(arena: &'arena Bump) -> Self {
-        ArenaInterner {
-            arena,
-            map: HashMap::new(),
-            strings: BumpVec::new_in(arena),
-        }
+        ArenaInterner { arena, map: HashMap::new(), strings: BumpVec::new_in(arena) }
     }
 
     /// Creates a new interner with pre-allocated capacity.
     pub fn with_capacity(arena: &'arena Bump, capacity: usize) -> Self {
         let mut strings = BumpVec::new_in(arena);
         strings.reserve(capacity);
-        ArenaInterner {
-            arena,
-            map: HashMap::with_capacity(capacity),
-            strings,
-        }
+        ArenaInterner { arena, map: HashMap::with_capacity(capacity), strings }
     }
 
     /// Interns a string, returning a symbol that can be used to retrieve it.
@@ -136,18 +128,13 @@ impl<'arena> ArenaInterner<'arena> {
 
     /// Returns an iterator over all interned strings and their symbols.
     pub fn iter(&self) -> impl Iterator<Item = (Symbol, &'arena str)> + '_ {
-        self.strings
-            .iter()
-            .enumerate()
-            .map(|(i, s)| (Symbol(i as u32), *s))
+        self.strings.iter().enumerate().map(|(i, s)| (Symbol(i as u32), *s))
     }
 }
 
 impl std::fmt::Debug for ArenaInterner<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArenaInterner")
-            .field("len", &self.strings.len())
-            .finish()
+        f.debug_struct("ArenaInterner").field("len", &self.strings.len()).finish()
     }
 }
 

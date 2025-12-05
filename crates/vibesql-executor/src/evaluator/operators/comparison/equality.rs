@@ -33,11 +33,9 @@ mod tests {
 
     #[test]
     fn test_string_equality() {
-        let result = equal(
-            &SqlValue::Varchar("hello".to_string()),
-            &SqlValue::Varchar("hello".to_string()),
-        )
-        .unwrap();
+        let result =
+            equal(&SqlValue::Varchar("hello".to_string()), &SqlValue::Varchar("hello".to_string()))
+                .unwrap();
         assert_eq!(result, SqlValue::Boolean(true));
     }
 
@@ -71,8 +69,8 @@ mod tests {
 
     #[test]
     fn test_integer_vs_numeric() {
-        let result = equal(&SqlValue::Integer(200), &SqlValue::Numeric(174.36666666666667))
-            .unwrap();
+        let result =
+            equal(&SqlValue::Integer(200), &SqlValue::Numeric(174.36666666666667)).unwrap();
         assert_eq!(result, SqlValue::Boolean(false));
     }
 
@@ -131,26 +129,11 @@ mod tests {
         // Test with Smallint, Bigint, Float, Real, Double, Numeric
         let true_val = SqlValue::Boolean(true);
 
-        assert_eq!(
-            equal(&true_val, &SqlValue::Smallint(1)).unwrap(),
-            SqlValue::Boolean(true)
-        );
-        assert_eq!(
-            equal(&true_val, &SqlValue::Bigint(1)).unwrap(),
-            SqlValue::Boolean(true)
-        );
-        assert_eq!(
-            equal(&true_val, &SqlValue::Real(1.0)).unwrap(),
-            SqlValue::Boolean(true)
-        );
-        assert_eq!(
-            equal(&true_val, &SqlValue::Double(1.0)).unwrap(),
-            SqlValue::Boolean(true)
-        );
-        assert_eq!(
-            equal(&true_val, &SqlValue::Numeric(1.0)).unwrap(),
-            SqlValue::Boolean(true)
-        );
+        assert_eq!(equal(&true_val, &SqlValue::Smallint(1)).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&true_val, &SqlValue::Bigint(1)).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&true_val, &SqlValue::Real(1.0)).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&true_val, &SqlValue::Double(1.0)).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&true_val, &SqlValue::Numeric(1.0)).unwrap(), SqlValue::Boolean(true));
     }
 
     #[test]

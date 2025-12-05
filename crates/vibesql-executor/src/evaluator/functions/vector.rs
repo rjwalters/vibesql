@@ -133,11 +133,8 @@ pub fn inner_product(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 )));
             }
 
-            let dot_product: f64 = v1
-                .iter()
-                .zip(v2.iter())
-                .map(|(a, b)| (*a as f64) * (*b as f64))
-                .sum();
+            let dot_product: f64 =
+                v1.iter().zip(v2.iter()).map(|(a, b)| (*a as f64) * (*b as f64)).sum();
 
             Ok(SqlValue::Double(dot_product))
         }

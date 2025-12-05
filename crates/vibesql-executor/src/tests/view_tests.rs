@@ -2,9 +2,9 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::{advanced_objects, CreateTableExecutor, InsertExecutor, SelectExecutor};
     use vibesql_parser::Parser;
     use vibesql_storage::Database;
-    use crate::{CreateTableExecutor, InsertExecutor, SelectExecutor, advanced_objects};
 
     fn create_test_db() -> Database {
         let mut db = Database::new();
@@ -12,8 +12,7 @@ mod tests {
         let create_table_sql = "CREATE TABLE users (id INT, name VARCHAR(100), email VARCHAR(100), status VARCHAR(20))";
         let stmt = Parser::parse_sql(create_table_sql).expect("Failed to parse CREATE TABLE");
         if let vibesql_ast::Statement::CreateTable(create_stmt) = stmt {
-            CreateTableExecutor::execute(&create_stmt, &mut db)
-                .expect("Failed to create table");
+            CreateTableExecutor::execute(&create_stmt, &mut db).expect("Failed to create table");
         }
 
         // Insert some test data
@@ -26,8 +25,7 @@ mod tests {
         for sql in insert_sqls {
             let stmt = Parser::parse_sql(sql).expect("Failed to parse INSERT");
             if let vibesql_ast::Statement::Insert(insert_stmt) = stmt {
-                InsertExecutor::execute(&mut db, &insert_stmt)
-                    .expect("Failed to insert data");
+                InsertExecutor::execute(&mut db, &insert_stmt).expect("Failed to insert data");
             }
         }
 
@@ -37,7 +35,8 @@ mod tests {
     #[test]
     fn test_create_view() {
         let mut db = create_test_db();
-        let sql = "CREATE VIEW active_users AS SELECT id, name, email FROM users WHERE status = 'active'";
+        let sql =
+            "CREATE VIEW active_users AS SELECT id, name, email FROM users WHERE status = 'active'";
         let stmt = Parser::parse_sql(sql).expect("Failed to parse CREATE VIEW");
 
         if let vibesql_ast::Statement::CreateView(view_stmt) = stmt {
@@ -117,7 +116,8 @@ mod tests {
         let stmt = Parser::parse_sql(select_sql).expect("Failed to parse SELECT");
         if let vibesql_ast::Statement::Select(select_stmt) = stmt {
             let executor = SelectExecutor::new(&db);
-            let result = executor.execute(&select_stmt).expect("Failed to select from view with WHERE");
+            let result =
+                executor.execute(&select_stmt).expect("Failed to select from view with WHERE");
 
             // Should have 2 active users
             assert_eq!(result.len(), 2);
@@ -142,8 +142,7 @@ mod tests {
         let drop_view_sql = "DROP VIEW test_view";
         let stmt = Parser::parse_sql(drop_view_sql).expect("Failed to parse DROP VIEW");
         if let vibesql_ast::Statement::DropView(drop_stmt) = stmt {
-            advanced_objects::execute_drop_view(&drop_stmt, &mut db)
-                .expect("Failed to drop view");
+            advanced_objects::execute_drop_view(&drop_stmt, &mut db).expect("Failed to drop view");
         }
 
         // Verify view was dropped
@@ -220,7 +219,8 @@ mod tests {
         }
 
         // Create second view that selects from first view
-        let view2_sql = "CREATE VIEW active_users_v2 AS SELECT id, name FROM all_users WHERE status = 'active'";
+        let view2_sql =
+            "CREATE VIEW active_users_v2 AS SELECT id, name FROM all_users WHERE status = 'active'";
         let stmt2 = Parser::parse_sql(view2_sql).expect("Failed to parse CREATE VIEW");
         if let vibesql_ast::Statement::CreateView(view_stmt) = stmt2 {
             advanced_objects::execute_create_view(&view_stmt, &mut db)
@@ -232,7 +232,8 @@ mod tests {
         let stmt = Parser::parse_sql(select_sql).expect("Failed to parse SELECT");
         if let vibesql_ast::Statement::Select(select_stmt) = stmt {
             let executor = SelectExecutor::new(&db);
-            let result = executor.execute(&select_stmt).expect("Failed to select from view on view");
+            let result =
+                executor.execute(&select_stmt).expect("Failed to select from view on view");
 
             // Should have 2 active users
             assert_eq!(result.len(), 2);

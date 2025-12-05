@@ -36,9 +36,7 @@ fn setup_manager_with_subscriptions(
     for _ in 0..count {
         let (tx, rx) = mpsc::channel(16);
         // Simple query on the "users" table
-        let _id = manager
-            .subscribe("SELECT * FROM users".to_string(), tx)
-            .unwrap();
+        let _id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
         receivers.push(rx);
     }
 
@@ -57,9 +55,7 @@ fn setup_manager_distributed(
     for table in tables {
         for _ in 0..subs_per_table {
             let (tx, rx) = mpsc::channel(16);
-            let _ = manager
-                .subscribe(format!("SELECT * FROM {}", table), tx)
-                .unwrap();
+            let _ = manager.subscribe(format!("SELECT * FROM {}", table), tx).unwrap();
             receivers.push(rx);
         }
     }
@@ -184,9 +180,7 @@ fn bench_fanout_notification(c: &mut Criterion) {
                     let mut receivers = Vec::with_capacity(size);
                     for _ in 0..size {
                         let (tx, rx) = mpsc::channel(16);
-                        let _ = manager
-                            .subscribe("SELECT * FROM users".to_string(), tx)
-                            .unwrap();
+                        let _ = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
                         receivers.push(rx);
                     }
                     (Arc::new(manager), receivers)
@@ -290,9 +284,7 @@ fn bench_unsubscribe(c: &mut Criterion) {
                     let mut ids = Vec::with_capacity(size);
                     for _ in 0..size {
                         let (tx, _rx) = mpsc::channel(1);
-                        let id = manager
-                            .subscribe("SELECT * FROM users".to_string(), tx)
-                            .unwrap();
+                        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
                         ids.push(id);
                     }
                     (manager, ids)
@@ -424,7 +416,14 @@ fn bench_table_index_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("table_index_lookup");
 
     let tables = vec![
-        "users", "orders", "products", "inventory", "payments", "shipments", "reviews", "carts",
+        "users",
+        "orders",
+        "products",
+        "inventory",
+        "payments",
+        "shipments",
+        "reviews",
+        "carts",
     ];
 
     for total_subscriptions in [1_000, 10_000].iter() {
@@ -466,9 +465,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
             // Initial setup: 1000 subscriptions
             for _ in 0..1000 {
                 let (tx, _rx) = mpsc::channel(1);
-                let id = manager
-                    .subscribe("SELECT * FROM users".to_string(), tx)
-                    .unwrap();
+                let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
                 ids.push(id);
             }
 
@@ -478,9 +475,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
                     0 => {
                         // Subscribe new
                         let (tx, _rx) = mpsc::channel(1);
-                        let id = manager
-                            .subscribe("SELECT * FROM orders".to_string(), tx)
-                            .unwrap();
+                        let id = manager.subscribe("SELECT * FROM orders".to_string(), tx).unwrap();
                         ids.push(id);
                     }
                     1 => {

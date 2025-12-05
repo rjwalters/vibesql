@@ -30,7 +30,11 @@ fn create_numeric_types_db() -> Database {
             ColumnSchema::new("int_value".to_string(), DataType::Integer, false),
             ColumnSchema::new("real_value".to_string(), DataType::Real, false),
             ColumnSchema::new("double_value".to_string(), DataType::DoublePrecision, false),
-            ColumnSchema::new("numeric_value".to_string(), DataType::Numeric { precision: 10, scale: 2 }, false),
+            ColumnSchema::new(
+                "numeric_value".to_string(),
+                DataType::Numeric { precision: 10, scale: 2 },
+                false,
+            ),
         ],
     );
 
@@ -179,7 +183,8 @@ fn test_index_range_scan_between_numeric_types() {
     }
 
     // Test BETWEEN on Double column with index
-    let query = "SELECT id, double_value FROM measurements WHERE double_value BETWEEN 15.0 AND 35.0";
+    let query =
+        "SELECT id, double_value FROM measurements WHERE double_value BETWEEN 15.0 AND 35.0";
     let stmt = Parser::parse_sql(query).unwrap();
 
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
@@ -211,11 +216,8 @@ fn test_index_multi_lookup_large_value_set() {
 
     // Insert 150 rows
     for i in 0..150 {
-        db.insert_row(
-            "items",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Integer(i * 10)]),
-        )
-        .unwrap();
+        db.insert_row("items", Row::new(vec![SqlValue::Integer(i), SqlValue::Integer(i * 10)]))
+            .unwrap();
     }
 
     // Create index on value column
@@ -240,11 +242,7 @@ fn test_index_multi_lookup_large_value_set() {
         // Even values from 0 to 98
         in_values.push(i * 10);
     }
-    let in_list = in_values
-        .iter()
-        .map(|v| v.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    let in_list = in_values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
 
     let query = format!("SELECT id FROM items WHERE value IN ({}) ORDER BY id", in_list);
     let stmt = Parser::parse_sql(&query).unwrap();
@@ -284,11 +282,8 @@ fn test_index_commuted_comparisons() {
 
     // Insert test data
     for i in 1..=10 {
-        db.insert_row(
-            "numbers",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Integer(i * 10)]),
-        )
-        .unwrap();
+        db.insert_row("numbers", Row::new(vec![SqlValue::Integer(i), SqlValue::Integer(i * 10)]))
+            .unwrap();
     }
 
     // Create index on value column

@@ -51,25 +51,13 @@ pub enum ColumnPredicate {
     NotEqual { column_idx: usize, value: SqlValue },
 
     /// column BETWEEN low AND high
-    Between {
-        column_idx: usize,
-        low: SqlValue,
-        high: SqlValue,
-    },
+    Between { column_idx: usize, low: SqlValue, high: SqlValue },
 
     /// column LIKE pattern
-    Like {
-        column_idx: usize,
-        pattern: String,
-        negated: bool,
-    },
+    Like { column_idx: usize, pattern: String, negated: bool },
 
     /// column IN (value1, value2, ...)
-    InList {
-        column_idx: usize,
-        values: Vec<SqlValue>,
-        negated: bool,
-    },
+    InList { column_idx: usize, values: Vec<SqlValue>, negated: bool },
 }
 
 /// Extract column predicates as a tree from a WHERE clause expression
@@ -91,10 +79,7 @@ pub enum ColumnPredicate {
 ///
 /// Some(tree) if the expression can be converted to columnar predicates,
 /// None if the expression is too complex for columnar optimization.
-pub fn extract_predicate_tree(
-    expr: &Expression,
-    schema: &CombinedSchema,
-) -> Option<PredicateTree> {
+pub fn extract_predicate_tree(expr: &Expression, schema: &CombinedSchema) -> Option<PredicateTree> {
     extract_tree_recursive(expr, schema)
 }
 
@@ -136,11 +121,7 @@ pub fn extract_column_predicates(
 fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<PredicateTree> {
     match expr {
         // AND: combine both sides
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             let left_tree = extract_tree_recursive(left, schema)?;
             let right_tree = extract_tree_recursive(right, schema)?;
 
@@ -159,11 +140,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         }
 
         // OR: combine both sides
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::Or,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::Or, right } => {
             let left_tree = extract_tree_recursive(left, schema)?;
             let right_tree = extract_tree_recursive(right, schema)?;
 
@@ -189,30 +166,24 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
             {
                 let column_idx = schema.get_column_index(table.as_deref(), column)?;
                 let predicate = match op {
-                    BinaryOperator::LessThan => ColumnPredicate::LessThan {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::GreaterThan => ColumnPredicate::GreaterThan {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::LessThanOrEqual => ColumnPredicate::LessThanOrEqual {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::GreaterThanOrEqual => ColumnPredicate::GreaterThanOrEqual {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::Equal => ColumnPredicate::Equal {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
-                        column_idx,
-                        value: value.clone(),
-                    },
+                    BinaryOperator::LessThan => {
+                        ColumnPredicate::LessThan { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::GreaterThan => {
+                        ColumnPredicate::GreaterThan { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::LessThanOrEqual => {
+                        ColumnPredicate::LessThanOrEqual { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::GreaterThanOrEqual => {
+                        ColumnPredicate::GreaterThanOrEqual { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::Equal => {
+                        ColumnPredicate::Equal { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::NotEqual => {
+                        ColumnPredicate::NotEqual { column_idx, value: value.clone() }
+                    }
                     _ => return None,
                 };
                 return Some(PredicateTree::Leaf(predicate));
@@ -224,31 +195,25 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
             {
                 let column_idx = schema.get_column_index(table.as_deref(), column)?;
                 let predicate = match op {
-                    BinaryOperator::LessThan => ColumnPredicate::GreaterThan {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::GreaterThan => ColumnPredicate::LessThan {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::LessThanOrEqual => ColumnPredicate::GreaterThanOrEqual {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::GreaterThanOrEqual => ColumnPredicate::LessThanOrEqual {
-                        column_idx,
-                        value: value.clone(),
-                    },
-                    BinaryOperator::Equal => ColumnPredicate::Equal {
-                        column_idx,
-                        value: value.clone(),
-                    },
+                    BinaryOperator::LessThan => {
+                        ColumnPredicate::GreaterThan { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::GreaterThan => {
+                        ColumnPredicate::LessThan { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::LessThanOrEqual => {
+                        ColumnPredicate::GreaterThanOrEqual { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::GreaterThanOrEqual => {
+                        ColumnPredicate::LessThanOrEqual { column_idx, value: value.clone() }
+                    }
+                    BinaryOperator::Equal => {
+                        ColumnPredicate::Equal { column_idx, value: value.clone() }
+                    }
                     // NotEqual is symmetric: literal <> column == column <> literal
-                    BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
-                        column_idx,
-                        value: value.clone(),
-                    },
+                    BinaryOperator::NotEqual => {
+                        ColumnPredicate::NotEqual { column_idx, value: value.clone() }
+                    }
                     _ => return None,
                 };
                 return Some(PredicateTree::Leaf(predicate));
@@ -260,13 +225,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         // BETWEEN: column BETWEEN low AND high
         // Only support ASYMMETRIC (default) BETWEEN for columnar optimization
         // SYMMETRIC BETWEEN falls through to general evaluator which handles bounds swapping
-        Expression::Between {
-            expr: inner,
-            low,
-            high,
-            negated: false,
-            symmetric: false,
-        } => {
+        Expression::Between { expr: inner, low, high, negated: false, symmetric: false } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
                     (low.as_ref(), high.as_ref())
@@ -283,12 +242,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         }
 
         // LIKE: column LIKE pattern
-        Expression::Like {
-            expr: inner,
-            pattern,
-            negated,
-            ..
-        } => {
+        Expression::Like { expr: inner, pattern, negated, .. } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 // Extract pattern string from literal
                 if let Expression::Literal(SqlValue::Character(pattern_str))
@@ -306,11 +260,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         }
 
         // IN list: column IN (value1, value2, ...)
-        Expression::InList {
-            expr: inner,
-            values,
-            negated,
-        } => {
+        Expression::InList { expr: inner, values, negated } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 // Extract all literal values from the IN list
                 let mut literal_values = Vec::with_capacity(values.len());
@@ -355,11 +305,7 @@ fn extract_predicates_recursive(
         // AND: extract predicates from both sides
         // Important: Don't fail if one side can't be extracted - just skip that predicate
         // This allows Q3-style queries where WHERE has both table-local and cross-table predicates
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             // Try both sides - don't propagate failure from either side
             let _ = extract_predicates_recursive(left, schema, predicates);
             let _ = extract_predicates_recursive(right, schema, predicates);
@@ -375,30 +321,24 @@ fn extract_predicates_recursive(
                 // Skip if column not in schema (cross-table predicate)
                 if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
                     let predicate = match op {
-                        BinaryOperator::LessThan => ColumnPredicate::LessThan {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::GreaterThan => ColumnPredicate::GreaterThan {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::LessThanOrEqual => ColumnPredicate::LessThanOrEqual {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::GreaterThanOrEqual => ColumnPredicate::GreaterThanOrEqual {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::Equal => ColumnPredicate::Equal {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
-                            column_idx,
-                            value: value.clone(),
-                        },
+                        BinaryOperator::LessThan => {
+                            ColumnPredicate::LessThan { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::GreaterThan => {
+                            ColumnPredicate::GreaterThan { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::LessThanOrEqual => {
+                            ColumnPredicate::LessThanOrEqual { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::GreaterThanOrEqual => {
+                            ColumnPredicate::GreaterThanOrEqual { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::Equal => {
+                            ColumnPredicate::Equal { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::NotEqual => {
+                            ColumnPredicate::NotEqual { column_idx, value: value.clone() }
+                        }
                         _ => return Some(()), // Skip unsupported operator
                     };
                     predicates.push(predicate);
@@ -414,31 +354,25 @@ fn extract_predicates_recursive(
                 if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
                     let predicate = match op {
                         // Reverse the comparison: literal < column => column > literal
-                        BinaryOperator::LessThan => ColumnPredicate::GreaterThan {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::GreaterThan => ColumnPredicate::LessThan {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::LessThanOrEqual => ColumnPredicate::GreaterThanOrEqual {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::GreaterThanOrEqual => ColumnPredicate::LessThanOrEqual {
-                            column_idx,
-                            value: value.clone(),
-                        },
-                        BinaryOperator::Equal => ColumnPredicate::Equal {
-                            column_idx,
-                            value: value.clone(),
-                        },
+                        BinaryOperator::LessThan => {
+                            ColumnPredicate::GreaterThan { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::GreaterThan => {
+                            ColumnPredicate::LessThan { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::LessThanOrEqual => {
+                            ColumnPredicate::GreaterThanOrEqual { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::GreaterThanOrEqual => {
+                            ColumnPredicate::LessThanOrEqual { column_idx, value: value.clone() }
+                        }
+                        BinaryOperator::Equal => {
+                            ColumnPredicate::Equal { column_idx, value: value.clone() }
+                        }
                         // NotEqual is symmetric: literal <> column == column <> literal
-                        BinaryOperator::NotEqual => ColumnPredicate::NotEqual {
-                            column_idx,
-                            value: value.clone(),
-                        },
+                        BinaryOperator::NotEqual => {
+                            ColumnPredicate::NotEqual { column_idx, value: value.clone() }
+                        }
                         _ => return Some(()), // Skip unsupported operator
                     };
                     predicates.push(predicate);
@@ -452,13 +386,7 @@ fn extract_predicates_recursive(
 
         // BETWEEN: column BETWEEN low AND high
         // Only support ASYMMETRIC (default) BETWEEN for columnar optimization
-        Expression::Between {
-            expr: inner,
-            low,
-            high,
-            negated: false,
-            symmetric: false,
-        } => {
+        Expression::Between { expr: inner, low, high, negated: false, symmetric: false } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
                     (low.as_ref(), high.as_ref())
@@ -479,12 +407,7 @@ fn extract_predicates_recursive(
         }
 
         // LIKE: column LIKE pattern
-        Expression::Like {
-            expr: inner,
-            pattern,
-            negated,
-            ..
-        } => {
+        Expression::Like { expr: inner, pattern, negated, .. } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 // Extract pattern string from literal
                 if let Expression::Literal(SqlValue::Character(pattern_str))
@@ -506,11 +429,7 @@ fn extract_predicates_recursive(
         }
 
         // IN list: column IN (value1, value2, ...)
-        Expression::InList {
-            expr: inner,
-            values,
-            negated,
-        } => {
+        Expression::InList { expr: inner, values, negated } => {
             if let Expression::ColumnRef { table, column } = inner.as_ref() {
                 // Extract all literal values from the IN list
                 let mut literal_values = Vec::with_capacity(values.len());

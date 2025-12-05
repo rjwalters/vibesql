@@ -80,14 +80,10 @@ impl<'arena> ArenaParser<'arena> {
     ///
     /// Supports the full range of SQL statements including DML (SELECT, INSERT,
     /// UPDATE, DELETE), DDL (CREATE, DROP, ALTER), and transaction statements.
-    pub fn parse_sql(
-        input: &str,
-        arena: &'arena Bump,
-    ) -> Result<Statement<'arena>, ParseError> {
+    pub fn parse_sql(input: &str, arena: &'arena Bump) -> Result<Statement<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_statement()
@@ -101,9 +97,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena SelectStmt<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_select_statement()
@@ -117,9 +112,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<(&'arena SelectStmt<'arena>, ArenaInterner<'arena>), ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         let stmt = parser.parse_select_statement()?;
@@ -198,9 +192,7 @@ impl<'arena> ArenaParser<'arena> {
                 Ok(Statement::ReleaseSavepoint(stmt))
             }
 
-            _ => Err(ParseError {
-                message: format!("Unexpected token: {:?}", self.peek()),
-            }),
+            _ => Err(ParseError { message: format!("Unexpected token: {:?}", self.peek()) }),
         }
     }
 
@@ -267,10 +259,7 @@ impl<'arena> ArenaParser<'arena> {
                 Ok(Statement::DropView(stmt))
             }
             _ => Err(ParseError {
-                message: format!(
-                    "Unsupported DROP statement type: {:?}",
-                    self.peek_at_offset(1)
-                ),
+                message: format!("Unsupported DROP statement type: {:?}", self.peek_at_offset(1)),
             }),
         }
     }
@@ -281,9 +270,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena Expression<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         let expr = parser.parse_expression()?;
@@ -296,9 +284,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena AlterTableStmt<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_alter_table_statement()
@@ -310,9 +297,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena InsertStmt<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_insert_statement()
@@ -324,9 +310,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena UpdateStmt<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_update_statement()
@@ -338,9 +323,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena DeleteStmt<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_delete_statement()
@@ -352,9 +336,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena InsertStmt<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         parser.parse_replace_statement()
@@ -366,9 +349,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<(&'arena AlterTableStmt<'arena>, ArenaInterner<'arena>), ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         let stmt = parser.parse_alter_table_statement()?;
@@ -381,9 +363,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<(&'arena DeleteStmt<'arena>, ArenaInterner<'arena>), ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         let stmt = parser.parse_delete_statement()?;
@@ -396,9 +377,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<(&'arena UpdateStmt<'arena>, ArenaInterner<'arena>), ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         let stmt = parser.parse_update_statement()?;
@@ -411,9 +391,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<(&'arena InsertStmt<'arena>, ArenaInterner<'arena>), ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         let stmt = parser.parse_insert_statement()?;
@@ -426,9 +405,8 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<(&'arena InsertStmt<'arena>, ArenaInterner<'arena>), ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer
-            .tokenize()
-            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = ArenaParser::new(tokens, arena);
         let stmt = parser.parse_replace_statement()?;
@@ -527,9 +505,7 @@ impl<'arena> ArenaParser<'arena> {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError {
-                message: format!("Expected {:?}, found {:?}", expected, self.peek()),
-            })
+            Err(ParseError { message: format!("Expected {:?}, found {:?}", expected, self.peek()) })
         }
     }
 
@@ -562,9 +538,9 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => Err(ParseError {
-                message: format!("Expected identifier, found {:?}", self.peek()),
-            }),
+            _ => {
+                Err(ParseError { message: format!("Expected identifier, found {:?}", self.peek()) })
+            }
         }
     }
 
@@ -632,9 +608,9 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => Err(ParseError {
-                message: format!("Expected alias name, found {:?}", self.peek()),
-            }),
+            _ => {
+                Err(ParseError { message: format!("Expected alias name, found {:?}", self.peek()) })
+            }
         }
     }
 }
@@ -667,9 +643,8 @@ impl<'arena> ArenaParser<'arena> {
 pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, ParseError> {
     let arena = Bump::new();
     let mut lexer = Lexer::new(input);
-    let tokens = lexer
-        .tokenize()
-        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+    let tokens =
+        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
     let mut parser = ArenaParser::new(tokens, &arena);
     let arena_stmt = parser.parse_select_statement()?;
@@ -692,9 +667,8 @@ pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, Par
 pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression, ParseError> {
     let arena = Bump::new();
     let mut lexer = Lexer::new(input);
-    let tokens = lexer
-        .tokenize()
-        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+    let tokens =
+        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
     let mut parser = ArenaParser::new(tokens, &arena);
     let arena_expr = parser.parse_expression()?;
@@ -717,9 +691,8 @@ pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression,
 pub fn parse_insert_to_owned(input: &str) -> Result<vibesql_ast::InsertStmt, ParseError> {
     let arena = Bump::new();
     let mut lexer = Lexer::new(input);
-    let tokens = lexer
-        .tokenize()
-        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+    let tokens =
+        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
     let mut parser = ArenaParser::new(tokens, &arena);
     let arena_stmt = parser.parse_insert_statement()?;
@@ -742,9 +715,8 @@ pub fn parse_insert_to_owned(input: &str) -> Result<vibesql_ast::InsertStmt, Par
 pub fn parse_update_to_owned(input: &str) -> Result<vibesql_ast::UpdateStmt, ParseError> {
     let arena = Bump::new();
     let mut lexer = Lexer::new(input);
-    let tokens = lexer
-        .tokenize()
-        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+    let tokens =
+        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
     let mut parser = ArenaParser::new(tokens, &arena);
     let arena_stmt = parser.parse_update_statement()?;
@@ -767,9 +739,8 @@ pub fn parse_update_to_owned(input: &str) -> Result<vibesql_ast::UpdateStmt, Par
 pub fn parse_delete_to_owned(input: &str) -> Result<vibesql_ast::DeleteStmt, ParseError> {
     let arena = Bump::new();
     let mut lexer = Lexer::new(input);
-    let tokens = lexer
-        .tokenize()
-        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+    let tokens =
+        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
     let mut parser = ArenaParser::new(tokens, &arena);
     let arena_stmt = parser.parse_delete_statement()?;
@@ -814,7 +785,8 @@ mod tests {
     #[test]
     fn test_timestamp_literal() {
         let arena = Bump::new();
-        let expr = ArenaParser::parse_expression_sql("TIMESTAMP '2024-01-15 10:30:00'", &arena).unwrap();
+        let expr =
+            ArenaParser::parse_expression_sql("TIMESTAMP '2024-01-15 10:30:00'", &arena).unwrap();
         match expr {
             Expression::Literal(SqlValue::Timestamp(ts)) => {
                 assert_eq!(ts.date.year, 2024);
@@ -836,7 +808,9 @@ mod tests {
     #[test]
     fn test_date_minus_interval_expression() {
         let arena = Bump::new();
-        let expr = ArenaParser::parse_expression_sql("DATE '1998-12-01' - INTERVAL '90' DAY", &arena).unwrap();
+        let expr =
+            ArenaParser::parse_expression_sql("DATE '1998-12-01' - INTERVAL '90' DAY", &arena)
+                .unwrap();
         match expr {
             Expression::BinaryOp { op, left, right } => {
                 assert_eq!(*op, vibesql_ast::BinaryOperator::Minus);

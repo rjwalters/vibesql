@@ -8,18 +8,18 @@
 //! - Error handling, rollback, and recursion prevention
 //! - Pseudo-variables (OLD/NEW row references)
 
+use crate::{CreateTableExecutor, SelectExecutor};
 use vibesql_storage::Database;
-use crate::{SelectExecutor, CreateTableExecutor};
 
 // Re-export test modules
-mod ddl;
-mod insert;
-mod update;
-mod delete;
-mod coordination;
 mod conditions;
+mod coordination;
+mod ddl;
+mod delete;
 mod error_handling;
+mod insert;
 mod pseudo_vars;
+mod update;
 
 // ============================================================================
 // Shared Test Helpers
@@ -79,7 +79,11 @@ pub(super) fn count_audit_rows(db: &Database) -> usize {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "AUDIT_LOG".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "AUDIT_LOG".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

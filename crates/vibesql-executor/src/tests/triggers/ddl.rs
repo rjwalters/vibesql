@@ -1,9 +1,9 @@
 //! Tests for trigger DDL operations (CREATE TRIGGER, DROP TRIGGER)
 
-use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
-use vibesql_ast::{CreateTriggerStmt, DropTriggerStmt};
-use vibesql_storage::Database;
 use crate::CreateTableExecutor;
+use vibesql_ast::{CreateTriggerStmt, DropTriggerStmt};
+use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+use vibesql_storage::Database;
 
 #[test]
 fn test_create_trigger() {
@@ -106,10 +106,7 @@ fn test_drop_trigger() {
     assert!(db.catalog.get_trigger("my_trigger").is_some());
 
     // Drop the trigger
-    let drop_stmt = DropTriggerStmt {
-        trigger_name: "my_trigger".to_string(),
-        cascade: false,
-    };
+    let drop_stmt = DropTriggerStmt { trigger_name: "my_trigger".to_string(), cascade: false };
 
     let result = crate::advanced_objects::execute_drop_trigger(&drop_stmt, &mut db);
     assert!(result.is_ok(), "Failed to drop trigger: {:?}", result.err());
@@ -122,10 +119,8 @@ fn test_drop_trigger() {
 fn test_drop_trigger_not_found() {
     let mut db = Database::new();
 
-    let drop_stmt = DropTriggerStmt {
-        trigger_name: "nonexistent_trigger".to_string(),
-        cascade: false,
-    };
+    let drop_stmt =
+        DropTriggerStmt { trigger_name: "nonexistent_trigger".to_string(), cascade: false };
 
     let result = crate::advanced_objects::execute_drop_trigger(&drop_stmt, &mut db);
     assert!(result.is_err(), "Should fail when dropping non-existent trigger");

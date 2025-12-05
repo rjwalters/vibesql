@@ -16,10 +16,7 @@ fn test_empty_procedure_body() {
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
     // CALL do_nothing();
-    let call = CallStmt {
-        procedure_name: "do_nothing".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "do_nothing".to_string(), arguments: vec![] };
 
     // Should succeed with no operations
     let result = advanced_objects::execute_call(&call, &mut db);
@@ -48,10 +45,7 @@ fn test_null_parameter_in_procedure() {
             },
             ProceduralStatement::Set {
                 name: "result".to_string(),
-                value: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "x".to_string(),
-                }),
+                value: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
             },
         ],
     );
@@ -85,7 +79,7 @@ fn test_declare_with_null_default() {
             ProceduralStatement::Declare {
                 name: "x".to_string(),
                 data_type: DataType::Integer,
-                default_value: None,  // Implicitly NULL
+                default_value: None, // Implicitly NULL
             },
             ProceduralStatement::Declare {
                 name: "y".to_string(),
@@ -97,10 +91,7 @@ fn test_declare_with_null_default() {
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "test_null_default".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "test_null_default".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_ok());
@@ -120,13 +111,11 @@ fn test_parameter_variable_shadowing() {
         "test_shadowing",
         "x",
         DataType::Integer,
-        vec![
-            ProceduralStatement::Declare {
-                name: "x".to_string(),
-                data_type: DataType::Integer,
-                default_value: Some(Box::new(Expression::Literal(SqlValue::Integer(10)))),
-            },
-        ],
+        vec![ProceduralStatement::Declare {
+            name: "x".to_string(),
+            data_type: DataType::Integer,
+            default_value: Some(Box::new(Expression::Literal(SqlValue::Integer(10)))),
+        }],
     );
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
@@ -168,10 +157,7 @@ fn test_very_long_procedure_body() {
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "long_procedure".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "long_procedure".to_string(), arguments: vec![] };
 
     // Should handle long body without issues
     let result = advanced_objects::execute_call(&call, &mut db);
@@ -187,12 +173,10 @@ fn test_deeply_nested_control_flow() {
     ctx.set_variable("result", SqlValue::Integer(0));
 
     // Create 10 levels of nested IF statements
-    let innermost = vec![
-        ProceduralStatement::Set {
-            name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Integer(10))),
-        }
-    ];
+    let innermost = vec![ProceduralStatement::Set {
+        name: "result".to_string(),
+        value: Box::new(Expression::Literal(SqlValue::Integer(10))),
+    }];
 
     let mut nested_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
@@ -209,11 +193,8 @@ fn test_deeply_nested_control_flow() {
         };
     }
 
-    let result = crate::procedural::executor::execute_procedural_statement(
-        &nested_stmt,
-        &mut ctx,
-        &mut db,
-    );
+    let result =
+        crate::procedural::executor::execute_procedural_statement(&nested_stmt, &mut ctx, &mut db);
 
     assert!(result.is_ok());
     assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Integer(10)));
@@ -231,21 +212,16 @@ fn test_procedure_with_special_chars_in_name() {
     let create_proc = create_simple_procedure(
         "proc-with-dash",
         vec![],
-        vec![
-            ProceduralStatement::Declare {
-                name: "result".to_string(),
-                data_type: DataType::Integer,
-                default_value: Some(Box::new(Expression::Literal(SqlValue::Integer(42)))),
-            },
-        ],
+        vec![ProceduralStatement::Declare {
+            name: "result".to_string(),
+            data_type: DataType::Integer,
+            default_value: Some(Box::new(Expression::Literal(SqlValue::Integer(42)))),
+        }],
     );
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "proc-with-dash".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "proc-with-dash".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_ok());
@@ -260,10 +236,7 @@ fn test_procedure_with_spaces_in_name() {
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "proc with spaces".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "proc with spaces".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_ok());
@@ -310,10 +283,7 @@ fn test_large_number_arithmetic() {
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "test_large_numbers".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "test_large_numbers".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_ok());
@@ -347,15 +317,9 @@ fn test_multiple_variable_operations() {
             ProceduralStatement::Set {
                 name: "a".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "b".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "c".to_string(),
-                    }),
+                    right: Box::new(Expression::ColumnRef { table: None, column: "c".to_string() }),
                 }),
             },
         ],
@@ -363,10 +327,7 @@ fn test_multiple_variable_operations() {
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "test_multi_vars".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "test_multi_vars".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_ok());
@@ -382,7 +343,11 @@ fn test_procedural_select_into_single_column() {
     setup_test_table(&mut db);
 
     // Insert test data
-    db.insert_row("users", Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] }).unwrap();
+    db.insert_row(
+        "users",
+        Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] },
+    )
+    .unwrap();
 
     // CREATE PROCEDURE get_user_name(IN user_id INT)
     // BEGIN
@@ -403,20 +368,18 @@ fn test_procedural_select_into_single_column() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "name".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                     alias: None,
                 }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+                from: Some(FromClause::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "id".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::ColumnRef {
                         table: None,
@@ -450,7 +413,11 @@ fn test_procedural_select_into_multiple_columns() {
     setup_test_table(&mut db);
 
     // Insert test data
-    db.insert_row("users", Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] }).unwrap();
+    db.insert_row(
+        "users",
+        Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] },
+    )
+    .unwrap();
 
     // CREATE PROCEDURE get_user_info(IN user_id INT)
     // BEGIN
@@ -478,28 +445,23 @@ fn test_procedural_select_into_multiple_columns() {
                 distinct: false,
                 select_list: vec![
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef {
-                            table: None,
-                            column: "id".to_string(),
-                        },
+                        expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                         alias: None,
                     },
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef {
-                            table: None,
-                            column: "name".to_string(),
-                        },
+                        expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                         alias: None,
                     },
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_id_out".to_string(), "user_name".to_string()]),
-                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+                from: Some(FromClause::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "id".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::ColumnRef {
                         table: None,
@@ -556,20 +518,18 @@ fn test_procedural_select_into_error_no_rows() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "name".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                     alias: None,
                 }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+                from: Some(FromClause::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "id".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::ColumnRef {
                         table: None,
@@ -598,7 +558,10 @@ fn test_procedural_select_into_error_no_rows() {
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::SelectIntoRowCount { expected: 1, actual: 0 }));
+    assert!(matches!(
+        result.unwrap_err(),
+        ExecutorError::SelectIntoRowCount { expected: 1, actual: 0 }
+    ));
 }
 
 #[test]
@@ -607,8 +570,16 @@ fn test_procedural_select_into_error_multiple_rows() {
     setup_test_table(&mut db);
 
     // Insert multiple rows
-    db.insert_row("users", Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] }).unwrap();
-    db.insert_row("users", Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] }).unwrap();
+    db.insert_row(
+        "users",
+        Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] },
+    )
+    .unwrap();
+    db.insert_row(
+        "users",
+        Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+    )
+    .unwrap();
 
     // CREATE PROCEDURE get_all_names()
     // BEGIN
@@ -628,15 +599,16 @@ fn test_procedural_select_into_error_multiple_rows() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "name".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                     alias: None,
                 }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+                from: Some(FromClause::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 where_clause: None,
                 group_by: None,
                 having: None,
@@ -650,14 +622,14 @@ fn test_procedural_select_into_error_multiple_rows() {
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "get_all_names".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "get_all_names".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::SelectIntoRowCount { expected: 1, actual: 2 }));
+    assert!(matches!(
+        result.unwrap_err(),
+        ExecutorError::SelectIntoRowCount { expected: 1, actual: 2 }
+    ));
 }
 
 #[test]
@@ -666,7 +638,11 @@ fn test_procedural_select_into_error_column_count_mismatch() {
     setup_test_table(&mut db);
 
     // Insert test data
-    db.insert_row("users", Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] }).unwrap();
+    db.insert_row(
+        "users",
+        Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] },
+    )
+    .unwrap();
 
     // CREATE PROCEDURE get_user_info()
     // BEGIN
@@ -687,28 +663,23 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 distinct: false,
                 select_list: vec![
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef {
-                            table: None,
-                            column: "id".to_string(),
-                        },
+                        expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                         alias: None,
                     },
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef {
-                            table: None,
-                            column: "name".to_string(),
-                        },
+                        expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                         alias: None,
                     },
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
-                from: Some(FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+                from: Some(FromClause::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "id".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::Literal(SqlValue::Integer(1))),
                 }),
@@ -724,12 +695,12 @@ fn test_procedural_select_into_error_column_count_mismatch() {
 
     advanced_objects::execute_create_procedure(&create_proc, &mut db).unwrap();
 
-    let call = CallStmt {
-        procedure_name: "get_user_info".to_string(),
-        arguments: vec![],
-    };
+    let call = CallStmt { procedure_name: "get_user_info".to_string(), arguments: vec![] };
 
     let result = advanced_objects::execute_call(&call, &mut db);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::SelectIntoColumnCount { expected: 1, actual: 2 }));
+    assert!(matches!(
+        result.unwrap_err(),
+        ExecutorError::SelectIntoColumnCount { expected: 1, actual: 2 }
+    ));
 }

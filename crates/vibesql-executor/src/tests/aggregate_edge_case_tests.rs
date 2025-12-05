@@ -11,7 +11,11 @@ fn test_avg_precision_decimal() {
     let schema = vibesql_catalog::TableSchema::new(
         "prices".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "price".to_string(),
                 vibesql_types::DataType::Numeric { precision: 10, scale: 2 },
@@ -48,18 +52,26 @@ fn test_avg_precision_decimal() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef { table: None, column: "price".to_string() }],
+                args: vec![vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "price".to_string(),
+                }],
                 character_unit: None,
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "prices".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "prices".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -86,7 +98,11 @@ fn test_sum_mixed_numeric_types() {
     let schema = vibesql_catalog::TableSchema::new(
         "mixed_amounts".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "amount".to_string(),
                 vibesql_types::DataType::Numeric { precision: 10, scale: 2 },
@@ -123,7 +139,8 @@ fn test_sum_mixed_numeric_types() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -137,7 +154,11 @@ fn test_sum_mixed_numeric_types() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "mixed_amounts".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "mixed_amounts".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -159,13 +180,21 @@ fn test_aggregate_with_case_expression() {
     let schema = vibesql_catalog::TableSchema::new(
         "transactions".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "type".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(10) },
                 false,
             ),
-            vibesql_catalog::ColumnSchema::new("amount".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "amount".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -201,7 +230,8 @@ fn test_aggregate_with_case_expression() {
     // SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END)
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -216,9 +246,9 @@ fn test_aggregate_with_case_expression() {
                                 column: "type".to_string(),
                             }),
                             op: vibesql_ast::BinaryOperator::Equal,
-                            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "credit".to_string(),
-                            ))),
+                            right: Box::new(vibesql_ast::Expression::Literal(
+                                vibesql_types::SqlValue::Varchar("credit".to_string()),
+                            )),
                         }],
                         result: vibesql_ast::Expression::ColumnRef {
                             table: None,
@@ -233,7 +263,11 @@ fn test_aggregate_with_case_expression() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "transactions".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "transactions".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -254,17 +288,25 @@ fn test_max_with_unary_plus() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("col0".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "col0".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3)])).unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -281,7 +323,11 @@ fn test_max_with_unary_plus() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -301,17 +347,25 @@ fn test_max_with_unary_minus() {
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("col0".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "col0".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3)])).unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(5)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -328,7 +382,11 @@ fn test_max_with_unary_minus() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -356,14 +414,18 @@ fn test_count_with_not() {
         )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Boolean(true)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Boolean(false)])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Boolean(true)])).unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Boolean(true)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Boolean(false)]))
+        .unwrap();
+    db.insert_row("tab0", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Boolean(true)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -380,7 +442,11 @@ fn test_count_with_not() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

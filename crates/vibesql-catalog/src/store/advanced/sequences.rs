@@ -44,10 +44,8 @@ impl super::super::Catalog {
                     for column in &table.columns {
                         if let Some(default_expr) = &column.default_value {
                             if self.expression_uses_sequence(default_expr, name) {
-                                columns_using_sequence.push((
-                                    table_name.clone(),
-                                    column.name.clone(),
-                                ));
+                                columns_using_sequence
+                                    .push((table_name.clone(), column.name.clone()));
                             }
                         }
                     }
@@ -96,7 +94,11 @@ impl super::super::Catalog {
     }
 
     /// Check if an expression uses a specific sequence
-    fn expression_uses_sequence(&self, expr: &vibesql_ast::Expression, sequence_name: &str) -> bool {
+    fn expression_uses_sequence(
+        &self,
+        expr: &vibesql_ast::Expression,
+        sequence_name: &str,
+    ) -> bool {
         use vibesql_ast::Expression;
         match expr {
             Expression::NextValue { sequence_name: seq_name } => seq_name == sequence_name,
@@ -112,7 +114,9 @@ impl super::super::Catalog {
             Expression::Case { operand, when_clauses, else_result } => {
                 operand.as_ref().is_some_and(|e| self.expression_uses_sequence(e, sequence_name))
                     || when_clauses.iter().any(|when| {
-                        when.conditions.iter().any(|c| self.expression_uses_sequence(c, sequence_name))
+                        when.conditions
+                            .iter()
+                            .any(|c| self.expression_uses_sequence(c, sequence_name))
                             || self.expression_uses_sequence(&when.result, sequence_name)
                     })
                     || else_result
@@ -179,9 +183,7 @@ impl super::super::Catalog {
 
     /// Get an immutable reference to a SEQUENCE
     pub fn get_sequence(&self, name: &str) -> Result<&Sequence, CatalogError> {
-        self.sequences
-            .get(name)
-            .ok_or_else(|| CatalogError::SequenceNotFound(name.to_string()))
+        self.sequences.get(name).ok_or_else(|| CatalogError::SequenceNotFound(name.to_string()))
     }
 
     /// List all sequence names

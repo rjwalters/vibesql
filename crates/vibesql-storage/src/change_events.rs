@@ -85,13 +85,7 @@ struct ChannelState {
 
 impl ChannelState {
     fn new(capacity: usize) -> Self {
-        Self {
-            buffer: vec![None; capacity],
-            write_pos: 0,
-            total_sent: 0,
-            capacity,
-            closed: false,
-        }
+        Self { buffer: vec![None; capacity], write_pos: 0, total_sent: 0, capacity, closed: false }
     }
 }
 
@@ -176,9 +170,7 @@ impl ChangeEventReceiver {
 
         // Calculate buffer index
         let buffer_idx = self.read_pos % state.capacity;
-        let event = state.buffer[buffer_idx]
-            .clone()
-            .expect("Buffer slot should be filled");
+        let event = state.buffer[buffer_idx].clone().expect("Buffer slot should be filled");
 
         self.read_pos += 1;
         Ok(event)
@@ -244,7 +236,9 @@ mod tests {
         sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 });
 
         let event = receiver.try_recv().unwrap();
-        assert!(matches!(event, ChangeEvent::Insert { table_name, row_index: 0 } if table_name == "users"));
+        assert!(
+            matches!(event, ChangeEvent::Insert { table_name, row_index: 0 } if table_name == "users")
+        );
     }
 
     #[test]

@@ -27,11 +27,7 @@ pub enum CompiledPredicate {
 
     /// Range comparison: column <op> literal
     /// where op is <, <=, >, >=
-    Range {
-        col_idx: usize,
-        op: RangeOp,
-        value: SqlValue,
-    },
+    Range { col_idx: usize, op: RangeOp, value: SqlValue },
 
     /// IS NULL check
     IsNull { col_idx: usize },
@@ -86,10 +82,8 @@ impl CompiledPredicate {
 
             // Flattened conjunction (AND chain)
             Expression::Conjunction(children) => {
-                let compiled: Vec<_> = children
-                    .iter()
-                    .filter_map(|child| Self::try_compile(child, schema))
-                    .collect();
+                let compiled: Vec<_> =
+                    children.iter().filter_map(|child| Self::try_compile(child, schema)).collect();
 
                 // All children must be compilable
                 if compiled.len() != children.len() {
@@ -106,10 +100,8 @@ impl CompiledPredicate {
 
             // Flattened disjunction (OR chain)
             Expression::Disjunction(children) => {
-                let compiled: Vec<_> = children
-                    .iter()
-                    .filter_map(|child| Self::try_compile(child, schema))
-                    .collect();
+                let compiled: Vec<_> =
+                    children.iter().filter_map(|child| Self::try_compile(child, schema)).collect();
 
                 // All children must be compilable
                 if compiled.len() != children.len() {
@@ -174,10 +166,7 @@ impl CompiledPredicate {
                     return None;
                 }
 
-                Some(CompiledPredicate::And(
-                    Box::new(left_compiled),
-                    Box::new(right_compiled),
-                ))
+                Some(CompiledPredicate::And(Box::new(left_compiled), Box::new(right_compiled)))
             }
 
             BinaryOperator::Or => {
@@ -191,10 +180,7 @@ impl CompiledPredicate {
                     return None;
                 }
 
-                Some(CompiledPredicate::Or(
-                    Box::new(left_compiled),
-                    Box::new(right_compiled),
-                ))
+                Some(CompiledPredicate::Or(Box::new(left_compiled), Box::new(right_compiled)))
             }
 
             // Simple comparison: col <op> literal or literal <op> col
@@ -210,16 +196,14 @@ impl CompiledPredicate {
         schema: &CombinedSchema,
     ) -> Option<Self> {
         // Try col <op> literal
-        if let (Expression::ColumnRef { table, column }, Expression::Literal(value)) =
-            (left, right)
+        if let (Expression::ColumnRef { table, column }, Expression::Literal(value)) = (left, right)
         {
             let col_idx = schema.get_column_index(table.as_deref(), column)?;
             return Self::compile_comparison_with_idx(col_idx, op, value.clone(), false);
         }
 
         // Try literal <op> col (reverse the operator)
-        if let (Expression::Literal(value), Expression::ColumnRef { table, column }) =
-            (left, right)
+        if let (Expression::Literal(value), Expression::ColumnRef { table, column }) = (left, right)
         {
             let col_idx = schema.get_column_index(table.as_deref(), column)?;
             return Self::compile_comparison_with_idx(col_idx, op, value.clone(), true);
@@ -243,17 +227,9 @@ impl CompiledPredicate {
             BinaryOperator::LessThan => {
                 if reversed {
                     // literal < col => col > literal
-                    Some(CompiledPredicate::Range {
-                        col_idx,
-                        op: RangeOp::GreaterThan,
-                        value,
-                    })
+                    Some(CompiledPredicate::Range { col_idx, op: RangeOp::GreaterThan, value })
                 } else {
-                    Some(CompiledPredicate::Range {
-                        col_idx,
-                        op: RangeOp::LessThan,
-                        value,
-                    })
+                    Some(CompiledPredicate::Range { col_idx, op: RangeOp::LessThan, value })
                 }
             }
 
@@ -266,39 +242,23 @@ impl CompiledPredicate {
                         value,
                     })
                 } else {
-                    Some(CompiledPredicate::Range {
-                        col_idx,
-                        op: RangeOp::LessThanOrEqual,
-                        value,
-                    })
+                    Some(CompiledPredicate::Range { col_idx, op: RangeOp::LessThanOrEqual, value })
                 }
             }
 
             BinaryOperator::GreaterThan => {
                 if reversed {
                     // literal > col => col < literal
-                    Some(CompiledPredicate::Range {
-                        col_idx,
-                        op: RangeOp::LessThan,
-                        value,
-                    })
+                    Some(CompiledPredicate::Range { col_idx, op: RangeOp::LessThan, value })
                 } else {
-                    Some(CompiledPredicate::Range {
-                        col_idx,
-                        op: RangeOp::GreaterThan,
-                        value,
-                    })
+                    Some(CompiledPredicate::Range { col_idx, op: RangeOp::GreaterThan, value })
                 }
             }
 
             BinaryOperator::GreaterThanOrEqual => {
                 if reversed {
                     // literal >= col => col <= literal
-                    Some(CompiledPredicate::Range {
-                        col_idx,
-                        op: RangeOp::LessThanOrEqual,
-                        value,
-                    })
+                    Some(CompiledPredicate::Range { col_idx, op: RangeOp::LessThanOrEqual, value })
                 } else {
                     Some(CompiledPredicate::Range {
                         col_idx,
@@ -548,12 +508,8 @@ impl CompiledPredicate {
                 Some(Self::apply_range_op(i64::from(*x), op, *y))
             }
             // Integer and Bigint are the same type (i64), but keep for explicitness
-            (SqlValue::Integer(x), SqlValue::Bigint(y)) => {
-                Some(Self::apply_range_op(*x, op, *y))
-            }
-            (SqlValue::Bigint(x), SqlValue::Integer(y)) => {
-                Some(Self::apply_range_op(*x, op, *y))
-            }
+            (SqlValue::Integer(x), SqlValue::Bigint(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            (SqlValue::Bigint(x), SqlValue::Integer(y)) => Some(Self::apply_range_op(*x, op, *y)),
 
             // String comparisons
             (SqlValue::Varchar(x), SqlValue::Varchar(y)) => {
@@ -708,7 +664,11 @@ mod tests {
     fn create_test_schema() -> CombinedSchema {
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(255) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(255) },
+                true,
+            ),
         ];
         let schema = TableSchema::new("test".to_string(), columns);
         CombinedSchema::from_table("test".to_string(), schema)
@@ -718,10 +678,7 @@ mod tests {
     fn test_compile_simple_equals() {
         let schema = create_test_schema();
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
@@ -741,10 +698,7 @@ mod tests {
     fn test_evaluate_equals() {
         let schema = create_test_schema();
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
@@ -752,15 +706,13 @@ mod tests {
         let compiled = CompiledPredicate::compile(&expr, &schema);
 
         // Test matching row
-        let row = Row {
-            values: vec![SqlValue::Integer(42), SqlValue::Varchar("test".to_string())],
-        };
+        let row =
+            Row { values: vec![SqlValue::Integer(42), SqlValue::Varchar("test".to_string())] };
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test non-matching row
-        let row = Row {
-            values: vec![SqlValue::Integer(99), SqlValue::Varchar("test".to_string())],
-        };
+        let row =
+            Row { values: vec![SqlValue::Integer(99), SqlValue::Varchar("test".to_string())] };
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 
@@ -769,19 +721,13 @@ mod tests {
         let schema = create_test_schema();
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),
@@ -791,24 +737,17 @@ mod tests {
         assert!(compiled.is_fully_compiled());
 
         // Test row that matches both conditions
-        let row = Row {
-            values: vec![SqlValue::Integer(50), SqlValue::Varchar("test".to_string())],
-        };
+        let row =
+            Row { values: vec![SqlValue::Integer(50), SqlValue::Varchar("test".to_string())] };
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test row that fails first condition
-        let row = Row {
-            values: vec![SqlValue::Integer(5), SqlValue::Varchar("test".to_string())],
-        };
+        let row = Row { values: vec![SqlValue::Integer(5), SqlValue::Varchar("test".to_string())] };
         assert_eq!(compiled.evaluate(&row), Some(false));
 
         // Test row that fails second condition
-        let row = Row {
-            values: vec![
-                SqlValue::Integer(150),
-                SqlValue::Varchar("test".to_string()),
-            ],
-        };
+        let row =
+            Row { values: vec![SqlValue::Integer(150), SqlValue::Varchar("test".to_string())] };
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 

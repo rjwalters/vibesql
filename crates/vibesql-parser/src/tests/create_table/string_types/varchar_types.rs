@@ -268,10 +268,10 @@ fn test_parse_nchar_varying_with_constraint() {
                 _ => panic!("Expected VARCHAR(42) for c2"),
             }
             // Verify KEY constraint
-            assert!(create.columns[1].constraints.iter().any(|c| matches!(
-                &c.kind,
-                vibesql_ast::ColumnConstraintKind::Key
-            )));
+            assert!(create.columns[1]
+                .constraints
+                .iter()
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Key)));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -363,7 +363,9 @@ fn test_parse_nvarchar_without_length() {
 #[test]
 fn test_parse_nvarchar_with_constraint() {
     // This is the actual failing test case from SQLLogicTest: NVARCHAR with UNIQUE
-    let result = Parser::parse_sql("CREATE TABLE `t21291` (`c1` NVARCHAR (13) UNIQUE, `c2` NVARCHAR (11) KEY);");
+    let result = Parser::parse_sql(
+        "CREATE TABLE `t21291` (`c1` NVARCHAR (13) UNIQUE, `c2` NVARCHAR (11) KEY);",
+    );
     assert!(result.is_ok(), "Failed to parse NVARCHAR with constraints: {:?}", result.err());
     let stmt = result.unwrap();
 
@@ -380,10 +382,10 @@ fn test_parse_nvarchar_with_constraint() {
                 _ => panic!("Expected VARCHAR(13) for c1"),
             }
             // Verify UNIQUE constraint
-            assert!(create.columns[0].constraints.iter().any(|c| matches!(
-                &c.kind,
-                vibesql_ast::ColumnConstraintKind::Unique
-            )));
+            assert!(create.columns[0]
+                .constraints
+                .iter()
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
 
             // Check second column (backtick-quoted, preserves case)
             assert_eq!(create.columns[1].name, "c2");
@@ -392,10 +394,10 @@ fn test_parse_nvarchar_with_constraint() {
                 _ => panic!("Expected VARCHAR(11) for c2"),
             }
             // Verify KEY constraint
-            assert!(create.columns[1].constraints.iter().any(|c| matches!(
-                &c.kind,
-                vibesql_ast::ColumnConstraintKind::Key
-            )));
+            assert!(create.columns[1]
+                .constraints
+                .iter()
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Key)));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -419,7 +421,10 @@ fn test_parse_nvarchar_equivalence() {
             vibesql_ast::Statement::CreateTable(nchar_varying_create),
         ) => {
             // Both should produce the same data type
-            assert_eq!(nvarchar_create.columns[0].data_type, nchar_varying_create.columns[0].data_type);
+            assert_eq!(
+                nvarchar_create.columns[0].data_type,
+                nchar_varying_create.columns[0].data_type
+            );
         }
         _ => panic!("Expected CREATE TABLE statements"),
     }
@@ -532,7 +537,11 @@ fn test_parse_national_varchar_with_constraint() {
     let result = Parser::parse_sql(
         "CREATE TABLE `t21659` (`c1` NATIONAL VARCHAR (4) UNIQUE, c2 NATIONAL VARCHAR (19) UNIQUE);"
     );
-    assert!(result.is_ok(), "Failed to parse NATIONAL VARCHAR with constraints: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse NATIONAL VARCHAR with constraints: {:?}",
+        result.err()
+    );
     let stmt = result.unwrap();
 
     match stmt {
@@ -548,10 +557,10 @@ fn test_parse_national_varchar_with_constraint() {
                 _ => panic!("Expected VARCHAR(4) for c1"),
             }
             // Verify UNIQUE constraint
-            assert!(create.columns[0].constraints.iter().any(|c| matches!(
-                &c.kind,
-                vibesql_ast::ColumnConstraintKind::Unique
-            )));
+            assert!(create.columns[0]
+                .constraints
+                .iter()
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
 
             // Check second column (unquoted, normalized to uppercase)
             assert_eq!(create.columns[1].name, "C2");
@@ -560,10 +569,10 @@ fn test_parse_national_varchar_with_constraint() {
                 _ => panic!("Expected VARCHAR(19) for c2"),
             }
             // Verify UNIQUE constraint
-            assert!(create.columns[1].constraints.iter().any(|c| matches!(
-                &c.kind,
-                vibesql_ast::ColumnConstraintKind::Unique
-            )));
+            assert!(create.columns[1]
+                .constraints
+                .iter()
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

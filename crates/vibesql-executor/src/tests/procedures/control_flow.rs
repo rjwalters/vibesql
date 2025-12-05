@@ -1,8 +1,8 @@
 //\! Phase 3: Control Flow Tests
 
 use super::*;
-use crate::procedural::{ExecutionContext, ControlFlow};
 use crate::procedural::executor::execute_procedural_statement;
+use crate::procedural::{ControlFlow, ExecutionContext};
 #[test]
 fn test_if_simple_boolean_true() {
     let mut db = setup_test_db();
@@ -16,12 +16,10 @@ fn test_if_simple_boolean_true() {
     // END IF;
     let if_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
-        then_statements: vec![
-            ProceduralStatement::Set {
-                name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar("executed".to_string()))),
-            }
-        ],
+        then_statements: vec![ProceduralStatement::Set {
+            name: "result".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Varchar("executed".to_string()))),
+        }],
         else_statements: None,
     };
 
@@ -43,12 +41,10 @@ fn test_if_simple_boolean_false() {
     // END IF;
     let if_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(false))),
-        then_statements: vec![
-            ProceduralStatement::Set {
-                name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar("executed".to_string()))),
-            }
-        ],
+        then_statements: vec![ProceduralStatement::Set {
+            name: "result".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Varchar("executed".to_string()))),
+        }],
         else_statements: None,
     };
 
@@ -73,18 +69,14 @@ fn test_if_with_else() {
     // END IF;
     let if_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(false))),
-        then_statements: vec![
-            ProceduralStatement::Set {
-                name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar("then".to_string()))),
-            }
-        ],
-        else_statements: Some(vec![
-            ProceduralStatement::Set {
-                name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar("else".to_string()))),
-            }
-        ]),
+        then_statements: vec![ProceduralStatement::Set {
+            name: "result".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Varchar("then".to_string()))),
+        }],
+        else_statements: Some(vec![ProceduralStatement::Set {
+            name: "result".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Varchar("else".to_string()))),
+        }]),
     };
 
     let result = execute_procedural_statement(&if_stmt, &mut ctx, &mut db);
@@ -105,12 +97,10 @@ fn test_if_integer_condition() {
     // END IF;
     let if_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Integer(1))),
-        then_statements: vec![
-            ProceduralStatement::Set {
-                name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar("nonzero".to_string()))),
-            }
-        ],
+        then_statements: vec![ProceduralStatement::Set {
+            name: "result".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Varchar("nonzero".to_string()))),
+        }],
         else_statements: None,
     };
 
@@ -122,12 +112,10 @@ fn test_if_integer_condition() {
     ctx.set_variable("result", SqlValue::Varchar("initial".to_string()));
     let if_stmt_zero = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Integer(0))),
-        then_statements: vec![
-            ProceduralStatement::Set {
-                name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar("zero".to_string()))),
-            }
-        ],
+        then_statements: vec![ProceduralStatement::Set {
+            name: "result".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Varchar("zero".to_string()))),
+        }],
         else_statements: None,
     };
 
@@ -149,12 +137,10 @@ fn test_if_null_condition() {
     // END IF;
     let if_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Null)),
-        then_statements: vec![
-            ProceduralStatement::Set {
-                name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar("executed".to_string()))),
-            }
-        ],
+        then_statements: vec![ProceduralStatement::Set {
+            name: "result".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Varchar("executed".to_string()))),
+        }],
         else_statements: None,
     };
 
@@ -216,12 +202,10 @@ fn test_while_loop_false_condition() {
     // END WHILE;
     let while_stmt = ProceduralStatement::While {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(false))),
-        statements: vec![
-            ProceduralStatement::Set {
-                name: "counter".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Integer(100))),
-            },
-        ],
+        statements: vec![ProceduralStatement::Set {
+            name: "counter".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Integer(100))),
+        }],
     };
 
     let result = execute_procedural_statement(&while_stmt, &mut ctx, &mut db);
@@ -291,12 +275,10 @@ fn test_repeat_until() {
     //   SET counter = 1;
     // UNTIL TRUE END REPEAT;
     let repeat_stmt = ProceduralStatement::Repeat {
-        statements: vec![
-            ProceduralStatement::Set {
-                name: "counter".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            },
-        ],
+        statements: vec![ProceduralStatement::Set {
+            name: "counter".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }],
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
     };
 
@@ -318,12 +300,10 @@ fn test_repeat_executes_at_least_once() {
     //   SET executed = TRUE;
     // UNTIL TRUE END REPEAT;  -- Exit immediately after first iteration
     let repeat_stmt = ProceduralStatement::Repeat {
-        statements: vec![
-            ProceduralStatement::Set {
-                name: "executed".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Boolean(true))),
-            },
-        ],
+        statements: vec![ProceduralStatement::Set {
+            name: "executed".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Boolean(true))),
+        }],
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
     };
 
@@ -380,18 +360,14 @@ fn test_nested_if() {
     // END IF;
     let nested_if = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
-        then_statements: vec![
-            ProceduralStatement::If {
-                condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
-                then_statements: vec![
-                    ProceduralStatement::Set {
-                        name: "result".to_string(),
-                        value: Box::new(Expression::Literal(SqlValue::Varchar("nested".to_string()))),
-                    }
-                ],
-                else_statements: None,
-            }
-        ],
+        then_statements: vec![ProceduralStatement::If {
+            condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
+            then_statements: vec![ProceduralStatement::Set {
+                name: "result".to_string(),
+                value: Box::new(Expression::Literal(SqlValue::Varchar("nested".to_string()))),
+            }],
+            else_statements: None,
+        }],
         else_statements: None,
     };
 
@@ -411,9 +387,9 @@ fn test_if_with_return() {
     // END IF;
     let if_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
-        then_statements: vec![
-            ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Integer(42)))),
-        ],
+        then_statements: vec![ProceduralStatement::Return(Box::new(Expression::Literal(
+            SqlValue::Integer(42),
+        )))],
         else_statements: None,
     };
 
@@ -435,12 +411,10 @@ fn test_variable_persistence() {
     // END IF;
     let if_stmt = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
-        then_statements: vec![
-            ProceduralStatement::Set {
-                name: "x".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Integer(2))),
-            }
-        ],
+        then_statements: vec![ProceduralStatement::Set {
+            name: "x".to_string(),
+            value: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        }],
         else_statements: None,
     };
 
@@ -481,10 +455,7 @@ fn test_procedure_body_caching_performance() {
             ProceduralStatement::Set {
                 name: "temp".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "x".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
@@ -513,20 +484,14 @@ fn test_procedure_body_caching_performance() {
         procedure_name: "test_cache_proc".to_string(),
         arguments: vec![
             Expression::Literal(SqlValue::Integer(5)),
-            Expression::ColumnRef {
-                table: None,
-                column: "@out".to_string(),
-            },
+            Expression::ColumnRef { table: None, column: "@out".to_string() },
         ],
     };
     advanced_objects::execute_call(&call_stmt, &mut db).unwrap();
     let first_call_duration = first_call_start.elapsed();
 
     // Verify result is correct
-    assert_eq!(
-        db.get_session_variable("out"),
-        Some(&SqlValue::Integer(20))
-    );
+    assert_eq!(db.get_session_variable("out"), Some(&SqlValue::Integer(20)));
 
     // Subsequent calls - should use cached body
     let iterations = 100;
@@ -536,10 +501,7 @@ fn test_procedure_body_caching_performance() {
             procedure_name: "test_cache_proc".to_string(),
             arguments: vec![
                 Expression::Literal(SqlValue::Integer(i)),
-                Expression::ColumnRef {
-                    table: None,
-                    column: format!("@out{}", i),
-                },
+                Expression::ColumnRef { table: None, column: format!("@out{}", i) },
             ],
         };
         advanced_objects::execute_call(&call_stmt, &mut db).unwrap();
@@ -591,19 +553,14 @@ fn test_cache_invalidation_on_drop() {
     // Call once to populate cache
     let call_stmt = CallStmt {
         procedure_name: "test_invalidate".to_string(),
-        arguments: vec![Expression::ColumnRef {
-            table: None,
-            column: "@out".to_string(),
-        }],
+        arguments: vec![Expression::ColumnRef { table: None, column: "@out".to_string() }],
     };
     advanced_objects::execute_call(&call_stmt, &mut db).unwrap();
     assert_eq!(db.get_session_variable("out"), Some(&SqlValue::Integer(42)));
 
     // Drop procedure - should invalidate cache
-    let drop_stmt = DropProcedureStmt {
-        procedure_name: "test_invalidate".to_string(),
-        if_exists: false,
-    };
+    let drop_stmt =
+        DropProcedureStmt { procedure_name: "test_invalidate".to_string(), if_exists: false };
     advanced_objects::execute_drop_procedure(&drop_stmt, &mut db).unwrap();
 
     // Verify procedure is gone
@@ -630,10 +587,7 @@ fn test_cache_invalidation_on_drop() {
     // Call again - should use new procedure body, not cached old one
     let call_stmt2 = CallStmt {
         procedure_name: "test_invalidate".to_string(),
-        arguments: vec![Expression::ColumnRef {
-            table: None,
-            column: "@out2".to_string(),
-        }],
+        arguments: vec![Expression::ColumnRef { table: None, column: "@out2".to_string() }],
     };
     advanced_objects::execute_call(&call_stmt2, &mut db).unwrap();
     assert_eq!(db.get_session_variable("out2"), Some(&SqlValue::Integer(99)));

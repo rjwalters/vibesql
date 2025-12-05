@@ -34,9 +34,8 @@ pub fn apply_filter_mask(
     let mut new_columns = Vec::new();
 
     for col_idx in 0..batch.column_count() {
-        let column = batch
-            .column(col_idx)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        let column =
+            batch.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: col_idx,
                 batch_columns: batch.column_count(),
             })?;

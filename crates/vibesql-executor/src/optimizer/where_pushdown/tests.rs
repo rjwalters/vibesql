@@ -1,7 +1,7 @@
 //! Test suite for WHERE clause predicate pushdown optimizer
 
-use super::*;
 use super::table_refs::flatten_conjuncts;
+use super::*;
 
 #[test]
 fn test_flatten_conjuncts_single() {
@@ -64,17 +64,25 @@ fn test_combine_with_and() {
 #[test]
 fn test_or_filter_extraction() {
     use vibesql_ast::{BinaryOperator, Expression};
-    use vibesql_types::SqlValue;
     use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::SqlValue;
 
     // Create schema with two nation tables (n1, n2)
     let n1_schema = TableSchema::new(
         "n1".to_string(),
-        vec![ColumnSchema::new("n_name".to_string(), vibesql_types::DataType::Varchar { max_length: Some(25) }, false)],
+        vec![ColumnSchema::new(
+            "n_name".to_string(),
+            vibesql_types::DataType::Varchar { max_length: Some(25) },
+            false,
+        )],
     );
     let n2_schema = TableSchema::new(
         "n2".to_string(),
-        vec![ColumnSchema::new("n_name".to_string(), vibesql_types::DataType::Varchar { max_length: Some(25) }, false)],
+        vec![ColumnSchema::new(
+            "n_name".to_string(),
+            vibesql_types::DataType::Varchar { max_length: Some(25) },
+            false,
+        )],
     );
     // Build CombinedSchema properly
     let schema = CombinedSchema::combine(
@@ -87,22 +95,34 @@ fn test_or_filter_extraction() {
     // (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE')
     let n1_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef { table: Some("n1".to_string()), column: "n_name".to_string() }),
+        left: Box::new(Expression::ColumnRef {
+            table: Some("n1".to_string()),
+            column: "n_name".to_string(),
+        }),
         right: Box::new(Expression::Literal(SqlValue::Varchar("FRANCE".to_string()))),
     };
     let n2_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef { table: Some("n2".to_string()), column: "n_name".to_string() }),
+        left: Box::new(Expression::ColumnRef {
+            table: Some("n2".to_string()),
+            column: "n_name".to_string(),
+        }),
         right: Box::new(Expression::Literal(SqlValue::Varchar("GERMANY".to_string()))),
     };
     let n1_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef { table: Some("n1".to_string()), column: "n_name".to_string() }),
+        left: Box::new(Expression::ColumnRef {
+            table: Some("n1".to_string()),
+            column: "n_name".to_string(),
+        }),
         right: Box::new(Expression::Literal(SqlValue::Varchar("GERMANY".to_string()))),
     };
     let n2_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef { table: Some("n2".to_string()), column: "n_name".to_string() }),
+        left: Box::new(Expression::ColumnRef {
+            table: Some("n2".to_string()),
+            column: "n_name".to_string(),
+        }),
         right: Box::new(Expression::Literal(SqlValue::Varchar("FRANCE".to_string()))),
     };
 
@@ -147,8 +167,8 @@ fn test_or_filter_extraction_multi_branch() {
     // Current implementation only handles binary OR, so nested ORs like:
     // ((A AND B) OR (C AND D)) OR (E AND F)
     use vibesql_ast::{BinaryOperator, Expression};
-    use vibesql_types::SqlValue;
     use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::SqlValue;
 
     // Create schema with tables t1, t2, t3
     let t1_schema = TableSchema::new(
@@ -179,12 +199,18 @@ fn test_or_filter_extraction_multi_branch() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t2".to_string()), column: "b".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t2".to_string()),
+                column: "b".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -193,12 +219,18 @@ fn test_or_filter_extraction_multi_branch() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t2".to_string()), column: "b".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t2".to_string()),
+                column: "b".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(4))),
         }),
     };
@@ -207,12 +239,18 @@ fn test_or_filter_extraction_multi_branch() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t2".to_string()), column: "b".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t2".to_string()),
+                column: "b".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(6))),
         }),
     };
@@ -255,8 +293,8 @@ fn test_or_filter_extraction_nested_or() {
     // Test case 2: Nested OR predicates
     // ((A OR B) AND C) OR ((D OR E) AND F)
     use vibesql_ast::{BinaryOperator, Expression};
-    use vibesql_types::SqlValue;
     use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::SqlValue;
 
     let t1_schema = TableSchema::new(
         "t1".to_string(),
@@ -273,12 +311,18 @@ fn test_or_filter_extraction_nested_or() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -288,7 +332,10 @@ fn test_or_filter_extraction_nested_or() {
         left: Box::new(left_or),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "b".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "b".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
     };
@@ -297,12 +344,18 @@ fn test_or_filter_extraction_nested_or() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(4))),
         }),
     };
@@ -312,7 +365,10 @@ fn test_or_filter_extraction_nested_or() {
         left: Box::new(right_or),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "b".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "b".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(20))),
         }),
     };
@@ -341,8 +397,8 @@ fn test_or_filter_extraction_asymmetric() {
     // (t1.a = 1 AND t2.b = 2) OR (t1.a = 3)
     // Should only extract filter for t1 (appears in both branches), not t2
     use vibesql_ast::{BinaryOperator, Expression};
-    use vibesql_types::SqlValue;
     use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::SqlValue;
 
     let t1_schema = TableSchema::new(
         "t1".to_string(),
@@ -364,12 +420,18 @@ fn test_or_filter_extraction_asymmetric() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t2".to_string()), column: "b".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t2".to_string()),
+                column: "b".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -377,7 +439,10 @@ fn test_or_filter_extraction_asymmetric() {
     // Right branch: t1.a = 3 (only t1, no t2)
     let right_branch = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+        left: Box::new(Expression::ColumnRef {
+            table: Some("t1".to_string()),
+            column: "a".to_string(),
+        }),
         right: Box::new(Expression::Literal(SqlValue::Integer(3))),
     };
 
@@ -405,8 +470,8 @@ fn test_or_filter_extraction_single_table() {
     // t1.a = 1 OR t1.a = 2
     // This is a valid case that extracts a simple OR filter for one table
     use vibesql_ast::{BinaryOperator, Expression};
-    use vibesql_types::SqlValue;
     use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::SqlValue;
 
     let t1_schema = TableSchema::new(
         "t1".to_string(),
@@ -420,12 +485,18 @@ fn test_or_filter_extraction_single_table() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -446,8 +517,8 @@ fn test_or_filter_extraction_no_common_tables() {
     // (t1.a = 1 AND t2.b = 2) OR (t3.c = 3 AND t4.d = 4)
     // No tables appear in both branches
     use vibesql_ast::{BinaryOperator, Expression};
-    use vibesql_types::SqlValue;
     use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::SqlValue;
 
     let t1_schema = TableSchema::new(
         "t1".to_string(),
@@ -485,12 +556,18 @@ fn test_or_filter_extraction_no_common_tables() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t1".to_string()), column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t1".to_string()),
+                column: "a".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t2".to_string()), column: "b".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t2".to_string()),
+                column: "b".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -500,12 +577,18 @@ fn test_or_filter_extraction_no_common_tables() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t3".to_string()), column: "c".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t3".to_string()),
+                column: "c".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: Some("t4".to_string()), column: "d".to_string() }),
+            left: Box::new(Expression::ColumnRef {
+                table: Some("t4".to_string()),
+                column: "d".to_string(),
+            }),
             right: Box::new(Expression::Literal(SqlValue::Integer(4))),
         }),
     };
@@ -525,8 +608,8 @@ fn test_or_filter_extraction_empty_branches() {
     // Test case 6: Empty branches - Should handle gracefully
     // TRUE OR FALSE
     use vibesql_ast::{BinaryOperator, Expression};
-    use vibesql_types::SqlValue;
     use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::SqlValue;
 
     let t1_schema = TableSchema::new(
         "t1".to_string(),

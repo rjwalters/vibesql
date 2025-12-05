@@ -6,18 +6,15 @@
 
 mod common;
 
-use common::{parse_backend_messages, start_test_server, TestClient};
 use bytes::{BufMut, BytesMut};
+use common::{parse_backend_messages, start_test_server, TestClient};
 
 /// Message type constants for subscription protocol
 const MSG_SUBSCRIPTION_DATA: u8 = 0xF2;
 const MSG_READY_FOR_QUERY: u8 = b'Z';
 
 /// Helper to send a subscription request for a query
-async fn send_subscribe(
-    client: &mut TestClient,
-    query: &str,
-) -> std::io::Result<[u8; 16]> {
+async fn send_subscribe(client: &mut TestClient, query: &str) -> std::io::Result<[u8; 16]> {
     // Generate a subscription ID (16 bytes based on query hash)
     let mut sub_id = [0u8; 16];
     for (i, b) in query.as_bytes().iter().enumerate() {
@@ -68,14 +65,8 @@ async fn test_subscribe_receives_initial_data() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create a test table with unique name
     let table_name = "sub_init_data_test";
@@ -83,26 +74,19 @@ async fn test_subscribe_receives_initial_data() {
         .send_query(&format!("CREATE TABLE IF NOT EXISTS {} (id INT, name VARCHAR)", table_name))
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Insert initial data
     client
         .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice'), (2, 'Bob')", table_name))
         .await
         .expect("Failed to insert data");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read insert response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
 
     // Subscribe to the table
     let select_query = format!("SELECT * FROM {}", table_name);
-    let _sub_id = send_subscribe(&mut client, &select_query)
-        .await
-        .expect("Failed to send subscribe");
+    let _sub_id =
+        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
 
     // Read subscription response (should include initial data)
     let data = client
@@ -113,15 +97,9 @@ async fn test_subscribe_receives_initial_data() {
 
     // Should have SubscriptionData message (0xF2) with initial results
     let has_subscription_data = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
-    assert!(
-        has_subscription_data,
-        "Expected SubscriptionData message for subscription"
-    );
+    assert!(has_subscription_data, "Expected SubscriptionData message for subscription");
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -133,14 +111,8 @@ async fn test_insert_triggers_subscription_update() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create a test table with unique name
     let table_name = "sub_insert_trigger_test";
@@ -148,16 +120,12 @@ async fn test_insert_triggers_subscription_update() {
         .send_query(&format!("CREATE TABLE IF NOT EXISTS {} (id INT, name VARCHAR)", table_name))
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Subscribe to empty table
     let select_query = format!("SELECT * FROM {}", table_name);
-    let _sub_id = send_subscribe(&mut client, &select_query)
-        .await
-        .expect("Failed to send subscribe");
+    let _sub_id =
+        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
     let _ = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -178,15 +146,9 @@ async fn test_insert_triggers_subscription_update() {
 
     // Should include SubscriptionData message (0xF2) with the insert update
     let has_subscription_update = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
-    assert!(
-        has_subscription_update,
-        "Expected SubscriptionData update after INSERT"
-    );
+    assert!(has_subscription_update, "Expected SubscriptionData update after INSERT");
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -198,14 +160,8 @@ async fn test_update_triggers_subscription_update() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create and populate test table
     let table_name = "sub_update_trigger_test";
@@ -213,25 +169,18 @@ async fn test_update_triggers_subscription_update() {
         .send_query(&format!("CREATE TABLE IF NOT EXISTS {} (id INT, name VARCHAR)", table_name))
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     client
         .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice')", table_name))
         .await
         .expect("Failed to insert data");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read insert response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
 
     // Subscribe
     let select_query = format!("SELECT * FROM {} WHERE id = 1", table_name);
-    let _sub_id = send_subscribe(&mut client, &select_query)
-        .await
-        .expect("Failed to send subscribe");
+    let _sub_id =
+        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
     let _ = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -252,15 +201,9 @@ async fn test_update_triggers_subscription_update() {
 
     // Should include SubscriptionData message (0xF2) with the update
     let has_subscription_update = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
-    assert!(
-        has_subscription_update,
-        "Expected SubscriptionData update after UPDATE"
-    );
+    assert!(has_subscription_update, "Expected SubscriptionData update after UPDATE");
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -272,14 +215,8 @@ async fn test_delete_triggers_subscription_update() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create and populate test table
     let table_name = "sub_delete_trigger_test";
@@ -287,25 +224,18 @@ async fn test_delete_triggers_subscription_update() {
         .send_query(&format!("CREATE TABLE IF NOT EXISTS {} (id INT, name VARCHAR)", table_name))
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     client
         .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice'), (2, 'Bob')", table_name))
         .await
         .expect("Failed to insert data");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read insert response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
 
     // Subscribe
     let select_query = format!("SELECT * FROM {}", table_name);
-    let _sub_id = send_subscribe(&mut client, &select_query)
-        .await
-        .expect("Failed to send subscribe");
+    let _sub_id =
+        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
     let _ = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -326,15 +256,9 @@ async fn test_delete_triggers_subscription_update() {
 
     // Should include SubscriptionData message (0xF2) with the delete
     let has_subscription_update = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
-    assert!(
-        has_subscription_update,
-        "Expected SubscriptionData update after DELETE"
-    );
+    assert!(has_subscription_update, "Expected SubscriptionData update after DELETE");
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -346,14 +270,8 @@ async fn test_unsubscribe_stops_updates() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create and populate test table
     let table_name = "sub_unsubscribe_test";
@@ -361,34 +279,25 @@ async fn test_unsubscribe_stops_updates() {
         .send_query(&format!("CREATE TABLE IF NOT EXISTS {} (id INT, name VARCHAR)", table_name))
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     client
         .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice')", table_name))
         .await
         .expect("Failed to insert data");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read insert response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
 
     // Subscribe
     let select_query = format!("SELECT * FROM {}", table_name);
-    let sub_id = send_subscribe(&mut client, &select_query)
-        .await
-        .expect("Failed to send subscribe");
+    let sub_id =
+        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
     let _ = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
         .expect("Failed to read subscription response");
 
     // Unsubscribe - no response expected per protocol spec, just continue
-    send_unsubscribe(&mut client, sub_id)
-        .await
-        .expect("Failed to send unsubscribe");
+    send_unsubscribe(&mut client, sub_id).await.expect("Failed to send unsubscribe");
 
     // Insert more data
     client
@@ -405,15 +314,9 @@ async fn test_unsubscribe_stops_updates() {
 
     // Should NOT have any SubscriptionData message (0xF2) after unsubscribe
     let has_subscription_update = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
-    assert!(
-        !has_subscription_update,
-        "Should not receive SubscriptionData after unsubscribe"
-    );
+    assert!(!has_subscription_update, "Should not receive SubscriptionData after unsubscribe");
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -429,43 +332,31 @@ async fn test_subscription_ignores_unrelated_tables() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create two test tables
     client
         .send_query("CREATE TABLE IF NOT EXISTS sub_users_unrel (id INT, name VARCHAR)")
         .await
         .expect("Failed to create users table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create users response");
+    let _ =
+        client.read_until_message_type(b'Z').await.expect("Failed to read create users response");
 
     client
         .send_query("CREATE TABLE IF NOT EXISTS sub_orders_unrel (id INT, user_id INT)")
         .await
         .expect("Failed to create orders table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create orders response");
+    let _ =
+        client.read_until_message_type(b'Z').await.expect("Failed to read create orders response");
 
     // Insert initial data in users
     client
         .send_query("INSERT INTO sub_users_unrel VALUES (1, 'Alice')")
         .await
         .expect("Failed to insert user data");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read insert user response");
+    let _ =
+        client.read_until_message_type(b'Z').await.expect("Failed to read insert user response");
 
     // Subscribe to users table
     let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_users_unrel")
@@ -496,10 +387,7 @@ async fn test_subscription_ignores_unrelated_tables() {
         "Should not receive SubscriptionData for changes to unrelated table"
     );
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -515,59 +403,39 @@ async fn test_multiple_subscribers_same_query() {
 
     // Connect first client
     let mut client1 = TestClient::connect(server.addr()).await.expect("Failed to connect client 1");
-    client1
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client1
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client1.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Connect second client
     let mut client2 = TestClient::connect(server.addr()).await.expect("Failed to connect client 2");
-    client2
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client2
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client2.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create shared test table on client1
     client1
         .send_query("CREATE TABLE IF NOT EXISTS sub_shared_users (id INT, name VARCHAR)")
         .await
         .expect("Failed to create table");
-    let _ = client1
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Insert initial data on client1
     client1
         .send_query("INSERT INTO sub_shared_users VALUES (1, 'Alice')")
         .await
         .expect("Failed to insert data");
-    let _ = client1
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read insert response");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read insert response");
 
     // Both clients subscribe to the same query
     let query = "SELECT * FROM sub_shared_users";
-    let _sub_id1 = send_subscribe(&mut client1, query)
-        .await
-        .expect("Failed to send subscribe from client1");
+    let _sub_id1 =
+        send_subscribe(&mut client1, query).await.expect("Failed to send subscribe from client1");
     let _ = client1
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
         .expect("Failed to read subscription response");
 
-    let _sub_id2 = send_subscribe(&mut client2, query)
-        .await
-        .expect("Failed to send subscribe from client2");
+    let _sub_id2 =
+        send_subscribe(&mut client2, query).await.expect("Failed to send subscribe from client2");
     let _ = client2
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -594,23 +462,11 @@ async fn test_multiple_subscribers_same_query() {
     let messages2 = parse_backend_messages(&data2);
     let has_update2 = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
 
-    assert!(
-        has_update1,
-        "Client1 should receive SubscriptionData update"
-    );
-    assert!(
-        has_update2,
-        "Client2 should receive SubscriptionData update"
-    );
+    assert!(has_update1, "Client1 should receive SubscriptionData update");
+    assert!(has_update2, "Client2 should receive SubscriptionData update");
 
-    client1
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
-    client2
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client1.send_terminate().await.expect("Failed to send terminate");
+    client2.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -626,24 +482,15 @@ async fn test_subscription_survives_empty_result() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create empty test table
     client
         .send_query("CREATE TABLE IF NOT EXISTS sub_empty_users (id INT, name VARCHAR)")
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Subscribe to empty result set
     let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_empty_users")
@@ -658,10 +505,7 @@ async fn test_subscription_survives_empty_result() {
     let messages = parse_backend_messages(&data);
 
     let has_subscription_data = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
-    assert!(
-        has_subscription_data,
-        "Should receive SubscriptionData even for empty result set"
-    );
+    assert!(has_subscription_data, "Should receive SubscriptionData even for empty result set");
 
     // Insert data should trigger update
     client
@@ -681,10 +525,7 @@ async fn test_subscription_survives_empty_result() {
         "Should receive update notification after inserting into previously empty result"
     );
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -696,24 +537,15 @@ async fn test_rapid_mutations() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create test table
     client
         .send_query("CREATE TABLE IF NOT EXISTS sub_counter_test (id INT, value INT)")
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Subscribe
     let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_counter_test")
@@ -736,25 +568,16 @@ async fn test_rapid_mutations() {
 
     // All mutations should have completed without errors
     // Final state: 10 rows in the table
-    client
-        .send_query("SELECT COUNT(*) FROM sub_counter_test")
-        .await
-        .expect("Failed to count rows");
+    client.send_query("SELECT COUNT(*) FROM sub_counter_test").await.expect("Failed to count rows");
 
-    let data = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read count response");
+    let data = client.read_until_message_type(b'Z').await.expect("Failed to read count response");
     let messages = parse_backend_messages(&data);
 
     // Should have data row with count
     let has_data_row = messages.iter().any(|m| m.is_data_row());
     assert!(has_data_row, "Should have data row with count result");
 
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
 
@@ -766,24 +589,15 @@ async fn test_subscription_cleanup_on_disconnect() {
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
 
     // Complete handshake
-    client
-        .send_startup("testuser", "testdb")
-        .await
-        .expect("Failed to send startup");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read startup response");
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create test table
     client
         .send_query("CREATE TABLE IF NOT EXISTS sub_disconnect_test (id INT)")
         .await
         .expect("Failed to create table");
-    let _ = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read create response");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Subscribe
     let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_disconnect_test")
@@ -795,10 +609,7 @@ async fn test_subscription_cleanup_on_disconnect() {
         .expect("Failed to read subscription response");
 
     // Disconnect by sending terminate
-    client
-        .send_terminate()
-        .await
-        .expect("Failed to send terminate");
+    client.send_terminate().await.expect("Failed to send terminate");
 
     // Connection should cleanly close
     // (No panic or resource leak - verified by test not hanging)

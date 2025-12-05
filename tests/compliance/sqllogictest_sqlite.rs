@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use md5::{Digest, Md5};
-use rusqlite::{Connection, types::ValueRef};
+use rusqlite::{types::ValueRef, Connection};
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 
 #[derive(Debug)]
@@ -71,24 +71,27 @@ impl SqliteDB {
     }
 
     fn execute_query(&self, sql: &str) -> Result<DBOutput<DefaultColumnType>, TestError> {
-        let mut stmt = self.conn.prepare(sql)
+        let mut stmt = self
+            .conn
+            .prepare(sql)
             .map_err(|e| TestError(format!("Failed to prepare query: {}", e)))?;
 
         let column_count = stmt.column_count();
         let mut rows = Vec::new();
         let mut types = Vec::new();
 
-        let mut db_rows = stmt.query([])
-            .map_err(|e| TestError(format!("Failed to execute query: {}", e)))?;
+        let mut db_rows =
+            stmt.query([]).map_err(|e| TestError(format!("Failed to execute query: {}", e)))?;
 
         // Determine column types from first row
         let mut first_row = true;
-        while let Some(row) = db_rows.next()
-            .map_err(|e| TestError(format!("Failed to fetch row: {}", e)))? {
-
+        while let Some(row) =
+            db_rows.next().map_err(|e| TestError(format!("Failed to fetch row: {}", e)))?
+        {
             let mut row_values = Vec::new();
             for i in 0..column_count {
-                let value = row.get_ref(i)
+                let value = row
+                    .get_ref(i)
                     .map_err(|e| TestError(format!("Failed to get column {}: {}", i, e)))?;
 
                 // Determine type from first row
@@ -117,7 +120,9 @@ impl SqliteDB {
     }
 
     fn execute_statement(&mut self, sql: &str) -> Result<DBOutput<DefaultColumnType>, TestError> {
-        let rows_affected = self.conn.execute(sql, [])
+        let rows_affected = self
+            .conn
+            .execute(sql, [])
             .map_err(|e| TestError(format!("Failed to execute statement: {}", e)))?;
         Ok(DBOutput::StatementComplete(rows_affected as u64))
     }

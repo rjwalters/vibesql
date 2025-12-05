@@ -23,7 +23,10 @@ use std::collections::HashMap;
 
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
-use vibesql_ast::arena::{self as arena_ast, ArenaInterner, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr, Symbol};
+use vibesql_ast::arena::{
+    self as arena_ast, ArenaInterner, Expression as ArenaExpression,
+    ExtendedExpr as ArenaExtendedExpr, Symbol,
+};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -146,15 +149,13 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             ArenaExpression::Literal(val) => Ok(val.clone()),
 
             // Placeholder - inline resolution from params slice
-            ArenaExpression::Placeholder(idx) => {
-                self.params.get(*idx).cloned().ok_or_else(|| {
-                    ExecutorError::UnsupportedExpression(format!(
-                        "Parameter index {} out of bounds (available: {})",
-                        idx,
-                        self.params.len()
-                    ))
-                })
-            }
+            ArenaExpression::Placeholder(idx) => self.params.get(*idx).cloned().ok_or_else(|| {
+                ExecutorError::UnsupportedExpression(format!(
+                    "Parameter index {} out of bounds (available: {})",
+                    idx,
+                    self.params.len()
+                ))
+            }),
 
             // Numbered placeholder ($1, $2, etc.) - 1-indexed
             ArenaExpression::NumberedPlaceholder(num) => {
@@ -193,7 +194,9 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 } else {
                     Err(ExecutorError::ColumnNotFound {
                         column_name: column_str.to_string(),
-                        table_name: table_str.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                        table_name: table_str
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
                         searched_tables: self.schema.table_schemas.keys().cloned().collect(),
                         available_columns: self.get_available_columns(),
                     })
@@ -228,9 +231,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             ArenaExpression::CurrentTime { .. } => {
                 super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &self.sql_mode)
             }
-            ArenaExpression::CurrentTimestamp { .. } => {
-                super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &self.sql_mode)
-            }
+            ArenaExpression::CurrentTimestamp { .. } => super::functions::eval_scalar_function(
+                "CURRENT_TIMESTAMP",
+                &[],
+                &None,
+                &self.sql_mode,
+            ),
 
             // DEFAULT keyword
             ArenaExpression::Default => Err(ExecutorError::UnsupportedExpression(
@@ -246,9 +252,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
                         SqlValue::Null => result = SqlValue::Null,
                         SqlValue::Boolean(true) => {}
-                        _ => return Err(ExecutorError::TypeError(
-                            format!("Conjunction requires boolean operands, got {:?}", val)
-                        )),
+                        _ => {
+                            return Err(ExecutorError::TypeError(format!(
+                                "Conjunction requires boolean operands, got {:?}",
+                                val
+                            )))
+                        }
                     }
                 }
                 Ok(result)
@@ -262,9 +271,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
                         SqlValue::Null => result = SqlValue::Null,
                         SqlValue::Boolean(false) => {}
-                        _ => return Err(ExecutorError::TypeError(
-                            format!("Disjunction requires boolean operands, got {:?}", val)
-                        )),
+                        _ => {
+                            return Err(ExecutorError::TypeError(format!(
+                                "Disjunction requires boolean operands, got {:?}",
+                                val
+                            )))
+                        }
                     }
                 }
                 Ok(result)
@@ -284,16 +296,19 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         match ext {
             // Function call
             ArenaExtendedExpr::Function { name, args, character_unit } => {
-                let evaluated_args: Result<Vec<SqlValue>, _> = args
-                    .iter()
-                    .map(|arg| self.eval_with_depth(arg, row))
-                    .collect();
+                let evaluated_args: Result<Vec<SqlValue>, _> =
+                    args.iter().map(|arg| self.eval_with_depth(arg, row)).collect();
                 let char_unit = character_unit.as_ref().map(|cu| match cu {
                     arena_ast::CharacterUnit::Characters => vibesql_ast::CharacterUnit::Characters,
                     arena_ast::CharacterUnit::Octets => vibesql_ast::CharacterUnit::Octets,
                 });
                 let name_str = self.resolve(*name);
-                super::functions::eval_scalar_function(name_str, &evaluated_args?, &char_unit, &self.sql_mode)
+                super::functions::eval_scalar_function(
+                    name_str,
+                    &evaluated_args?,
+                    &char_unit,
+                    &self.sql_mode,
+                )
             }
 
             // Aggregate function - should be pre-computed
@@ -305,32 +320,27 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // CASE expression
-            ArenaExtendedExpr::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => self.eval_case(operand.as_deref(), when_clauses, else_result.as_deref(), row),
+            ArenaExtendedExpr::Case { operand, when_clauses, else_result } => {
+                self.eval_case(operand.as_deref(), when_clauses, else_result.as_deref(), row)
+            }
 
             // BETWEEN predicate
-            ArenaExtendedExpr::Between {
-                expr: inner,
-                low,
-                high,
-                negated,
-                symmetric,
-            } => {
+            ArenaExtendedExpr::Between { expr: inner, low, high, negated, symmetric } => {
                 let val = self.eval_with_depth(inner, row)?;
                 let low_val = self.eval_with_depth(low, row)?;
                 let high_val = self.eval_with_depth(high, row)?;
-                super::core::eval_between_static(&val, &low_val, &high_val, *negated, *symmetric, self.sql_mode.clone())
+                super::core::eval_between_static(
+                    &val,
+                    &low_val,
+                    &high_val,
+                    *negated,
+                    *symmetric,
+                    self.sql_mode.clone(),
+                )
             }
 
             // IN list
-            ArenaExtendedExpr::InList {
-                expr: inner,
-                values,
-                negated,
-            } => {
+            ArenaExtendedExpr::InList { expr: inner, values, negated } => {
                 let val = self.eval_with_depth(inner, row)?;
                 if matches!(val, SqlValue::Null) {
                     return Ok(SqlValue::Null);
@@ -387,11 +397,9 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // Window function - should be pre-computed
-            ArenaExtendedExpr::WindowFunction { .. } => {
-                Err(ExecutorError::UnsupportedExpression(
-                    "Window functions must be pre-computed before arena evaluation".to_string(),
-                ))
-            }
+            ArenaExtendedExpr::WindowFunction { .. } => Err(ExecutorError::UnsupportedExpression(
+                "Window functions must be pre-computed before arena evaluation".to_string(),
+            )),
 
             // POSITION function
             ArenaExtendedExpr::Position { substring, string, .. } => {
@@ -427,11 +435,9 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             | ArenaExtendedExpr::SessionVariable { .. }
             | ArenaExtendedExpr::DuplicateKeyValue { .. }
             | ArenaExtendedExpr::NextValue { .. }
-            | ArenaExtendedExpr::MatchAgainst { .. } => {
-                Err(ExecutorError::UnsupportedExpression(
-                    "Advanced expression types not supported in arena evaluator".to_string(),
-                ))
-            }
+            | ArenaExtendedExpr::MatchAgainst { .. } => Err(ExecutorError::UnsupportedExpression(
+                "Advanced expression types not supported in arena evaluator".to_string(),
+            )),
         }
     }
 
@@ -474,10 +480,17 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 }
                 let right_val = self.eval_with_depth(right, row)?;
                 // NULL AND FALSE = FALSE
-                if matches!(left_val, SqlValue::Null) && matches!(right_val, SqlValue::Boolean(false)) {
+                if matches!(left_val, SqlValue::Null)
+                    && matches!(right_val, SqlValue::Boolean(false))
+                {
                     return Ok(SqlValue::Boolean(false));
                 }
-                super::core::eval_binary_op_static(&left_val, &op, &right_val, self.sql_mode.clone())
+                super::core::eval_binary_op_static(
+                    &left_val,
+                    &op,
+                    &right_val,
+                    self.sql_mode.clone(),
+                )
             }
             BinaryOperator::Or => {
                 let left_val = self.eval_with_depth(left, row)?;
@@ -487,16 +500,28 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 }
                 let right_val = self.eval_with_depth(right, row)?;
                 // NULL OR TRUE = TRUE
-                if matches!(left_val, SqlValue::Null) && matches!(right_val, SqlValue::Boolean(true)) {
+                if matches!(left_val, SqlValue::Null)
+                    && matches!(right_val, SqlValue::Boolean(true))
+                {
                     return Ok(SqlValue::Boolean(true));
                 }
-                super::core::eval_binary_op_static(&left_val, &op, &right_val, self.sql_mode.clone())
+                super::core::eval_binary_op_static(
+                    &left_val,
+                    &op,
+                    &right_val,
+                    self.sql_mode.clone(),
+                )
             }
             _ => {
                 // Non-short-circuit: evaluate both sides
                 let left_val = self.eval_with_depth(left, row)?;
                 let right_val = self.eval_with_depth(right, row)?;
-                super::core::eval_binary_op_static(&left_val, &op, &right_val, self.sql_mode.clone())
+                super::core::eval_binary_op_static(
+                    &left_val,
+                    &op,
+                    &right_val,
+                    self.sql_mode.clone(),
+                )
             }
         }
     }
@@ -563,7 +588,11 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
     }
 
     /// Evaluate POSITION function.
-    fn eval_position(&self, substring: &SqlValue, string: &SqlValue) -> Result<SqlValue, ExecutorError> {
+    fn eval_position(
+        &self,
+        substring: &SqlValue,
+        string: &SqlValue,
+    ) -> Result<SqlValue, ExecutorError> {
         match (substring, string) {
             (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
             (SqlValue::Varchar(sub), SqlValue::Varchar(s))
@@ -594,15 +623,23 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     Some(SqlValue::Varchar(r)) | Some(SqlValue::Character(r)) => r.as_str(),
                     Some(SqlValue::Null) => return Ok(SqlValue::Null),
                     None => " ",
-                    _ => return Err(ExecutorError::TypeError(format!(
-                        "TRIM removal character must be string, got {:?}",
-                        removal_char
-                    ))),
+                    _ => {
+                        return Err(ExecutorError::TypeError(format!(
+                            "TRIM removal character must be string, got {:?}",
+                            removal_char
+                        )))
+                    }
                 };
                 let result = match position {
-                    Some(arena_ast::TrimPosition::Leading) => s.trim_start_matches(|c| remove_chars.contains(c)),
-                    Some(arena_ast::TrimPosition::Trailing) => s.trim_end_matches(|c| remove_chars.contains(c)),
-                    Some(arena_ast::TrimPosition::Both) | None => s.trim_matches(|c| remove_chars.contains(c)),
+                    Some(arena_ast::TrimPosition::Leading) => {
+                        s.trim_start_matches(|c| remove_chars.contains(c))
+                    }
+                    Some(arena_ast::TrimPosition::Trailing) => {
+                        s.trim_end_matches(|c| remove_chars.contains(c))
+                    }
+                    Some(arena_ast::TrimPosition::Both) | None => {
+                        s.trim_matches(|c| remove_chars.contains(c))
+                    }
                 };
                 Ok(SqlValue::Varchar(result.to_string()))
             }
@@ -629,10 +666,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     IntervalUnit::Month => d.month as i64,
                     IntervalUnit::Day => d.day as i64,
                     IntervalUnit::Quarter => (d.month as i64 - 1) / 3 + 1,
-                    _ => return Err(ExecutorError::UnsupportedExpression(format!(
-                        "EXTRACT {:?} from DATE not supported",
-                        field
-                    ))),
+                    _ => {
+                        return Err(ExecutorError::UnsupportedExpression(format!(
+                            "EXTRACT {:?} from DATE not supported",
+                            field
+                        )))
+                    }
                 };
                 Ok(SqlValue::Integer(result))
             }
@@ -641,10 +680,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     IntervalUnit::Hour => t.hour as i64,
                     IntervalUnit::Minute => t.minute as i64,
                     IntervalUnit::Second => t.second as i64,
-                    _ => return Err(ExecutorError::UnsupportedExpression(format!(
-                        "EXTRACT {:?} from TIME not supported",
-                        field
-                    ))),
+                    _ => {
+                        return Err(ExecutorError::UnsupportedExpression(format!(
+                            "EXTRACT {:?} from TIME not supported",
+                            field
+                        )))
+                    }
                 };
                 Ok(SqlValue::Integer(result))
             }
@@ -657,10 +698,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     IntervalUnit::Minute => ts.time.minute as i64,
                     IntervalUnit::Second => ts.time.second as i64,
                     IntervalUnit::Quarter => (ts.date.month as i64 - 1) / 3 + 1,
-                    _ => return Err(ExecutorError::UnsupportedExpression(format!(
-                        "EXTRACT {:?} from TIMESTAMP not supported",
-                        field
-                    ))),
+                    _ => {
+                        return Err(ExecutorError::UnsupportedExpression(format!(
+                            "EXTRACT {:?} from TIMESTAMP not supported",
+                            field
+                        )))
+                    }
                 };
                 Ok(SqlValue::Integer(result))
             }
@@ -714,7 +757,11 @@ mod tests {
     fn make_schema() -> CombinedSchema {
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(255) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(255) },
+                true,
+            ),
         ];
         let table_schema = TableSchema::new("test".to_string(), columns);
         CombinedSchema::from_table("test".to_string(), table_schema)
@@ -768,17 +815,11 @@ mod tests {
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
         let row = Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar("Bob".to_string())]);
 
-        let expr = ArenaExpression::ColumnRef {
-            table: None,
-            column: id_sym,
-        };
+        let expr = ArenaExpression::ColumnRef { table: None, column: id_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Integer(42));
 
-        let expr = ArenaExpression::ColumnRef {
-            table: None,
-            column: name_sym,
-        };
+        let expr = ArenaExpression::ColumnRef { table: None, column: name_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Varchar("Bob".to_string()));
     }
@@ -798,20 +839,14 @@ mod tests {
         let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Null]);
 
         let expr = ArenaExpression::IsNull {
-            expr: arena.alloc(ArenaExpression::ColumnRef {
-                table: None,
-                column: name_sym,
-            }),
+            expr: arena.alloc(ArenaExpression::ColumnRef { table: None, column: name_sym }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Boolean(true));
 
         let expr = ArenaExpression::IsNull {
-            expr: arena.alloc(ArenaExpression::ColumnRef {
-                table: None,
-                column: id_sym,
-            }),
+            expr: arena.alloc(ArenaExpression::ColumnRef { table: None, column: id_sym }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();

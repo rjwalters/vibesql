@@ -11,11 +11,11 @@ use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use crate::select::columnar::aggregate::functions::compare_for_min_max;
-use crate::select::columnar::scan::ColumnarScan;
-use crate::select::columnar::aggregate::AggregateOp;
 use super::evaluator::{eval_simple_expr, sql_value_to_f64};
 use super::simd::try_simd_aggregate;
+use crate::select::columnar::aggregate::functions::compare_for_min_max;
+use crate::select::columnar::aggregate::AggregateOp;
+use crate::select::columnar::scan::ColumnarScan;
 
 /// Threshold for using SIMD acceleration (same as vectorized filter threshold)
 const SIMD_THRESHOLD: usize = 100;
@@ -31,7 +31,11 @@ fn try_vectorized_binary_aggregate(
     filter_bitmap: Option<&[bool]>,
     schema: &CombinedSchema,
 ) -> Result<Option<SqlValue>, ExecutorError> {
-    log::trace!("[VecBinary] Checking vectorized binary aggregate for {} rows, op={:?}", rows.len(), op);
+    log::trace!(
+        "[VecBinary] Checking vectorized binary aggregate for {} rows, op={:?}",
+        rows.len(),
+        op
+    );
 
     // Only optimize SUM and AVG for now
     if !matches!(op, AggregateOp::Sum | AggregateOp::Avg) {
@@ -52,16 +56,14 @@ fn try_vectorized_binary_aggregate(
         let (left_col, right_col) = match (left.as_ref(), right.as_ref()) {
             (
                 Expression::ColumnRef { table: t1, column: c1 },
-                Expression::ColumnRef { table: t2, column: c2 }
+                Expression::ColumnRef { table: t2, column: c2 },
             ) => {
-                let idx1 = schema.get_column_index(t1.as_deref(), c1)
-                    .ok_or_else(|| ExecutorError::UnsupportedExpression(
-                        format!("Column not found: {}", c1)
-                    ))?;
-                let idx2 = schema.get_column_index(t2.as_deref(), c2)
-                    .ok_or_else(|| ExecutorError::UnsupportedExpression(
-                        format!("Column not found: {}", c2)
-                    ))?;
+                let idx1 = schema.get_column_index(t1.as_deref(), c1).ok_or_else(|| {
+                    ExecutorError::UnsupportedExpression(format!("Column not found: {}", c1))
+                })?;
+                let idx2 = schema.get_column_index(t2.as_deref(), c2).ok_or_else(|| {
+                    ExecutorError::UnsupportedExpression(format!("Column not found: {}", c2))
+                })?;
                 (idx1, idx2)
             }
             _ => return Ok(None), // Not simple col * col pattern
@@ -85,12 +87,10 @@ fn try_vectorized_binary_aggregate(
             }
 
             // Get values from both columns
-            let val1 = scan.row(row_idx)
-                .and_then(|row| row.get(left_col))
-                .unwrap_or(&SqlValue::Null);
-            let val2 = scan.row(row_idx)
-                .and_then(|row| row.get(right_col))
-                .unwrap_or(&SqlValue::Null);
+            let val1 =
+                scan.row(row_idx).and_then(|row| row.get(left_col)).unwrap_or(&SqlValue::Null);
+            let val2 =
+                scan.row(row_idx).and_then(|row| row.get(right_col)).unwrap_or(&SqlValue::Null);
 
             // Convert to f64 and multiply
             if let (Some(v1), Some(v2)) = (sql_value_to_f64(val1), sql_value_to_f64(val2)) {
@@ -155,7 +155,11 @@ pub fn compute_expression_aggregate(
     // Try SIMD path for large datasets (more general than vectorized binary)
     // Only when no filter bitmap (vectorized binary handles filtered case)
     if rows.len() >= SIMD_THRESHOLD && filter_bitmap.is_none() {
-        log::debug!("[ExprAgg] Attempting Arrow SIMD path ({} >= {} rows)", rows.len(), SIMD_THRESHOLD);
+        log::debug!(
+            "[ExprAgg] Attempting Arrow SIMD path ({} >= {} rows)",
+            rows.len(),
+            SIMD_THRESHOLD
+        );
         if let Ok(result) = try_simd_aggregate(rows, expr, op, schema) {
             log::debug!("[ExprAgg] Arrow SIMD path succeeded");
             return Ok(result);
@@ -163,7 +167,11 @@ pub fn compute_expression_aggregate(
         log::debug!("[ExprAgg] Arrow SIMD path failed, falling back to scalar");
         // Fall through to scalar path if SIMD fails
     } else if rows.len() < SIMD_THRESHOLD {
-        log::debug!("[ExprAgg] Below SIMD threshold ({} < {}), using vectorized/scalar path", rows.len(), SIMD_THRESHOLD);
+        log::debug!(
+            "[ExprAgg] Below SIMD threshold ({} < {}), using vectorized/scalar path",
+            rows.len(),
+            SIMD_THRESHOLD
+        );
     }
 
     // Scalar path (for small datasets, complex expressions, or when SIMD not applicable)
@@ -248,11 +256,12 @@ fn compute_scalar_aggregate(
                             }
                             float_sum += v;
                         }
-                        SqlValue::Null => {}, // Already checked above
+                        SqlValue::Null => {} // Already checked above
                         _ => {
-                            return Err(ExecutorError::UnsupportedExpression(
-                                format!("Cannot compute SUM on non-numeric value: {:?}", value)
-                            ))
+                            return Err(ExecutorError::UnsupportedExpression(format!(
+                                "Cannot compute SUM on non-numeric value: {:?}",
+                                value
+                            )))
                         }
                     }
                     count += 1;
@@ -287,8 +296,15 @@ fn compute_scalar_aggregate(
         }
         AggregateOp::Avg => {
             // AVG(expr) = SUM(expr) / COUNT(expr)
-            let sum_result = compute_expression_aggregate(rows, expr, AggregateOp::Sum, filter_bitmap, schema)?;
-            let count_result = compute_expression_aggregate(rows, expr, AggregateOp::Count, filter_bitmap, schema)?;
+            let sum_result =
+                compute_expression_aggregate(rows, expr, AggregateOp::Sum, filter_bitmap, schema)?;
+            let count_result = compute_expression_aggregate(
+                rows,
+                expr,
+                AggregateOp::Count,
+                filter_bitmap,
+                schema,
+            )?;
 
             match (sum_result, count_result) {
                 (SqlValue::Integer(sum), SqlValue::Integer(count)) if count > 0 => {

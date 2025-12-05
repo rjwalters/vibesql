@@ -75,11 +75,10 @@ pub fn gather_single_column(
     selection: &SelectionVector,
     column_idx: usize,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
-    let column = batch.column(column_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-            column_index: column_idx,
-            batch_columns: batch.column_count(),
-        })?;
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
 
     gather_from_column_array(column, selection)
 }
@@ -112,109 +111,82 @@ pub fn gather_column_array(
 ) -> Result<ColumnArray, ExecutorError> {
     match column {
         ColumnArray::Int64(values, nulls) => {
-            let gathered: Vec<i64> = selection
-                .iter()
-                .map(|idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<i64> = selection.iter().map(|idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::Int64(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::Int32(values, nulls) => {
-            let gathered: Vec<i32> = selection
-                .iter()
-                .map(|idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<i32> = selection.iter().map(|idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::Int32(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::Float64(values, nulls) => {
-            let gathered: Vec<f64> = selection
-                .iter()
-                .map(|idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<f64> = selection.iter().map(|idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::Float64(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::Float32(values, nulls) => {
-            let gathered: Vec<f32> = selection
-                .iter()
-                .map(|idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<f32> = selection.iter().map(|idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::Float32(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::String(values, nulls) => {
-            let gathered: Vec<String> = selection
-                .iter()
-                .map(|idx| values[idx as usize].clone())
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<String> =
+                selection.iter().map(|idx| values[idx as usize].clone()).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::String(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::FixedString(values, nulls) => {
-            let gathered: Vec<String> = selection
-                .iter()
-                .map(|idx| values[idx as usize].clone())
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<String> =
+                selection.iter().map(|idx| values[idx as usize].clone()).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::FixedString(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::Date(values, nulls) => {
-            let gathered: Vec<i32> = selection
-                .iter()
-                .map(|idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<i32> = selection.iter().map(|idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::Date(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::Timestamp(values, nulls) => {
-            let gathered: Vec<i64> = selection
-                .iter()
-                .map(|idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<i64> = selection.iter().map(|idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::Timestamp(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::Boolean(values, nulls) => {
-            let gathered: Vec<u8> = selection
-                .iter()
-                .map(|idx| values[idx as usize])
-                .collect();
-            let gathered_nulls = nulls.as_ref().map(|n| {
-                Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>())
-            });
+            let gathered: Vec<u8> = selection.iter().map(|idx| values[idx as usize]).collect();
+            let gathered_nulls = nulls
+                .as_ref()
+                .map(|n| Arc::new(selection.iter().map(|idx| n[idx as usize]).collect::<Vec<_>>()));
             Ok(ColumnArray::Boolean(Arc::new(gathered), gathered_nulls))
         }
 
         ColumnArray::Mixed(values) => {
-            let gathered: Vec<SqlValue> = selection
-                .iter()
-                .map(|idx| values[idx as usize].clone())
-                .collect();
+            let gathered: Vec<SqlValue> =
+                selection.iter().map(|idx| values[idx as usize].clone()).collect();
             Ok(ColumnArray::Mixed(Arc::new(gathered)))
         }
     }
@@ -230,8 +202,8 @@ pub fn gather_batch(
     let mut columns = Vec::with_capacity(batch.column_count());
 
     for col_idx in 0..batch.column_count() {
-        let column = batch.column(col_idx)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        let column =
+            batch.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: col_idx,
                 batch_columns: batch.column_count(),
             })?;
@@ -253,8 +225,8 @@ pub fn gather_batch_columns(
     let mut names = batch.column_names().map(|_| Vec::with_capacity(column_indices.len()));
 
     for &col_idx in column_indices {
-        let column = batch.column(col_idx)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        let column =
+            batch.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: col_idx,
                 batch_columns: batch.column_count(),
             })?;
@@ -277,14 +249,8 @@ pub fn gather_batch_columns(
 /// Gather from row-based data
 ///
 /// Fallback for when data is not columnar.
-pub fn gather_rows(
-    rows: &[Row],
-    selection: &SelectionVector,
-) -> Vec<Row> {
-    selection
-        .iter()
-        .map(|idx| rows[idx as usize].clone())
-        .collect()
+pub fn gather_rows(rows: &[Row], selection: &SelectionVector) -> Vec<Row> {
+    selection.iter().map(|idx| rows[idx as usize].clone()).collect()
 }
 
 /// Gather specific columns from row-based data
@@ -378,11 +344,7 @@ pub fn estimate_savings(
     let index_overhead = selected_rows * std::mem::size_of::<u32>();
     let late = index_overhead + (selected_rows * projected_columns * avg_value_bytes);
 
-    let savings = if early > 0 {
-        1.0 - (late as f64 / early as f64)
-    } else {
-        0.0
-    };
+    let savings = if early > 0 { 1.0 - (late as f64 / early as f64) } else { 0.0 };
 
     (early, late, savings)
 }
@@ -394,16 +356,20 @@ mod gather_tests {
     fn sample_batch() -> ColumnarBatch {
         let columns = vec![
             ColumnArray::Int64(Arc::new(vec![1, 2, 3, 4, 5]), None),
-            ColumnArray::String(Arc::new(vec![
-                "Alice".into(),
-                "Bob".into(),
-                "Carol".into(),
-                "Dave".into(),
-                "Eve".into(),
-            ]), None),
+            ColumnArray::String(
+                Arc::new(vec![
+                    "Alice".into(),
+                    "Bob".into(),
+                    "Carol".into(),
+                    "Dave".into(),
+                    "Eve".into(),
+                ]),
+                None,
+            ),
             ColumnArray::Float64(Arc::new(vec![10.0, 20.0, 30.0, 40.0, 50.0]), None),
         ];
-        ColumnarBatch::from_columns(columns, Some(vec!["id".into(), "name".into(), "score".into()])).unwrap()
+        ColumnarBatch::from_columns(columns, Some(vec!["id".into(), "name".into(), "score".into()]))
+            .unwrap()
     }
 
     #[test]
@@ -498,7 +464,8 @@ mod gather_tests {
                 ColumnArray::String(Arc::new(vec!["A".into(), "B".into()]), None),
             ],
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let right = ColumnarBatch::from_columns(
             vec![
@@ -506,12 +473,14 @@ mod gather_tests {
                 ColumnArray::String(Arc::new(vec!["X".into(), "Y".into()]), None),
             ],
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let left_indices = vec![0, 0, 1];
         let right_indices = vec![0, 1, u32::MAX]; // Last is left outer NULL
 
-        let rows = gather_join_output(&left, &right, &left_indices, &right_indices, None, None).unwrap();
+        let rows =
+            gather_join_output(&left, &right, &left_indices, &right_indices, None, None).unwrap();
 
         assert_eq!(rows.len(), 3);
 

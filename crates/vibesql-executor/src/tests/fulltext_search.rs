@@ -8,7 +8,11 @@ fn test_match_against_natural_language_single_column() {
     let schema = vibesql_catalog::TableSchema::new(
         "ARTICLES".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "title".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(200) },
@@ -71,7 +75,11 @@ fn test_match_against_multiple_columns() {
     let schema = vibesql_catalog::TableSchema::new(
         "ARTICLES".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "title".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(200) },
@@ -134,7 +142,11 @@ fn test_match_against_no_matches() {
     let schema = vibesql_catalog::TableSchema::new(
         "ARTICLES".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "title".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(200) },
@@ -181,7 +193,11 @@ fn test_match_against_boolean_mode_required() {
     let schema = vibesql_catalog::TableSchema::new(
         "ARTICLES".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "title".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(200) },

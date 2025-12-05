@@ -72,7 +72,7 @@ impl SelectExecutor<'_> {
         if group_cols.len() != simple_exprs.len() {
             log::debug!("GROUP BY contains non-column expressions, falling back to row-oriented");
             return Err(ExecutorError::Other(
-                "GROUP BY with non-column expressions not supported in columnar path".to_string()
+                "GROUP BY with non-column expressions not supported in columnar path".to_string(),
             ));
         }
 
@@ -85,9 +85,9 @@ impl SelectExecutor<'_> {
         //   SUM(l_extendedprice * (1 - l_discount) * (1 + l_tax))  -- E2 = E1 * (1 + l_tax)
         // We detect that E1 is a sub-expression of E2 and compute E1 first,
         // then use the cached column to compute E2, avoiding redundant arithmetic.
-        let has_expression_aggs = aggregates.iter().any(|spec| {
-            matches!(&spec.source, columnar::AggregateSource::Expression(_))
-        });
+        let has_expression_aggs = aggregates
+            .iter()
+            .any(|spec| matches!(&spec.source, columnar::AggregateSource::Expression(_)));
 
         #[cfg(feature = "profile-q6")]
         let expr_start = std::time::Instant::now();
@@ -99,14 +99,17 @@ impl SelectExecutor<'_> {
 
             // Expression cache: maps expression hash to column index
             // This allows us to reuse previously computed expression columns
-            let mut expr_cache: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+            let mut expr_cache: std::collections::HashMap<u64, usize> =
+                std::collections::HashMap::new();
 
             // First pass: collect all expressions and sort by complexity (simpler first)
             // This ensures sub-expressions are evaluated before expressions that use them
             let mut expr_indices: Vec<(usize, &columnar::AggregateSpec)> = aggregates
                 .iter()
                 .enumerate()
-                .filter(|(_, spec)| matches!(&spec.source, columnar::AggregateSource::Expression(_)))
+                .filter(|(_, spec)| {
+                    matches!(&spec.source, columnar::AggregateSource::Expression(_))
+                })
                 .collect();
 
             // Sort by expression depth (simpler expressions first for CSE)
@@ -119,7 +122,8 @@ impl SelectExecutor<'_> {
             });
 
             // Build a mapping of original expression index -> computed column index
-            let mut computed_expr_cols: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            let mut computed_expr_cols: std::collections::HashMap<usize, usize> =
+                std::collections::HashMap::new();
 
             // Second pass: evaluate expressions in order of complexity
             for (orig_idx, spec) in &expr_indices {
@@ -128,7 +132,10 @@ impl SelectExecutor<'_> {
 
                     if let Some(&cached_col_idx) = expr_cache.get(&expr_hash) {
                         // Exact expression match - reuse cached column
-                        log::debug!("GROUP BY CSE: reusing cached column {} for expression", cached_col_idx);
+                        log::debug!(
+                            "GROUP BY CSE: reusing cached column {} for expression",
+                            cached_col_idx
+                        );
                         computed_expr_cols.insert(*orig_idx, cached_col_idx);
                     } else {
                         // Check if this expression can be computed using a cached sub-expression
@@ -170,7 +177,8 @@ impl SelectExecutor<'_> {
                         expanded_agg_cols.push((0, columnar::AggregateOp::Count));
                     }
                     columnar::AggregateSource::Expression(_) => {
-                        let col_idx = computed_expr_cols.get(&orig_idx)
+                        let col_idx = computed_expr_cols
+                            .get(&orig_idx)
                             .copied()
                             .expect("Expression should have been computed in second pass");
                         expanded_agg_cols.push((col_idx, spec.op));
@@ -192,12 +200,10 @@ impl SelectExecutor<'_> {
             // No expression aggregates - convert directly (no batch clone needed)
             let agg_cols: Vec<(usize, columnar::AggregateOp)> = aggregates
                 .iter()
-                .map(|spec| {
-                    match &spec.source {
-                        columnar::AggregateSource::Column(idx) => (*idx, spec.op),
-                        columnar::AggregateSource::CountStar => (0, columnar::AggregateOp::Count),
-                        columnar::AggregateSource::Expression(_) => unreachable!(),
-                    }
+                .map(|spec| match &spec.source {
+                    columnar::AggregateSource::Column(idx) => (*idx, spec.op),
+                    columnar::AggregateSource::CountStar => (0, columnar::AggregateOp::Count),
+                    columnar::AggregateSource::Expression(_) => unreachable!(),
                 })
                 .collect();
             (filtered_batch, agg_cols)
@@ -258,13 +264,11 @@ impl SelectExecutor<'_> {
         // Resolve group column indices
         let group_cols: Vec<usize> = simple_exprs
             .iter()
-            .filter_map(|expr| {
-                match expr {
-                    Expression::ColumnRef { table, column } => {
-                        schema.get_column_index(table.as_deref(), column.as_str())
-                    }
-                    _ => None,
+            .filter_map(|expr| match expr {
+                Expression::ColumnRef { table, column } => {
+                    schema.get_column_index(table.as_deref(), column.as_str())
                 }
+                _ => None,
             })
             .collect();
 
@@ -274,7 +278,9 @@ impl SelectExecutor<'_> {
         }
 
         // Extract select expressions
-        let select_exprs: Vec<_> = stmt.select_list.iter()
+        let select_exprs: Vec<_> = stmt
+            .select_list
+            .iter()
             .filter_map(|item| match item {
                 vibesql_ast::SelectItem::Expression { expr, .. } => Some(expr.clone()),
                 _ => None,

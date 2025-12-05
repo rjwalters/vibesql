@@ -33,9 +33,7 @@ impl ByteOrder {
         match val {
             0 => Ok(ByteOrder::BigEndian),
             1 => Ok(ByteOrder::LittleEndian),
-            _ => Err(ExecutorError::UnsupportedFeature(
-                format!("Invalid WKB byte order: {}", val),
-            )),
+            _ => Err(ExecutorError::UnsupportedFeature(format!("Invalid WKB byte order: {}", val))),
         }
     }
 }
@@ -67,19 +65,26 @@ fn parse_geometry(cursor: &mut Cursor<&[u8]>) -> Result<Geometry, ExecutorError>
         WKB_MULTILINESTRING => parse_multilinestring(cursor, byte_order),
         WKB_MULTIPOLYGON => parse_multipolygon(cursor, byte_order),
         WKB_GEOMETRYCOLLECTION => parse_geometrycollection(cursor, byte_order),
-        _ => Err(ExecutorError::UnsupportedFeature(
-            format!("Unknown WKB geometry type: {}", pure_type),
-        )),
+        _ => Err(ExecutorError::UnsupportedFeature(format!(
+            "Unknown WKB geometry type: {}",
+            pure_type
+        ))),
     }
 }
 
-fn parse_point(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Geometry, ExecutorError> {
+fn parse_point(
+    cursor: &mut Cursor<&[u8]>,
+    byte_order: ByteOrder,
+) -> Result<Geometry, ExecutorError> {
     let x = read_f64(cursor, byte_order)?;
     let y = read_f64(cursor, byte_order)?;
     Ok(Geometry::Point { x, y })
 }
 
-fn parse_linestring(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Geometry, ExecutorError> {
+fn parse_linestring(
+    cursor: &mut Cursor<&[u8]>,
+    byte_order: ByteOrder,
+) -> Result<Geometry, ExecutorError> {
     let num_points = read_u32(cursor, byte_order)? as usize;
     let mut points = Vec::with_capacity(num_points);
 
@@ -98,7 +103,10 @@ fn parse_linestring(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result
     Ok(Geometry::LineString { points })
 }
 
-fn parse_polygon(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Geometry, ExecutorError> {
+fn parse_polygon(
+    cursor: &mut Cursor<&[u8]>,
+    byte_order: ByteOrder,
+) -> Result<Geometry, ExecutorError> {
     let num_rings = read_u32(cursor, byte_order)? as usize;
     let mut rings = Vec::with_capacity(num_rings);
 
@@ -124,7 +132,10 @@ fn parse_polygon(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Ge
     Ok(Geometry::Polygon { rings })
 }
 
-fn parse_multipoint(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Geometry, ExecutorError> {
+fn parse_multipoint(
+    cursor: &mut Cursor<&[u8]>,
+    byte_order: ByteOrder,
+) -> Result<Geometry, ExecutorError> {
     let num_points = read_u32(cursor, byte_order)? as usize;
     let mut points = Vec::with_capacity(num_points);
 
@@ -132,7 +143,7 @@ fn parse_multipoint(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result
         // Each point in multipoint has its own header
         let _ = read_byte_order(cursor)?;
         let geom_type = read_u32(cursor, byte_order)?;
-        
+
         if (geom_type & !EWKB_SRID_FLAG) != WKB_POINT {
             return Err(ExecutorError::UnsupportedFeature(
                 "Invalid MULTIPOINT geometry".to_string(),
@@ -153,7 +164,10 @@ fn parse_multipoint(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result
     Ok(Geometry::MultiPoint { points })
 }
 
-fn parse_multilinestring(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Geometry, ExecutorError> {
+fn parse_multilinestring(
+    cursor: &mut Cursor<&[u8]>,
+    byte_order: ByteOrder,
+) -> Result<Geometry, ExecutorError> {
     let num_lines = read_u32(cursor, byte_order)? as usize;
     let mut lines = Vec::with_capacity(num_lines);
 
@@ -161,7 +175,7 @@ fn parse_multilinestring(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> R
         // Each linestring in multilinestring has its own header
         let _ = read_byte_order(cursor)?;
         let geom_type = read_u32(cursor, byte_order)?;
-        
+
         if (geom_type & !EWKB_SRID_FLAG) != WKB_LINESTRING {
             return Err(ExecutorError::UnsupportedFeature(
                 "Invalid MULTILINESTRING geometry".to_string(),
@@ -189,7 +203,10 @@ fn parse_multilinestring(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> R
     Ok(Geometry::MultiLineString { lines })
 }
 
-fn parse_multipolygon(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Geometry, ExecutorError> {
+fn parse_multipolygon(
+    cursor: &mut Cursor<&[u8]>,
+    byte_order: ByteOrder,
+) -> Result<Geometry, ExecutorError> {
     let num_polygons = read_u32(cursor, byte_order)? as usize;
     let mut polygons = Vec::with_capacity(num_polygons);
 
@@ -197,7 +214,7 @@ fn parse_multipolygon(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Resu
         // Each polygon in multipolygon has its own header
         let _ = read_byte_order(cursor)?;
         let geom_type = read_u32(cursor, byte_order)?;
-        
+
         if (geom_type & !EWKB_SRID_FLAG) != WKB_POLYGON {
             return Err(ExecutorError::UnsupportedFeature(
                 "Invalid MULTIPOLYGON geometry".to_string(),
@@ -232,7 +249,10 @@ fn parse_multipolygon(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Resu
     Ok(Geometry::MultiPolygon { polygons })
 }
 
-fn parse_geometrycollection(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<Geometry, ExecutorError> {
+fn parse_geometrycollection(
+    cursor: &mut Cursor<&[u8]>,
+    byte_order: ByteOrder,
+) -> Result<Geometry, ExecutorError> {
     let num_geoms = read_u32(cursor, byte_order)? as usize;
     let mut geometries = Vec::with_capacity(num_geoms);
 
@@ -254,17 +274,17 @@ fn parse_geometrycollection(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -
 
 fn read_byte_order(cursor: &mut Cursor<&[u8]>) -> Result<ByteOrder, ExecutorError> {
     let mut buf = [0u8; 1];
-    cursor.read_exact(&mut buf).map_err(|_| {
-        ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string())
-    })?;
+    cursor
+        .read_exact(&mut buf)
+        .map_err(|_| ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string()))?;
     ByteOrder::from_u8(buf[0])
 }
 
 fn read_u32(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<u32, ExecutorError> {
     let mut buf = [0u8; 4];
-    cursor.read_exact(&mut buf).map_err(|_| {
-        ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string())
-    })?;
+    cursor
+        .read_exact(&mut buf)
+        .map_err(|_| ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string()))?;
 
     Ok(match byte_order {
         ByteOrder::LittleEndian => u32::from_le_bytes(buf),
@@ -274,9 +294,9 @@ fn read_u32(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<u32, Ex
 
 fn read_i32(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<i32, ExecutorError> {
     let mut buf = [0u8; 4];
-    cursor.read_exact(&mut buf).map_err(|_| {
-        ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string())
-    })?;
+    cursor
+        .read_exact(&mut buf)
+        .map_err(|_| ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string()))?;
 
     Ok(match byte_order {
         ByteOrder::LittleEndian => i32::from_le_bytes(buf),
@@ -286,9 +306,9 @@ fn read_i32(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<i32, Ex
 
 fn read_f64(cursor: &mut Cursor<&[u8]>, byte_order: ByteOrder) -> Result<f64, ExecutorError> {
     let mut buf = [0u8; 8];
-    cursor.read_exact(&mut buf).map_err(|_| {
-        ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string())
-    })?;
+    cursor
+        .read_exact(&mut buf)
+        .map_err(|_| ExecutorError::UnsupportedFeature("Unexpected end of WKB data".to_string()))?;
 
     Ok(match byte_order {
         ByteOrder::LittleEndian => f64::from_le_bytes(buf),

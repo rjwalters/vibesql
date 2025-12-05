@@ -54,9 +54,7 @@ impl ColumnarPipeline {
     /// SIMD acceleration is provided via LLVM auto-vectorization.
     #[inline]
     pub fn new() -> Self {
-        Self {
-            use_simd: true,
-        }
+        Self { use_simd: true }
     }
 
     /// Create a columnar pipeline with explicit SIMD setting.
@@ -65,9 +63,7 @@ impl ColumnarPipeline {
     #[inline]
     #[allow(dead_code)]
     pub fn with_simd(use_simd: bool) -> Self {
-        Self {
-            use_simd,
-        }
+        Self { use_simd }
     }
 }
 
@@ -80,7 +76,10 @@ impl Default for ColumnarPipeline {
 impl ExecutionPipeline for ColumnarPipeline {
     /// Create an evaluator with context for columnar execution.
     #[inline]
-    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
+    fn create_evaluator<'a>(
+        &self,
+        ctx: &'a ExecutionContext<'a>,
+    ) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
         ctx.create_evaluator()
     }
 
@@ -123,11 +122,8 @@ impl ExecutionPipeline for ColumnarPipeline {
             }
 
             // Apply SIMD-accelerated filtering
-            let filtered_batch = if predicates.is_empty() {
-                batch
-            } else {
-                simd_filter_batch(&batch, &predicates)?
-            };
+            let filtered_batch =
+                if predicates.is_empty() { batch } else { simd_filter_batch(&batch, &predicates)? };
 
             // Return columnar batch output (defer row conversion to final stage)
             return Ok(PipelineOutput::from_batch(filtered_batch));
@@ -160,11 +156,8 @@ impl ExecutionPipeline for ColumnarPipeline {
         let batch = ColumnarBatch::from_rows(&rows)?;
 
         // Apply SIMD-accelerated filtering
-        let filtered_batch = if predicates.is_empty() {
-            batch
-        } else {
-            simd_filter_batch(&batch, &predicates)?
-        };
+        let filtered_batch =
+            if predicates.is_empty() { batch } else { simd_filter_batch(&batch, &predicates)? };
 
         // Return columnar batch output (defer row conversion to final stage)
         Ok(PipelineOutput::from_batch(filtered_batch))
@@ -292,9 +285,8 @@ impl ExecutionPipeline for ColumnarPipeline {
         }
 
         // Compute aggregates using batch-native operations
-        let needs_schema = agg_specs
-            .iter()
-            .any(|spec| matches!(spec.source, AggregateSource::Expression(_)));
+        let needs_schema =
+            agg_specs.iter().any(|spec| matches!(spec.source, AggregateSource::Expression(_)));
         let schema_ref = if needs_schema { Some(ctx.schema) } else { None };
 
         let results =
@@ -411,19 +403,15 @@ impl ColumnarPipeline {
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         match expr {
             Expression::Literal(val) => Ok(val.clone()),
-            Expression::AggregateFunction { name, .. } => {
-                match name.to_uppercase().as_str() {
-                    "COUNT" => Ok(vibesql_types::SqlValue::Integer(0)),
-                    _ => Ok(vibesql_types::SqlValue::Null),
-                }
-            }
+            Expression::AggregateFunction { name, .. } => match name.to_uppercase().as_str() {
+                "COUNT" => Ok(vibesql_types::SqlValue::Integer(0)),
+                _ => Ok(vibesql_types::SqlValue::Null),
+            },
             Expression::UnaryOp { op, expr: inner } => {
                 let inner_val = Self::evaluate_empty_aggregate(inner, evaluator)?;
                 let dummy_row = vibesql_storage::Row::new(vec![]);
-                let unary_expr = Expression::UnaryOp {
-                    op: *op,
-                    expr: Box::new(Expression::Literal(inner_val)),
-                };
+                let unary_expr =
+                    Expression::UnaryOp { op: *op, expr: Box::new(Expression::Literal(inner_val)) };
                 evaluator.eval(&unary_expr, &dummy_row)
             }
             Expression::BinaryOp { left, op, right } => {
@@ -437,12 +425,10 @@ impl ColumnarPipeline {
                 };
                 evaluator.eval(&binary_expr, &dummy_row)
             }
-            Expression::Function { name, .. } => {
-                match name.to_uppercase().as_str() {
-                    "COUNT" => Ok(vibesql_types::SqlValue::Integer(0)),
-                    _ => Ok(vibesql_types::SqlValue::Null),
-                }
-            }
+            Expression::Function { name, .. } => match name.to_uppercase().as_str() {
+                "COUNT" => Ok(vibesql_types::SqlValue::Integer(0)),
+                _ => Ok(vibesql_types::SqlValue::Null),
+            },
             Expression::Cast { expr: inner, data_type } => {
                 let inner_val = Self::evaluate_empty_aggregate(inner, evaluator)?;
                 crate::evaluator::casting::cast_value(
@@ -568,10 +554,7 @@ mod tests {
 
         let sum_expr = Expression::AggregateFunction {
             name: "SUM".to_string(),
-            args: vec![Expression::ColumnRef {
-                table: None,
-                column: "x".to_string(),
-            }],
+            args: vec![Expression::ColumnRef { table: None, column: "x".to_string() }],
             distinct: false,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&sum_expr, &evaluator).unwrap();
@@ -587,10 +570,7 @@ mod tests {
         for agg_name in &["AVG", "MIN", "MAX"] {
             let expr = Expression::AggregateFunction {
                 name: agg_name.to_string(),
-                args: vec![Expression::ColumnRef {
-                    table: None,
-                    column: "x".to_string(),
-                }],
+                args: vec![Expression::ColumnRef { table: None, column: "x".to_string() }],
                 distinct: false,
             };
             let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
@@ -690,10 +670,7 @@ mod tests {
         let evaluator = ctx.create_evaluator();
 
         // Column reference without aggregate should return NULL
-        let expr = Expression::ColumnRef {
-            table: None,
-            column: "x".to_string(),
-        };
+        let expr = Expression::ColumnRef { table: None, column: "x".to_string() };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Null);
     }
@@ -717,10 +694,7 @@ mod tests {
                 distinct: false,
             }),
         };
-        let select_items = vec![SelectItem::Expression {
-            expr: complex_agg,
-            alias: None,
-        }];
+        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None }];
 
         // fallback_aggregation should return UnsupportedFeature for non-empty rows
         let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);
@@ -752,10 +726,7 @@ mod tests {
                 distinct: false,
             }),
         };
-        let select_items = vec![SelectItem::Expression {
-            expr: complex_agg,
-            alias: None,
-        }];
+        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None }];
 
         // fallback_aggregation should work for empty rows (returns -0 = 0)
         let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);

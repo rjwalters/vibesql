@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use crate::schema::CombinedSchema;
+use vibesql_ast::BinaryOperator;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::DataType;
-use vibesql_ast::BinaryOperator;
 
-use crate::select::columnar::batch::{ColumnarBatch, ColumnArray};
+use crate::select::columnar::batch::{ColumnArray, ColumnarBatch};
 
 fn make_test_schema() -> CombinedSchema {
     let schema = TableSchema::new(
@@ -23,46 +23,32 @@ fn make_test_schema() -> CombinedSchema {
 
 fn make_test_batch() -> ColumnarBatch {
     // Create a batch with price, discount, and quantity columns
-    let price_col = ColumnArray::Float64(
-        Arc::new(vec![100.0, 200.0, 300.0, 400.0]),
-        None,
-    );
-    let discount_col = ColumnArray::Float64(
-        Arc::new(vec![0.1, 0.2, 0.15, 0.05]),
-        None,
-    );
-    let quantity_col = ColumnArray::Int64(
-        Arc::new(vec![10, 20, 15, 25]),
-        None,
-    );
+    let price_col = ColumnArray::Float64(Arc::new(vec![100.0, 200.0, 300.0, 400.0]), None);
+    let discount_col = ColumnArray::Float64(Arc::new(vec![0.1, 0.2, 0.15, 0.05]), None);
+    let quantity_col = ColumnArray::Int64(Arc::new(vec![10, 20, 15, 25]), None);
 
     ColumnarBatch::from_columns(
         vec![price_col, discount_col, quantity_col],
         Some(vec!["price".to_string(), "discount".to_string(), "quantity".to_string()]),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 #[test]
 fn test_batch_expression_aggregate_multiply() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
 
     // Test SUM(price * discount)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "discount".to_string(),
-        }),
+        right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
     };
 
     let result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &schema)
@@ -79,25 +65,19 @@ fn test_batch_expression_aggregate_multiply() {
 
 #[test]
 fn test_batch_expression_aggregate_avg() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
 
     // Test AVG(price * discount)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "discount".to_string(),
-        }),
+        right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
     };
 
     let result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Avg, &schema)
@@ -114,25 +94,19 @@ fn test_batch_expression_aggregate_avg() {
 
 #[test]
 fn test_batch_expression_aggregate_mixed_types() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
 
     // Test SUM(price * quantity) - Float64 * Int64
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "quantity".to_string(),
-        }),
+        right: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
     };
 
     let result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &schema)
@@ -149,20 +123,17 @@ fn test_batch_expression_aggregate_mixed_types() {
 
 #[test]
 fn test_batch_expression_aggregate_with_literal() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
 
     // Test SUM(price * 2)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
         right: Box::new(Expression::Literal(SqlValue::Integer(2))),
     };
@@ -181,28 +152,22 @@ fn test_batch_expression_aggregate_with_literal() {
 
 #[test]
 fn test_batch_expression_aggregate_nested() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
 
     // Test SUM(price * (1 - discount))
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
         right: Box::new(Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Double(1.0))),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "discount".to_string(),
-            }),
+            right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
         }),
     };
 
@@ -220,25 +185,19 @@ fn test_batch_expression_aggregate_nested() {
 
 #[test]
 fn test_batch_expression_aggregate_min_max() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
 
     // Test MIN(price * discount)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "discount".to_string(),
-        }),
+        right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
     };
 
     let min_result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Min, &schema)
@@ -265,10 +224,10 @@ fn test_batch_expression_aggregate_min_max() {
 
 #[test]
 fn test_batch_expression_aggregate_empty_batch() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     let batch = ColumnarBatch::from_columns(
         vec![
@@ -276,7 +235,8 @@ fn test_batch_expression_aggregate_empty_batch() {
             ColumnArray::Float64(Arc::new(vec![]), None),
         ],
         Some(vec!["price".to_string(), "discount".to_string()]),
-    ).unwrap();
+    )
+    .unwrap();
 
     let schema = TableSchema::new(
         "test".to_string(),
@@ -288,49 +248,43 @@ fn test_batch_expression_aggregate_empty_batch() {
     let combined_schema = CombinedSchema::from_table("test".to_string(), schema);
 
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "discount".to_string(),
-        }),
+        right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
     };
 
     // SUM of empty batch should return NULL
-    let sum_result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &combined_schema)
-        .expect("Should handle empty batch");
+    let sum_result =
+        compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &combined_schema)
+            .expect("Should handle empty batch");
     assert_eq!(sum_result, SqlValue::Null);
 
     // COUNT of empty batch should return 0
-    let count_result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Count, &combined_schema)
-        .expect("Should handle empty batch");
+    let count_result =
+        compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Count, &combined_schema)
+            .expect("Should handle empty batch");
     assert_eq!(count_result, SqlValue::Integer(0));
 }
 
 #[test]
 fn test_batch_expression_aggregate_with_nulls() {
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
-    use crate::select::columnar::aggregate::AggregateOp;
-    use super::batch::compute_batch_expression_aggregate;
 
     // Create a batch with some NULL values
     let price_col = ColumnArray::Float64(
         Arc::new(vec![100.0, 200.0, 300.0, 400.0]),
         Some(Arc::new(vec![false, true, false, false])), // Second value is NULL
     );
-    let discount_col = ColumnArray::Float64(
-        Arc::new(vec![0.1, 0.2, 0.15, 0.05]),
-        None,
-    );
+    let discount_col = ColumnArray::Float64(Arc::new(vec![0.1, 0.2, 0.15, 0.05]), None);
 
     let batch = ColumnarBatch::from_columns(
         vec![price_col, discount_col],
         Some(vec!["price".to_string(), "discount".to_string()]),
-    ).unwrap();
+    )
+    .unwrap();
 
     let schema = TableSchema::new(
         "test".to_string(),
@@ -342,19 +296,14 @@ fn test_batch_expression_aggregate_with_nulls() {
     let combined_schema = CombinedSchema::from_table("test".to_string(), schema);
 
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "price".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "discount".to_string(),
-        }),
+        right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
     };
 
-    let result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &combined_schema)
-        .expect("Should handle batch with nulls");
+    let result =
+        compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &combined_schema)
+            .expect("Should handle batch with nulls");
 
     // Expected: 100*0.1 + 300*0.15 + 400*0.05 = 10 + 45 + 20 = 75 (skipping NULL row)
     match result {

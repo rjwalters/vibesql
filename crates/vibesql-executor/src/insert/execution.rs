@@ -134,7 +134,8 @@ fn execute_insert_internal(
 
         // Apply DEFAULT values for unspecified columns
         // This returns the first generated sequence value (if any)
-        let generated_id = super::defaults::apply_default_values(&schema, &mut full_row_values, db)?;
+        let generated_id =
+            super::defaults::apply_default_values(&schema, &mut full_row_values, db)?;
 
         // Track the first generated ID across all rows
         if first_generated_id.is_none() {
@@ -198,20 +199,16 @@ fn execute_insert_internal(
         .is_some();
 
     let use_batch_insert = stmt.on_duplicate_key_update.is_none()
-        && !matches!(
-            stmt.conflict_clause,
-            Some(vibesql_ast::ConflictClause::Replace)
-        )
+        && !matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
         && !has_insert_triggers;
 
     if use_batch_insert && validated_rows.len() > 1 {
         // Fast path: Use batch insert for multiple rows without triggers
-        let rows: Vec<vibesql_storage::Row> = validated_rows
-            .into_iter()
-            .map(vibesql_storage::Row::new)
-            .collect();
+        let rows: Vec<vibesql_storage::Row> =
+            validated_rows.into_iter().map(vibesql_storage::Row::new).collect();
 
-        rows_inserted = db.insert_rows_batch(&stmt.table_name, rows)
+        rows_inserted = db
+            .insert_rows_batch(&stmt.table_name, rows)
             .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
@@ -233,10 +230,7 @@ fn execute_insert_internal(
                     continue;
                 }
                 // No conflict, fall through to insert
-            } else if matches!(
-                stmt.conflict_clause,
-                Some(vibesql_ast::ConflictClause::Replace)
-            ) {
+            } else if matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace)) {
                 // If REPLACE conflict clause, delete conflicting rows first
                 super::replace::handle_replace_conflicts(
                     db,
@@ -257,14 +251,16 @@ fn execute_insert_internal(
             )?;
 
             // Get row count before insert to enable rollback
-            let row_count_before = db.get_table(&stmt.table_name)
+            let row_count_before = db
+                .get_table(&stmt.table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
                 .row_count();
 
             // Insert the row
             let row = vibesql_storage::Row::new(full_row_values);
-            db.insert_row(&stmt.table_name, row.clone())
-                .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
+            db.insert_row(&stmt.table_name, row.clone()).map_err(|e| {
+                ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
+            })?;
 
             // Fire AFTER INSERT triggers
             // If AFTER triggers fail, we need to rollback the insert
@@ -280,7 +276,8 @@ fn execute_insert_internal(
                 // Rollback: Delete the row we just inserted
                 // Note: This is a simple rollback mechanism for Phase 3
                 // Full transaction support will come in a later phase
-                let table = db.get_table_mut(&stmt.table_name)
+                let table = db
+                    .get_table_mut(&stmt.table_name)
                     .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
                 // Delete the last row (the one we just inserted)

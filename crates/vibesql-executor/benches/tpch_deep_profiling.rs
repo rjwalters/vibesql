@@ -109,10 +109,8 @@ fn main() {
         .unwrap_or(DEFAULT_ITERATIONS);
 
     // Get timeout from env (default 30s)
-    let timeout_secs: u64 = env::var("QUERY_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(30);
+    let timeout_secs: u64 =
+        env::var("QUERY_TIMEOUT_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
     let timeout = Duration::from_secs(timeout_secs);
 
     eprintln!("Iterations: {} (set PROFILING_ITERATIONS to change)", iterations);
@@ -150,10 +148,7 @@ fn main() {
     let queries_to_run: Vec<_> = if args.len() > 1 {
         let target_query = &args[1];
         eprintln!("Single-query mode: {}", target_query);
-        all_queries
-            .into_iter()
-            .filter(|(name, _)| *name == target_query)
-            .collect()
+        all_queries.into_iter().filter(|(name, _)| *name == target_query).collect()
     } else {
         eprintln!("Running all profiling queries");
         all_queries

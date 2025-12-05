@@ -92,14 +92,7 @@ impl ArenaPreparedStatement {
         // Cast to 'static lifetime - this is safe because the arena owns the data
         let interner_ptr = interner_ptr.cast::<ArenaInterner<'static>>();
 
-        Ok(Self {
-            sql,
-            arena,
-            statement_ptr,
-            interner_ptr,
-            param_count,
-            tables,
-        })
+        Ok(Self { sql, arena, statement_ptr, interner_ptr, param_count, tables })
     }
 
     /// Get the original SQL.
@@ -191,11 +184,7 @@ impl std::fmt::Display for ArenaBindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ArenaBindError::ParameterCountMismatch { expected, actual } => {
-                write!(
-                    f,
-                    "Parameter count mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Parameter count mismatch: expected {}, got {}", expected, actual)
             }
         }
     }
@@ -283,12 +272,7 @@ where
         vibesql_ast::arena::FromClause::Subquery { query, .. } => {
             visit_arena_statement(query, visitor);
         }
-        vibesql_ast::arena::FromClause::Join {
-            left,
-            right,
-            condition,
-            ..
-        } => {
+        vibesql_ast::arena::FromClause::Join { left, right, condition, .. } => {
             visit_arena_from_clause_exprs(left, visitor);
             visit_arena_from_clause_exprs(right, visitor);
             if let Some(cond) = condition {
@@ -429,11 +413,7 @@ where
                     visit_arena_expression(arg, visitor);
                 }
             }
-            ExtendedExpr::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => {
+            ExtendedExpr::Case { operand, when_clauses, else_result } => {
                 if let Some(op) = operand {
                     visit_arena_expression(op, visitor);
                 }
@@ -448,30 +428,17 @@ where
                 }
             }
             ExtendedExpr::ScalarSubquery(select) => visit_arena_statement(select, visitor),
-            ExtendedExpr::In {
-                expr: inner,
-                subquery,
-                ..
-            } => {
+            ExtendedExpr::In { expr: inner, subquery, .. } => {
                 visit_arena_expression(inner, visitor);
                 visit_arena_statement(subquery, visitor);
             }
-            ExtendedExpr::InList {
-                expr: inner,
-                values,
-                ..
-            } => {
+            ExtendedExpr::InList { expr: inner, values, .. } => {
                 visit_arena_expression(inner, visitor);
                 for v in values.iter() {
                     visit_arena_expression(v, visitor);
                 }
             }
-            ExtendedExpr::Between {
-                expr: inner,
-                low,
-                high,
-                ..
-            } => {
+            ExtendedExpr::Between { expr: inner, low, high, .. } => {
                 visit_arena_expression(inner, visitor);
                 visit_arena_expression(low, visitor);
                 visit_arena_expression(high, visitor);
@@ -479,17 +446,11 @@ where
             ExtendedExpr::Cast { expr: inner, .. } => {
                 visit_arena_expression(inner, visitor);
             }
-            ExtendedExpr::Position {
-                substring, string, ..
-            } => {
+            ExtendedExpr::Position { substring, string, .. } => {
                 visit_arena_expression(substring, visitor);
                 visit_arena_expression(string, visitor);
             }
-            ExtendedExpr::Trim {
-                removal_char,
-                string,
-                ..
-            } => {
+            ExtendedExpr::Trim { removal_char, string, .. } => {
                 if let Some(c) = removal_char {
                     visit_arena_expression(c, visitor);
                 }
@@ -498,22 +459,14 @@ where
             ExtendedExpr::Extract { expr: inner, .. } => {
                 visit_arena_expression(inner, visitor);
             }
-            ExtendedExpr::Like {
-                expr: inner,
-                pattern,
-                ..
-            } => {
+            ExtendedExpr::Like { expr: inner, pattern, .. } => {
                 visit_arena_expression(inner, visitor);
                 visit_arena_expression(pattern, visitor);
             }
             ExtendedExpr::Exists { subquery, .. } => {
                 visit_arena_statement(subquery, visitor);
             }
-            ExtendedExpr::QuantifiedComparison {
-                expr: inner,
-                subquery,
-                ..
-            } => {
+            ExtendedExpr::QuantifiedComparison { expr: inner, subquery, .. } => {
                 visit_arena_expression(inner, visitor);
                 visit_arena_statement(subquery, visitor);
             }
@@ -565,8 +518,11 @@ mod tests {
         assert_eq!(prepared.sql(), sql);
         assert_eq!(prepared.param_count(), 0);
         // Arena parser stores table names in uppercase
-        assert!(prepared.tables().contains("USERS"),
-            "Expected 'USERS' in tables {:?}", prepared.tables());
+        assert!(
+            prepared.tables().contains("USERS"),
+            "Expected 'USERS' in tables {:?}",
+            prepared.tables()
+        );
     }
 
     #[test]
@@ -597,9 +553,7 @@ mod tests {
 
         // Wrong param count should fail
         assert!(prepared.validate_params(&[]).is_err());
-        assert!(prepared
-            .validate_params(&[SqlValue::Integer(1), SqlValue::Integer(2)])
-            .is_err());
+        assert!(prepared.validate_params(&[SqlValue::Integer(1), SqlValue::Integer(2)]).is_err());
     }
 
     #[test]

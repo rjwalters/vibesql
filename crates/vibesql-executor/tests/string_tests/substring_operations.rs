@@ -175,7 +175,9 @@ fn test_substring_wrong_arg_count_too_few() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -329,7 +331,9 @@ fn test_left_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -372,7 +376,9 @@ fn test_left_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "hello".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
@@ -465,7 +471,9 @@ fn test_right_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -493,7 +501,9 @@ fn test_right_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "hello".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,

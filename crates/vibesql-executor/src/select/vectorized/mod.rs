@@ -23,9 +23,7 @@ pub mod filter;
 pub mod predicate;
 
 pub use arithmetic::evaluate_arithmetic_simd;
-pub use batch::{
-    rows_to_record_batch, record_batch_to_rows,
-};
+pub use batch::{record_batch_to_rows, rows_to_record_batch};
 pub use filter::filter_record_batch_simd;
 pub use predicate::apply_where_filter_vectorized;
 

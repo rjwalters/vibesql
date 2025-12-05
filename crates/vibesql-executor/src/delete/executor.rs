@@ -5,9 +5,7 @@ use vibesql_storage::Database;
 
 use super::integrity::check_no_child_references;
 use crate::{
-    errors::ExecutorError,
-    evaluator::ExpressionEvaluator,
-    privilege_checker::PrivilegeChecker,
+    errors::ExecutorError, evaluator::ExpressionEvaluator, privilege_checker::PrivilegeChecker,
     truncate_validation::can_use_truncate,
 };
 

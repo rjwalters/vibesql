@@ -9,12 +9,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::executor::block_on;
 
+use crate::error_handling::AnyError;
 use crate::error_handling::TestError;
-use crate::output::{RecordOutput, DBOutput, Normalizer, ColumnTypeValidator, Validator};
+use crate::output::{ColumnTypeValidator, DBOutput, Normalizer, RecordOutput, Validator};
 use crate::parser::*;
 use crate::substitution::Substitution;
 use crate::{ColumnType, Connections, MakeConnection};
-use crate::error_handling::AnyError;
 
 /// The async database to be tested.
 #[async_trait]
@@ -446,7 +446,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         script: &str,
         name: impl Into<Arc<str>>,
     ) -> Result<(), TestError> {
-        let records = crate::parser::parse_with_name(script, name).expect("failed to parse sqllogictest");
+        let records =
+            crate::parser::parse_with_name(script, name).expect("failed to parse sqllogictest");
         self.run_multi_async(records).await
     }
 
@@ -485,7 +486,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Otherwise, we just do simple string substitution for `__TEST_DIR__` and `__NOW__`.
     /// This is useful for `system` commands: The shell can do the environment variables, and we can
     /// write strings like `\n` without escaping.
-    pub(super) fn may_substitute(&self, input: String, subst_env_vars: bool) -> Result<String, AnyError> {
+    pub(super) fn may_substitute(
+        &self,
+        input: String,
+        subst_env_vars: bool,
+    ) -> Result<String, AnyError> {
         if self.substitution_on {
             Substitution::new(&self.locals, subst_env_vars)
                 .substitute(&input)

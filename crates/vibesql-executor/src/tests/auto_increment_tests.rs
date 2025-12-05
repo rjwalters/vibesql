@@ -1,6 +1,8 @@
 //! Tests for AUTO_INCREMENT and LAST_INSERT_ROWID() functionality
 
-use vibesql_ast::{ColumnConstraint, ColumnConstraintKind, ColumnDef, CreateTableStmt, InsertSource, InsertStmt};
+use vibesql_ast::{
+    ColumnConstraint, ColumnConstraintKind, ColumnDef, CreateTableStmt, InsertSource, InsertStmt,
+};
 use vibesql_storage::Database;
 use vibesql_types::{DataType, SqlValue};
 
@@ -19,14 +21,8 @@ fn test_auto_increment_basic_inserts() {
                 data_type: DataType::Integer,
                 nullable: false,
                 constraints: vec![
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::AutoIncrement,
-                    },
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::PrimaryKey,
-                    },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
                 ],
                 default_value: None,
                 comment: None,
@@ -51,7 +47,9 @@ fn test_auto_increment_basic_inserts() {
     let insert1 = InsertStmt {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
-        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("alice".to_string()))]]),
+        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
+            SqlValue::Varchar("alice".to_string()),
+        )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -62,7 +60,9 @@ fn test_auto_increment_basic_inserts() {
     let insert2 = InsertStmt {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
-        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("bob".to_string()))]]),
+        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
+            SqlValue::Varchar("bob".to_string()),
+        )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -134,14 +134,8 @@ fn test_last_insert_rowid_basic() {
                 data_type: DataType::Integer,
                 nullable: false,
                 constraints: vec![
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::AutoIncrement,
-                    },
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::PrimaryKey,
-                    },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
                 ],
                 default_value: None,
                 comment: None,
@@ -169,7 +163,9 @@ fn test_last_insert_rowid_basic() {
     let insert1 = InsertStmt {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
-        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("alice".to_string()))]]),
+        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
+            SqlValue::Varchar("alice".to_string()),
+        )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -183,7 +179,9 @@ fn test_last_insert_rowid_basic() {
     let insert2 = InsertStmt {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
-        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("bob".to_string()))]]),
+        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
+            SqlValue::Varchar("bob".to_string()),
+        )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -207,14 +205,8 @@ fn test_last_insert_rowid_multi_row_insert() {
                 data_type: DataType::Integer,
                 nullable: false,
                 constraints: vec![
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::AutoIncrement,
-                    },
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::PrimaryKey,
-                    },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
                 ],
                 default_value: None,
                 comment: None,
@@ -330,14 +322,8 @@ fn test_last_insert_rowid_via_select() {
                 data_type: DataType::Integer,
                 nullable: false,
                 constraints: vec![
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::AutoIncrement,
-                    },
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::PrimaryKey,
-                    },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
                 ],
                 default_value: None,
                 comment: None,
@@ -362,7 +348,9 @@ fn test_last_insert_rowid_via_select() {
     let insert1 = InsertStmt {
         table_name: "users".to_string(),
         columns: vec!["name".to_string()],
-        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("alice".to_string()))]]),
+        source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
+            SqlValue::Varchar("alice".to_string()),
+        )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };

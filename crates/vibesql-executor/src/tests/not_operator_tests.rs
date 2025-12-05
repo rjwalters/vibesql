@@ -14,25 +14,45 @@ fn test_not_in_select_where() {
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("pk".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("col0".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "pk".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "col0".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
 
     // Insert test data
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Integer(100),
-    ])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(2),
-        vibesql_types::SqlValue::Integer(542),
-    ])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(3),
-        vibesql_types::SqlValue::Integer(600),
-    ])).unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(100),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(542),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Integer(600),
+        ]),
+    )
+    .unwrap();
 
     let executor = select::SelectExecutor::new(&db);
 
@@ -46,13 +66,22 @@ fn test_not_in_select_where() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "col0".to_string() }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "col0".to_string(),
+                }),
                 op: vibesql_ast::BinaryOperator::LessThan,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(542))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(542),
+                )),
             }),
         }),
         group_by: None,
@@ -77,20 +106,36 @@ fn test_not_with_equality() {
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("pk".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("col0".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "pk".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "col0".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
 
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Integer(100),
-    ])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(2),
-        vibesql_types::SqlValue::Integer(200),
-    ])).unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(100),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(200),
+        ]),
+    )
+    .unwrap();
 
     let executor = select::SelectExecutor::new(&db);
 
@@ -102,13 +147,22 @@ fn test_not_with_equality() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "col0".to_string() }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "col0".to_string(),
+                }),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(100),
+                )),
             }),
         }),
         group_by: None,
@@ -132,25 +186,45 @@ fn test_not_in_delete_where() {
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("pk".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("col0".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "pk".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "col0".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
 
     // Insert test data
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Integer(100),
-    ])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(2),
-        vibesql_types::SqlValue::Integer(542),
-    ])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(3),
-        vibesql_types::SqlValue::Integer(600),
-    ])).unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(100),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(542),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Integer(600),
+        ]),
+    )
+    .unwrap();
 
     // DELETE FROM tab0 WHERE NOT (col0 < 542)
     let stmt = vibesql_ast::DeleteStmt {
@@ -159,9 +233,14 @@ fn test_not_in_delete_where() {
         where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "col0".to_string() }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "col0".to_string(),
+                }),
                 op: vibesql_ast::BinaryOperator::LessThan,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(542))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(542),
+                )),
             }),
         })),
     };
@@ -176,7 +255,11 @@ fn test_not_in_delete_where() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -189,7 +272,8 @@ fn test_not_in_delete_where() {
     let remaining_rows = executor.execute(&verify_stmt).unwrap();
     assert_eq!(remaining_rows.len(), 1);
     assert_eq!(remaining_rows[0].values[0], vibesql_types::SqlValue::Integer(1)); // pk=1
-    assert_eq!(remaining_rows[0].values[1], vibesql_types::SqlValue::Integer(100)); // col0=100
+    assert_eq!(remaining_rows[0].values[1], vibesql_types::SqlValue::Integer(100));
+    // col0=100
 }
 
 #[test]
@@ -199,20 +283,36 @@ fn test_not_with_null() {
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("pk".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("col0".to_string(), vibesql_types::DataType::Integer, true), // nullable
+            vibesql_catalog::ColumnSchema::new(
+                "pk".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "col0".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ), // nullable
         ],
     );
     db.create_table(schema).unwrap();
 
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Null,
-    ])).unwrap();
-    db.insert_row("tab0", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(2),
-        vibesql_types::SqlValue::Integer(100),
-    ])).unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Null,
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "tab0",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(100),
+        ]),
+    )
+    .unwrap();
 
     let executor = select::SelectExecutor::new(&db);
 
@@ -226,13 +326,22 @@ fn test_not_with_null() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "tab0".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "tab0".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "col0".to_string() }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "col0".to_string(),
+                }),
                 op: vibesql_ast::BinaryOperator::LessThan,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(542))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(542),
+                )),
             }),
         }),
         group_by: None,

@@ -1,16 +1,16 @@
+use crate::errors::ExecutorError;
 /// Storage-related SQL functions
 ///
 /// Functions for working with blob/file storage:
 /// - STORAGE_URL(blob_id) - Generate URL for accessing a blob
 use vibesql_types::SqlValue;
-use crate::errors::ExecutorError;
 
 /// STORAGE_URL(blob_id TEXT) -> TEXT
-/// 
+///
 /// Generate a URL for accessing a stored blob.
 /// For local filesystem, returns a relative path.
 /// For cloud storage, could return a signed URL.
-/// 
+///
 /// Example:
 ///   SELECT STORAGE_URL(blob_id) FROM files;
 pub fn eval_storage_url(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
@@ -35,7 +35,7 @@ pub fn eval_storage_url(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 }
 
 /// STORAGE_SIZE(blob_id TEXT) -> BIGINT
-/// 
+///
 /// Get the size in bytes of a stored blob.
 /// Queries the vibesql_storage system table for metadata.
 /// Returns NULL if the blob does not exist.
@@ -69,7 +69,7 @@ mod tests {
     fn test_storage_url_function() {
         let blob_id = SqlValue::Varchar("550e8400-e29b-41d4-a716-446655440000".to_string());
         let result = eval_storage_url(&[blob_id]).unwrap();
-        
+
         match result {
             SqlValue::Varchar(url) => {
                 assert!(url.starts_with("/storage/blobs/"));

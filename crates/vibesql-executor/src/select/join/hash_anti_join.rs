@@ -132,21 +132,17 @@ pub(super) fn hash_anti_join_with_filter(
     let right_slice = right.as_slice();
 
     // Partition the filter into right-only and cross-table predicates
-    let (right_only_filter, probe_filter) = partition_filter_predicates(
-        filter,
-        combined_schema,
-        &left.schema,
-        &right.schema,
-    );
+    let (right_only_filter, probe_filter) =
+        partition_filter_predicates(filter, combined_schema, &left.schema, &right.schema);
 
     // Create evaluators for build and probe phases
-    let right_only_evaluator = right_only_filter.as_ref().map(|_| {
-        CombinedExpressionEvaluator::with_database(&right.schema, database)
-    });
+    let right_only_evaluator = right_only_filter
+        .as_ref()
+        .map(|_| CombinedExpressionEvaluator::with_database(&right.schema, database));
 
-    let probe_evaluator = probe_filter.as_ref().map(|_| {
-        CombinedExpressionEvaluator::with_database(combined_schema, database)
-    });
+    let probe_evaluator = probe_filter
+        .as_ref()
+        .map(|_| CombinedExpressionEvaluator::with_database(combined_schema, database));
 
     // Build phase: Create hash table from right side with right-only predicate filtering
     let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> = AHashMap::new();
@@ -172,8 +168,7 @@ pub(super) fn hash_anti_join_with_filter(
                     // Row passes filter, add to hash table
                     hash_table.entry(key).or_default().push(idx);
                 }
-                Ok(vibesql_types::SqlValue::Boolean(false))
-                | Ok(vibesql_types::SqlValue::Null) => {
+                Ok(vibesql_types::SqlValue::Boolean(false)) | Ok(vibesql_types::SqlValue::Null) => {
                     // Row doesn't pass filter, skip it
                     filtered_count += 1;
                     continue;
@@ -314,10 +309,7 @@ mod tests {
         // Left table: users(id, name)
         let left = create_test_from_result(
             "users",
-            vec![
-                ("id", DataType::Integer),
-                ("name", DataType::Varchar { max_length: Some(50) }),
-            ],
+            vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
                 vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
                 vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
@@ -357,10 +349,7 @@ mod tests {
         // Left table with NULL id
         let left = create_test_from_result(
             "users",
-            vec![
-                ("id", DataType::Integer),
-                ("name", DataType::Varchar { max_length: Some(50) }),
-            ],
+            vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
                 vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
                 vec![SqlValue::Null, SqlValue::Varchar("Unknown".to_string())],
@@ -431,10 +420,7 @@ mod tests {
         // Left table (non-empty)
         let left = create_test_from_result(
             "users",
-            vec![
-                ("id", DataType::Integer),
-                ("name", DataType::Varchar { max_length: Some(50) }),
-            ],
+            vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
                 vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
                 vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
@@ -455,10 +441,7 @@ mod tests {
         // Left table
         let left = create_test_from_result(
             "users",
-            vec![
-                ("id", DataType::Integer),
-                ("name", DataType::Varchar { max_length: Some(50) }),
-            ],
+            vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
                 vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
                 vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],

@@ -3,8 +3,8 @@
 //! This module handles evaluation of EXISTS and NOT EXISTS predicates,
 //! which test whether a subquery returns any rows.
 
-use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row};
 use super::super::super::core::CombinedExpressionEvaluator;
+use super::schema_utils::{build_merged_outer_row, build_merged_outer_schema};
 use crate::errors::ExecutorError;
 
 impl CombinedExpressionEvaluator<'_> {
@@ -46,28 +46,22 @@ impl CombinedExpressionEvaluator<'_> {
         };
 
         // Pass CTE context for queries referencing CTEs from outer scope (#3044)
-        let select_executor = if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
-            if let Some(cte_ctx) = self.cte_context {
-                crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                    database,
-                    outer_row,
-                    schema,
-                    cte_ctx,
-                    self.depth,
-                )
+        let select_executor =
+            if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
+                if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                        database, outer_row, schema, cte_ctx, self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                        database, outer_row, schema, self.depth,
+                    )
+                }
+            } else if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
             } else {
-                crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                    database,
-                    outer_row,
-                    schema,
-                    self.depth,
-                )
-            }
-        } else if let Some(cte_ctx) = self.cte_context {
-            crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
-        } else {
-            crate::select::SelectExecutor::new(database)
-        };
+                crate::select::SelectExecutor::new(database)
+            };
         let rows = select_executor.execute(subquery)?;
 
         // Delegate to shared logic

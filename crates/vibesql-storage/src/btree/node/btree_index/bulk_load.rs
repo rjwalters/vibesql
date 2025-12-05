@@ -16,8 +16,8 @@ use vibesql_types::DataType;
 use crate::page::{PageId, PageManager, PAGE_SIZE};
 use crate::StorageError;
 
+use super::super::super::serialize::{write_internal_node_no_sync, write_leaf_node_no_sync};
 use super::super::super::{calculate_degree, estimate_max_key_size};
-use super::super::super::serialize::{write_leaf_node_no_sync, write_internal_node_no_sync};
 use super::super::structure::{InternalNode, Key, LeafNode};
 use super::BTreeIndex;
 
@@ -128,7 +128,13 @@ impl BTreeIndex {
             while let Some((_key, row_ids)) = entries_iter.peek() {
                 // Calculate actual size of this entry
                 // varint encoding: 1 byte for counts < 128, 2 bytes for < 16384, etc.
-                let varint_size = if row_ids.len() < 128 { 1 } else if row_ids.len() < 16384 { 2 } else { 3 };
+                let varint_size = if row_ids.len() < 128 {
+                    1
+                } else if row_ids.len() < 16384 {
+                    2
+                } else {
+                    3
+                };
                 let entry_size = key_size + varint_size + row_ids.len() * 8;
 
                 // Check if we have room for this entry
@@ -154,7 +160,8 @@ impl BTreeIndex {
 
                 // Update the previous leaf's next_leaf pointer
                 // Read previous leaf, update it, and write it back (no sync)
-                let mut prev_leaf = super::super::super::serialize::read_leaf_node(&page_manager, prev_id)?;
+                let mut prev_leaf =
+                    super::super::super::serialize::read_leaf_node(&page_manager, prev_id)?;
                 prev_leaf.next_leaf = page_id;
                 write_leaf_node_no_sync(&page_manager, &prev_leaf, degree)?;
             }
@@ -214,14 +221,8 @@ impl BTreeIndex {
         // 3. Root is the single remaining node
         let root_page_id = current_level[0];
 
-        let index = BTreeIndex {
-            root_page_id,
-            key_schema,
-            degree,
-            height,
-            page_manager,
-            metadata_page_id,
-        };
+        let index =
+            BTreeIndex { root_page_id, key_schema, degree, height, page_manager, metadata_page_id };
 
         // Save metadata without syncing (we'll sync once at the end)
         index.save_metadata_no_sync()?;
@@ -256,7 +257,9 @@ pub(super) fn read_first_key_from_page(
         if internal.keys.is_empty() {
             // Internal node with only one child - need to recurse
             if internal.children.is_empty() {
-                return Err(StorageError::IoError("Internal node has no keys or children".to_string()));
+                return Err(StorageError::IoError(
+                    "Internal node has no keys or children".to_string(),
+                ));
             }
             return read_first_key_from_page(page_manager, internal.children[0]);
         }

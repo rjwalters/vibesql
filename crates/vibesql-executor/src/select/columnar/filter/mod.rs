@@ -14,7 +14,9 @@ use crate::errors::ExecutorError;
 // Re-export public types and functions
 pub(super) use comparison::parse_date_string;
 pub use evaluation::{evaluate_predicate, evaluate_predicate_tree};
-pub use predicates::{extract_column_predicates, extract_predicate_tree, ColumnPredicate, PredicateTree};
+pub use predicates::{
+    extract_column_predicates, extract_predicate_tree, ColumnPredicate, PredicateTree,
+};
 
 /// Apply a filter to row indices based on a predicate tree
 ///
@@ -262,24 +264,13 @@ mod tests {
     fn test_simd_streaming_filter_large_dataset() {
         // Create a large dataset (>256 rows to trigger SIMD path)
         let rows: Vec<Row> = (0..1000)
-            .map(|i| {
-                Row::new(vec![
-                    SqlValue::Integer(i),
-                    SqlValue::Double(i as f64 * 0.01),
-                ])
-            })
+            .map(|i| Row::new(vec![SqlValue::Integer(i), SqlValue::Double(i as f64 * 0.01)]))
             .collect();
 
         // Filter: col0 < 500 AND col1 < 3.0
         let predicates = vec![
-            ColumnPredicate::LessThan {
-                column_idx: 0,
-                value: SqlValue::Integer(500),
-            },
-            ColumnPredicate::LessThan {
-                column_idx: 1,
-                value: SqlValue::Double(3.0),
-            },
+            ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(500) },
+            ColumnPredicate::LessThan { column_idx: 1, value: SqlValue::Double(3.0) },
         ];
 
         let indices = apply_columnar_filter(&rows, &predicates).unwrap();
@@ -301,11 +292,7 @@ mod tests {
             .map(|i| {
                 let year = 1994 + (i / 365);
                 let day = (i % 28) + 1;
-                Row::new(vec![SqlValue::Date(Date {
-                    year,
-                    month: 6,
-                    day: day as u8,
-                })])
+                Row::new(vec![SqlValue::Date(Date { year, month: 6, day: day as u8 })])
             })
             .collect();
 
@@ -313,19 +300,11 @@ mod tests {
         let predicates = vec![
             ColumnPredicate::GreaterThanOrEqual {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 1994,
-                    month: 6,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 1994, month: 6, day: 1 }),
             },
             ColumnPredicate::LessThan {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 1995,
-                    month: 6,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 1995, month: 6, day: 1 }),
             },
         ];
 
@@ -338,32 +317,24 @@ mod tests {
     #[test]
     fn test_simd_streaming_vs_scalar_consistency() {
         // Verify SIMD streaming produces same results as scalar path
-        let rows: Vec<Row> = (0..300)
-            .map(|i| Row::new(vec![SqlValue::Integer(i)]))
-            .collect();
+        let rows: Vec<Row> = (0..300).map(|i| Row::new(vec![SqlValue::Integer(i)])).collect();
 
         let predicates = vec![
-            ColumnPredicate::GreaterThan {
-                column_idx: 0,
-                value: SqlValue::Integer(100),
-            },
-            ColumnPredicate::LessThan {
-                column_idx: 0,
-                value: SqlValue::Integer(200),
-            },
+            ColumnPredicate::GreaterThan { column_idx: 0, value: SqlValue::Integer(100) },
+            ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(200) },
         ];
 
         // Get results from SIMD streaming path
         let simd_indices = apply_columnar_filter_simd_streaming(&rows, &predicates).unwrap();
 
         // Get results from scalar path (using smaller dataset)
-        let small_rows: Vec<Row> = (0..100)
-            .map(|i| Row::new(vec![SqlValue::Integer(i + 100)]))
-            .collect();
-        let scalar_bitmap = create_filter_bitmap(small_rows.len(), &predicates, |row_idx, col_idx| {
-            small_rows.get(row_idx).and_then(|row| row.get(col_idx))
-        })
-        .unwrap();
+        let small_rows: Vec<Row> =
+            (0..100).map(|i| Row::new(vec![SqlValue::Integer(i + 100)])).collect();
+        let scalar_bitmap =
+            create_filter_bitmap(small_rows.len(), &predicates, |row_idx, col_idx| {
+                small_rows.get(row_idx).and_then(|row| row.get(col_idx))
+            })
+            .unwrap();
         let expected_count = scalar_bitmap.iter().filter(|&&x| x).count();
 
         // Both should find 99 rows (101-199 inclusive for SIMD, 100-199 adjusted for scalar)
@@ -436,29 +407,13 @@ mod tests {
 
         let rows = [
             // Row 0: col0=5, col1=15, col2=5 -> (5<10 OR 15>20) AND 5=5 -> TRUE AND TRUE -> TRUE
-            Row::new(vec![
-                SqlValue::Integer(5),
-                SqlValue::Integer(15),
-                SqlValue::Integer(5),
-            ]),
+            Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(15), SqlValue::Integer(5)]),
             // Row 1: col0=15, col1=25, col2=5 -> (15<10 OR 25>20) AND 5=5 -> TRUE AND TRUE -> TRUE
-            Row::new(vec![
-                SqlValue::Integer(15),
-                SqlValue::Integer(25),
-                SqlValue::Integer(5),
-            ]),
+            Row::new(vec![SqlValue::Integer(15), SqlValue::Integer(25), SqlValue::Integer(5)]),
             // Row 2: col0=15, col1=15, col2=5 -> (15<10 OR 15>20) AND 5=5 -> FALSE AND TRUE -> FALSE
-            Row::new(vec![
-                SqlValue::Integer(15),
-                SqlValue::Integer(15),
-                SqlValue::Integer(5),
-            ]),
+            Row::new(vec![SqlValue::Integer(15), SqlValue::Integer(15), SqlValue::Integer(5)]),
             // Row 3: col0=5, col1=25, col2=10 -> (5<10 OR 25>20) AND 10=5 -> TRUE AND FALSE -> FALSE
-            Row::new(vec![
-                SqlValue::Integer(5),
-                SqlValue::Integer(25),
-                SqlValue::Integer(10),
-            ]),
+            Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(25), SqlValue::Integer(10)]),
         ];
 
         let bitmap = create_filter_bitmap_tree(rows.len(), &tree, |row_idx, col_idx| {
@@ -488,19 +443,13 @@ mod tests {
         // Build: col0 < 10 OR col1 > 20
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "col0".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             op: BinaryOperator::Or,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "col1".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(20))),
             }),
@@ -520,10 +469,7 @@ mod tests {
 
     #[test]
     fn test_less_than_predicate() {
-        let pred = ColumnPredicate::LessThan {
-            column_idx: 0,
-            value: SqlValue::Integer(10),
-        };
+        let pred = ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(10) };
 
         assert!(evaluate_predicate(&pred, &SqlValue::Integer(5)));
         assert!(!evaluate_predicate(&pred, &SqlValue::Integer(10)));
@@ -549,11 +495,13 @@ mod tests {
     fn test_filter_bitmap() {
         use vibesql_storage::Row;
 
-        let rows = [Row::new(vec![SqlValue::Integer(5)]),
+        let rows = [
+            Row::new(vec![SqlValue::Integer(5)]),
             Row::new(vec![SqlValue::Integer(10)]),
             Row::new(vec![SqlValue::Integer(15)]),
             Row::new(vec![SqlValue::Integer(20)]),
-            Row::new(vec![SqlValue::Integer(25)])];
+            Row::new(vec![SqlValue::Integer(25)]),
+        ];
 
         // Test with no predicates - all rows should pass
         let bitmap = create_filter_bitmap(rows.len(), &[], |row_idx, col_idx| {
@@ -564,10 +512,8 @@ mod tests {
         assert!(bitmap.iter().all(|&x| x));
 
         // Test with LessThan predicate
-        let predicates = vec![ColumnPredicate::LessThan {
-            column_idx: 0,
-            value: SqlValue::Integer(18),
-        }];
+        let predicates =
+            vec![ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(18) }];
         let bitmap = create_filter_bitmap(rows.len(), &predicates, |row_idx, col_idx| {
             rows.get(row_idx).and_then(|row| row.get(col_idx))
         })

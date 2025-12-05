@@ -125,10 +125,7 @@ impl DataIO {
             let columns: Vec<String> = obj.keys().cloned().collect();
 
             if columns.is_empty() {
-                return Err(anyhow::anyhow!(
-                    "Row {} has no columns",
-                    idx + 1
-                ));
+                return Err(anyhow::anyhow!("Row {} has no columns", idx + 1));
             }
 
             let values: Vec<String> = columns
@@ -232,10 +229,7 @@ mod tests {
         temp_file.flush().unwrap();
 
         // Import JSON
-        let statements = DataIO::import_json(
-            temp_file.path().to_str().unwrap(),
-            "users"
-        ).unwrap();
+        let statements = DataIO::import_json(temp_file.path().to_str().unwrap(), "users").unwrap();
 
         // Verify we got 2 INSERT statements
         assert_eq!(statements.len(), 2);
@@ -260,10 +254,8 @@ mod tests {
         temp_file.flush().unwrap();
 
         // Import JSON
-        let statements = DataIO::import_json(
-            temp_file.path().to_str().unwrap(),
-            "test_table"
-        ).unwrap();
+        let statements =
+            DataIO::import_json(temp_file.path().to_str().unwrap(), "test_table").unwrap();
 
         // Verify single quotes are properly escaped
         assert_eq!(statements.len(), 1);
@@ -286,10 +278,7 @@ mod tests {
         temp_file.flush().unwrap();
 
         // Attempt to import
-        let result = DataIO::import_json(
-            temp_file.path().to_str().unwrap(),
-            "users"
-        );
+        let result = DataIO::import_json(temp_file.path().to_str().unwrap(), "users");
 
         // Should fail with error
         assert!(result.is_err());
@@ -307,10 +296,7 @@ mod tests {
         temp_file.flush().unwrap();
 
         // Attempt to import
-        let result = DataIO::import_json(
-            temp_file.path().to_str().unwrap(),
-            "users"
-        );
+        let result = DataIO::import_json(temp_file.path().to_str().unwrap(), "users");
 
         // Should fail with error
         assert!(result.is_err());

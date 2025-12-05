@@ -71,13 +71,15 @@ pub fn transform_subqueries_to_joins(stmt: &SelectStmt) -> SelectStmt {
 
         // Try to extract IN/NOT IN/EXISTS subqueries from WHERE clause and convert to joins
         if let Some(where_clause) = &result.where_clause {
-            if let Some((new_from, new_where)) = try_extract_subqueries_to_joins(
-                result.from.as_ref().unwrap(),
-                where_clause,
-            ) {
+            if let Some((new_from, new_where)) =
+                try_extract_subqueries_to_joins(result.from.as_ref().unwrap(), where_clause)
+            {
                 // Debug output for subquery transformation
                 if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
-                    eprintln!("[SUBQUERY_TRANSFORM] Iteration {}: Converted subquery to join", iteration + 1);
+                    eprintln!(
+                        "[SUBQUERY_TRANSFORM] Iteration {}: Converted subquery to join",
+                        iteration + 1
+                    );
                 }
                 result.from = Some(new_from);
                 result.where_clause = new_where;
@@ -155,7 +157,9 @@ fn try_extract_subqueries_to_joins(
             }
 
             // Try recursively on left side
-            if let Some((new_left_from, new_left_where)) = try_extract_subqueries_to_joins(from, left) {
+            if let Some((new_left_from, new_left_where)) =
+                try_extract_subqueries_to_joins(from, left)
+            {
                 let combined_where = match new_left_where {
                     Some(new_left) => Some(Expression::BinaryOp {
                         op: BinaryOperator::And,
@@ -168,7 +172,9 @@ fn try_extract_subqueries_to_joins(
             }
 
             // Try recursively on right side
-            if let Some((new_right_from, new_right_where)) = try_extract_subqueries_to_joins(from, right) {
+            if let Some((new_right_from, new_right_where)) =
+                try_extract_subqueries_to_joins(from, right)
+            {
                 let combined_where = match new_right_where {
                     Some(new_right) => Some(Expression::BinaryOp {
                         op: BinaryOperator::And,

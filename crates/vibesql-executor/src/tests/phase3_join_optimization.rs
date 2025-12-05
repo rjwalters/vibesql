@@ -18,8 +18,16 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     let t1_schema = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "value".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(t1_schema).unwrap();
@@ -28,7 +36,10 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     for i in 1..=5 {
         db.insert_row(
             "t1",
-            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Integer(i * 10)]),
+            vibesql_storage::Row::new(vec![
+                vibesql_types::SqlValue::Integer(i),
+                vibesql_types::SqlValue::Integer(i * 10),
+            ]),
         )
         .unwrap();
     }
@@ -37,7 +48,11 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     let t2_schema = vibesql_catalog::TableSchema::new(
         "t2".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -64,13 +79,22 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+            left: Box::new(vibesql_ast::FromClause::Table {
+                name: "t1".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                name: "t2".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None, // NO ON clause - equijoin is in WHERE
             natural: false,
@@ -104,7 +128,8 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     assert_eq!(first_row.values[0], vibesql_types::SqlValue::Integer(1)); // t1.id
     assert_eq!(first_row.values[1], vibesql_types::SqlValue::Integer(10)); // t1.value
     assert_eq!(first_row.values[2], vibesql_types::SqlValue::Integer(1)); // t2.id
-    assert_eq!(first_row.values[3], vibesql_types::SqlValue::Varchar("name_1".to_string())); // t2.name
+    assert_eq!(first_row.values[3], vibesql_types::SqlValue::Varchar("name_1".to_string()));
+    // t2.name
 }
 
 /// Test that multiple equijoins are handled correctly when hash join uses one
@@ -116,8 +141,16 @@ fn test_hash_join_multiple_equijoins_in_where() {
     let t1_schema = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "value".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(t1_schema).unwrap();
@@ -125,7 +158,10 @@ fn test_hash_join_multiple_equijoins_in_where() {
     for i in 1..=3 {
         db.insert_row(
             "t1",
-            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Integer(i * 10)]),
+            vibesql_storage::Row::new(vec![
+                vibesql_types::SqlValue::Integer(i),
+                vibesql_types::SqlValue::Integer(i * 10),
+            ]),
         )
         .unwrap();
     }
@@ -134,8 +170,16 @@ fn test_hash_join_multiple_equijoins_in_where() {
     let t2_schema = vibesql_catalog::TableSchema::new(
         "t2".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "value".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(t2_schema).unwrap();
@@ -143,7 +187,10 @@ fn test_hash_join_multiple_equijoins_in_where() {
     for i in 1..=3 {
         db.insert_row(
             "t2",
-            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Integer(i * 20)]),
+            vibesql_storage::Row::new(vec![
+                vibesql_types::SqlValue::Integer(i),
+                vibesql_types::SqlValue::Integer(i * 20),
+            ]),
         )
         .unwrap();
     }
@@ -153,13 +200,22 @@ fn test_hash_join_multiple_equijoins_in_where() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+            left: Box::new(vibesql_ast::FromClause::Table {
+                name: "t1".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                name: "t2".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: false,
@@ -223,8 +279,16 @@ fn test_cascading_joins_with_where_equijoins() {
         let schema = vibesql_catalog::TableSchema::new(
             table_name.clone(),
             vec![
-                vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-                vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, false),
+                vibesql_catalog::ColumnSchema::new(
+                    "id".to_string(),
+                    vibesql_types::DataType::Integer,
+                    false,
+                ),
+                vibesql_catalog::ColumnSchema::new(
+                    "value".to_string(),
+                    vibesql_types::DataType::Integer,
+                    false,
+                ),
             ],
         );
         db.create_table(schema).unwrap();
@@ -253,25 +317,42 @@ fn test_cascading_joins_with_where_equijoins() {
     // Build nested join manually
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Join {
                 left: Box::new(vibesql_ast::FromClause::Join {
-                    left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-                    right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+                    left: Box::new(vibesql_ast::FromClause::Table {
+                        name: "t1".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
+                    right: Box::new(vibesql_ast::FromClause::Table {
+                        name: "t2".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     join_type: vibesql_ast::JoinType::Inner,
                     condition: None,
                     natural: false,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
+                right: Box::new(vibesql_ast::FromClause::Table {
+                    name: "t3".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 join_type: vibesql_ast::JoinType::Inner,
                 condition: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t4".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                name: "t4".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: false,
@@ -340,8 +421,16 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
     let t1_schema = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("key".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "key".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(t1_schema).unwrap();
@@ -349,7 +438,10 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
     for i in 1..=3 {
         db.insert_row(
             "t1",
-            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Integer(i * 10)]),
+            vibesql_storage::Row::new(vec![
+                vibesql_types::SqlValue::Integer(i),
+                vibesql_types::SqlValue::Integer(i * 10),
+            ]),
         )
         .unwrap();
     }
@@ -357,8 +449,16 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
     let t2_schema = vibesql_catalog::TableSchema::new(
         "t2".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("key".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "key".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(t2_schema).unwrap();
@@ -366,7 +466,10 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
     for i in 1..=3 {
         db.insert_row(
             "t2",
-            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i), vibesql_types::SqlValue::Integer(i * 10)]),
+            vibesql_storage::Row::new(vec![
+                vibesql_types::SqlValue::Integer(i),
+                vibesql_types::SqlValue::Integer(i * 10),
+            ]),
         )
         .unwrap();
     }
@@ -376,13 +479,22 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+            left: Box::new(vibesql_ast::FromClause::Table {
+                name: "t1".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                name: "t2".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -431,9 +543,21 @@ fn test_multi_column_hash_join_composite_keys() {
     let sales_schema = vibesql_catalog::TableSchema::new(
         "sales".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("region_id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("product_id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("amount".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "region_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "product_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "amount".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(sales_schema).unwrap();
@@ -457,9 +581,21 @@ fn test_multi_column_hash_join_composite_keys() {
     let inventory_schema = vibesql_catalog::TableSchema::new(
         "inventory".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("region_id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("product_id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("stock".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "region_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "product_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "stock".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(inventory_schema).unwrap();
@@ -492,8 +628,16 @@ fn test_multi_column_hash_join_composite_keys() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "inventory".to_string(), alias: None, column_aliases: None }),
+            left: Box::new(vibesql_ast::FromClause::Table {
+                name: "sales".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                name: "inventory".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             join_type: vibesql_ast::JoinType::Inner,
             // ON clause with composite key
             condition: Some(vibesql_ast::Expression::BinaryOp {
@@ -541,7 +685,7 @@ fn test_multi_column_hash_join_composite_keys() {
     for row in result.iter() {
         assert_eq!(row.values.len(), 6, "Expected 6 columns");
         // Verify the join keys match
-        assert_eq!(row.values[0], row.values[3], "region_id should match");  // sales.region_id = inventory.region_id
+        assert_eq!(row.values[0], row.values[3], "region_id should match"); // sales.region_id = inventory.region_id
         assert_eq!(row.values[1], row.values[4], "product_id should match"); // sales.product_id = inventory.product_id
     }
 }
@@ -568,7 +712,11 @@ fn test_star_join_select5_pattern() {
         let schema = vibesql_catalog::TableSchema::new(
             table_name.clone(),
             vec![
-                vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+                vibesql_catalog::ColumnSchema::new(
+                    "id".to_string(),
+                    vibesql_types::DataType::Integer,
+                    false,
+                ),
                 vibesql_catalog::ColumnSchema::new(
                     format!("val{}", table_num),
                     vibesql_types::DataType::Integer,
@@ -620,7 +768,8 @@ fn test_star_join_select5_pattern() {
 
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -629,28 +778,52 @@ fn test_star_join_select5_pattern() {
                 left: Box::new(vibesql_ast::FromClause::Join {
                     left: Box::new(vibesql_ast::FromClause::Join {
                         left: Box::new(vibesql_ast::FromClause::Join {
-                            left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-                            right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+                            left: Box::new(vibesql_ast::FromClause::Table {
+                                name: "t1".to_string(),
+                                alias: None,
+                                column_aliases: None,
+                            }),
+                            right: Box::new(vibesql_ast::FromClause::Table {
+                                name: "t2".to_string(),
+                                alias: None,
+                                column_aliases: None,
+                            }),
                             join_type: vibesql_ast::JoinType::Inner,
                             condition: None, // Star join: conditions in WHERE
                             natural: false,
                         }),
-                        right: Box::new(vibesql_ast::FromClause::Table { name: "t3".to_string(), alias: None, column_aliases: None }),
+                        right: Box::new(vibesql_ast::FromClause::Table {
+                            name: "t3".to_string(),
+                            alias: None,
+                            column_aliases: None,
+                        }),
                         join_type: vibesql_ast::JoinType::Inner,
                         condition: None,
                         natural: false,
                     }),
-                    right: Box::new(vibesql_ast::FromClause::Table { name: "t4".to_string(), alias: None, column_aliases: None }),
+                    right: Box::new(vibesql_ast::FromClause::Table {
+                        name: "t4".to_string(),
+                        alias: None,
+                        column_aliases: None,
+                    }),
                     join_type: vibesql_ast::JoinType::Inner,
                     condition: None,
                     natural: false,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table { name: "t5".to_string(), alias: None, column_aliases: None }),
+                right: Box::new(vibesql_ast::FromClause::Table {
+                    name: "t5".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 join_type: vibesql_ast::JoinType::Inner,
                 condition: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { name: "t6".to_string(), alias: None, column_aliases: None }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                name: "t6".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             natural: false,

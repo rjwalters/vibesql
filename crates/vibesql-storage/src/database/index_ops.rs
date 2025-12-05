@@ -64,14 +64,12 @@ impl Database {
 
     /// Update user-defined indexes for delete operation
     pub fn update_indexes_for_delete(&mut self, table_name: &str, row: &Row, row_index: usize) {
-        self.operations
-            .update_indexes_for_delete(&self.catalog, table_name, row, row_index);
+        self.operations.update_indexes_for_delete(&self.catalog, table_name, row, row_index);
     }
 
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(&mut self, table_name: &str) {
-        self.operations
-            .rebuild_indexes(&self.catalog, &self.tables, table_name);
+        self.operations.rebuild_indexes(&self.catalog, &self.tables, table_name);
     }
 
     /// Adjust user-defined indexes after row deletions
@@ -83,8 +81,7 @@ impl Database {
     /// * `table_name` - Name of the table whose indexes need adjustment
     /// * `deleted_indices` - Sorted list of deleted row indices (ascending order)
     pub fn adjust_indexes_after_delete(&mut self, table_name: &str, deleted_indices: &[usize]) {
-        self.operations
-            .adjust_indexes_after_delete(table_name, deleted_indices);
+        self.operations.adjust_indexes_after_delete(table_name, deleted_indices);
     }
 
     /// Drop an index
@@ -128,6 +125,7 @@ impl Database {
     /// * `dimensions` - Number of dimensions in the vectors
     /// * `lists` - Number of clusters for the IVFFlat algorithm
     /// * `metric` - Distance metric to use (L2, Cosine, InnerProduct)
+    #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index(
         &mut self,
         index_name: String,
@@ -205,6 +203,7 @@ impl Database {
     /// * `m` - Maximum number of connections per node (default 16)
     /// * `ef_construction` - Size of dynamic candidate list during construction (default 64)
     /// * `metric` - Distance metric to use (L2, Cosine, InnerProduct)
+    #[allow(clippy::too_many_arguments)]
     pub fn create_hnsw_index(
         &mut self,
         index_name: String,
@@ -282,7 +281,10 @@ impl Database {
     }
 
     /// Get spatial index (mutable)
-    pub fn get_spatial_index_mut(&mut self, index_name: &str) -> Option<&mut crate::index::SpatialIndex> {
+    pub fn get_spatial_index_mut(
+        &mut self,
+        index_name: &str,
+    ) -> Option<&mut crate::index::SpatialIndex> {
         self.operations.get_spatial_index_mut(index_name)
     }
 
@@ -360,15 +362,15 @@ impl Database {
         key_values: &[vibesql_types::SqlValue],
     ) -> Result<Option<Vec<&Row>>, StorageError> {
         // Get index metadata to find the table
-        let metadata = self.get_index(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let metadata = self
+            .get_index(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
         let table_name = metadata.table_name.clone();
 
         // Get the index data
-        let index_data = self.get_index_data(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .get_index_data(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         // Perform the lookup
         let row_indices = match index_data.get(key_values) {
@@ -377,9 +379,9 @@ impl Database {
         };
 
         // Get the table
-        let table = self.get_table(&table_name).ok_or_else(|| {
-            StorageError::TableNotFound(table_name.clone())
-        })?;
+        let table = self
+            .get_table(&table_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
         // Collect the rows
         let rows = table.scan();
@@ -416,15 +418,15 @@ impl Database {
         key_values: &[vibesql_types::SqlValue],
     ) -> Result<Option<&Row>, StorageError> {
         // Get index metadata to find the table
-        let metadata = self.get_index(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let metadata = self
+            .get_index(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
         let table_name = metadata.table_name.clone();
 
         // Get the index data
-        let index_data = self.get_index_data(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .get_index_data(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         // Perform the lookup
         let row_indices = match index_data.get(key_values) {
@@ -439,9 +441,9 @@ impl Database {
         };
 
         // Get the table and return the row using O(1) direct access
-        let table = self.get_table(&table_name).ok_or_else(|| {
-            StorageError::TableNotFound(table_name.clone())
-        })?;
+        let table = self
+            .get_table(&table_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
         Ok(table.get_row(first_idx))
     }
@@ -481,20 +483,20 @@ impl Database {
         keys: &[Vec<vibesql_types::SqlValue>],
     ) -> Result<Vec<Option<Vec<&'a Row>>>, StorageError> {
         // Get index metadata to find the table
-        let metadata = self.get_index(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let metadata = self
+            .get_index(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
         let table_name = metadata.table_name.clone();
 
         // Get the index data
-        let index_data = self.get_index_data(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .get_index_data(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         // Get the table once for O(1) row access
-        let table = self.get_table(&table_name).ok_or_else(|| {
-            StorageError::TableNotFound(table_name.clone())
-        })?;
+        let table = self
+            .get_table(&table_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
         // Look up each key using direct row access
         let mut results = Vec::with_capacity(keys.len());
@@ -502,10 +504,8 @@ impl Database {
             let row_indices = index_data.get(key);
             match row_indices {
                 Some(indices) if !indices.is_empty() => {
-                    let matched_rows: Vec<_> = indices
-                        .iter()
-                        .filter_map(|&idx| table.get_row(idx))
-                        .collect();
+                    let matched_rows: Vec<_> =
+                        indices.iter().filter_map(|&idx| table.get_row(idx)).collect();
                     if matched_rows.is_empty() {
                         results.push(None);
                     } else {
@@ -536,20 +536,20 @@ impl Database {
         keys: &[Vec<vibesql_types::SqlValue>],
     ) -> Result<Vec<Option<&'a Row>>, StorageError> {
         // Get index metadata to find the table
-        let metadata = self.get_index(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let metadata = self
+            .get_index(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
         let table_name = metadata.table_name.clone();
 
         // Get the index data
-        let index_data = self.get_index_data(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .get_index_data(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         // Get the table once for O(1) row access
-        let table = self.get_table(&table_name).ok_or_else(|| {
-            StorageError::TableNotFound(table_name.clone())
-        })?;
+        let table = self
+            .get_table(&table_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
         // Look up each key using direct row access
         let mut results = Vec::with_capacity(keys.len());
@@ -602,15 +602,15 @@ impl Database {
         prefix: &[vibesql_types::SqlValue],
     ) -> Result<Vec<&Row>, StorageError> {
         // Get index metadata to find the table
-        let metadata = self.get_index(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let metadata = self
+            .get_index(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
         let table_name = metadata.table_name.clone();
 
         // Get the index data
-        let index_data = self.get_index_data(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .get_index_data(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         // Perform the prefix scan
         let row_indices = index_data.prefix_scan(prefix);
@@ -619,15 +619,12 @@ impl Database {
         }
 
         // Get the table
-        let table = self.get_table(&table_name).ok_or_else(|| {
-            StorageError::TableNotFound(table_name.clone())
-        })?;
+        let table = self
+            .get_table(&table_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
         // Collect the rows using O(1) direct access
-        let rows: Vec<_> = row_indices
-            .iter()
-            .filter_map(|&idx| table.get_row(idx))
-            .collect();
+        let rows: Vec<_> = row_indices.iter().filter_map(|&idx| table.get_row(idx)).collect();
 
         Ok(rows)
     }
@@ -660,29 +657,27 @@ impl Database {
         prefixes: &[Vec<vibesql_types::SqlValue>],
     ) -> Result<Vec<Vec<&'a Row>>, StorageError> {
         // Get index metadata to find the table
-        let metadata = self.get_index(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let metadata = self
+            .get_index(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
         let table_name = metadata.table_name.clone();
 
         // Get the index data
-        let index_data = self.get_index_data(index_name).ok_or_else(|| {
-            StorageError::IndexNotFound(index_name.to_string())
-        })?;
+        let index_data = self
+            .get_index_data(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         // Get the table once for O(1) row access
-        let table = self.get_table(&table_name).ok_or_else(|| {
-            StorageError::TableNotFound(table_name.clone())
-        })?;
+        let table = self
+            .get_table(&table_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
         // Look up each prefix and collect results
         let mut results = Vec::with_capacity(prefixes.len());
         for prefix in prefixes {
             let row_indices = index_data.prefix_scan(prefix);
-            let matched_rows: Vec<_> = row_indices
-                .iter()
-                .filter_map(|&idx| table.get_row(idx))
-                .collect();
+            let matched_rows: Vec<_> =
+                row_indices.iter().filter_map(|&idx| table.get_row(idx)).collect();
             results.push(matched_rows);
         }
 

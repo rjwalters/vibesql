@@ -30,7 +30,10 @@ pub(crate) fn probe_columnar(
     let mut right_indices = Vec::new();
 
     match (left_key, right_key) {
-        (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, right_nulls)) => {
+        (
+            ColumnArray::Int64(left_values, left_nulls),
+            ColumnArray::Int64(right_values, right_nulls),
+        ) => {
             for (left_idx, &key) in left_values.iter().enumerate() {
                 // Skip NULL left keys - NULLs never match in equi-joins
                 if is_null(left_nulls, left_idx) {
@@ -46,7 +49,10 @@ pub(crate) fn probe_columnar(
                 }
             }
         }
-        (ColumnArray::String(left_values, left_nulls), ColumnArray::String(right_values, right_nulls)) => {
+        (
+            ColumnArray::String(left_values, left_nulls),
+            ColumnArray::String(right_values, right_nulls),
+        ) => {
             for (left_idx, key) in left_values.iter().enumerate() {
                 // Skip NULL left keys - NULLs never match in equi-joins
                 if is_null(left_nulls, left_idx) {
@@ -64,7 +70,8 @@ pub(crate) fn probe_columnar(
         }
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
-                "Columnar hash join probe not supported for this column type combination".to_string()
+                "Columnar hash join probe not supported for this column type combination"
+                    .to_string(),
             ));
         }
     }

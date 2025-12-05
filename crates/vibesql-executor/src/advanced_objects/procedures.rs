@@ -50,7 +50,7 @@ pub fn execute_create_procedure(
     stmt: &CreateProcedureStmt,
     db: &mut Database,
 ) -> Result<(), ExecutorError> {
-    use vibesql_catalog::{Procedure, ProcedureBody, ProcedureParam, ParameterMode, SqlSecurity};
+    use vibesql_catalog::{ParameterMode, Procedure, ProcedureBody, ProcedureParam, SqlSecurity};
 
     // Convert AST parameters to catalog parameters
     let catalog_params = stmt
@@ -62,11 +62,7 @@ pub fn execute_create_procedure(
                 vibesql_ast::ParameterMode::Out => ParameterMode::Out,
                 vibesql_ast::ParameterMode::InOut => ParameterMode::InOut,
             };
-            ProcedureParam {
-                mode,
-                name: param.name.clone(),
-                data_type: param.data_type.clone(),
-            }
+            ProcedureParam { mode, name: param.name.clone(), data_type: param.data_type.clone() }
         })
         .collect();
 
@@ -80,29 +76,34 @@ pub fn execute_create_procedure(
     };
 
     // Convert characteristics (Phase 6)
-    let sql_security = stmt.sql_security.as_ref().map(|sec| match sec {
-        vibesql_ast::SqlSecurity::Definer => SqlSecurity::Definer,
-        vibesql_ast::SqlSecurity::Invoker => SqlSecurity::Invoker,
-    }).unwrap_or(SqlSecurity::Definer);
+    let sql_security = stmt
+        .sql_security
+        .as_ref()
+        .map(|sec| match sec {
+            vibesql_ast::SqlSecurity::Definer => SqlSecurity::Definer,
+            vibesql_ast::SqlSecurity::Invoker => SqlSecurity::Invoker,
+        })
+        .unwrap_or(SqlSecurity::Definer);
 
-    let procedure = if stmt.sql_security.is_some() || stmt.comment.is_some() || stmt.language.is_some() {
-        Procedure::with_characteristics(
-            stmt.procedure_name.clone(),
-            db.catalog.get_current_schema().to_string(),
-            catalog_params,
-            catalog_body,
-            sql_security,
-            stmt.comment.clone(),
-            stmt.language.clone().unwrap_or_else(|| "SQL".to_string()),
-        )
-    } else {
-        Procedure::new(
-            stmt.procedure_name.clone(),
-            db.catalog.get_current_schema().to_string(),
-            catalog_params,
-            catalog_body,
-        )
-    };
+    let procedure =
+        if stmt.sql_security.is_some() || stmt.comment.is_some() || stmt.language.is_some() {
+            Procedure::with_characteristics(
+                stmt.procedure_name.clone(),
+                db.catalog.get_current_schema().to_string(),
+                catalog_params,
+                catalog_body,
+                sql_security,
+                stmt.comment.clone(),
+                stmt.language.clone().unwrap_or_else(|| "SQL".to_string()),
+            )
+        } else {
+            Procedure::new(
+                stmt.procedure_name.clone(),
+                db.catalog.get_current_schema().to_string(),
+                catalog_params,
+                catalog_body,
+            )
+        };
 
     db.catalog.create_procedure_with_characteristics(procedure)?;
     Ok(())
@@ -213,11 +214,8 @@ fn extract_variable_name(expr: &Expression) -> Result<String, ExecutorError> {
 /// - OUT/INOUT parameter is not a session variable
 /// - Type mismatch in parameter binding
 /// - Execution error in procedure body
-pub fn execute_call(
-    stmt: &CallStmt,
-    db: &mut Database,
-) -> Result<(), ExecutorError> {
-    use crate::procedural::{ExecutionContext, execute_procedural_statement, ControlFlow};
+pub fn execute_call(stmt: &CallStmt, db: &mut Database) -> Result<(), ExecutorError> {
+    use crate::procedural::{execute_procedural_statement, ControlFlow, ExecutionContext};
 
     // 1. Look up the procedure definition and clone what we need
     let (parameters, body) = {
@@ -310,7 +308,7 @@ pub fn execute_call(
                     ControlFlow::Leave(_) | ControlFlow::Iterate(_) => {
                         // Control flow statements not yet supported in Phase 2
                         return Err(ExecutorError::UnsupportedFeature(
-                            "Control flow (LEAVE/ITERATE) not yet supported in Phase 2".to_string()
+                            "Control flow (LEAVE/ITERATE) not yet supported in Phase 2".to_string(),
                         ));
                     }
                 }
@@ -320,7 +318,7 @@ pub fn execute_call(
         vibesql_catalog::ProcedureBody::RawSql(_) => {
             // RawSql fallback - would require parsing
             Err(ExecutorError::UnsupportedFeature(
-                "RawSql procedure bodies require parsing (use BEGIN/END block instead)".to_string()
+                "RawSql procedure bodies require parsing (use BEGIN/END block instead)".to_string(),
             ))
         }
     }?;
@@ -328,7 +326,8 @@ pub fn execute_call(
     // 5. Return output parameter values to session variables
     for (param_name, target_var_name) in ctx.get_out_parameters() {
         // Get the parameter value from the context
-        let value = ctx.get_parameter(param_name)
+        let value = ctx
+            .get_parameter(param_name)
             .cloned()
             .ok_or_else(|| ExecutorError::Other(format!("Parameter '{}' not found", param_name)))?;
 

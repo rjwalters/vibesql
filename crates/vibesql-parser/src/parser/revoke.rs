@@ -292,4 +292,3 @@ fn parse_optional_column_list(
         Ok(None)
     }
 }
-

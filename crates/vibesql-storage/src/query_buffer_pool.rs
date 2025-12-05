@@ -3,8 +3,8 @@
 //! Provides reusable buffers to reduce allocation overhead in high-volume query execution.
 //! Thread-local pools eliminate lock contention for concurrent access.
 
-use std::cell::RefCell;
 use crate::Row;
+use std::cell::RefCell;
 use vibesql_types::SqlValue;
 
 /// Default initial capacity for row buffers
@@ -113,10 +113,7 @@ impl QueryBufferPool {
         let row_buffers_pooled = ROW_POOL.with(|pool| pool.borrow().len());
         let value_buffers_pooled = VALUE_POOL.with(|pool| pool.borrow().len());
 
-        QueryBufferPoolStats {
-            row_buffers_pooled,
-            value_buffers_pooled,
-        }
+        QueryBufferPoolStats { row_buffers_pooled, value_buffers_pooled }
     }
 
     /// Clear all thread-local buffer pools, releasing memory back to the allocator.
@@ -161,10 +158,7 @@ pub struct RowBufferGuard {
 impl RowBufferGuard {
     /// Create a new guard wrapping a buffer
     pub fn new(buffer: Vec<Row>, pool: QueryBufferPool) -> Self {
-        Self {
-            buffer: Some(buffer),
-            pool,
-        }
+        Self { buffer: Some(buffer), pool }
     }
 
     /// Take ownership of the buffer, consuming the guard without returning to pool
@@ -202,10 +196,7 @@ pub struct ValueBufferGuard {
 impl ValueBufferGuard {
     /// Create a new guard wrapping a buffer
     pub fn new(buffer: Vec<SqlValue>, pool: QueryBufferPool) -> Self {
-        Self {
-            buffer: Some(buffer),
-            pool,
-        }
+        Self { buffer: Some(buffer), pool }
     }
 
     /// Take ownership of the buffer, consuming the guard without returning to pool

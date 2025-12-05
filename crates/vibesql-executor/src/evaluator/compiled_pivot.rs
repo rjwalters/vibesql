@@ -99,28 +99,28 @@ impl PivotAggregateGroup {
         }
 
         // Find the largest group with 2+ members
-        let best_group = groups
-            .into_iter()
-            .filter(|(_, v)| v.len() >= 2)
-            .max_by_key(|(_, v)| v.len());
+        let best_group =
+            groups.into_iter().filter(|(_, v)| v.len() >= 2).max_by_key(|(_, v)| v.len());
 
-        best_group.map(|((function_name, condition_col_idx, value_col_idx, distinct), candidates)| {
-            let entries = candidates
-                .into_iter()
-                .map(|c| PivotEntry {
-                    condition_value: c.condition_value,
-                    cache_key: c.cache_key,
-                })
-                .collect();
+        best_group.map(
+            |((function_name, condition_col_idx, value_col_idx, distinct), candidates)| {
+                let entries = candidates
+                    .into_iter()
+                    .map(|c| PivotEntry {
+                        condition_value: c.condition_value,
+                        cache_key: c.cache_key,
+                    })
+                    .collect();
 
-            PivotAggregateGroup {
-                function_name,
-                condition_col_idx,
-                value_col_idx,
-                distinct,
-                entries,
-            }
-        })
+                PivotAggregateGroup {
+                    function_name,
+                    condition_col_idx,
+                    value_col_idx,
+                    distinct,
+                    entries,
+                }
+            },
+        )
     }
 
     /// Extract a pivot candidate from an expression if it matches the pattern:
@@ -177,11 +177,7 @@ impl PivotAggregateGroup {
 
         // Condition must be col = literal
         let (condition_col_idx, condition_value) = match condition {
-            Expression::BinaryOp {
-                op: vibesql_ast::BinaryOperator::Equal,
-                left,
-                right,
-            } => {
+            Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Equal, left, right } => {
                 // Try left = column, right = literal
                 if let Some(pair) = Self::extract_column_equals_literal(left, right, schema) {
                     pair
@@ -253,7 +249,8 @@ impl PivotAggregateGroup {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build a lookup map from condition_value -> accumulator index
-        let mut value_to_idx: HashMap<&SqlValue, usize> = HashMap::with_capacity(self.entries.len());
+        let mut value_to_idx: HashMap<&SqlValue, usize> =
+            HashMap::with_capacity(self.entries.len());
         for (idx, entry) in self.entries.iter().enumerate() {
             value_to_idx.insert(&entry.condition_value, idx);
         }
@@ -435,21 +432,12 @@ mod tests {
         };
 
         let select_list = vec![
-            SelectItem::Expression {
-                expr: expr1,
-                alias: Some("sun_sales".to_string()),
-            },
-            SelectItem::Expression {
-                expr: expr2,
-                alias: Some("week1_sales".to_string()),
-            },
+            SelectItem::Expression { expr: expr1, alias: Some("sun_sales".to_string()) },
+            SelectItem::Expression { expr: expr2, alias: Some("week1_sales".to_string()) },
         ];
 
         let pivot = PivotAggregateGroup::try_detect(&select_list, &schema);
-        assert!(
-            pivot.is_none(),
-            "Should not detect pivot with different condition columns"
-        );
+        assert!(pivot.is_none(), "Should not detect pivot with different condition columns");
     }
 
     #[test]
@@ -500,15 +488,21 @@ mod tests {
         let results = pivot.execute(&rows).unwrap();
 
         // Find results by checking cache keys
-        let sun_key = pivot.entries.iter().find(|e| {
-            matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Sunday")
-        }).unwrap();
-        let mon_key = pivot.entries.iter().find(|e| {
-            matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Monday")
-        }).unwrap();
-        let tue_key = pivot.entries.iter().find(|e| {
-            matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Tuesday")
-        }).unwrap();
+        let sun_key = pivot
+            .entries
+            .iter()
+            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Sunday"))
+            .unwrap();
+        let mon_key = pivot
+            .entries
+            .iter()
+            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Monday"))
+            .unwrap();
+        let tue_key = pivot
+            .entries
+            .iter()
+            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Tuesday"))
+            .unwrap();
 
         assert_eq!(results.get(&sun_key.cache_key), Some(&SqlValue::Integer(300))); // 100 + 200
         assert_eq!(results.get(&mon_key.cache_key), Some(&SqlValue::Integer(50)));

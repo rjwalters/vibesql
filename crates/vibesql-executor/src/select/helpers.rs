@@ -20,12 +20,8 @@ pub(super) fn estimate_result_size(rows: &[vibesql_storage::Row]) -> usize {
     // Sample first 10, middle 10, and last 10 rows
     let sample_size = 30;
     let step = rows.len() / sample_size;
-    let sample_total: usize = rows
-        .iter()
-        .step_by(step.max(1))
-        .take(sample_size)
-        .map(|r| r.estimated_size_bytes())
-        .sum();
+    let sample_total: usize =
+        rows.iter().step_by(step.max(1)).take(sample_size).map(|r| r.estimated_size_bytes()).sum();
 
     let avg_row_size = sample_total / sample_size.min(rows.len());
     avg_row_size * rows.len()

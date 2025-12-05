@@ -15,7 +15,8 @@ fn test_parse_exists_simple() {
     if let vibesql_ast::Statement::Select(select) = stmt {
         assert!(select.where_clause.is_some());
 
-        if let vibesql_ast::Expression::Exists { subquery, negated } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::Exists { subquery, negated } = &select.where_clause.unwrap()
+        {
             // Should not be negated
             assert!(!(*negated));
 

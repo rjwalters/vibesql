@@ -156,8 +156,9 @@ fn test_parse_group_by_with_order_by() {
 
 #[test]
 fn test_parse_group_by_rollup() {
-    let result =
-        Parser::parse_sql("SELECT year, quarter, SUM(sales) FROM data GROUP BY ROLLUP(year, quarter);");
+    let result = Parser::parse_sql(
+        "SELECT year, quarter, SUM(sales) FROM data GROUP BY ROLLUP(year, quarter);",
+    );
     assert!(result.is_ok(), "Failed to parse ROLLUP: {:?}", result);
     let stmt = result.unwrap();
 
@@ -192,8 +193,9 @@ fn test_parse_group_by_rollup() {
 
 #[test]
 fn test_parse_group_by_cube() {
-    let result =
-        Parser::parse_sql("SELECT region, product, SUM(sales) FROM data GROUP BY CUBE(region, product);");
+    let result = Parser::parse_sql(
+        "SELECT region, product, SUM(sales) FROM data GROUP BY CUBE(region, product);",
+    );
     assert!(result.is_ok(), "Failed to parse CUBE: {:?}", result);
     let stmt = result.unwrap();
 
@@ -258,9 +260,7 @@ fn test_parse_group_by_grouping_sets() {
 #[test]
 fn test_parse_group_by_rollup_with_composite() {
     // ROLLUP((a, b), c) - (a, b) treated as single grouping unit
-    let result = Parser::parse_sql(
-        "SELECT a, b, c, SUM(d) FROM data GROUP BY ROLLUP((a, b), c);",
-    );
+    let result = Parser::parse_sql("SELECT a, b, c, SUM(d) FROM data GROUP BY ROLLUP((a, b), c);");
     assert!(result.is_ok(), "Failed to parse ROLLUP with composite: {:?}", result);
     let stmt = result.unwrap();
 
@@ -304,15 +304,13 @@ fn test_parse_grouping_function() {
             // Second select item should be GROUPING(year)
             assert!(select.select_list.len() >= 2);
             match &select.select_list[1] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => {
-                    match expr {
-                        vibesql_ast::Expression::Function { name, args, .. } => {
-                            assert_eq!(name.to_uppercase(), "GROUPING");
-                            assert_eq!(args.len(), 1);
-                        }
-                        _ => panic!("Expected GROUPING function"),
+                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                    vibesql_ast::Expression::Function { name, args, .. } => {
+                        assert_eq!(name.to_uppercase(), "GROUPING");
+                        assert_eq!(args.len(), 1);
                     }
-                }
+                    _ => panic!("Expected GROUPING function"),
+                },
                 _ => panic!("Expected expression"),
             }
         }
@@ -475,9 +473,8 @@ fn test_parse_group_by_mixed_simple_with_grouping_sets() {
 #[test]
 fn test_parse_group_by_mixed_multiple_simple_with_rollup() {
     // GROUP BY a, b, ROLLUP(c, d)
-    let result = Parser::parse_sql(
-        "SELECT a, b, c, d, SUM(e) FROM data GROUP BY a, b, ROLLUP(c, d);",
-    );
+    let result =
+        Parser::parse_sql("SELECT a, b, c, d, SUM(e) FROM data GROUP BY a, b, ROLLUP(c, d);");
     assert!(result.is_ok(), "Failed to parse mixed GROUP BY with multiple simple: {:?}", result);
     let stmt = result.unwrap();
 
@@ -488,7 +485,7 @@ fn test_parse_group_by_mixed_multiple_simple_with_rollup() {
             match group_by {
                 GroupByClause::Mixed(items) => {
                     assert_eq!(items.len(), 3); // a, b, ROLLUP(c, d)
-                    // First two should be simple
+                                                // First two should be simple
                     assert!(matches!(&items[0], MixedGroupingItem::Simple(_)));
                     assert!(matches!(&items[1], MixedGroupingItem::Simple(_)));
                     // Third should be ROLLUP
@@ -505,9 +502,7 @@ fn test_parse_group_by_mixed_multiple_simple_with_rollup() {
 fn test_parse_group_by_rollup_then_simple() {
     // ROLLUP at the beginning, then simple columns
     // GROUP BY ROLLUP(a), b
-    let result = Parser::parse_sql(
-        "SELECT a, b, SUM(c) FROM data GROUP BY ROLLUP(a), b;",
-    );
+    let result = Parser::parse_sql("SELECT a, b, SUM(c) FROM data GROUP BY ROLLUP(a), b;");
     assert!(result.is_ok(), "Failed to parse ROLLUP then simple: {:?}", result);
     let stmt = result.unwrap();
 
@@ -534,9 +529,7 @@ fn test_parse_group_by_rollup_then_simple() {
 fn test_parse_group_by_multiple_rollup() {
     // Multiple ROLLUP in one GROUP BY
     // GROUP BY ROLLUP(a), ROLLUP(b)
-    let result = Parser::parse_sql(
-        "SELECT a, b, SUM(c) FROM data GROUP BY ROLLUP(a), ROLLUP(b);",
-    );
+    let result = Parser::parse_sql("SELECT a, b, SUM(c) FROM data GROUP BY ROLLUP(a), ROLLUP(b);");
     assert!(result.is_ok(), "Failed to parse multiple ROLLUP: {:?}", result);
     let stmt = result.unwrap();
 
@@ -561,9 +554,8 @@ fn test_parse_group_by_multiple_rollup() {
 fn test_parse_group_by_mixed_rollup_and_cube() {
     // Mix of ROLLUP and CUBE
     // GROUP BY a, ROLLUP(b), CUBE(c)
-    let result = Parser::parse_sql(
-        "SELECT a, b, c, SUM(d) FROM data GROUP BY a, ROLLUP(b), CUBE(c);",
-    );
+    let result =
+        Parser::parse_sql("SELECT a, b, c, SUM(d) FROM data GROUP BY a, ROLLUP(b), CUBE(c);");
     assert!(result.is_ok(), "Failed to parse mixed ROLLUP and CUBE: {:?}", result);
     let stmt = result.unwrap();
 

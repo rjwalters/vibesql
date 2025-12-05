@@ -54,12 +54,20 @@ fn test_select_into_single_row() {
                 alias: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "name".to_string(),
+                },
                 alias: None,
             },
         ],
         into_table: Some("target".to_string()),
-        into_variables: None,        from: Some(vibesql_ast::FromClause::Table { name: "source".to_string(), alias: None, column_aliases: None }),
+        into_variables: None,
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "source".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -82,7 +90,12 @@ fn test_select_into_single_row() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
-        into_variables: None,        from: Some(vibesql_ast::FromClause::Table { name: "target".to_string(), alias: None, column_aliases: None }),
+        into_variables: None,
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "target".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -128,7 +141,12 @@ fn test_select_into_no_rows_error() {
             alias: None,
         }],
         into_table: Some("target".to_string()),
-        into_variables: None,        from: Some(vibesql_ast::FromClause::Table { name: "source".to_string(), alias: None, column_aliases: None }),
+        into_variables: None,
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "source".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -169,8 +187,16 @@ fn test_select_into_multiple_rows_error() {
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
     // Insert multiple rows
-    db.insert_row("source", vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(1)] }).unwrap();
-    db.insert_row("source", vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(2)] }).unwrap();
+    db.insert_row(
+        "source",
+        vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(1)] },
+    )
+    .unwrap();
+    db.insert_row(
+        "source",
+        vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(2)] },
+    )
+    .unwrap();
 
     // Execute SELECT INTO (should fail - multiple rows)
     let select_stmt = vibesql_ast::SelectStmt {
@@ -181,7 +207,12 @@ fn test_select_into_multiple_rows_error() {
             alias: None,
         }],
         into_table: Some("target".to_string()),
-        into_variables: None,        from: Some(vibesql_ast::FromClause::Table { name: "source".to_string(), alias: None, column_aliases: None }),
+        into_variables: None,
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "source".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -222,7 +253,11 @@ fn test_select_into_with_expressions() {
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
     // Insert one row
-    db.insert_row("source", vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(10)] }).unwrap();
+    db.insert_row(
+        "source",
+        vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(10)] },
+    )
+    .unwrap();
 
     // Execute SELECT INTO with expression and alias
     let select_stmt = vibesql_ast::SelectStmt {
@@ -231,13 +266,23 @@ fn test_select_into_with_expressions() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Plus,
-                left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() }),
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "x".to_string(),
+                }),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(5),
+                )),
             },
             alias: Some("y".to_string()),
         }],
         into_table: Some("target".to_string()),
-        into_variables: None,        from: Some(vibesql_ast::FromClause::Table { name: "source".to_string(), alias: None, column_aliases: None }),
+        into_variables: None,
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "source".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -257,7 +302,12 @@ fn test_select_into_with_expressions() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
-        into_variables: None,        from: Some(vibesql_ast::FromClause::Table { name: "target".to_string(), alias: None, column_aliases: None }),
+        into_variables: None,
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "target".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

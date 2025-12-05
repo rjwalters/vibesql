@@ -15,7 +15,9 @@ impl Parser {
     }
 
     /// Parse primary expression (literals, identifiers, parenthesized expressions)
-    pub(super) fn parse_primary_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
+    pub(super) fn parse_primary_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
         // Try to parse as a placeholder (?)
         if matches!(self.peek(), Token::Placeholder) {
             self.advance();

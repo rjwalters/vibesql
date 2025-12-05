@@ -84,7 +84,11 @@ mod integration_tests {
         let schema = vibesql_catalog::TableSchema::new(
             "small_table".to_string(),
             vec![
-                vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+                vibesql_catalog::ColumnSchema::new(
+                    "id".to_string(),
+                    vibesql_types::DataType::Integer,
+                    false,
+                ),
                 vibesql_catalog::ColumnSchema::new(
                     "name".to_string(),
                     vibesql_types::DataType::Varchar { max_length: Some(100) },
@@ -115,11 +119,16 @@ mod integration_tests {
         let executor = SelectExecutor::new(&db);
         let stmt = vibesql_ast::SelectStmt {
             into_table: None,
-            into_variables: None,            with_clause: None,
+            into_variables: None,
+            with_clause: None,
             set_operation: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-            from: Some(vibesql_ast::FromClause::Table { name: "small_table".to_string(), alias: None, column_aliases: None }),
+            from: Some(vibesql_ast::FromClause::Table {
+                name: "small_table".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: None,
             group_by: None,
             having: None,
@@ -144,13 +153,21 @@ mod integration_tests {
         // Create two tables
         let schema1 = vibesql_catalog::TableSchema::new(
             "t1".to_string(),
-            vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+            vec![vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            )],
         );
         db.create_table(schema1).unwrap();
 
         let schema2 = vibesql_catalog::TableSchema::new(
             "t2".to_string(),
-            vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+            vec![vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            )],
         );
         db.create_table(schema2).unwrap();
 
@@ -158,8 +175,16 @@ mod integration_tests {
         // 10,100 x 10,100 = 102,010,000 rows (exceeds limit with minimal overhead)
         // Reduced from 15,000 to speed up test while still triggering the limit
         for i in 0..10_100 {
-            db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)])).unwrap();
-            db.insert_row("t2", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)])).unwrap();
+            db.insert_row(
+                "t1",
+                vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+            )
+            .unwrap();
+            db.insert_row(
+                "t2",
+                vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+            )
+            .unwrap();
         }
 
         let executor = SelectExecutor::new(&db);
@@ -167,13 +192,22 @@ mod integration_tests {
         // Test CROSS JOIN
         let cross_join_stmt = vibesql_ast::SelectStmt {
             into_table: None,
-            into_variables: None,            with_clause: None,
+            into_variables: None,
+            with_clause: None,
             set_operation: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
             from: Some(vibesql_ast::FromClause::Join {
-                left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-                right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+                left: Box::new(vibesql_ast::FromClause::Table {
+                    name: "t1".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
+                right: Box::new(vibesql_ast::FromClause::Table {
+                    name: "t2".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 join_type: vibesql_ast::JoinType::Cross,
                 condition: None,
                 natural: false,
@@ -197,15 +231,26 @@ mod integration_tests {
         // Test INNER JOIN without selective condition (also cartesian-like)
         let inner_join_stmt = vibesql_ast::SelectStmt {
             into_table: None,
-            into_variables: None,            with_clause: None,
+            into_variables: None,
+            with_clause: None,
             set_operation: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
             from: Some(vibesql_ast::FromClause::Join {
-                left: Box::new(vibesql_ast::FromClause::Table { name: "t1".to_string(), alias: None, column_aliases: None }),
-                right: Box::new(vibesql_ast::FromClause::Table { name: "t2".to_string(), alias: None, column_aliases: None }),
+                left: Box::new(vibesql_ast::FromClause::Table {
+                    name: "t1".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
+                right: Box::new(vibesql_ast::FromClause::Table {
+                    name: "t2".to_string(),
+                    alias: None,
+                    column_aliases: None,
+                }),
                 join_type: vibesql_ast::JoinType::Inner,
-                condition: Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))),
+                condition: Some(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Boolean(true),
+                )),
                 natural: false,
             }),
             where_clause: None,

@@ -23,12 +23,12 @@ mod conversion;
 pub(crate) mod datetime;
 mod null_handling;
 mod numeric;
-pub(crate) mod string;
-mod storage;
-mod system;
-mod vector;
 #[cfg(feature = "spatial")]
 pub(crate) mod spatial;
+mod storage;
+pub(crate) mod string;
+mod system;
+mod vector;
 
 /// Evaluate a scalar function on given argument values
 ///
@@ -138,11 +138,15 @@ pub(super) fn eval_scalar_function(
         // Constructor functions - WKT (Phase 1)
         "ST_GEOMFROMTEXT" | "ST_GEOM_FROM_TEXT" => spatial::constructors::st_geom_from_text(args),
         #[cfg(feature = "spatial")]
-        "ST_POINTFROMTEXT" | "ST_POINT_FROM_TEXT" => spatial::constructors::st_point_from_text(args),
+        "ST_POINTFROMTEXT" | "ST_POINT_FROM_TEXT" => {
+            spatial::constructors::st_point_from_text(args)
+        }
         #[cfg(feature = "spatial")]
         "ST_LINEFROMTEXT" | "ST_LINE_FROM_TEXT" => spatial::constructors::st_line_from_text(args),
         #[cfg(feature = "spatial")]
-        "ST_POLYGONFROMTEXT" | "ST_POLYGON_FROM_TEXT" => spatial::constructors::st_polygon_from_text(args),
+        "ST_POLYGONFROMTEXT" | "ST_POLYGON_FROM_TEXT" => {
+            spatial::constructors::st_polygon_from_text(args)
+        }
 
         #[cfg(feature = "spatial")]
         // Constructor functions - WKB (Phase 2)
@@ -152,7 +156,9 @@ pub(super) fn eval_scalar_function(
         #[cfg(feature = "spatial")]
         "ST_LINEFROMWKB" | "ST_LINE_FROM_WKB" => spatial::constructors::st_line_from_wkb(args),
         #[cfg(feature = "spatial")]
-        "ST_POLYGONFROMWKB" | "ST_POLYGON_FROM_WKB" => spatial::constructors::st_polygon_from_wkb(args),
+        "ST_POLYGONFROMWKB" | "ST_POLYGON_FROM_WKB" => {
+            spatial::constructors::st_polygon_from_wkb(args)
+        }
 
         #[cfg(feature = "spatial")]
         // Accessor functions
@@ -218,11 +224,15 @@ pub(super) fn eval_scalar_function(
         #[cfg(feature = "spatial")]
         "ST_CONVEXHULL" | "ST_CONVEX_HULL" => spatial::measurements::st_convex_hull(args),
         #[cfg(feature = "spatial")]
-        "ST_POINTONSURFACE" | "ST_POINT_ON_SURFACE" => spatial::measurements::st_point_on_surface(args),
+        "ST_POINTONSURFACE" | "ST_POINT_ON_SURFACE" => {
+            spatial::measurements::st_point_on_surface(args)
+        }
         #[cfg(feature = "spatial")]
         "ST_BOUNDARY" => spatial::measurements::st_boundary(args),
         #[cfg(feature = "spatial")]
-        "ST_HAUSDORFFDISTANCE" | "ST_HAUSDORFF_DISTANCE" => spatial::measurements::st_hausdorff_distance(args),
+        "ST_HAUSDORFFDISTANCE" | "ST_HAUSDORFF_DISTANCE" => {
+            spatial::measurements::st_hausdorff_distance(args)
+        }
 
         #[cfg(feature = "spatial")]
         // Spatial operation functions
