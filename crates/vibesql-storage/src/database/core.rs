@@ -8,6 +8,7 @@ use super::operations::Operations;
 use super::transactions::TransactionChange;
 use crate::change_events::{ChangeEvent, ChangeEventReceiver, ChangeEventSender};
 use crate::columnar_cache::ColumnarCache;
+use crate::wal::{PersistenceEngine, WalOp};
 use crate::{QueryBufferPool, Row, StorageError, Table};
 use std::collections::HashMap;
 
@@ -38,6 +39,11 @@ pub struct Database {
     /// Last generated AUTO_INCREMENT value for LAST_INSERT_ROWID()
     /// Tracks the most recent auto-generated ID from INSERT operations
     pub(super) last_insert_rowid: i64,
+    /// Optional persistence engine for WAL-based async persistence
+    /// Enables durable storage when enabled
+    pub(super) persistence_engine: Option<PersistenceEngine>,
+    /// Next table ID to assign (for WAL table_id tracking)
+    pub(super) next_table_id: u32,
 }
 
 impl Database {
@@ -53,17 +59,44 @@ impl Database {
     /// Begin a new transaction
     pub fn begin_transaction(&mut self) -> Result<(), StorageError> {
         let catalog = &self.catalog.clone();
-        self.lifecycle.transaction_manager_mut().begin_transaction(catalog, &self.tables)
+        self.lifecycle.transaction_manager_mut().begin_transaction(catalog, &self.tables)?;
+
+        // Emit WAL entry for persistence
+        if let Some(txn_id) = self.transaction_id() {
+            self.emit_wal_op(WalOp::TxnBegin { txn_id });
+        }
+
+        Ok(())
     }
 
     /// Commit the current transaction
     pub fn commit_transaction(&mut self) -> Result<(), StorageError> {
-        self.lifecycle.transaction_manager_mut().commit_transaction()
+        // Get transaction ID before committing (it will be cleared after)
+        let txn_id = self.transaction_id();
+
+        self.lifecycle.transaction_manager_mut().commit_transaction()?;
+
+        // Emit WAL entry for persistence
+        if let Some(txn_id) = txn_id {
+            self.emit_wal_op(WalOp::TxnCommit { txn_id });
+        }
+
+        Ok(())
     }
 
     /// Rollback the current transaction
     pub fn rollback_transaction(&mut self) -> Result<(), StorageError> {
-        self.lifecycle.perform_rollback(&mut self.catalog, &mut self.tables)
+        // Get transaction ID before rolling back (it will be cleared after)
+        let txn_id = self.transaction_id();
+
+        self.lifecycle.perform_rollback(&mut self.catalog, &mut self.tables)?;
+
+        // Emit WAL entry for persistence
+        if let Some(txn_id) = txn_id {
+            self.emit_wal_op(WalOp::TxnRollback { txn_id });
+        }
+
+        Ok(())
     }
 
     /// Check if we're currently in a transaction
@@ -147,6 +180,18 @@ impl Database {
         let current_schema = &self.catalog.get_current_schema();
         let qualified_name = format!("{}.{}", current_schema, normalized_table_name);
 
+        // Assign table ID and emit WAL entry for persistence
+        let table_id = self.next_table_id();
+
+        // Serialize schema for WAL (use a simple binary format)
+        let schema_data = serialize_table_schema(&schema);
+
+        self.emit_wal_op(WalOp::CreateTable {
+            table_id,
+            table_name: qualified_name.clone(),
+            schema_data,
+        });
+
         let table = Table::new(schema);
         self.tables.insert(qualified_name, table);
 
@@ -223,6 +268,12 @@ impl Database {
 
     /// Drop a table
     pub fn drop_table(&mut self, name: &str) -> Result<(), StorageError> {
+        // Emit WAL entry for persistence before dropping
+        self.emit_wal_op(WalOp::DropTable {
+            table_id: self.table_name_to_id(name),
+            table_name: name.to_string(),
+        });
+
         // Invalidate columnar cache before dropping
         self.columnar_cache.invalidate(name);
         self.operations.drop_table(&mut self.catalog, &mut self.tables, name)
@@ -233,7 +284,14 @@ impl Database {
         let row_index =
             self.operations.insert_row(&self.catalog, &mut self.tables, table_name, row.clone())?;
 
-        self.record_change(TransactionChange::Insert { table_name: table_name.to_string(), row });
+        self.record_change(TransactionChange::Insert { table_name: table_name.to_string(), row: row.clone() });
+
+        // Emit WAL entry for persistence
+        self.emit_wal_op(WalOp::Insert {
+            table_id: self.table_name_to_id(table_name),
+            row_id: row_index as u64,
+            values: row.values.clone(),
+        });
 
         // Broadcast change event to subscribers
         self.broadcast_change(ChangeEvent::Insert {
@@ -296,11 +354,20 @@ impl Database {
             rows.clone(),
         )?;
 
-        // Record changes for transaction management and broadcast events
+        let table_id = self.table_name_to_id(table_name);
+
+        // Record changes for transaction management, emit WAL entries, and broadcast events
         for (row, &row_index) in rows.into_iter().zip(row_indices.iter()) {
             self.record_change(TransactionChange::Insert {
                 table_name: table_name.to_string(),
-                row,
+                row: row.clone(),
+            });
+
+            // Emit WAL entry for persistence
+            self.emit_wal_op(WalOp::Insert {
+                table_id,
+                row_id: row_index as u64,
+                values: row.values.clone(),
             });
 
             // Broadcast change event to subscribers
@@ -469,6 +536,14 @@ impl Database {
             &new_row,
             row_index,
         );
+
+        // Emit WAL entry for persistence
+        self.emit_wal_op(WalOp::Update {
+            table_id: self.table_name_to_id(&resolved_name),
+            row_id: row_index as u64,
+            old_values: old_row.values.clone(),
+            new_values: new_row.values.clone(),
+        });
 
         // Broadcast change event to subscribers
         self.broadcast_change(ChangeEvent::Update { table_name: resolved_name.clone(), row_index });
@@ -762,6 +837,82 @@ impl Database {
     }
 
     // ============================================================================
+    // WAL Persistence Support
+    // ============================================================================
+
+    /// Enable WAL-based async persistence
+    ///
+    /// Creates a persistence engine that writes changes to a WAL file in the background.
+    /// All subsequent DML and DDL operations will be logged to the WAL for durability.
+    ///
+    /// # Arguments
+    /// * `engine` - A pre-configured PersistenceEngine instance
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use vibesql_storage::{Database, PersistenceEngine, PersistenceConfig};
+    ///
+    /// let mut db = Database::new();
+    /// let engine = PersistenceEngine::new("/path/to/wal.log", PersistenceConfig::default())?;
+    /// db.enable_persistence(engine);
+    /// ```
+    pub fn enable_persistence(&mut self, engine: PersistenceEngine) {
+        self.persistence_engine = Some(engine);
+    }
+
+    /// Check if WAL persistence is enabled
+    pub fn persistence_enabled(&self) -> bool {
+        self.persistence_engine.is_some()
+    }
+
+    /// Get persistence statistics (if enabled)
+    pub fn persistence_stats(&self) -> Option<crate::wal::PersistenceStats> {
+        self.persistence_engine.as_ref().map(|e| e.stats())
+    }
+
+    /// Emit a WAL operation to the persistence engine (if enabled)
+    ///
+    /// This is a no-op if persistence is not enabled, providing zero overhead
+    /// when WAL is disabled.
+    pub(super) fn emit_wal_op(&self, op: WalOp) {
+        if let Some(engine) = &self.persistence_engine {
+            if let Err(e) = engine.send(op) {
+                log::error!("Failed to emit WAL op: {}", e);
+            }
+        }
+    }
+
+    /// Get the next table ID and increment the counter
+    pub(super) fn next_table_id(&mut self) -> u32 {
+        let id = self.next_table_id;
+        self.next_table_id += 1;
+        id
+    }
+
+    /// Compute a table ID from table name using hash (for consistent mapping)
+    ///
+    /// This is used when we don't have a monotonic table ID assigned at creation time,
+    /// such as for tables created before WAL was enabled.
+    pub(super) fn table_name_to_id(&self, name: &str) -> u32 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        name.hash(&mut hasher);
+        hasher.finish() as u32
+    }
+
+    /// Sync all pending WAL entries to disk
+    ///
+    /// Blocks until all pending entries have been written and flushed.
+    /// This is useful for ensuring durability before returning to the user.
+    pub fn sync_persistence(&self) -> Result<(), StorageError> {
+        if let Some(engine) = &self.persistence_engine {
+            engine.sync()
+        } else {
+            Ok(())
+        }
+    }
+
+    // ============================================================================
     // AUTO_INCREMENT / LAST_INSERT_ROWID Support
     // ============================================================================
 
@@ -798,6 +949,40 @@ impl Database {
     pub fn set_last_insert_rowid(&mut self, id: i64) {
         self.last_insert_rowid = id;
     }
+}
+
+/// Serialize a TableSchema to bytes for WAL storage
+///
+/// Uses a simple format: JSON serialization of the schema.
+/// This is for WAL recovery purposes and doesn't need to be maximally efficient.
+fn serialize_table_schema(schema: &vibesql_catalog::TableSchema) -> Vec<u8> {
+    // Simple approach: serialize the table name and column info as text
+    // Format: table_name\0col1_name\0col1_type\0nullable\0...
+    let mut data = Vec::new();
+
+    // Write table name
+    data.extend_from_slice(schema.name.as_bytes());
+    data.push(0);
+
+    // Write column count
+    data.extend_from_slice(&(schema.columns.len() as u32).to_le_bytes());
+
+    // Write each column
+    for col in &schema.columns {
+        // Column name
+        data.extend_from_slice(col.name.as_bytes());
+        data.push(0);
+
+        // Data type (as debug string for simplicity)
+        let type_str = format!("{:?}", col.data_type);
+        data.extend_from_slice(type_str.as_bytes());
+        data.push(0);
+
+        // Nullable flag
+        data.push(if col.nullable { 1 } else { 0 });
+    }
+
+    data
 }
 
 #[cfg(test)]
@@ -1120,5 +1305,115 @@ mod tests {
         assert!(
             matches!(&events[0], ChangeEvent::Update { table_name, row_index: 42 } if table_name == "products")
         );
+    }
+
+    // ============================================================================
+    // WAL Persistence Tests
+    // ============================================================================
+
+    #[test]
+    fn test_persistence_disabled_by_default() {
+        let db = Database::new();
+        assert!(!db.persistence_enabled());
+        assert!(db.persistence_stats().is_none());
+    }
+
+    #[test]
+    fn test_enable_persistence() {
+        use std::io::Cursor;
+        use crate::wal::{PersistenceConfig, PersistenceEngine};
+
+        let mut db = Database::new();
+        assert!(!db.persistence_enabled());
+
+        // Create a persistence engine with an in-memory writer
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+
+        db.enable_persistence(engine);
+        assert!(db.persistence_enabled());
+        assert!(db.persistence_stats().is_some());
+    }
+
+    #[test]
+    fn test_persistence_emits_insert_entries() {
+        use std::io::Cursor;
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+        use crate::wal::{PersistenceConfig, PersistenceEngine};
+
+        let mut db = Database::new();
+
+        // Enable persistence
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        db.enable_persistence(engine);
+
+        // Create a table
+        let schema = TableSchema::new(
+            "users".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ],
+        );
+        db.create_table(schema).unwrap();
+
+        // Insert rows
+        let row1 = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
+        let row2 = crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]);
+        db.insert_row("users", row1).unwrap();
+        db.insert_row("users", row2).unwrap();
+
+        // Check stats
+        let stats = db.persistence_stats().unwrap();
+        // CreateTable + 2 Inserts = 3 entries
+        assert_eq!(stats.entries_sent, 3);
+    }
+
+    #[test]
+    fn test_persistence_emits_transaction_entries() {
+        use std::io::Cursor;
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+        use crate::wal::{PersistenceConfig, PersistenceEngine};
+
+        let mut db = Database::new();
+
+        // Enable persistence
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        db.enable_persistence(engine);
+
+        // Create a table
+        let schema = TableSchema::new(
+            "test".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+        db.create_table(schema).unwrap();
+
+        // Start transaction
+        db.begin_transaction().unwrap();
+
+        // Insert
+        let row = crate::Row::new(vec![SqlValue::Integer(1)]);
+        db.insert_row("test", row).unwrap();
+
+        // Commit
+        db.commit_transaction().unwrap();
+
+        // Check stats: CreateTable + TxnBegin + Insert + TxnCommit = 4
+        let stats = db.persistence_stats().unwrap();
+        assert_eq!(stats.entries_sent, 4);
+    }
+
+    #[test]
+    fn test_sync_persistence_no_op_when_disabled() {
+        let db = Database::new();
+        // Should not error when persistence is disabled
+        assert!(db.sync_persistence().is_ok());
     }
 }
