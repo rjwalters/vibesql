@@ -337,7 +337,8 @@ impl SelectExecutor<'_> {
             ExecutionStrategy::ExpressionOnly { .. } => {
                 // SELECT without FROM - special case that doesn't use pipelines
                 // May still have aggregates (e.g., SELECT COUNT(*), SELECT MAX(1))
-                return self.execute_expression_only(stmt, cte_results);
+                // Note: Do NOT use early return here - we need to fall through to set operations handling
+                self.execute_expression_only(stmt, cte_results)?
             }
         };
 
