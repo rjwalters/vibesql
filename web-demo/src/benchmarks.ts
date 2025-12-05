@@ -372,6 +372,31 @@ interface BenchmarkResults {
 }
 
 /**
+ * TPC-C benchmark interfaces (different format - uses TPS instead of mean time)
+ */
+interface TPCCStats {
+  tps: number;
+  transactions: number;
+  duration_ms: number;
+  success_rate: number;
+}
+
+interface TPCCBenchmark {
+  name: string;
+  stats: TPCCStats;
+}
+
+interface TPCCResults {
+  benchmarks: TPCCBenchmark[];
+  metadata: {
+    suite: string;
+    timestamp: string;
+    git_commit: string;
+    scale_factor: string;
+  };
+}
+
+/**
  * Footprint benchmark interfaces (different format from TPC benchmarks)
  */
 interface FootprintBenchmark {
@@ -1089,6 +1114,266 @@ function renderFootprintChart(data: FootprintResults): void {
 }
 
 /**
+ * Format TPS (transactions per second) with appropriate units
+ */
+function formatTPS(tps: number): string {
+  if (tps >= 1_000_000) {
+    return `${(tps / 1_000_000).toFixed(2)}M TPS`;
+  } else if (tps >= 1_000) {
+    return `${(tps / 1_000).toFixed(2)}K TPS`;
+  } else {
+    return `${tps.toFixed(2)} TPS`;
+  }
+}
+
+/**
+ * Group TPC-C benchmarks by operation
+ */
+function groupTPCCBenchmarksByOperation(benchmarks: TPCCBenchmark[]): Map<string, Map<string, TPCCBenchmark>> {
+  const grouped = new Map<string, Map<string, TPCCBenchmark>>();
+
+  for (const bench of benchmarks) {
+    const parts = bench.name.split('_');
+    const database = parts[parts.length - 1]; // Last part is database name
+    const operation = parts.slice(1, -1).join('_'); // Middle parts are operation
+
+    if (!grouped.has(operation)) {
+      grouped.set(operation, new Map());
+    }
+
+    grouped.get(operation)!.set(database, bench);
+  }
+
+  return grouped;
+}
+
+/**
+ * Render TPC-C results table (uses TPS instead of execution time)
+ */
+function renderTPCCTable(data: TPCCResults): void {
+  const tbody = document.getElementById('results-tbody');
+  const table = document.getElementById('results-table');
+  if (!tbody || !table) return;
+
+  // Update table headers for TPC-C view
+  const thead = table.querySelector('thead tr');
+  if (thead) {
+    thead.innerHTML = `
+      <th class="px-4 py-3">Workload</th>
+      <th class="px-4 py-3 text-right">VibeSQL</th>
+      <th class="px-4 py-3 text-right">SQLite</th>
+      <th class="px-4 py-3 text-right">Transactions</th>
+      <th class="px-4 py-3 text-right">Duration</th>
+      <th class="px-4 py-3 text-right">Speedup</th>
+      <th class="px-4 py-3 text-center">Winner</th>
+    `;
+  }
+
+  tbody.innerHTML = '';
+
+  const grouped = groupTPCCBenchmarksByOperation(data.benchmarks);
+
+  let totalSpeedup = 0;
+  let comparisonCount = 0;
+
+  for (const [operation, databases] of grouped.entries()) {
+    const vibesql = databases.get('vibesql');
+    const sqlite = databases.get('sqlite');
+
+    if (!vibesql && !sqlite) continue;
+
+    const row = document.createElement('tr');
+    row.className = 'hover:bg-card/50 transition-colors';
+
+    // Operation name
+    const opCell = document.createElement('td');
+    opCell.className = 'px-4 py-3 font-medium text-foreground';
+    const config = SUITE_CONFIGS['tpcc'];
+    const description = config.descriptions[operation];
+    if (description) {
+      opCell.innerHTML = `<span class="cursor-help" title="${description}">${operation.replace(/_/g, ' ').toUpperCase()}</span>`;
+    } else {
+      opCell.textContent = operation.replace(/_/g, ' ').toUpperCase();
+    }
+    row.appendChild(opCell);
+
+    // VibeSQL TPS
+    const vibesqlCell = document.createElement('td');
+    vibesqlCell.className = 'px-4 py-3 text-right text-muted';
+    vibesqlCell.textContent = vibesql ? formatTPS(vibesql.stats.tps) : 'N/A';
+    row.appendChild(vibesqlCell);
+
+    // SQLite TPS
+    const sqliteCell = document.createElement('td');
+    sqliteCell.className = 'px-4 py-3 text-right text-muted';
+    sqliteCell.textContent = sqlite ? formatTPS(sqlite.stats.tps) : 'N/A';
+    row.appendChild(sqliteCell);
+
+    // Transactions (use vibesql or sqlite)
+    const txCell = document.createElement('td');
+    txCell.className = 'px-4 py-3 text-right text-muted';
+    const txBench = vibesql || sqlite;
+    txCell.textContent = txBench ? txBench.stats.transactions.toLocaleString() : 'N/A';
+    row.appendChild(txCell);
+
+    // Duration
+    const durCell = document.createElement('td');
+    durCell.className = 'px-4 py-3 text-right text-muted';
+    durCell.textContent = txBench ? `${(txBench.stats.duration_ms / 1000).toFixed(0)}s` : 'N/A';
+    row.appendChild(durCell);
+
+    // Speedup (for TPS, higher is better, so speedup = vibesql / sqlite)
+    const speedupCell = document.createElement('td');
+    speedupCell.className = 'px-4 py-3 text-right font-semibold';
+
+    if (vibesql && sqlite && vibesql.stats.tps > 0 && sqlite.stats.tps > 0) {
+      const speedup = vibesql.stats.tps / sqlite.stats.tps;
+      speedupCell.textContent = `${speedup.toFixed(2)}x`;
+
+      if (speedup > 1) {
+        speedupCell.className += ' text-green-600 dark:text-green-400';
+      } else if (speedup < 1) {
+        speedupCell.className += ' text-red-600 dark:text-red-400';
+      } else {
+        speedupCell.className += ' text-muted';
+      }
+
+      totalSpeedup += speedup;
+      comparisonCount++;
+    } else {
+      speedupCell.textContent = 'N/A';
+      speedupCell.className += ' text-muted';
+    }
+    row.appendChild(speedupCell);
+
+    // Winner
+    const winnerCell = document.createElement('td');
+    winnerCell.className = 'px-4 py-3 text-center text-2xl';
+
+    if (vibesql && sqlite && vibesql.stats.tps > 0 && sqlite.stats.tps > 0) {
+      const speedup = vibesql.stats.tps / sqlite.stats.tps;
+      winnerCell.textContent = speedup > 1 ? '🚀' : speedup < 1 ? '🐌' : '🤝';
+    } else {
+      winnerCell.textContent = '-';
+    }
+    row.appendChild(winnerCell);
+
+    tbody.appendChild(row);
+  }
+
+  // Update summary cards
+  if (comparisonCount > 0) {
+    const avgSpeedup = totalSpeedup / comparisonCount;
+    const avgSpeedupEl = document.getElementById('avg-speedup');
+    if (avgSpeedupEl) {
+      if (avgSpeedup > 1) {
+        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x faster`;
+        avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
+      } else if (avgSpeedup < 1) {
+        const slowerBy = 1 / avgSpeedup;
+        avgSpeedupEl.textContent = `${slowerBy.toFixed(2)}x slower`;
+        avgSpeedupEl.className = 'text-xl font-bold text-red-600 dark:text-red-400';
+      } else {
+        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x`;
+        avgSpeedupEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+      }
+    }
+  }
+
+  const opsTestedEl = document.getElementById('ops-tested');
+  if (opsTestedEl) {
+    opsTestedEl.textContent = grouped.size.toString();
+  }
+
+  // Update last updated timestamp
+  const lastUpdatedEl = document.getElementById('last-updated');
+  if (lastUpdatedEl && data.metadata.timestamp) {
+    const date = new Date(data.metadata.timestamp);
+    lastUpdatedEl.textContent = date.toLocaleDateString();
+    lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+  }
+}
+
+/**
+ * Render TPC-C comparison chart
+ */
+function renderTPCCChart(data: TPCCResults): void {
+  const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  // Destroy existing chart if any
+  if (currentChart) {
+    currentChart.destroy();
+    currentChart = null;
+  }
+
+  const grouped = groupTPCCBenchmarksByOperation(data.benchmarks);
+
+  const labels: string[] = [];
+  const vibesqlData: number[] = [];
+  const sqliteData: number[] = [];
+
+  for (const [operation, databases] of grouped.entries()) {
+    const vibesql = databases.get('vibesql');
+    const sqlite = databases.get('sqlite');
+
+    labels.push(operation.replace(/_/g, ' ').toUpperCase());
+    vibesqlData.push(vibesql ? vibesql.stats.tps / 1000 : 0); // Convert to K TPS
+    sqliteData.push(sqlite ? sqlite.stats.tps / 1000 : 0);
+  }
+
+  currentChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'VibeSQL',
+          data: vibesqlData,
+          backgroundColor: 'rgba(34, 197, 94, 0.5)',
+          borderColor: 'rgba(34, 197, 94, 1)',
+          borderWidth: 1,
+        },
+        {
+          label: 'SQLite',
+          data: sqliteData,
+          backgroundColor: 'rgba(239, 68, 68, 0.5)',
+          borderColor: 'rgba(239, 68, 68, 1)',
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Transactions per Second (K TPS) - Higher is Better',
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+        },
+        tooltip: {
+          callbacks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            label: function (context: any) {
+              return `${context.dataset.label}: ${(context.parsed.y * 1000).toLocaleString()} TPS`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
  * Update the methodology section
  */
 function updateMethodology(suite: BenchmarkSuite): void {
@@ -1165,6 +1450,14 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
 
       renderFootprintTable(data);
       renderFootprintChart(data);
+      return;
+    }
+
+    // Handle TPC-C suite differently (uses TPS instead of mean execution time)
+    if (suite === 'tpcc') {
+      const data: TPCCResults = await response.json();
+      renderTPCCTable(data);
+      renderTPCCChart(data);
       return;
     }
 
