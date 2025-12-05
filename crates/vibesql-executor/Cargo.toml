@@ -53,6 +53,7 @@ tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 
 [dev-dependencies]
 vibesql-parser = { version = "0.1.2", path = "../vibesql-parser" }
+vibesql-server = { version = "0.1.2", path = "../vibesql-server" }
 criterion = { version = "0.8", features = ["html_reports"] }
 rand = "0.9"
 rand_chacha = "0.9"
@@ -61,6 +62,9 @@ paste = "1.0"
 env_logger = "0.11"
 libc = "0.2"
 sysinfo = "0.37"
+tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
+tokio-postgres = "0.7"
+bytes = "1.0"
 
 [features]
 default = ["parallel", "spatial"]
@@ -224,4 +228,8 @@ harness = false
 
 [[bench]]
 name = "arena_prepared_statement_benchmark"
+harness = false
+
+[[bench]]
+name = "sysbench_server"
 harness = false

@@ -123,10 +123,13 @@ impl SysbenchData {
 
     /// Generate a random range for range queries.
     /// Returns (start_id, end_id) where end_id = start_id + range_size - 1.
+    /// If the table is smaller than the range size, uses the full table range.
     pub fn random_range(&mut self, range_size: usize) -> (i64, i64) {
-        let max_start = (self.table_size - range_size + 1).max(1);
+        // Use saturating_sub to avoid underflow when table_size < range_size
+        let effective_range = range_size.min(self.table_size);
+        let max_start = self.table_size.saturating_sub(effective_range).saturating_add(1).max(1);
         let start = self.rng.random_range(1..=max_start as i64);
-        (start, start + range_size as i64 - 1)
+        (start, start + effective_range as i64 - 1)
     }
 
     /// Reset the generator for re-iteration
