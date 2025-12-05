@@ -466,14 +466,15 @@ fn main() {
     let duration = Duration::from_secs(duration_secs);
     let warmup = Duration::from_secs(warmup_secs);
 
-    // Parse transaction type
-    let transaction_type = if args.len() > 1 {
-        match TransactionType::from_str(&args[1]) {
+    // Parse transaction type (skip benchmark harness arguments like --bench)
+    let user_args: Vec<_> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
+    let transaction_type = if !user_args.is_empty() {
+        match TransactionType::from_str(user_args[0]) {
             Some(t) => t,
             None => {
                 eprintln!(
                     "Error: Unknown transaction type '{}'. Run with --help for usage.",
-                    args[1]
+                    user_args[0]
                 );
                 std::process::exit(1);
             }

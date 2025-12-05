@@ -1148,12 +1148,13 @@ fn main() {
     let duration = Duration::from_secs(duration_secs);
     let warmup = Duration::from_secs(warmup_secs);
 
-    // Parse workload type
-    let workload_type = if args.len() > 1 {
-        match WorkloadType::from_str(&args[1]) {
+    // Parse workload type (skip benchmark harness arguments like --bench)
+    let user_args: Vec<_> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
+    let workload_type = if !user_args.is_empty() {
+        match WorkloadType::from_str(user_args[0]) {
             Some(t) => t,
             None => {
-                eprintln!("Error: Unknown workload type '{}'. Run with --help for usage.", args[1]);
+                eprintln!("Error: Unknown workload type '{}'. Run with --help for usage.", user_args[0]);
                 std::process::exit(1);
             }
         }
