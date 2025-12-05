@@ -55,16 +55,20 @@ use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::SqlValue;
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::prelude::*;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::PooledConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "benchmark-comparison")]
-use sysbench::schema::{load_duckdb, load_mysql, load_sqlite};
+#[cfg(feature = "duckdb-comparison")]
+use sysbench::schema::load_duckdb;
+#[cfg(feature = "mysql-comparison")]
+use sysbench::schema::load_mysql;
+#[cfg(feature = "sqlite-comparison")]
+use sysbench::schema::load_sqlite;
 
 /// Default table size for sysbench tests
 const DEFAULT_TABLE_SIZE: usize = 10_000;
@@ -382,7 +386,7 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
         // which is not yet available. This approach still uses the SQL executor path
         // (no direct API bypass) for benchmark fairness.
         let sql = format!(
-            "INSERT INTO sbtest1 (id, k, c, pad) VALUES ({}, {}, '{}', '{}')",
+            "INSERT INTO sbtest1 (id, k, c, padding) VALUES ({}, {}, '{}', '{}')",
             id, k, c, pad
         );
         if let Ok(vibesql_ast::Statement::Insert(insert)) = Parser::parse_sql(&sql) {
@@ -464,19 +468,19 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
 // SQLite Executor
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 struct SqliteExecutor<'a> {
     conn: &'a SqliteConn,
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 impl<'a> SqliteExecutor<'a> {
     fn new(conn: &'a SqliteConn) -> Self {
         Self { conn }
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 impl<'a> SysbenchExecutor for SqliteExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
         let mut stmt = self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
@@ -491,7 +495,7 @@ impl<'a> SysbenchExecutor for SqliteExecutor<'a> {
     fn insert(&mut self, id: i64, k: i64, c: &str, pad: &str) {
         let mut stmt = self
             .conn
-            .prepare_cached("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
+            .prepare_cached("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)")
             .unwrap();
         let _ = stmt.execute(rusqlite::params![id, k, c, pad]);
     }
@@ -571,19 +575,19 @@ impl<'a> SysbenchExecutor for SqliteExecutor<'a> {
 // DuckDB Executor
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 struct DuckdbExecutor<'a> {
     conn: &'a DuckDBConn,
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 impl<'a> DuckdbExecutor<'a> {
     fn new(conn: &'a DuckDBConn) -> Self {
         Self { conn }
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 impl<'a> SysbenchExecutor for DuckdbExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
         let mut stmt = self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
@@ -598,7 +602,7 @@ impl<'a> SysbenchExecutor for DuckdbExecutor<'a> {
     fn insert(&mut self, id: i64, k: i64, c: &str, pad: &str) {
         let mut stmt = self
             .conn
-            .prepare_cached("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?1, ?2, ?3, ?4)")
+            .prepare_cached("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)")
             .unwrap();
         let _ = stmt.execute(duckdb::params![id, k, c, pad]);
     }
@@ -678,19 +682,19 @@ impl<'a> SysbenchExecutor for DuckdbExecutor<'a> {
 // MySQL Executor
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 struct MysqlExecutor<'a> {
     conn: &'a mut PooledConn,
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 impl<'a> MysqlExecutor<'a> {
     fn new(conn: &'a mut PooledConn) -> Self {
         Self { conn }
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 impl<'a> SysbenchExecutor for MysqlExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
         let result: Vec<mysql::Row> =
@@ -699,9 +703,10 @@ impl<'a> SysbenchExecutor for MysqlExecutor<'a> {
     }
 
     fn insert(&mut self, id: i64, k: i64, c: &str, pad: &str) {
-        let _ = self
-            .conn
-            .exec_drop("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)", (id, k, c, pad));
+        let _ = self.conn.exec_drop(
+            "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)",
+            (id, k, c, pad),
+        );
     }
 
     fn update_index(&mut self, id: i64) {
@@ -1289,9 +1294,9 @@ fn main() {
     all_results.push(("VibeSQL", vibesql_results));
 
     // ========================================
-    // Comparison Benchmarks (if feature enabled)
+    // SQLite Comparison (if feature enabled)
     // ========================================
-    #[cfg(feature = "benchmark-comparison")]
+    #[cfg(feature = "sqlite-comparison")]
     {
         // SQLite benchmark
         eprintln!("\n\nLoading SQLite database...");
@@ -1406,7 +1411,13 @@ fn main() {
         }
         print_results(&sqlite_results, "SQLite");
         all_results.push(("SQLite", sqlite_results));
+    }
 
+    // ========================================
+    // DuckDB Comparison (if feature enabled)
+    // ========================================
+    #[cfg(feature = "duckdb-comparison")]
+    {
         // DuckDB benchmark
         eprintln!("\n\nLoading DuckDB database...");
         let duckdb_load_start = Instant::now();
@@ -1520,7 +1531,13 @@ fn main() {
         }
         print_results(&duckdb_results, "DuckDB");
         all_results.push(("DuckDB", duckdb_results));
+    }
 
+    // ========================================
+    // MySQL Comparison (if feature enabled)
+    // ========================================
+    #[cfg(feature = "mysql-comparison")]
+    {
         // MySQL benchmark (optional - only if MYSQL_URL is set)
         if let Some(mut mysql_conn) = load_mysql(table_size) {
             eprintln!("\n\nMySQL database loaded");
