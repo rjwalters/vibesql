@@ -221,9 +221,12 @@ impl DeleteExecutor {
             rows_and_indices_to_delete.iter().map(|(idx, _)| *idx).collect();
         deleted_indices.sort_unstable();
 
-        // Step 5a: Remove entries from user-defined indexes BEFORE deleting rows
-        // (while row indices are still valid)
+        // Step 5a: Emit WAL entries and remove entries from user-defined indexes
+        // BEFORE deleting rows (while row indices are still valid and we have old values)
         for (idx, row) in &rows_and_indices_to_delete {
+            // Emit WAL entry for persistence (captures old_values for recovery replay)
+            database.emit_wal_delete(&stmt.table_name, *idx as u64, row.values.clone());
+
             database.update_indexes_for_delete(&stmt.table_name, row, *idx);
         }
 

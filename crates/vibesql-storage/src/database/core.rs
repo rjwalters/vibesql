@@ -912,6 +912,50 @@ impl Database {
         }
     }
 
+    /// Emit a WAL delete entry for persistence
+    ///
+    /// Called by the DELETE executor before rows are removed.
+    /// Captures old_values for recovery replay.
+    pub fn emit_wal_delete(
+        &self,
+        table_name: &str,
+        row_id: u64,
+        old_values: Vec<vibesql_types::SqlValue>,
+    ) {
+        self.emit_wal_op(WalOp::Delete {
+            table_id: self.table_name_to_id(table_name),
+            row_id,
+            old_values,
+        });
+    }
+
+    /// Emit a WAL create index entry for persistence
+    ///
+    /// Called by the CREATE INDEX executor after index is created.
+    pub fn emit_wal_create_index(
+        &self,
+        index_id: u32,
+        index_name: &str,
+        table_name: &str,
+        column_indices: Vec<u32>,
+        is_unique: bool,
+    ) {
+        self.emit_wal_op(WalOp::CreateIndex {
+            index_id,
+            index_name: index_name.to_string(),
+            table_id: self.table_name_to_id(table_name),
+            column_indices,
+            is_unique,
+        });
+    }
+
+    /// Emit a WAL drop index entry for persistence
+    ///
+    /// Called by the DROP INDEX executor before index is dropped.
+    pub fn emit_wal_drop_index(&self, index_id: u32, index_name: &str) {
+        self.emit_wal_op(WalOp::DropIndex { index_id, index_name: index_name.to_string() });
+    }
+
     // ============================================================================
     // AUTO_INCREMENT / LAST_INSERT_ROWID Support
     // ============================================================================
@@ -1415,5 +1459,82 @@ mod tests {
         let db = Database::new();
         // Should not error when persistence is disabled
         assert!(db.sync_persistence().is_ok());
+    }
+
+    #[test]
+    fn test_emit_wal_delete() {
+        use std::io::Cursor;
+        use crate::wal::{PersistenceConfig, PersistenceEngine};
+
+        let mut db = Database::new();
+
+        // Enable persistence
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        db.enable_persistence(engine);
+
+        // Emit delete entries
+        db.emit_wal_delete("users", 0, vec![SqlValue::Integer(1)]);
+        db.emit_wal_delete("users", 1, vec![SqlValue::Integer(2)]);
+
+        // Check stats
+        let stats = db.persistence_stats().unwrap();
+        assert_eq!(stats.entries_sent, 2);
+    }
+
+    #[test]
+    fn test_emit_wal_create_index() {
+        use std::io::Cursor;
+        use crate::wal::{PersistenceConfig, PersistenceEngine};
+
+        let mut db = Database::new();
+
+        // Enable persistence
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        db.enable_persistence(engine);
+
+        // Emit create index entry
+        db.emit_wal_create_index(1, "idx_users_email", "users", vec![1], false);
+
+        // Check stats
+        let stats = db.persistence_stats().unwrap();
+        assert_eq!(stats.entries_sent, 1);
+    }
+
+    #[test]
+    fn test_emit_wal_drop_index() {
+        use std::io::Cursor;
+        use crate::wal::{PersistenceConfig, PersistenceEngine};
+
+        let mut db = Database::new();
+
+        // Enable persistence
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        db.enable_persistence(engine);
+
+        // Emit drop index entry
+        db.emit_wal_drop_index(1, "idx_users_email");
+
+        // Check stats
+        let stats = db.persistence_stats().unwrap();
+        assert_eq!(stats.entries_sent, 1);
+    }
+
+    #[test]
+    fn test_emit_wal_no_op_when_disabled() {
+        let db = Database::new();
+
+        // These should be no-ops when persistence is disabled (no panic)
+        db.emit_wal_delete("users", 0, vec![SqlValue::Integer(1)]);
+        db.emit_wal_create_index(1, "idx", "table", vec![0], false);
+        db.emit_wal_drop_index(1, "idx");
+
+        // Persistence stats should still be None
+        assert!(db.persistence_stats().is_none());
     }
 }

@@ -29,6 +29,9 @@ impl DropIndexExecutor {
         if let Some(metadata) = index_metadata {
             let table_name = metadata.table_name.clone();
 
+            // Emit WAL entry for persistence BEFORE dropping
+            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
+
             // Drop from catalog
             database
                 .catalog
@@ -51,12 +54,16 @@ impl DropIndexExecutor {
         // Fallback: check storage without catalog metadata (for legacy indexes)
         // Check if it's a spatial index first
         if database.spatial_index_exists(index_name) {
+            // Emit WAL entry for persistence BEFORE dropping
+            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
             database.drop_spatial_index(index_name)?;
             return Ok(format!("Spatial index '{}' dropped successfully", index_name));
         }
 
         // Otherwise check if it's a B-tree index
         if database.index_exists(index_name) {
+            // Emit WAL entry for persistence BEFORE dropping
+            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
             database.drop_index(index_name)?;
             return Ok(format!("Index '{}' dropped successfully", index_name));
         }
@@ -69,6 +76,14 @@ impl DropIndexExecutor {
             Err(ExecutorError::IndexNotFound(index_name.clone()))
         }
     }
+}
+
+/// Compute an index ID from index name using hash (for consistent mapping)
+fn index_name_to_id(name: &str) -> u32 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut hasher);
+    hasher.finish() as u32
 }
 
 #[cfg(test)]
