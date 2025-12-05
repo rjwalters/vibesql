@@ -38,6 +38,9 @@ pub fn write_data<W: Write>(writer: &mut W, db: &Database) -> Result<(), Storage
 pub fn read_data<R: Read>(reader: &mut R, db: &mut Database) -> Result<(), StorageError> {
     let table_count = db.catalog.list_tables().len();
 
+    // Track tables that were loaded so we can rebuild their indexes
+    let mut loaded_tables = Vec::with_capacity(table_count);
+
     for _ in 0..table_count {
         // Read table name from file (don't rely on list_tables() ordering)
         let table_name = read_string(reader)?;
@@ -63,6 +66,18 @@ pub fn read_data<R: Read>(reader: &mut R, db: &mut Database) -> Result<(), Stora
                 })?;
             }
         }
+
+        loaded_tables.push(table_name);
+    }
+
+    // Rebuild database-level indexes for all loaded tables.
+    // This is necessary because indexes are created during catalog loading when tables
+    // are empty, so the index data structures have no entries. After loading rows,
+    // we need to populate the indexes with the actual data.
+    // This fixes the bug where ORDER BY on indexed columns returns empty results
+    // after loading a database from disk (see issue #3602).
+    for table_name in loaded_tables {
+        db.rebuild_indexes(&table_name);
     }
 
     Ok(())

@@ -631,3 +631,123 @@ fn test_no_primary_key_persistence() {
     // Clean up
     std::fs::remove_file(temp_file).unwrap();
 }
+
+/// Test that indexes are populated correctly after database save/load.
+/// This is a regression test for issue #3602 where ORDER BY on indexed
+/// columns returned empty results after loading a database from disk.
+#[test]
+fn test_index_data_populated_after_load() {
+    let temp_file = "/tmp/test_db_index_after_load.vbsql";
+
+    // Clean up any existing test file
+    let _ = std::fs::remove_file(temp_file);
+
+    // Step 1: Create database with index
+    let mut db = Database::new();
+
+    let schema = TableSchema::with_primary_key(
+        "test_orders".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new(
+                "customer".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                false,
+            ),
+            ColumnSchema::new("amount".to_string(), DataType::DoublePrecision, false),
+        ],
+        vec!["id".to_string()],
+    );
+
+    db.create_table(schema).unwrap();
+
+    // Create an explicit index on the customer column
+    db.create_index(
+        "idx_customer".to_string(),
+        "test_orders".to_string(),
+        false,
+        vec![vibesql_ast::IndexColumn {
+            column_name: "customer".to_string(),
+            direction: vibesql_ast::OrderDirection::Asc,
+            prefix_length: None,
+        }],
+    )
+    .unwrap();
+
+    // Insert test data
+    let table = db.get_table_mut("test_orders").unwrap();
+    table
+        .insert(vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Varchar("Alice".to_string()),
+            vibesql_types::SqlValue::Double(100.0),
+        ]))
+        .unwrap();
+    table
+        .insert(vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Varchar("Bob".to_string()),
+            vibesql_types::SqlValue::Double(200.0),
+        ]))
+        .unwrap();
+    table
+        .insert(vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Varchar("Charlie".to_string()),
+            vibesql_types::SqlValue::Double(300.0),
+        ]))
+        .unwrap();
+
+    // Rebuild indexes for the table (simulating what happens during normal operations)
+    db.rebuild_indexes("test_orders");
+
+    // Verify index works before save
+    let index_data_before = db.get_index_data("idx_customer").expect("Index should exist");
+    let alice_lookup_before = index_data_before.get(&[vibesql_types::SqlValue::Varchar("Alice".to_string())]);
+    assert!(
+        alice_lookup_before.is_some() && !alice_lookup_before.unwrap().is_empty(),
+        "Index should return results before save"
+    );
+
+    // Step 2: Save to binary format
+    db.save_binary(temp_file).unwrap();
+
+    // Step 3: Load from binary format
+    let db2 = Database::load_binary(temp_file).unwrap();
+
+    // Step 4: Verify index exists after load
+    assert!(db2.index_exists("idx_customer"), "Index should exist after load");
+
+    // Step 5: Verify index data is populated after load
+    let index_data_after = db2.get_index_data("idx_customer").expect("Index data should exist");
+    let alice_lookup_after = index_data_after.get(&[vibesql_types::SqlValue::Varchar("Alice".to_string())]);
+    assert!(
+        alice_lookup_after.is_some() && !alice_lookup_after.unwrap().is_empty(),
+        "Index should return results after load (regression test for issue #3602)"
+    );
+
+    // Verify all entries are in the index
+    let bob_lookup = index_data_after.get(&[vibesql_types::SqlValue::Varchar("Bob".to_string())]);
+    let charlie_lookup =
+        index_data_after.get(&[vibesql_types::SqlValue::Varchar("Charlie".to_string())]);
+    assert!(
+        bob_lookup.is_some() && !bob_lookup.unwrap().is_empty(),
+        "Index should contain Bob"
+    );
+    assert!(
+        charlie_lookup.is_some() && !charlie_lookup.unwrap().is_empty(),
+        "Index should contain Charlie"
+    );
+
+    // Step 6: Verify lookup_by_index works (high-level API)
+    let rows = db2.lookup_by_index("idx_customer", &[vibesql_types::SqlValue::Varchar("Alice".to_string())]);
+    assert!(rows.is_ok(), "lookup_by_index should succeed");
+    let rows = rows.unwrap();
+    assert!(rows.is_some(), "lookup_by_index should find Alice");
+    let rows = rows.unwrap();
+    assert_eq!(rows.len(), 1, "Should find exactly one row for Alice");
+    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar("Alice".to_string()));
+
+    // Clean up
+    std::fs::remove_file(temp_file).unwrap();
+}
