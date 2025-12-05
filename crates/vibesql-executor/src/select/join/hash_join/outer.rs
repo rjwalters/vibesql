@@ -1,8 +1,9 @@
 use super::build::build_hash_table_parallel;
-use super::{combine_rows, FromResult};
+use super::FromResult;
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Create a row with all NULL values
+#[allow(dead_code)]
 pub(crate) fn create_null_row(col_count: usize) -> vibesql_storage::Row {
     vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Null; col_count])
 }
@@ -46,6 +47,8 @@ pub(in crate::select::join) fn hash_join_left_outer(
         .clone();
 
     let right_col_count = right_schema.columns.len();
+    let left_col_count: usize =
+        left.schema.table_schemas.values().map(|(_, s)| s.columns.len()).sum();
 
     // Combine schemas
     let combined_schema =
@@ -60,29 +63,58 @@ pub(in crate::select::join) fn hash_join_left_outer(
     // Uses parallel hashing when available for large tables
     let hash_table = build_hash_table_parallel(right_slice, right_col_idx);
 
-    // Probe with LEFT side, preserving unmatched left rows
-    let mut result_rows = Vec::new();
+    // Pre-compute combined row size for efficient allocation
+    let combined_size = left_col_count + right_col_count;
+
+    // Two-phase approach for better allocation:
+    // Phase 1: Count total rows needed (matched + unmatched)
+    let mut match_count = 0usize;
+    let mut unmatched_count = 0usize;
+
+    for left_row in left_slice {
+        let key = &left_row.values[left_col_idx];
+
+        if key == &vibesql_types::SqlValue::Null {
+            unmatched_count += 1;
+        } else if let Some(right_indices) = hash_table.get(key) {
+            match_count += right_indices.len();
+        } else {
+            unmatched_count += 1;
+        }
+    }
+
+    // Phase 2: Allocate result with exact capacity and populate
+    let mut result_rows = Vec::with_capacity(match_count + unmatched_count);
+
+    // Create a single null row for reuse (reduces allocations for unmatched rows)
+    let null_values = vec![vibesql_types::SqlValue::Null; right_col_count];
 
     for left_row in left_slice {
         let key = &left_row.values[left_col_idx];
 
         // For NULL keys in left, still emit the row with NULL right side
         if key == &vibesql_types::SqlValue::Null {
-            // Left row with NULLs for right columns
-            let null_right = create_null_row(right_col_count);
-            result_rows.push(combine_rows(left_row, &null_right));
+            let mut combined = Vec::with_capacity(combined_size);
+            combined.extend_from_slice(&left_row.values);
+            combined.extend_from_slice(&null_values);
+            result_rows.push(vibesql_storage::Row::new(combined));
             continue;
         }
 
         if let Some(right_indices) = hash_table.get(key) {
             // Found matches - emit all combinations
             for &right_idx in right_indices {
-                result_rows.push(combine_rows(left_row, &right_slice[right_idx]));
+                let mut combined = Vec::with_capacity(combined_size);
+                combined.extend_from_slice(&left_row.values);
+                combined.extend_from_slice(&right_slice[right_idx].values);
+                result_rows.push(vibesql_storage::Row::new(combined));
             }
         } else {
             // No match - emit left row with NULLs for right columns
-            let null_right = create_null_row(right_col_count);
-            result_rows.push(combine_rows(left_row, &null_right));
+            let mut combined = Vec::with_capacity(combined_size);
+            combined.extend_from_slice(&left_row.values);
+            combined.extend_from_slice(&null_values);
+            result_rows.push(vibesql_storage::Row::new(combined));
         }
     }
 

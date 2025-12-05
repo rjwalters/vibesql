@@ -2,7 +2,7 @@
 
 use super::build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey};
 use super::columnar::{hash_join_indices_columnar, hash_join_indices_columnar_multi};
-use super::{combine_rows, FromResult};
+use super::{batch_combine_rows, FromResult};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 // Note: Memory limit checking removed from hash join.
@@ -106,18 +106,9 @@ pub(in crate::select::join) fn hash_join_inner(
         pairs
     };
 
-    // Materialization phase: Create combined rows from index pairs
-    // Pre-allocate result vector with exact size now that we know it
-    let mut result_rows = Vec::with_capacity(join_pairs.len());
-    for (build_idx, probe_idx) in join_pairs {
-        // Combine rows in correct order (left first, then right)
-        let combined_row = if left_is_build {
-            combine_rows(&build_rows[build_idx], &probe_rows[probe_idx])
-        } else {
-            combine_rows(&probe_rows[probe_idx], &build_rows[build_idx])
-        };
-        result_rows.push(combined_row);
-    }
+    // Materialization phase: Create combined rows from index pairs using batch combine
+    // This optimizes allocation by pre-computing combined row size
+    let result_rows = batch_combine_rows(build_rows, probe_rows, &join_pairs, left_is_build);
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
@@ -208,16 +199,9 @@ pub(in crate::select::join) fn hash_join_inner_multi(
         pairs
     };
 
-    // Materialization phase: Create combined rows from index pairs
-    let mut result_rows = Vec::with_capacity(join_pairs.len());
-    for (build_idx, probe_idx) in join_pairs {
-        let combined_row = if left_is_build {
-            combine_rows(&build_rows[build_idx], &probe_rows[probe_idx])
-        } else {
-            combine_rows(&probe_rows[probe_idx], &build_rows[build_idx])
-        };
-        result_rows.push(combined_row);
-    }
+    // Materialization phase: Create combined rows from index pairs using batch combine
+    // This optimizes allocation by pre-computing combined row size
+    let result_rows = batch_combine_rows(build_rows, probe_rows, &join_pairs, left_is_build);
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
@@ -303,11 +287,15 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     }
 
     // Materialization phase: Create combined rows from index pairs
-    let mut result_rows = Vec::with_capacity(pairs.len());
-    for (left_idx, right_idx) in pairs {
-        let combined_row = combine_rows(&left_slice[left_idx], &right_slice[right_idx]);
-        result_rows.push(combined_row);
-    }
+    // For arithmetic join, left is always probed so left_is_build = false equivalent
+    // We need to pass (left_idx, right_idx) pairs where left is in "probe" position
+    // Since batch_combine_rows expects (build_idx, probe_idx), we pass:
+    // - build_rows = right_slice (the side we built hash table on)
+    // - probe_rows = left_slice (the side we probed with)
+    // - But pairs are (left_idx, right_idx), so we need to swap for batch_combine_rows
+    let swapped_pairs: Vec<(usize, usize)> =
+        pairs.into_iter().map(|(left, right)| (right, left)).collect();
+    let result_rows = batch_combine_rows(right_slice, left_slice, &swapped_pairs, false);
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
