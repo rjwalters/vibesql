@@ -46,6 +46,9 @@ pub use query_buffer_pool::{
 pub use row::Row;
 pub use statistics::{ColumnStatistics, TableStatistics};
 pub use table::Table;
+pub use wal::{
+    Lsn, PersistenceConfig, PersistenceEngine, PersistenceStats, WalEntry, WalOp, WalOpTag,
+};
 
 // Platform-specific exports
 #[cfg(not(target_arch = "wasm32"))]
