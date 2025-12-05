@@ -2,8 +2,6 @@
  * Types for the VibeSQL Drizzle adapter
  */
 
-import type { VibeSQL } from '@vibesql/client';
-
 /**
  * Result row from sqlite-proxy query
  */
