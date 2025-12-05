@@ -606,11 +606,69 @@ def run_all(config: BenchConfig) -> int:
     return 0
 
 
+def ensure_python_bindings():
+    """Ensure Python bindings are built and up to date."""
+    print("Checking Python bindings...")
+
+    # Check if vibesql module exists and get its location
+    try:
+        import vibesql
+        module_path = Path(vibesql.__file__).parent
+        so_file = module_path / "vibesql.abi3.so"
+
+        if so_file.exists():
+            so_mtime = so_file.stat().st_mtime
+
+            # Check if any Rust source files are newer than the .so
+            rust_sources = list(Path("crates").rglob("*.rs"))
+            newest_rust = max((f.stat().st_mtime for f in rust_sources), default=0)
+
+            if newest_rust > so_mtime:
+                print("  Python bindings are outdated, rebuilding...")
+            else:
+                print("  Python bindings are up to date")
+                return True
+        else:
+            print("  Python bindings not found, building...")
+    except ImportError:
+        print("  Python bindings not installed, building...")
+
+    # Build and install Python bindings
+    result = subprocess.run(
+        ["make", "build-python"],
+        cwd=Path(__file__).parent.parent,
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        print(f"⚠ Failed to build Python bindings: {result.stderr}")
+        return False
+
+    # Find and install the wheel
+    wheels = list(Path("target/wheels").glob("vibesql-*.whl"))
+    if wheels:
+        wheel_path = wheels[0]
+        result = subprocess.run(
+            ["pip3", "install", "--force-reinstall", "--quiet", str(wheel_path)],
+            cwd=Path(__file__).parent.parent
+        )
+        if result.returncode == 0:
+            print("  ✓ Python bindings installed")
+            return True
+
+    print("⚠ Failed to install Python bindings")
+    return False
+
+
 def main():
     """Main entry point."""
     parser = create_parser()
     args = parser.parse_args()
-    
+
+    # Ensure Python bindings are up to date for result storage
+    ensure_python_bindings()
+
     # Parse arguments into config
     try:
         config = build_config(args)
