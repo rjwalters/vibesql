@@ -404,20 +404,9 @@ pub async fn list_rows(
     let sql = build_select_sql(&table_name, &params);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-                )
-                    .into_response();
-            }
-        };
+    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
-    match session.execute(&sql) {
+    match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
             let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
             let row_values: Vec<Vec<JsonValue>> =
@@ -467,20 +456,9 @@ pub async fn get_row(
     let sql = build_select_by_pk_sql(&table_name, &pk_column, &id, params.select.as_deref());
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-                )
-                    .into_response();
-            }
-        };
+    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
-    match session.execute(&sql) {
+    match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
             if rows.is_empty() {
                 return (
@@ -541,20 +519,9 @@ pub async fn create_row(
     let sql = build_insert_sql(&table_name, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-                )
-                    .into_response();
-            }
-        };
+    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
-    match session.execute(&sql) {
+    match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Insert { rows_affected }) => {
             (StatusCode::CREATED, Json(MutationResponse { rows_affected })).into_response()
         }
@@ -606,20 +573,9 @@ pub async fn update_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-                )
-                    .into_response();
-            }
-        };
+    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
-    match session.execute(&sql) {
+    match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
             if rows_affected == 0 {
                 (
@@ -679,20 +635,9 @@ pub async fn patch_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-                )
-                    .into_response();
-            }
-        };
+    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
-    match session.execute(&sql) {
+    match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
             if rows_affected == 0 {
                 (
@@ -743,20 +688,9 @@ pub async fn delete_row(
     let sql = build_delete_sql(&table_name, &pk_column, &id);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-                )
-                    .into_response();
-            }
-        };
+    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
-    match session.execute(&sql) {
+    match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Delete { rows_affected }) => {
             if rows_affected == 0 {
                 (

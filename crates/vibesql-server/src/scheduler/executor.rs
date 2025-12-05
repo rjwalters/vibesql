@@ -145,7 +145,7 @@ impl ScheduleExecutor {
     /// Execute a single SQL statement via the session
     async fn execute_statement(&self, sql: &str, session: &Arc<Mutex<Session>>) -> Result<usize> {
         let mut session_guard = session.lock().await;
-        let result = session_guard.execute(sql)?;
+        let result = session_guard.execute(sql).await?;
         Ok(result.rows_affected() as usize)
     }
 }
@@ -182,8 +182,8 @@ mod tests {
     #[tokio::test]
     async fn test_execute_schedule_insert() {
         // Create a session with a table
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
-        session.execute("CREATE TABLE schedule_test (id INT, value VARCHAR(100))").unwrap();
+        let mut session = Session::new_standalone("testdb".to_string(), "testuser".to_string());
+        session.execute("CREATE TABLE schedule_test (id INT, value VARCHAR(100))").await.unwrap();
         let session = Arc::new(Mutex::new(session));
 
         // Create executor
@@ -212,11 +212,11 @@ mod tests {
 
         // Verify data was inserted
         let session_guard = session.lock().await;
-        let _select_result = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+        let _select_result = Session::new_standalone("testdb".to_string(), "testuser".to_string());
         drop(session_guard);
 
         let mut verify_session = session.lock().await;
-        let verify = verify_session.execute("SELECT * FROM schedule_test WHERE id = 1").unwrap();
+        let verify = verify_session.execute("SELECT * FROM schedule_test WHERE id = 1").await.unwrap();
         match verify {
             crate::session::ExecutionResult::Select { rows, .. } => {
                 assert_eq!(rows.len(), 1);
@@ -228,9 +228,9 @@ mod tests {
     #[tokio::test]
     async fn test_execute_schedule_update() {
         // Create a session with a table and initial data
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
-        session.execute("CREATE TABLE update_test (id INT, value VARCHAR(100))").unwrap();
-        session.execute("INSERT INTO update_test VALUES (1, 'original')").unwrap();
+        let mut session = Session::new_standalone("testdb".to_string(), "testuser".to_string());
+        session.execute("CREATE TABLE update_test (id INT, value VARCHAR(100))").await.unwrap();
+        session.execute("INSERT INTO update_test VALUES (1, 'original')").await.unwrap();
         let session = Arc::new(Mutex::new(session));
 
         // Create executor
@@ -261,10 +261,10 @@ mod tests {
     #[tokio::test]
     async fn test_execute_schedule_delete() {
         // Create a session with a table and initial data
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
-        session.execute("CREATE TABLE delete_test (id INT, value VARCHAR(100))").unwrap();
-        session.execute("INSERT INTO delete_test VALUES (1, 'to_delete')").unwrap();
-        session.execute("INSERT INTO delete_test VALUES (2, 'to_keep')").unwrap();
+        let mut session = Session::new_standalone("testdb".to_string(), "testuser".to_string());
+        session.execute("CREATE TABLE delete_test (id INT, value VARCHAR(100))").await.unwrap();
+        session.execute("INSERT INTO delete_test VALUES (1, 'to_delete')").await.unwrap();
+        session.execute("INSERT INTO delete_test VALUES (2, 'to_keep')").await.unwrap();
         let session = Arc::new(Mutex::new(session));
 
         // Create executor
@@ -295,10 +295,10 @@ mod tests {
     #[tokio::test]
     async fn test_execute_schedule_select() {
         // Create a session with a table and data
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
-        session.execute("CREATE TABLE select_test (id INT, value VARCHAR(100))").unwrap();
-        session.execute("INSERT INTO select_test VALUES (1, 'row1')").unwrap();
-        session.execute("INSERT INTO select_test VALUES (2, 'row2')").unwrap();
+        let mut session = Session::new_standalone("testdb".to_string(), "testuser".to_string());
+        session.execute("CREATE TABLE select_test (id INT, value VARCHAR(100))").await.unwrap();
+        session.execute("INSERT INTO select_test VALUES (1, 'row1')").await.unwrap();
+        session.execute("INSERT INTO select_test VALUES (2, 'row2')").await.unwrap();
         let session = Arc::new(Mutex::new(session));
 
         // Create executor
@@ -329,7 +329,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_schedule_invalid_sql() {
         // Create a session
-        let session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+        let session = Session::new_standalone("testdb".to_string(), "testuser".to_string());
         let session = Arc::new(Mutex::new(session));
 
         // Create executor
@@ -360,7 +360,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_schedule_table_not_found() {
         // Create a session without the table
-        let session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+        let session = Session::new_standalone("testdb".to_string(), "testuser".to_string());
         let session = Arc::new(Mutex::new(session));
 
         // Create executor with minimal retries for faster test
@@ -395,7 +395,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_schedule_create_table() {
         // Create a session
-        let session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+        let session = Session::new_standalone("testdb".to_string(), "testuser".to_string());
         let session = Arc::new(Mutex::new(session));
 
         // Create executor
@@ -424,7 +424,7 @@ mod tests {
 
         // Verify table was created by inserting into it
         let mut session_guard = session.lock().await;
-        let insert_result = session_guard.execute("INSERT INTO scheduled_table VALUES (1, 'test')");
+        let insert_result = session_guard.execute("INSERT INTO scheduled_table VALUES (1, 'test')").await;
         assert!(insert_result.is_ok());
     }
 }

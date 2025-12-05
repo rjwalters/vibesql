@@ -14,6 +14,7 @@ use vibesql_server::config::{
 };
 use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
+use vibesql_server::registry::DatabaseRegistry;
 use vibesql_server::subscription::SubscriptionConfig;
 use vibesql_server::SubscriptionManager;
 
@@ -83,6 +84,9 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
     // Create shared subscription manager for tests
     let subscription_manager = Arc::new(SubscriptionManager::new());
 
+    // Create shared database registry for tests
+    let database_registry = DatabaseRegistry::new();
+
     // Spawn server task
     tokio::spawn(async move {
         loop {
@@ -94,6 +98,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                             let observability = Arc::clone(&observability);
                             let password_store = password_store.clone();
                             let active_connections = Arc::clone(&active_connections);
+                            let database_registry = database_registry.clone();
                             let subscription_manager = Arc::clone(&subscription_manager);
 
                             tokio::spawn(async move {
@@ -104,6 +109,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                                     observability,
                                     password_store,
                                     active_connections,
+                                    database_registry,
                                     subscription_manager,
                                 );
                                 let _ = handler.handle().await;

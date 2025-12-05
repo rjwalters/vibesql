@@ -9,6 +9,7 @@ pub mod connection;
 pub mod http;
 pub mod observability;
 pub mod protocol;
+pub mod registry;
 pub mod scheduler;
 pub mod session;
 pub mod subscription;
@@ -26,6 +27,7 @@ pub use protocol::{
 pub use scheduler::{
     ScheduleExecutor, ScheduleExecutorConfig, SchedulerManager, SchedulerManagerConfig,
 };
+pub use registry::{DatabaseRegistry, SharedDatabase};
 pub use session::{Column, ExecutionResult, Row, Session};
 pub use subscription::{
     extract_table_dependencies, extract_table_refs, SessionSubscription, SessionSubscriptionId,

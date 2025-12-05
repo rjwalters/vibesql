@@ -58,6 +58,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
     use vibesql_server::config::Config;
     use vibesql_server::connection::ConnectionHandler;
     use vibesql_server::observability::ObservabilityProvider;
+    use vibesql_server::registry::DatabaseRegistry;
     use vibesql_server::SubscriptionManager;
 
     let addr = format!("127.0.0.1:{}", port);
@@ -79,6 +80,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
 
     let active_connections = Arc::new(AtomicUsize::new(0));
     let subscription_manager = Arc::new(SubscriptionManager::new());
+    let database_registry = DatabaseRegistry::new();
 
     loop {
         tokio::select! {
@@ -91,6 +93,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                         let config = Arc::clone(&config);
                         let observability = Arc::clone(&observability);
                         let active_connections = Arc::clone(&active_connections);
+                        let database_registry = database_registry.clone();
                         let subscription_manager = Arc::clone(&subscription_manager);
 
                         tokio::spawn(async move {
@@ -101,6 +104,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                                 observability,
                                 None,
                                 active_connections,
+                                database_registry,
                                 subscription_manager,
                             );
                             let _ = handler.handle().await;
@@ -359,24 +363,20 @@ async fn test_nested_begin_rejection() {
         .expect("Connection should still be usable after nested BEGIN attempt");
 }
 
-/// Test 6: Cross-session isolation - verify uncommitted changes not visible to other sessions
+/// Test 6: Cross-session data visibility with shared database
 ///
-/// IMPORTANT: This test documents expected behavior for a proper multi-session database.
-/// Currently, vibesql-server creates a separate in-memory database per session,
-/// so sessions cannot see each other's data at all (not even committed data).
+/// This test verifies that sessions connecting to the same database share data.
+/// With shared database support implemented:
+/// 1. Sessions share the same database when connecting to the same database name
+/// 2. Tables and data created in one session are visible to other sessions
+/// 3. Each session can read and write to shared tables
 ///
-/// When shared database support is implemented:
-/// 1. Sessions should share the same database
-/// 2. Uncommitted data should NOT be visible to other sessions
-/// 3. Committed data SHOULD be visible to other sessions
-///
-/// For now, this test verifies the server handles multiple sessions without crashing
-/// and documents the expected behavior.
+/// Note: Transaction isolation (uncommitted data visibility) is not yet implemented.
 #[tokio::test]
-async fn test_cross_session_isolation() {
+async fn test_cross_session_visibility() {
     let server = TestServer::start().await;
 
-    // Create two separate connections
+    // Create two separate connections (both to the default 'test' database)
     let client1 = connect(&server).await;
     let client2 = connect(&server).await;
 
@@ -386,24 +386,13 @@ async fn test_cross_session_isolation() {
         .await
         .expect("Failed to create table on client1");
 
-    // Begin transaction on client1
-    client1.simple_query("BEGIN").await.expect("BEGIN should succeed on client1");
-
-    // Insert data in client1's transaction
+    // Insert data from client1
     client1
-        .simple_query("INSERT INTO isolation_test (id, value) VALUES (1, 'uncommitted')")
+        .simple_query("INSERT INTO isolation_test (id, value) VALUES (1, 'from_client1')")
         .await
         .expect("INSERT should succeed on client1");
 
-    // Client2 needs its own table since sessions don't share database
-    // Create the same table structure on client2
-    client2
-        .simple_query("CREATE TABLE isolation_test (id INT, value VARCHAR(100))")
-        .await
-        .expect("Failed to create table on client2");
-
-    // Query from client2 - currently sees its own empty table
-    // (sessions don't share database in current implementation)
+    // Client2 should see the table and data (shared database)
     let rows = client2
         .simple_query("SELECT * FROM isolation_test")
         .await
@@ -412,40 +401,31 @@ async fn test_cross_session_isolation() {
     let data_rows: Vec<_> =
         rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
-    // CURRENT BEHAVIOR: Sessions have isolated databases
-    // Client2 sees 0 rows because it has its own separate database
-    //
-    // EXPECTED BEHAVIOR (when shared database is implemented):
-    // Client2 should see 0 rows because client1's data is uncommitted
-    //
-    // Either way, client2 should see 0 rows here
-    assert_eq!(data_rows.len(), 0, "Client2 should not see uncommitted data");
+    // With shared database, client2 sees data from client1
+    assert_eq!(
+        data_rows.len(),
+        1,
+        "Client2 should see data from client1 in shared database"
+    );
 
-    // Commit on client1
-    client1.simple_query("COMMIT").await.expect("COMMIT should succeed on client1");
-
-    // Query client2 again
-    let rows = client2
-        .simple_query("SELECT * FROM isolation_test")
+    // Client2 can also insert data
+    client2
+        .simple_query("INSERT INTO isolation_test (id, value) VALUES (2, 'from_client2')")
         .await
-        .expect("SELECT should succeed on client2 after client1 commit");
+        .expect("INSERT should succeed on client2");
+
+    // Client1 should see client2's data
+    let rows = client1
+        .simple_query("SELECT * FROM isolation_test ORDER BY id")
+        .await
+        .expect("SELECT should succeed on client1");
 
     let data_rows: Vec<_> =
         rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
-    // CURRENT BEHAVIOR: Sessions have isolated databases
-    // Client2 still sees 0 rows because databases are not shared
-    //
-    // EXPECTED BEHAVIOR (when shared database is implemented):
-    // Client2 should see 1 row (the committed data from client1)
-    //
-    // This documents the current limitation.
-    // When shared database support is implemented, change assertion to:
-    // assert_eq!(data_rows.len(), 1, "Client2 should see committed data from client1");
-
     assert_eq!(
         data_rows.len(),
-        0,
-        "Client2 sees 0 rows (sessions currently have isolated databases - expected to change)"
+        2,
+        "Client1 should see both rows in shared database"
     );
 }

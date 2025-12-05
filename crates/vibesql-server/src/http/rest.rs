@@ -143,29 +143,13 @@ async fn graphql_handler(
 
     // Create a session and execute the query
     let mut session =
-        match crate::session::Session::new("graphql".to_string(), "graphql_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(graphql::GraphQLResponse {
-                        data: None,
-                        errors: Some(vec![graphql::GraphQLError::new(format!(
-                            "Failed to create session: {}",
-                            e
-                        ))]),
-                    }),
-                )
-                    .into_response();
-            }
-        };
+        crate::session::Session::new_standalone("graphql".to_string(), "graphql_user".to_string());
 
     // Execute the main query
     let result = if params.is_empty() {
-        session.execute(&sql)
+        session.execute(&sql).await
     } else {
-        session.execute_with_params(&sql, &params)
+        session.execute_with_params(&sql, &params).await
     };
 
     match result {
@@ -211,7 +195,9 @@ async fn graphql_handler(
                                         &mut rows_json,
                                         nested,
                                         &ctx,
-                                    ) {
+                                    )
+                                    .await
+                                    {
                                         debug!("Warning: nested query failed: {}", e);
                                     }
                                 }
@@ -305,11 +291,11 @@ fn build_schema_map(
 }
 
 /// Execute a nested query and attach results to parent rows
-fn execute_nested_query(
+async fn execute_nested_query(
     session: &mut crate::session::Session,
     parent_rows: &mut [serde_json::Map<String, serde_json::Value>],
     nested: &graphql::NestedQueryInfo,
-    _ctx: &graphql::GraphQLExecutionContext,
+    _ctx: &graphql::GraphQLExecutionContext<'_>,
 ) -> Result<(), String> {
     if parent_rows.is_empty() {
         return Ok(());
@@ -345,7 +331,8 @@ fn execute_nested_query(
 
     debug!("Executing nested query: {}", sql);
 
-    let result = session.execute(&sql).map_err(|e| format!("Nested query failed: {}", e))?;
+    let result =
+        session.execute(&sql).await.map_err(|e| format!("Nested query failed: {}", e))?;
 
     // Convert results to JSON objects
     let nested_rows: Vec<serde_json::Map<String, serde_json::Value>> = match result {
@@ -367,7 +354,10 @@ fn execute_nested_query(
     // Execute any deeper nested queries recursively
     let mut nested_rows_mut = nested_rows;
     for deeper_nested in &nested.nested {
-        if let Err(e) = execute_nested_query(session, &mut nested_rows_mut, deeper_nested, _ctx) {
+        if let Err(e) =
+            Box::pin(execute_nested_query(session, &mut nested_rows_mut, deeper_nested, _ctx))
+                .await
+        {
             debug!("Warning: deeper nested query failed: {}", e);
         }
     }
@@ -411,23 +401,13 @@ async fn execute_query(
 
     // Create a session for query execution
     let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-                )
-                    .into_response();
-            }
-        };
+        crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
     // Execute the query
     let result = if params.is_empty() {
-        session.execute(&req.sql)
+        session.execute(&req.sql).await
     } else {
-        session.execute_with_params(&req.sql, &params)
+        session.execute_with_params(&req.sql, &params).await
     };
 
     match result {
@@ -620,35 +600,13 @@ async fn subscribe_stream(
 
     // Execute initial query
     let mut session =
-        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to create session: {}", e);
-                let event_data = serde_json::to_string(&SseEvent {
-                    event_type: "error".to_string(),
-                    columns: None,
-                    rows: None,
-                    old: None,
-                    new: None,
-                    error: Some(format!("Failed to create session: {}", e)),
-                })
-                .unwrap_or_default();
-
-                let stream = futures::stream::once(async move {
-                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                        Event::default().data(event_data),
-                    )
-                });
-
-                return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
-            }
-        };
+        crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
 
     // Execute the initial query
     let result = if params_vec.is_empty() {
-        session.execute(&params.query)
+        session.execute(&params.query).await
     } else {
-        session.execute_with_params(&params.query, &params_vec)
+        session.execute_with_params(&params.query, &params_vec).await
     };
 
     // Validate it's a SELECT statement

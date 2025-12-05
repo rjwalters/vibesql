@@ -6,8 +6,9 @@ use vibesql_executor::{
     CursorExecutor, CursorStore, FetchResult as CursorFetchResult, PreparedStatement,
     PreparedStatementCache, PreparedStatementCacheStats,
 };
-use vibesql_storage::Database;
 use vibesql_types::SqlValue;
+
+use crate::registry::SharedDatabase;
 
 /// Session state for a database connection
 pub struct Session {
@@ -17,8 +18,8 @@ pub struct Session {
     /// User name
     #[allow(dead_code)]
     pub user: String,
-    /// Database instance
-    db: Database,
+    /// Shared database instance (shared across all connections to the same database)
+    db: SharedDatabase,
     /// Transaction state
     #[allow(dead_code)]
     pub in_transaction: bool,
@@ -134,11 +135,12 @@ pub struct Row {
 }
 
 impl Session {
-    /// Create a new session
-    pub fn new(database: String, user: String) -> Result<Self> {
-        let db = Database::new();
-
-        Ok(Self {
+    /// Create a new session with a shared database
+    ///
+    /// This constructor is used for wire protocol connections where multiple
+    /// connections to the same database should share data.
+    pub fn new(database: String, user: String, db: SharedDatabase) -> Self {
+        Self {
             database,
             user,
             db,
@@ -146,17 +148,21 @@ impl Session {
             stmt_cache: Arc::new(PreparedStatementCache::default_cache()),
             named_statements: HashMap::new(),
             cursors: CursorStore::new(),
-        })
+        }
     }
 
-    /// Get a reference to the database
-    pub fn database(&self) -> &Database {
+    /// Create a new standalone session with its own isolated database
+    ///
+    /// This constructor is used for HTTP API requests and other stateless
+    /// operations where data isolation between requests is acceptable.
+    pub fn new_standalone(database: String, user: String) -> Self {
+        let db = Arc::new(tokio::sync::RwLock::new(vibesql_storage::Database::new()));
+        Self::new(database, user, db)
+    }
+
+    /// Get the shared database handle
+    pub fn shared_database(&self) -> &SharedDatabase {
         &self.db
-    }
-
-    /// Get a mutable reference to the database
-    pub fn database_mut(&mut self) -> &mut Database {
-        &mut self.db
     }
 
     /// Create a new session with a shared statement cache
@@ -164,11 +170,10 @@ impl Session {
     pub fn with_cache(
         database: String,
         user: String,
+        db: SharedDatabase,
         cache: Arc<PreparedStatementCache>,
-    ) -> Result<Self> {
-        let db = Database::new();
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             database,
             user,
             db,
@@ -176,7 +181,7 @@ impl Session {
             stmt_cache: cache,
             named_statements: HashMap::new(),
             cursors: CursorStore::new(),
-        })
+        }
     }
 
     /// Prepare a SQL statement for repeated execution
@@ -187,7 +192,7 @@ impl Session {
     /// # Example
     /// ```ignore
     /// let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
-    /// let result = session.execute_prepared(&stmt, &[SqlValue::Integer(1)])?;
+    /// let result = session.execute_prepared(&stmt, &[SqlValue::Integer(1)]).await?;
     /// ```
     #[allow(dead_code)]
     pub fn prepare(&self, sql: &str) -> Result<Arc<PreparedStatement>> {
@@ -199,7 +204,7 @@ impl Session {
     /// Binds the provided parameters to the prepared statement and executes it.
     /// This avoids the parsing overhead of the original SQL.
     #[allow(dead_code)]
-    pub fn execute_prepared(
+    pub async fn execute_prepared(
         &mut self,
         stmt: &PreparedStatement,
         params: &[SqlValue],
@@ -208,39 +213,46 @@ impl Session {
         let bound_stmt = stmt.bind(params).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Execute the bound statement
-        self.execute_statement(&bound_stmt)
+        self.execute_statement(&bound_stmt).await
     }
 
     /// Execute a SQL query with auto-caching
     ///
     /// This method automatically caches parsed statements for performance.
     /// For repeated queries, use `prepare()` + `execute_prepared()` for best performance.
-    pub fn execute(&mut self, sql: &str) -> Result<ExecutionResult> {
+    pub async fn execute(&mut self, sql: &str) -> Result<ExecutionResult> {
         // Try to get from cache or prepare
         let prepared = self.stmt_cache.get_or_prepare(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // For non-parameterized queries, execute directly from cached AST
-        self.execute_statement(prepared.statement())
+        self.execute_statement(prepared.statement()).await
     }
 
     /// Execute a SQL query with parameters (convenience method)
     ///
     /// Combines prepare + execute_prepared in one call.
     #[allow(dead_code)]
-    pub fn execute_with_params(
+    pub async fn execute_with_params(
         &mut self,
         sql: &str,
         params: &[SqlValue],
     ) -> Result<ExecutionResult> {
         let prepared = self.prepare(sql)?;
-        self.execute_prepared(&prepared, params)
+        self.execute_prepared(&prepared, params).await
     }
 
     /// Execute a parsed statement
-    fn execute_statement(&mut self, statement: &vibesql_ast::Statement) -> Result<ExecutionResult> {
+    async fn execute_statement(
+        &mut self,
+        statement: &vibesql_ast::Statement,
+    ) -> Result<ExecutionResult> {
+        // Acquire write lock for most operations (read-only operations could use read lock,
+        // but for simplicity we use write lock for all to avoid potential deadlocks)
+        let mut db = self.db.write().await;
+
         match statement {
             vibesql_ast::Statement::Select(select_stmt) => {
-                let executor = vibesql_executor::SelectExecutor::new(&self.db);
+                let executor = vibesql_executor::SelectExecutor::new(&*db);
                 let rows = executor.execute(select_stmt)?;
 
                 // Convert to our result format
@@ -261,7 +273,7 @@ impl Session {
 
             vibesql_ast::Statement::Insert(insert_stmt) => {
                 let affected =
-                    vibesql_executor::InsertExecutor::execute(&mut self.db, insert_stmt)?;
+                    vibesql_executor::InsertExecutor::execute(&mut *db, insert_stmt)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&insert_stmt.table_name);
                 Ok(ExecutionResult::Insert { rows_affected: affected })
@@ -269,7 +281,7 @@ impl Session {
 
             vibesql_ast::Statement::Update(update_stmt) => {
                 let affected =
-                    vibesql_executor::UpdateExecutor::execute(update_stmt, &mut self.db)?;
+                    vibesql_executor::UpdateExecutor::execute(update_stmt, &mut *db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&update_stmt.table_name);
                 Ok(ExecutionResult::Update { rows_affected: affected })
@@ -277,72 +289,95 @@ impl Session {
 
             vibesql_ast::Statement::Delete(delete_stmt) => {
                 let affected =
-                    vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut self.db)?;
+                    vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut *db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&delete_stmt.table_name);
                 Ok(ExecutionResult::Delete { rows_affected: affected })
             }
 
             vibesql_ast::Statement::CreateTable(create_stmt) => {
-                vibesql_executor::CreateTableExecutor::execute(create_stmt, &mut self.db)?;
+                vibesql_executor::CreateTableExecutor::execute(create_stmt, &mut *db)?;
                 Ok(ExecutionResult::CreateTable)
             }
 
             vibesql_ast::Statement::CreateIndex(index_stmt) => {
-                vibesql_executor::CreateIndexExecutor::execute(index_stmt, &mut self.db)?;
+                vibesql_executor::CreateIndexExecutor::execute(index_stmt, &mut *db)?;
                 Ok(ExecutionResult::CreateIndex)
             }
 
             vibesql_ast::Statement::CreateView(view_stmt) => {
-                vibesql_executor::advanced_objects::execute_create_view(view_stmt, &mut self.db)?;
+                vibesql_executor::advanced_objects::execute_create_view(view_stmt, &mut *db)?;
                 Ok(ExecutionResult::CreateView)
             }
 
             vibesql_ast::Statement::DropTable(drop_stmt) => {
-                vibesql_executor::DropTableExecutor::execute(drop_stmt, &mut self.db)?;
+                vibesql_executor::DropTableExecutor::execute(drop_stmt, &mut *db)?;
                 // Invalidate cache for dropped table
                 self.stmt_cache.invalidate_table(&drop_stmt.table_name);
                 Ok(ExecutionResult::DropTable)
             }
 
             vibesql_ast::Statement::DropIndex(drop_stmt) => {
-                vibesql_executor::DropIndexExecutor::execute(drop_stmt, &mut self.db)?;
+                vibesql_executor::DropIndexExecutor::execute(drop_stmt, &mut *db)?;
                 Ok(ExecutionResult::DropIndex)
             }
 
             vibesql_ast::Statement::DropView(drop_stmt) => {
-                vibesql_executor::advanced_objects::execute_drop_view(drop_stmt, &mut self.db)?;
+                vibesql_executor::advanced_objects::execute_drop_view(drop_stmt, &mut *db)?;
                 Ok(ExecutionResult::DropView)
             }
 
             vibesql_ast::Statement::Analyze(analyze_stmt) => {
                 let message =
-                    vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut self.db)?;
+                    vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut *db)?;
                 // Extract table count from message - the executor returns a message like
                 // "ANALYZE completed - N table(s) analyzed"
                 let tables_analyzed =
-                    if analyze_stmt.table_name.is_some() { 1 } else { self.db.list_tables().len() };
+                    if analyze_stmt.table_name.is_some() { 1 } else { db.list_tables().len() };
                 let _ = message; // Message is informational, we track count
                 Ok(ExecutionResult::Analyze { tables_analyzed })
             }
 
-            vibesql_ast::Statement::Prepare(prepare_stmt) => self.execute_prepare(prepare_stmt),
+            vibesql_ast::Statement::Prepare(prepare_stmt) => {
+                // Release lock before calling helper (doesn't need db)
+                drop(db);
+                self.execute_prepare(prepare_stmt)
+            }
 
-            vibesql_ast::Statement::Execute(execute_stmt) => self.execute_execute(execute_stmt),
+            vibesql_ast::Statement::Execute(execute_stmt) => {
+                // Release lock before calling helper (will reacquire if needed)
+                drop(db);
+                self.execute_execute(execute_stmt).await
+            }
 
             vibesql_ast::Statement::Deallocate(deallocate_stmt) => {
+                // Release lock before calling helper (doesn't need db)
+                drop(db);
                 self.execute_deallocate(deallocate_stmt)
             }
 
             vibesql_ast::Statement::DeclareCursor(declare_stmt) => {
+                // Release lock - declare doesn't need db
+                drop(db);
                 self.execute_declare_cursor(declare_stmt)
             }
 
-            vibesql_ast::Statement::OpenCursor(open_stmt) => self.execute_open_cursor(open_stmt),
+            vibesql_ast::Statement::OpenCursor(open_stmt) => {
+                // Keep lock for open cursor (needs db)
+                CursorExecutor::open(&mut self.cursors, open_stmt, &*db)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                Ok(ExecutionResult::OpenCursor { cursor_name: open_stmt.cursor_name.clone() })
+            }
 
-            vibesql_ast::Statement::Fetch(fetch_stmt) => self.execute_fetch(fetch_stmt),
+            vibesql_ast::Statement::Fetch(fetch_stmt) => {
+                // Release lock - fetch doesn't need db
+                drop(db);
+                self.execute_fetch(fetch_stmt)
+            }
 
             vibesql_ast::Statement::CloseCursor(close_stmt) => {
+                // Release lock - close doesn't need db
+                drop(db);
                 self.execute_close_cursor(close_stmt)
             }
 
@@ -392,22 +427,26 @@ impl Session {
     fn execute_execute(
         &mut self,
         execute_stmt: &vibesql_ast::ExecuteStmt,
-    ) -> Result<ExecutionResult> {
-        let name = &execute_stmt.name;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExecutionResult>> + Send + '_>>
+    {
+        let name = execute_stmt.name.clone();
+        let param_exprs = execute_stmt.params.clone();
 
-        // Look up the named statement
-        let prepared = self
-            .named_statements
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("Prepared statement '{}' not found", name))?
-            .clone();
+        Box::pin(async move {
+            // Look up the named statement
+            let prepared = self
+                .named_statements
+                .get(&name)
+                .ok_or_else(|| anyhow::anyhow!("Prepared statement '{}' not found", name))?
+                .clone();
 
-        // Evaluate parameter expressions to get values
-        let params: Vec<SqlValue> =
-            execute_stmt.params.iter().map(evaluate_expression).collect::<Result<Vec<_>>>()?;
+            // Evaluate parameter expressions to get values
+            let params: Vec<SqlValue> =
+                param_exprs.iter().map(evaluate_expression).collect::<Result<Vec<_>>>()?;
 
-        // Execute the prepared statement with parameters
-        self.execute_prepared(&prepared, &params)
+            // Execute the prepared statement with parameters
+            self.execute_prepared(&prepared, &params).await
+        })
     }
 
     /// Execute DEALLOCATE statement - removes a named prepared statement
@@ -485,16 +524,6 @@ impl Session {
         Ok(ExecutionResult::DeclareCursor { cursor_name: stmt.cursor_name.clone() })
     }
 
-    /// Execute OPEN CURSOR statement
-    fn execute_open_cursor(
-        &mut self,
-        stmt: &vibesql_ast::OpenCursorStmt,
-    ) -> Result<ExecutionResult> {
-        CursorExecutor::open(&mut self.cursors, stmt, &self.db)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-        Ok(ExecutionResult::OpenCursor { cursor_name: stmt.cursor_name.clone() })
-    }
-
     /// Execute FETCH statement
     fn execute_fetch(&mut self, stmt: &vibesql_ast::FetchStmt) -> Result<ExecutionResult> {
         let fetch_result: CursorFetchResult =
@@ -551,12 +580,17 @@ fn evaluate_expression(expr: &vibesql_ast::Expression) -> Result<SqlValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::RwLock;
+    use vibesql_storage::Database;
+
+    fn create_shared_db() -> SharedDatabase {
+        Arc::new(RwLock::new(Database::new()))
+    }
 
     #[test]
     fn test_session_creation() {
-        let session = Session::new("testdb".to_string(), "testuser".to_string());
-        assert!(session.is_ok());
-        let session = session.unwrap();
+        let db = create_shared_db();
+        let session = Session::new("testdb".to_string(), "testuser".to_string(), db);
         assert_eq!(session.database, "testdb");
         assert_eq!(session.user, "testuser");
         assert!(!session.in_transaction);
@@ -564,7 +598,8 @@ mod tests {
 
     #[test]
     fn test_transaction_state() {
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // Not in transaction initially
         assert!(!session.in_transaction);
@@ -584,19 +619,20 @@ mod tests {
         assert!(session.commit().is_err());
     }
 
-    #[test]
-    fn test_prepare_and_execute() {
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+    #[tokio::test]
+    async fn test_prepare_and_execute() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // Create a table first
-        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").unwrap();
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
 
         // Prepare a statement (note: parser doesn't support ?, so use literal value)
         let stmt = session.prepare("SELECT * FROM users WHERE id = 1").unwrap();
         assert_eq!(stmt.param_count(), 0);
 
         // Execute the prepared statement
-        let result = session.execute_prepared(&stmt, &[]);
+        let result = session.execute_prepared(&stmt, &[]).await;
         assert!(result.is_ok());
 
         // Verify we get a Select result
@@ -608,7 +644,8 @@ mod tests {
 
     #[test]
     fn test_cache_hit() {
-        let session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+        let db = create_shared_db();
+        let session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // First prepare - cache miss
         let _stmt1 = session.prepare("SELECT 1").unwrap();
@@ -623,32 +660,34 @@ mod tests {
         assert_eq!(stats.hits, 1);
     }
 
-    #[test]
-    fn test_auto_caching_in_execute() {
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+    #[tokio::test]
+    async fn test_auto_caching_in_execute() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // First execute - cache miss
-        session.execute("SELECT 1").unwrap();
+        session.execute("SELECT 1").await.unwrap();
         let stats = session.cache_stats();
         assert_eq!(stats.misses, 1);
 
         // Second execute - cache hit
-        session.execute("SELECT 1").unwrap();
+        session.execute("SELECT 1").await.unwrap();
         let stats = session.cache_stats();
         assert_eq!(stats.hits, 1);
     }
 
-    #[test]
-    fn test_analyze_single_table() {
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+    #[tokio::test]
+    async fn test_analyze_single_table() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // Create a table and insert data
-        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").unwrap();
-        session.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
-        session.execute("INSERT INTO users VALUES (2, 'Bob')").unwrap();
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
+        session.execute("INSERT INTO users VALUES (1, 'Alice')").await.unwrap();
+        session.execute("INSERT INTO users VALUES (2, 'Bob')").await.unwrap();
 
         // Analyze the table
-        let result = session.execute("ANALYZE users").unwrap();
+        let result = session.execute("ANALYZE users").await.unwrap();
 
         // Verify we get an Analyze result
         match result {
@@ -659,18 +698,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_analyze_all_tables() {
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+    #[tokio::test]
+    async fn test_analyze_all_tables() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // Create multiple tables
-        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").unwrap();
-        session.execute("CREATE TABLE products (id INT, price INT)").unwrap();
-        session.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
-        session.execute("INSERT INTO products VALUES (1, 100)").unwrap();
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
+        session.execute("CREATE TABLE products (id INT, price INT)").await.unwrap();
+        session.execute("INSERT INTO users VALUES (1, 'Alice')").await.unwrap();
+        session.execute("INSERT INTO products VALUES (1, 100)").await.unwrap();
 
         // Analyze all tables (no table name)
-        let result = session.execute("ANALYZE").unwrap();
+        let result = session.execute("ANALYZE").await.unwrap();
 
         // Verify we get an Analyze result with 2 tables
         match result {
@@ -681,16 +721,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_analyze_with_columns() {
-        let mut session = Session::new("testdb".to_string(), "testuser".to_string()).unwrap();
+    #[tokio::test]
+    async fn test_analyze_with_columns() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // Create a table
-        session.execute("CREATE TABLE users (id INT, name VARCHAR(100), age INT)").unwrap();
-        session.execute("INSERT INTO users VALUES (1, 'Alice', 30)").unwrap();
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100), age INT)").await.unwrap();
+        session.execute("INSERT INTO users VALUES (1, 'Alice', 30)").await.unwrap();
 
         // Analyze specific columns
-        let result = session.execute("ANALYZE users (id, name)").unwrap();
+        let result = session.execute("ANALYZE users (id, name)").await.unwrap();
 
         // Verify we get an Analyze result
         match result {
@@ -705,5 +746,51 @@ mod tests {
     fn test_analyze_statement_type() {
         let result = ExecutionResult::Analyze { tables_analyzed: 1 };
         assert_eq!(result.statement_type(), "ANALYZE");
+    }
+
+    #[tokio::test]
+    async fn test_shared_database_across_sessions() {
+        // Create a shared database
+        let db = create_shared_db();
+
+        // Create two sessions using the same shared database
+        let mut session1 = Session::new("testdb".to_string(), "user1".to_string(), Arc::clone(&db));
+        let mut session2 = Session::new("testdb".to_string(), "user2".to_string(), Arc::clone(&db));
+
+        // Create a table through session 1
+        session1
+            .execute("CREATE TABLE shared_test (id INT, value VARCHAR(100))")
+            .await
+            .unwrap();
+
+        // Insert data through session 1
+        session1
+            .execute("INSERT INTO shared_test VALUES (1, 'from session 1')")
+            .await
+            .unwrap();
+
+        // Should be visible through session 2
+        let result = session2.execute("SELECT * FROM shared_test").await.unwrap();
+        match result {
+            ExecutionResult::Select { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+            }
+            _ => panic!("Expected Select result"),
+        }
+
+        // Insert through session 2
+        session2
+            .execute("INSERT INTO shared_test VALUES (2, 'from session 2')")
+            .await
+            .unwrap();
+
+        // Should be visible through session 1
+        let result = session1.execute("SELECT * FROM shared_test").await.unwrap();
+        match result {
+            ExecutionResult::Select { rows, .. } => {
+                assert_eq!(rows.len(), 2);
+            }
+            _ => panic!("Expected Select result"),
+        }
     }
 }

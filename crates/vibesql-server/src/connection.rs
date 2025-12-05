@@ -4,6 +4,7 @@ use crate::observability::ObservabilityProvider;
 use crate::protocol::{
     BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
 };
+use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{SessionSubscriptionManager, SubscriptionManager};
 use anyhow::Result;
@@ -30,6 +31,8 @@ pub struct ConnectionHandler {
     session: Option<Session>,
     connection_start: Instant,
     active_connections: Arc<AtomicUsize>,
+    /// Database registry for shared database instances across connections
+    database_registry: DatabaseRegistry,
     /// Session-level subscription manager for real-time query subscriptions
     subscription_manager: SessionSubscriptionManager,
     /// Global subscription manager for processing storage change events
@@ -46,6 +49,7 @@ impl ConnectionHandler {
         observability: Arc<ObservabilityProvider>,
         password_store: Option<Arc<PasswordStore>>,
         active_connections: Arc<AtomicUsize>,
+        database_registry: DatabaseRegistry,
         global_subscription_manager: Arc<SubscriptionManager>,
     ) -> Self {
         Self {
@@ -59,6 +63,7 @@ impl ConnectionHandler {
             session: None,
             connection_start: Instant::now(),
             active_connections,
+            database_registry,
             subscription_manager: SessionSubscriptionManager::new(),
             global_subscription_manager,
         }
@@ -123,8 +128,11 @@ impl ConnectionHandler {
                 // Perform authentication
                 self.authenticate(&user).await?;
 
-                // Create session
-                self.session = Some(Session::new(database.clone(), user.clone())?);
+                // Get or create shared database from registry
+                let shared_db = self.database_registry.get_or_create(&database).await;
+
+                // Create session with shared database
+                self.session = Some(Session::new(database.clone(), user.clone(), shared_db));
 
                 info!("User '{}' connected to database '{}'", user, database);
 
@@ -306,8 +314,8 @@ impl ConnectionHandler {
         // Track query execution time
         let query_start = Instant::now();
 
-        // Execute query
-        match session.execute(query) {
+        // Execute query (now async due to shared database locking)
+        match session.execute(query).await {
             Ok(result) => {
                 let query_duration = query_start.elapsed();
                 let stmt_type = result.statement_type();
@@ -374,8 +382,8 @@ impl ConnectionHandler {
             }
         };
 
-        // Execute the query to get initial data
-        match session.execute(query) {
+        // Execute the query to get initial data (async due to shared database locking)
+        match session.execute(query).await {
             Ok(ExecutionResult::Select { rows, .. }) => {
                 // Convert rows to wire format
                 let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
