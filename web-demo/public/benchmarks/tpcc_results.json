@@ -3,34 +3,34 @@
     {
       "name": "tpcc_mixed_vibesql",
       "stats": {
-        "mean": 1.1e-05,
+        "mean": 9e-06,
         "stddev": 0,
-        "min": 1e-05,
-        "max": 1.2e-05,
-        "rounds": 5505543,
-        "tps": 91759.05,
-        "transactions": 5505543,
+        "min": 8e-06,
+        "max": 1e-05,
+        "rounds": 6625901,
+        "tps": 110431.68,
+        "transactions": 6625901,
         "duration_ms": 60000
       }
     },
     {
       "name": "tpcc_mixed_sqlite",
       "stats": {
-        "mean": 0.000284,
+        "mean": 0.000213,
         "stddev": 0,
-        "min": 0.000255,
-        "max": 0.000312,
-        "rounds": 211368,
-        "tps": 3522.8,
-        "transactions": 211368,
+        "min": 0.000192,
+        "max": 0.000235,
+        "rounds": 281059,
+        "tps": 4684.32,
+        "transactions": 281059,
         "duration_ms": 60000
       }
     }
   ],
-  "datetime": "2025-12-04T23:29:17.744981",
+  "datetime": "2025-12-05T10:39:50.834805",
   "machine_info": {
     "suite": "tpcc",
-    "git_commit": "62d702fa",
+    "git_commit": "58e8a095",
     "scale_factor": "1.0"
   }
 }
