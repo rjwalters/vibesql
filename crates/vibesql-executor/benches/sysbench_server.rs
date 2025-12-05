@@ -18,21 +18,6 @@
 //! This benchmark uses vibesql-server with PostgreSQL wire protocol, connecting
 //! via tokio-postgres, to provide an equivalent client-server comparison.
 //!
-//! ## Known Limitations
-//!
-//! vibesql-server has a connection handling issue where connections are closed after
-//! approximately 150-190 table queries (varies by table size). This appears to be a
-//! protocol handling bug in the server. Until fixed, the benchmark:
-//! - Uses a small default table size (50 rows) to maximize benchmark runtime
-//! - Skips warmup phase to preserve queries for actual measurement
-//! - Reports partial results when connection is lost
-//!
-//! Total query budget per connection: ~150-190 table queries
-//! - Schema creation: 2 queries (CREATE TABLE, CREATE INDEX)
-//! - Data loading: N queries (one INSERT per row)
-//! - Verification: 1 query (SELECT COUNT)
-//! - Remaining for benchmark: ~145-187 - N queries
-//!
 //! ## Usage
 //!
 //! ```bash
@@ -47,7 +32,7 @@
 //!
 //! ## Environment Variables
 //!
-//! - `SYSBENCH_TABLE_SIZE` - Number of rows (default: 50, max ~150 due to server bug)
+//! - `SYSBENCH_TABLE_SIZE` - Number of rows (default: 10000)
 //! - `SYSBENCH_DURATION_SECS` - Benchmark duration in seconds (default: 30)
 //! - `SYSBENCH_WARMUP_SECS` - Warmup duration in seconds (default: 5)
 //! - `MYSQL_URL` - MySQL connection string (optional)
@@ -77,9 +62,7 @@ use mysql::prelude::*;
 use mysql::{Pool, PooledConn};
 
 /// Default table size for sysbench tests
-/// NOTE: vibesql-server has a connection limit bug (~190 table queries per connection).
-/// With 50 rows, we get ~137 queries for benchmarking (190 - 3 schema - 50 INSERT).
-const DEFAULT_TABLE_SIZE: usize = 50;
+const DEFAULT_TABLE_SIZE: usize = 10000;
 
 /// Range size for range queries (sysbench default is 100)
 const RANGE_SIZE: usize = 100;
@@ -99,6 +82,7 @@ async fn start_vibesql_server(
     use vibesql_server::config::{AuthConfig, Config, LoggingConfig, ServerConfig};
     use vibesql_server::connection::ConnectionHandler;
     use vibesql_server::observability::ObservabilityProvider;
+    use vibesql_server::registry::DatabaseRegistry;
     use vibesql_server::subscription::SubscriptionManager;
 
     // Create minimal configuration for benchmark
@@ -130,6 +114,9 @@ async fn start_vibesql_server(
     // Create the global subscription manager (no need for change events in benchmark)
     let subscription_manager = Arc::new(SubscriptionManager::new());
 
+    // Create shared database registry for all connections
+    let database_registry = DatabaseRegistry::new();
+
     // Create observability provider once (disabled for benchmarks)
     let observability = Arc::new(
         ObservabilityProvider::init(&Default::default())
@@ -151,6 +138,7 @@ async fn start_vibesql_server(
                             let config = Arc::clone(&config);
                             let active_connections = Arc::clone(&active_connections);
                             let subscription_manager = Arc::clone(&subscription_manager);
+                            let database_registry = database_registry.clone();
                             let observability = Arc::clone(&observability);
 
                             tokio::spawn(async move {
@@ -161,6 +149,7 @@ async fn start_vibesql_server(
                                     observability,
                                     None, // No password store (trust auth)
                                     active_connections,
+                                    database_registry,
                                     subscription_manager,
                                 );
                                 let _ = handler.handle().await;
@@ -1362,9 +1351,7 @@ fn main() {
         }
         eprintln!("Data loaded in {:?}", load_start.elapsed());
 
-        // Skip warmup and run a quick benchmark directly
-        // vibesql-server has a connection limit bug - table queries fail after ~190 total queries
-        eprintln!("Starting benchmarks (no warmup due to connection limitations)...");
+        eprintln!("Starting benchmarks...");
 
         // Run benchmarks
         let mut results = Vec::new();

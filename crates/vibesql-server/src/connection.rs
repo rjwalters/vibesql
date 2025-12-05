@@ -255,41 +255,44 @@ impl ConnectionHandler {
     /// Process queries from the client
     async fn process_queries(&mut self) -> Result<()> {
         loop {
-            // Read a message
-            self.read_message().await?;
-
-            // Decode frontend message
-            let msg = FrontendMessage::decode(&mut self.read_buf)?;
+            // Read a complete message, waiting for more data if needed
+            let msg = match self.read_complete_message().await {
+                Ok(msg) => msg,
+                Err(e) => {
+                    // Check if this is a clean connection close
+                    let err_str = e.to_string();
+                    if err_str.contains("Connection closed") {
+                        debug!("Connection closed by client");
+                        break;
+                    }
+                    return Err(e);
+                }
+            };
 
             match msg {
-                Some(FrontendMessage::Query { query }) => {
+                FrontendMessage::Query { query } => {
                     debug!("Query: {}", query);
                     self.execute_query(&query).await?;
                 }
 
-                Some(FrontendMessage::Subscribe { query, params }) => {
+                FrontendMessage::Subscribe { query, params } => {
                     debug!("Subscribe: {}", query);
                     self.handle_subscribe(&query, params).await?;
                 }
 
-                Some(FrontendMessage::Unsubscribe { subscription_id }) => {
+                FrontendMessage::Unsubscribe { subscription_id } => {
                     debug!("Unsubscribe: {:?}", subscription_id);
                     self.subscription_manager.unsubscribe(&subscription_id);
                     // No response needed per protocol spec
                 }
 
-                Some(FrontendMessage::Terminate) => {
+                FrontendMessage::Terminate => {
                     debug!("Client requested termination");
                     break;
                 }
 
-                Some(msg) => {
+                msg => {
                     warn!("Unexpected message: {:?}", msg);
-                }
-
-                None => {
-                    debug!("Connection closed by client");
-                    break;
                 }
             }
         }
@@ -298,6 +301,24 @@ impl ConnectionHandler {
         self.subscription_manager.clear();
 
         Ok(())
+    }
+
+    /// Read a complete frontend message, looping until enough data is available
+    ///
+    /// This is critical for proper PostgreSQL wire protocol handling. TCP may deliver
+    /// messages in fragments, so we must continue reading until we have a complete
+    /// message. Previously, partial reads were incorrectly interpreted as connection
+    /// closure, causing connections to drop after ~150-190 queries.
+    async fn read_complete_message(&mut self) -> Result<FrontendMessage> {
+        loop {
+            // Try to decode a message from the existing buffer
+            if let Some(msg) = FrontendMessage::decode(&mut self.read_buf)? {
+                return Ok(msg);
+            }
+
+            // Need more data - read from the stream
+            self.read_message().await?;
+        }
     }
 
     /// Execute a SQL query
