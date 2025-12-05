@@ -397,6 +397,33 @@ interface TPCCResults {
 }
 
 /**
+ * TPC-DS benchmark interfaces (VibeSQL only, different stats format)
+ */
+interface TPCDSStats {
+  mean: number;
+  total: number;
+  rows: number;
+  status: 'passed' | 'failed' | 'timeout';
+}
+
+interface TPCDSBenchmark {
+  name: string;
+  stats: TPCDSStats;
+}
+
+interface TPCDSResults {
+  benchmarks: TPCDSBenchmark[];
+  metadata: {
+    suite: string;
+    timestamp: string;
+    git_commit: string;
+    scale_factor: string;
+    total_queries: number;
+    passed_queries: number;
+  };
+}
+
+/**
  * Footprint benchmark interfaces (different format from TPC benchmarks)
  */
 interface FootprintBenchmark {
@@ -1374,6 +1401,214 @@ function renderTPCCChart(data: TPCCResults): void {
 }
 
 /**
+ * Parse TPC-DS benchmark name to extract query number
+ */
+function parseTPCDSBenchmarkName(name: string): { queryNum: string; database: string } {
+  // Format: "tpcds_q1_vibesql" or "tpcds_q10_vibesql"
+  const parts = name.split('_');
+  const database = parts[parts.length - 1];
+  const queryNum = parts[1]; // e.g., "q1", "q10"
+  return { queryNum, database };
+}
+
+/**
+ * Render TPC-DS results table (VibeSQL only, shows pass/fail status)
+ */
+function renderTPCDSTable(data: TPCDSResults): void {
+  const tbody = document.getElementById('results-tbody');
+  const table = document.getElementById('results-table');
+  if (!tbody || !table) return;
+
+  const config = SUITE_CONFIGS['tpcds'];
+
+  // Update table headers for TPC-DS view
+  const thead = table.querySelector('thead tr');
+  if (thead) {
+    thead.innerHTML = `
+      <th class="px-4 py-3">Query</th>
+      <th class="px-4 py-3 text-right">Execution Time</th>
+      <th class="px-4 py-3 text-right">Rows</th>
+      <th class="px-4 py-3 text-center">Status</th>
+    `;
+  }
+
+  tbody.innerHTML = '';
+
+  // Sort benchmarks by query number
+  const sortedBenchmarks = [...data.benchmarks].sort((a, b) => {
+    const aNum = parseInt(parseTPCDSBenchmarkName(a.name).queryNum.replace('q', ''));
+    const bNum = parseInt(parseTPCDSBenchmarkName(b.name).queryNum.replace('q', ''));
+    return aNum - bNum;
+  });
+
+  let passedCount = 0;
+
+  for (const bench of sortedBenchmarks) {
+    const { queryNum } = parseTPCDSBenchmarkName(bench.name);
+    const isPassed = bench.stats.status === 'passed';
+    if (isPassed) passedCount++;
+
+    const row = document.createElement('tr');
+    row.className = 'hover:bg-card/50 transition-colors';
+
+    // Query name with description tooltip
+    const queryCell = document.createElement('td');
+    queryCell.className = 'px-4 py-3 font-medium text-foreground';
+    const description = config.descriptions[queryNum];
+    if (description) {
+      queryCell.innerHTML = `<span class="cursor-help" title="${description}">TPC-DS ${queryNum.toUpperCase()}</span>`;
+    } else {
+      queryCell.textContent = `TPC-DS ${queryNum.toUpperCase()}`;
+    }
+    row.appendChild(queryCell);
+
+    // Execution time
+    const timeCell = document.createElement('td');
+    timeCell.className = 'px-4 py-3 text-right text-muted';
+    if (isPassed && bench.stats.mean > 0) {
+      timeCell.textContent = formatTime(bench.stats.mean) || 'N/A';
+    } else {
+      timeCell.textContent = '-';
+    }
+    row.appendChild(timeCell);
+
+    // Rows returned
+    const rowsCell = document.createElement('td');
+    rowsCell.className = 'px-4 py-3 text-right text-muted';
+    rowsCell.textContent = bench.stats.rows.toLocaleString();
+    row.appendChild(rowsCell);
+
+    // Status
+    const statusCell = document.createElement('td');
+    statusCell.className = 'px-4 py-3 text-center text-2xl';
+    if (bench.stats.status === 'passed') {
+      statusCell.textContent = '✅';
+      statusCell.title = 'Query passed';
+    } else if (bench.stats.status === 'timeout') {
+      statusCell.textContent = '⏱️';
+      statusCell.title = 'Query timed out';
+    } else {
+      statusCell.textContent = '❌';
+      statusCell.title = 'Query failed';
+    }
+    row.appendChild(statusCell);
+
+    tbody.appendChild(row);
+  }
+
+  // Update summary cards
+  const avgSpeedupEl = document.getElementById('avg-speedup');
+  if (avgSpeedupEl) {
+    const passRate = (passedCount / sortedBenchmarks.length * 100).toFixed(0);
+    avgSpeedupEl.textContent = `${passRate}% pass rate`;
+    avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
+  }
+
+  const opsTestedEl = document.getElementById('ops-tested');
+  if (opsTestedEl) {
+    opsTestedEl.textContent = `${passedCount}/${sortedBenchmarks.length}`;
+  }
+
+  // Update last updated timestamp
+  const lastUpdatedEl = document.getElementById('last-updated');
+  if (lastUpdatedEl && data.metadata.timestamp) {
+    const date = new Date(data.metadata.timestamp);
+    lastUpdatedEl.textContent = date.toLocaleDateString();
+    lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+  }
+}
+
+/**
+ * Render TPC-DS performance chart
+ */
+function renderTPCDSChart(data: TPCDSResults): void {
+  const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  // Destroy existing chart if any
+  if (currentChart) {
+    currentChart.destroy();
+    currentChart = null;
+  }
+
+  // Sort benchmarks by query number and filter to passed queries
+  const sortedBenchmarks = [...data.benchmarks]
+    .filter(b => b.stats.status === 'passed' && b.stats.mean > 0)
+    .sort((a, b) => {
+      const aNum = parseInt(parseTPCDSBenchmarkName(a.name).queryNum.replace('q', ''));
+      const bNum = parseInt(parseTPCDSBenchmarkName(b.name).queryNum.replace('q', ''));
+      return aNum - bNum;
+    });
+
+  const labels = sortedBenchmarks.map(b => {
+    const { queryNum } = parseTPCDSBenchmarkName(b.name);
+    return queryNum.toUpperCase();
+  });
+
+  const vibesqlData = sortedBenchmarks.map(b => b.stats.mean * 1000); // Convert to ms
+
+  currentChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'VibeSQL',
+          data: vibesqlData,
+          backgroundColor: 'rgba(34, 197, 94, 0.5)',
+          borderColor: 'rgba(34, 197, 94, 1)',
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          type: 'logarithmic',
+          beginAtZero: false,
+          title: {
+            display: true,
+            text: 'Execution Time (ms) - Log Scale',
+          },
+          ticks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            callback: function (value: any) {
+              const allowedTicks = [0.1, 1, 10, 100, 1000];
+              if (allowedTicks.includes(value)) {
+                return value;
+              }
+              return null;
+            },
+          },
+        },
+        x: {
+          ticks: {
+            maxRotation: 90,
+            minRotation: 45,
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+        },
+        tooltip: {
+          callbacks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            label: function (context: any) {
+              return `${context.dataset.label}: ${context.parsed.y.toFixed(2)} ms`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
  * Update the methodology section
  */
 function updateMethodology(suite: BenchmarkSuite): void {
@@ -1461,7 +1696,15 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
       return;
     }
 
-    // Standard TPC benchmark handling
+    // Handle TPC-DS suite differently (VibeSQL only, different stats format)
+    if (suite === 'tpcds') {
+      const data: TPCDSResults = await response.json();
+      renderTPCDSTable(data);
+      renderTPCDSChart(data);
+      return;
+    }
+
+    // Standard TPC benchmark handling (TPC-H with comparisons)
     const data: BenchmarkResults = await response.json();
 
     // Update last updated timestamp
