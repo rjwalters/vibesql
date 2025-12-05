@@ -35,12 +35,11 @@ jobs:
           sudo rm -rf /usr/local/share/boost
           sudo rm -rf /usr/share/swift
           sudo docker image prune --all --force
-           sudo docker system prune --all --force
           sudo docker system prune --all --force
           df -h
 
           - uses: actions/checkout@v6
-        with:
+          with:
           submodules: recursive
 
       - name: Setup Rust
