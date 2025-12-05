@@ -17,16 +17,19 @@ async fn test_session_table_persistence() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create table
-    client.send_query("CREATE TABLE persist_test (id INT, name VARCHAR(50))").await.expect("Failed to CREATE TABLE");
+    client
+        .send_query("CREATE TABLE persist_test (id INT, name VARCHAR(50))")
+        .await
+        .expect("Failed to CREATE TABLE");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
-    assert!(
-        messages.iter().any(|m| m.is_command_complete()),
-        "CREATE TABLE should complete"
-    );
+    assert!(messages.iter().any(|m| m.is_command_complete()), "CREATE TABLE should complete");
 
     // Insert data
-    client.send_query("INSERT INTO persist_test VALUES (1, 'first')").await.expect("Failed to INSERT");
+    client
+        .send_query("INSERT INTO persist_test VALUES (1, 'first')")
+        .await
+        .expect("Failed to INSERT");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
     assert!(messages.iter().any(|m| m.is_command_complete()));
@@ -53,18 +56,27 @@ async fn test_session_data_modification_visibility() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     // Create and populate table
-    client.send_query("CREATE TABLE modify_test (id INT, value INT)").await.expect("Failed to CREATE");
+    client
+        .send_query("CREATE TABLE modify_test (id INT, value INT)")
+        .await
+        .expect("Failed to CREATE");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     client.send_query("INSERT INTO modify_test VALUES (1, 100)").await.expect("Failed to INSERT");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Update the value
-    client.send_query("UPDATE modify_test SET value = 200 WHERE id = 1").await.expect("Failed to UPDATE");
+    client
+        .send_query("UPDATE modify_test SET value = 200 WHERE id = 1")
+        .await
+        .expect("Failed to UPDATE");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Verify the update is visible
-    client.send_query("SELECT value FROM modify_test WHERE id = 1").await.expect("Failed to SELECT");
+    client
+        .send_query("SELECT value FROM modify_test WHERE id = 1")
+        .await
+        .expect("Failed to SELECT");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
 
@@ -164,7 +176,10 @@ async fn test_session_sequential_operations() {
 
     // Multiple inserts
     for i in 1..=5 {
-        client.send_query(&format!("INSERT INTO seq_test VALUES ({}, {})", i, i * 10)).await.expect("Failed to INSERT");
+        client
+            .send_query(&format!("INSERT INTO seq_test VALUES ({}, {})", i, i * 10))
+            .await
+            .expect("Failed to INSERT");
         let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     }
 
@@ -177,7 +192,10 @@ async fn test_session_sequential_operations() {
     assert_eq!(row_count, 5, "Should have 5 rows");
 
     // Update some rows
-    client.send_query("UPDATE seq_test SET val = val * 2 WHERE id > 3").await.expect("Failed to UPDATE");
+    client
+        .send_query("UPDATE seq_test SET val = val * 2 WHERE id > 3")
+        .await
+        .expect("Failed to UPDATE");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
     let cmd = messages.iter().find(|m| m.is_command_complete()).unwrap();
@@ -224,7 +242,10 @@ async fn test_session_continues_after_error() {
     client.send_query("SELECT * FROM error_test").await.expect("Failed to SELECT after error");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
-    assert!(messages.iter().any(|m| m.is_row_description()), "Session should continue working after error");
+    assert!(
+        messages.iter().any(|m| m.is_row_description()),
+        "Session should continue working after error"
+    );
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();
@@ -257,7 +278,10 @@ async fn test_new_session_clean_state() {
         let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
         let messages = parse_backend_messages(&data);
         // Each session has its own database, so temp_table should not exist
-        assert!(messages.iter().any(|m| m.is_error()), "Table from previous session should not exist");
+        assert!(
+            messages.iter().any(|m| m.is_error()),
+            "Table from previous session should not exist"
+        );
 
         client.send_terminate().await.expect("Failed to terminate");
     }
@@ -275,23 +299,41 @@ async fn test_concurrent_session_operations() {
         .map(|i| {
             tokio::spawn(async move {
                 let mut client = TestClient::connect(addr).await.expect("Failed to connect");
-                client.send_startup(&format!("user{}", i), "testdb").await.expect("Failed to startup");
-                let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                client
+                    .send_startup(&format!("user{}", i), "testdb")
+                    .await
+                    .expect("Failed to startup");
+                let _ =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
                 // Each session creates its own table
                 let table_name = format!("concurrent_table_{}", i);
-                client.send_query(&format!("CREATE TABLE {} (id INT)", table_name)).await.expect("Failed to CREATE");
-                let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                client
+                    .send_query(&format!("CREATE TABLE {} (id INT)", table_name))
+                    .await
+                    .expect("Failed to CREATE");
+                let _ =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
                 // Insert multiple rows
                 for j in 0..5 {
-                    client.send_query(&format!("INSERT INTO {} VALUES ({})", table_name, j)).await.expect("Failed to INSERT");
-                    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                    client
+                        .send_query(&format!("INSERT INTO {} VALUES ({})", table_name, j))
+                        .await
+                        .expect("Failed to INSERT");
+                    let _ = client
+                        .read_until_message_type(b'Z')
+                        .await
+                        .expect("Failed to read response");
                 }
 
                 // Verify row count
-                client.send_query(&format!("SELECT * FROM {}", table_name)).await.expect("Failed to SELECT");
-                let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                client
+                    .send_query(&format!("SELECT * FROM {}", table_name))
+                    .await
+                    .expect("Failed to SELECT");
+                let data =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
                 let messages = parse_backend_messages(&data);
                 let row_count = messages.iter().filter(|m| m.is_data_row()).count();
                 assert_eq!(row_count, 5, "Session {} should have 5 rows", i);
@@ -318,13 +360,19 @@ async fn test_session_create_index() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Create table
-    client.send_query("CREATE TABLE index_test (id INT, name VARCHAR(50))").await.expect("Failed to CREATE TABLE");
+    client
+        .send_query("CREATE TABLE index_test (id INT, name VARCHAR(50))")
+        .await
+        .expect("Failed to CREATE TABLE");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
     assert!(messages.iter().any(|m| m.is_command_complete()));
 
     // Create index
-    client.send_query("CREATE INDEX idx_name ON index_test (name)").await.expect("Failed to CREATE INDEX");
+    client
+        .send_query("CREATE INDEX idx_name ON index_test (name)")
+        .await
+        .expect("Failed to CREATE INDEX");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
     assert!(messages.iter().any(|m| m.is_command_complete()), "CREATE INDEX should complete");
@@ -333,7 +381,10 @@ async fn test_session_create_index() {
     client.send_query("INSERT INTO index_test VALUES (1, 'test')").await.expect("Failed to INSERT");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
-    client.send_query("SELECT * FROM index_test WHERE name = 'test'").await.expect("Failed to SELECT");
+    client
+        .send_query("SELECT * FROM index_test WHERE name = 'test'")
+        .await
+        .expect("Failed to SELECT");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
     assert!(messages.iter().any(|m| m.is_data_row()), "Query should work with index");

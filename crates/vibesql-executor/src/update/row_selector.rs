@@ -14,7 +14,10 @@ pub struct RowSelector<'a> {
 
 impl<'a> RowSelector<'a> {
     /// Create a new row selector
-    pub fn new(schema: &'a vibesql_catalog::TableSchema, evaluator: &'a ExpressionEvaluator<'a>) -> Self {
+    pub fn new(
+        schema: &'a vibesql_catalog::TableSchema,
+        evaluator: &'a ExpressionEvaluator<'a>,
+    ) -> Self {
         Self { schema, evaluator }
     }
 

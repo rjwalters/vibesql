@@ -6,8 +6,8 @@
 use crate::errors::ExecutorError;
 
 // Re-export the evaluator types for backwards compatibility
-pub use super::single::ExpressionEvaluator;
 pub use super::combined_core::CombinedExpressionEvaluator;
+pub use super::single::ExpressionEvaluator;
 
 /// Static version of eval_binary_op for shared logic
 ///
@@ -98,7 +98,10 @@ pub(crate) fn eval_between_static(
 
 /// Compare two SQL values for equality in simple CASE expressions
 /// Uses regular = comparison semantics where NULL = anything is UNKNOWN (false)
-pub(crate) fn values_are_equal(left: &vibesql_types::SqlValue, right: &vibesql_types::SqlValue) -> bool {
+pub(crate) fn values_are_equal(
+    left: &vibesql_types::SqlValue,
+    right: &vibesql_types::SqlValue,
+) -> bool {
     use vibesql_types::SqlValue::*;
 
     // SQL standard semantics for simple CASE equality:
@@ -119,11 +122,16 @@ pub(crate) fn values_are_equal(left: &vibesql_types::SqlValue, right: &vibesql_t
         // Numeric type comparisons - convert to f64 for comparison
         // This handles: Numeric, Integer, Smallint, Bigint, Unsigned, Float, Real, Double
         (
-            Integer(_) | Smallint(_) | Bigint(_) | Unsigned(_) | Numeric(_) | Float(_) | Real(_) | Double(_),
-            Integer(_) | Smallint(_) | Bigint(_) | Unsigned(_) | Numeric(_) | Float(_) | Real(_) | Double(_)
+            Integer(_) | Smallint(_) | Bigint(_) | Unsigned(_) | Numeric(_) | Float(_) | Real(_)
+            | Double(_),
+            Integer(_) | Smallint(_) | Bigint(_) | Unsigned(_) | Numeric(_) | Float(_) | Real(_)
+            | Double(_),
         ) => {
             // Convert both to f64 and compare
-            match (crate::evaluator::casting::to_f64(left), crate::evaluator::casting::to_f64(right)) {
+            match (
+                crate::evaluator::casting::to_f64(left),
+                crate::evaluator::casting::to_f64(right),
+            ) {
                 (Ok(a), Ok(b)) => (a - b).abs() < f64::EPSILON,
                 _ => false,
             }

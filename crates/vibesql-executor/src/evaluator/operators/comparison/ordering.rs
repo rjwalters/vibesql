@@ -14,10 +14,7 @@ pub fn less_than(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, Executor
 
 /// Less than or equal operator (<=)
 #[inline]
-pub fn less_than_or_equal(
-    left: &SqlValue,
-    right: &SqlValue,
-) -> Result<SqlValue, ExecutorError> {
+pub fn less_than_or_equal(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
     compare(left, right, |cmp| cmp != std::cmp::Ordering::Greater, "<=")
 }
 
@@ -29,10 +26,7 @@ pub fn greater_than(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, Execu
 
 /// Greater than or equal operator (>=)
 #[inline]
-pub fn greater_than_or_equal(
-    left: &SqlValue,
-    right: &SqlValue,
-) -> Result<SqlValue, ExecutorError> {
+pub fn greater_than_or_equal(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
     compare(left, right, |cmp| cmp != std::cmp::Ordering::Less, ">=")
 }
 

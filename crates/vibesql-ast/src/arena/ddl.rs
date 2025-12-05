@@ -205,23 +205,10 @@ pub struct DropColumnStmt {
 /// ALTER COLUMN operation
 #[derive(Debug, Clone, PartialEq)]
 pub enum AlterColumnStmt<'arena> {
-    SetDefault {
-        table_name: Symbol,
-        column_name: Symbol,
-        default: Expression<'arena>,
-    },
-    DropDefault {
-        table_name: Symbol,
-        column_name: Symbol,
-    },
-    SetNotNull {
-        table_name: Symbol,
-        column_name: Symbol,
-    },
-    DropNotNull {
-        table_name: Symbol,
-        column_name: Symbol,
-    },
+    SetDefault { table_name: Symbol, column_name: Symbol, default: Expression<'arena> },
+    DropDefault { table_name: Symbol, column_name: Symbol },
+    SetNotNull { table_name: Symbol, column_name: Symbol },
+    DropNotNull { table_name: Symbol, column_name: Symbol },
 }
 
 /// ADD CONSTRAINT operation

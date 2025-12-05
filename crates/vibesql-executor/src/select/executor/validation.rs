@@ -25,10 +25,7 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
             // Skip "*" - it's a wildcard, not an actual column reference
             // This handles cases like COUNT(*) parsed as ColumnRef { column: "*" }
             if column != "*" {
-                refs.push(ColumnReference {
-                    table: table.clone(),
-                    column: column.clone(),
-                });
+                refs.push(ColumnReference { table: table.clone(), column: column.clone() });
             }
         }
         Expression::BinaryOp { left, right, .. } => {
@@ -172,19 +169,13 @@ fn validate_column_ref(
     outer_schema: Option<&CombinedSchema>,
 ) -> Result<(), ExecutorError> {
     // Check if column exists in inner schema
-    if schema
-        .get_column_index(col_ref.table.as_deref(), &col_ref.column)
-        .is_some()
-    {
+    if schema.get_column_index(col_ref.table.as_deref(), &col_ref.column).is_some() {
         return Ok(());
     }
 
     // For correlated subqueries, also check outer schema (#2694)
     if let Some(outer) = outer_schema {
-        if outer
-            .get_column_index(col_ref.table.as_deref(), &col_ref.column)
-            .is_some()
-        {
+        if outer.get_column_index(col_ref.table.as_deref(), &col_ref.column).is_some() {
             return Ok(());
         }
     }
@@ -268,15 +259,10 @@ pub fn validate_select_columns_with_context(
             SelectItem::QualifiedWildcard { qualifier, .. } => {
                 // Validate that the qualifier matches a known table (check both schemas)
                 let qualifier_lower = qualifier.to_lowercase();
-                let table_in_inner = schema
-                    .table_schemas
-                    .keys()
-                    .any(|k| k.to_lowercase() == qualifier_lower);
+                let table_in_inner =
+                    schema.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower);
                 let table_in_outer = outer_schema.is_some_and(|outer| {
-                    outer
-                        .table_schemas
-                        .keys()
-                        .any(|k| k.to_lowercase() == qualifier_lower)
+                    outer.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower)
                 });
 
                 if !table_in_inner && !table_in_outer {
@@ -304,7 +290,9 @@ pub fn validate_select_columns_with_context(
     for col_ref in &column_refs {
         // Skip validation for procedure variables (unqualified only)
         if col_ref.table.is_none() {
-            if proc_vars.contains(&col_ref.column) || proc_vars.contains(&col_ref.column.to_lowercase()) {
+            if proc_vars.contains(&col_ref.column)
+                || proc_vars.contains(&col_ref.column.to_lowercase())
+            {
                 continue;
             }
         }
@@ -355,10 +343,7 @@ mod tests {
     fn test_valid_column_ref() {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
-            expr: Expression::ColumnRef {
-                table: None,
-                column: "id".to_string(),
-            },
+            expr: Expression::ColumnRef { table: None, column: "id".to_string() },
             alias: None,
         }];
 
@@ -370,21 +355,14 @@ mod tests {
     fn test_invalid_column_ref() {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
-            expr: Expression::ColumnRef {
-                table: None,
-                column: "invalid_column".to_string(),
-            },
+            expr: Expression::ColumnRef { table: None, column: "invalid_column".to_string() },
             alias: None,
         }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_err());
         match result {
-            Err(ExecutorError::ColumnNotFound {
-                column_name,
-                available_columns,
-                ..
-            }) => {
+            Err(ExecutorError::ColumnNotFound { column_name, available_columns, .. }) => {
                 assert_eq!(column_name, "invalid_column");
                 assert!(available_columns.contains(&"ID".to_string()));
                 assert!(available_columns.contains(&"NAME".to_string()));

@@ -90,10 +90,18 @@ pub fn sum_f64_filtered(values: &[f64], filter_mask: &[bool]) -> f64 {
         let off = i * 4;
         // 4-accumulator pattern: reduces loop-carried dependencies
         // The compiler may auto-vectorize these conditional adds
-        if filter_mask[off] { s0 += values[off]; }
-        if filter_mask[off + 1] { s1 += values[off + 1]; }
-        if filter_mask[off + 2] { s2 += values[off + 2]; }
-        if filter_mask[off + 3] { s3 += values[off + 3]; }
+        if filter_mask[off] {
+            s0 += values[off];
+        }
+        if filter_mask[off + 1] {
+            s1 += values[off + 1];
+        }
+        if filter_mask[off + 2] {
+            s2 += values[off + 2];
+        }
+        if filter_mask[off + 3] {
+            s3 += values[off + 3];
+        }
     }
 
     let mut sum = s0 + s1 + s2 + s3;
@@ -120,10 +128,18 @@ pub fn sum_i64_filtered(values: &[i64], filter_mask: &[bool]) -> i64 {
 
     for i in 0..chunks {
         let off = i * 4;
-        if filter_mask[off] { s0 = s0.wrapping_add(values[off]); }
-        if filter_mask[off + 1] { s1 = s1.wrapping_add(values[off + 1]); }
-        if filter_mask[off + 2] { s2 = s2.wrapping_add(values[off + 2]); }
-        if filter_mask[off + 3] { s3 = s3.wrapping_add(values[off + 3]); }
+        if filter_mask[off] {
+            s0 = s0.wrapping_add(values[off]);
+        }
+        if filter_mask[off + 1] {
+            s1 = s1.wrapping_add(values[off + 1]);
+        }
+        if filter_mask[off + 2] {
+            s2 = s2.wrapping_add(values[off + 2]);
+        }
+        if filter_mask[off + 3] {
+            s3 = s3.wrapping_add(values[off + 3]);
+        }
     }
 
     let mut sum = s0.wrapping_add(s1).wrapping_add(s2).wrapping_add(s3);
@@ -283,8 +299,8 @@ mod tests {
     #[test]
     fn test_filtered_remainder_handling() {
         // Test with non-multiple-of-4 lengths
-        let values: Vec<f64> = (1..=7).map(|x| x as f64).collect();  // 7 elements
-        let filter = vec![true, false, true, false, true, false, true];  // 1, 3, 5, 7 = 16
+        let values: Vec<f64> = (1..=7).map(|x| x as f64).collect(); // 7 elements
+        let filter = vec![true, false, true, false, true, false, true]; // 1, 3, 5, 7 = 16
         assert!((sum_f64_filtered(&values, &filter) - 16.0).abs() < 0.001);
     }
 

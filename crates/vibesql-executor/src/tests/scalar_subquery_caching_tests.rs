@@ -4,10 +4,13 @@
 //! scalar subqueries to avoid redundant execution, especially in HAVING clauses.
 
 use super::super::*;
-use vibesql_parser::Parser;
 use vibesql_ast::Statement;
+use vibesql_parser::Parser;
 
-fn execute_sql(db: &mut vibesql_storage::Database, sql: &str) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+fn execute_sql(
+    db: &mut vibesql_storage::Database,
+    sql: &str,
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     let stmt = Parser::parse_sql(sql).map_err(|e| ExecutorError::ParseError(format!("{:?}", e)))?;
     match stmt {
         Statement::CreateTable(create_stmt) => {
@@ -22,7 +25,10 @@ fn execute_sql(db: &mut vibesql_storage::Database, sql: &str) -> Result<Vec<vibe
             let result = SelectExecutor::new(db).execute(&select_stmt)?;
             Ok(result)
         }
-        _ => Err(ExecutorError::UnsupportedFeature(format!("Unsupported statement type: {:?}", stmt))),
+        _ => Err(ExecutorError::UnsupportedFeature(format!(
+            "Unsupported statement type: {:?}",
+            stmt
+        ))),
     }
 }
 

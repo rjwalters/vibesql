@@ -180,10 +180,7 @@ fn test_arena_parse_insert_or_replace() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     let (stmt, _interner) = result.unwrap();
-    assert!(matches!(
-        stmt.conflict_clause,
-        Some(vibesql_ast::arena::ConflictClause::Replace)
-    ));
+    assert!(matches!(stmt.conflict_clause, Some(vibesql_ast::arena::ConflictClause::Replace)));
 }
 
 #[test]
@@ -194,10 +191,7 @@ fn test_arena_parse_insert_or_ignore() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     let (stmt, _interner) = result.unwrap();
-    assert!(matches!(
-        stmt.conflict_clause,
-        Some(vibesql_ast::arena::ConflictClause::Ignore)
-    ));
+    assert!(matches!(stmt.conflict_clause, Some(vibesql_ast::arena::ConflictClause::Ignore)));
 }
 
 #[test]
@@ -208,10 +202,7 @@ fn test_arena_parse_replace() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     let (stmt, _interner) = result.unwrap();
-    assert!(matches!(
-        stmt.conflict_clause,
-        Some(vibesql_ast::arena::ConflictClause::Replace)
-    ));
+    assert!(matches!(stmt.conflict_clause, Some(vibesql_ast::arena::ConflictClause::Replace)));
 }
 
 #[test]
@@ -258,8 +249,9 @@ fn test_arena_parse_delete_with_placeholder() {
     let (stmt, _interner) = result.unwrap();
     assert!(stmt.where_clause.is_some());
     if let Some(vibesql_ast::arena::WhereClause::Condition(
-        vibesql_ast::arena::Expression::BinaryOp { right, .. }
-    )) = &stmt.where_clause {
+        vibesql_ast::arena::Expression::BinaryOp { right, .. },
+    )) = &stmt.where_clause
+    {
         // The right side should be a placeholder
         assert!(matches!(right, vibesql_ast::arena::Expression::Placeholder(_)));
     }
@@ -274,10 +266,7 @@ fn test_arena_parse_update_with_placeholder() {
 
     let (stmt, _interner) = result.unwrap();
     // First placeholder in SET
-    assert!(matches!(
-        stmt.assignments[0].value,
-        vibesql_ast::arena::Expression::Placeholder(0)
-    ));
+    assert!(matches!(stmt.assignments[0].value, vibesql_ast::arena::Expression::Placeholder(0)));
 }
 
 #[test]
@@ -290,14 +279,8 @@ fn test_arena_parse_insert_with_placeholder() {
     let (stmt, _interner) = result.unwrap();
     match &stmt.source {
         vibesql_ast::arena::InsertSource::Values(rows) => {
-            assert!(matches!(
-                rows[0][0],
-                vibesql_ast::arena::Expression::Placeholder(0)
-            ));
-            assert!(matches!(
-                rows[0][1],
-                vibesql_ast::arena::Expression::Placeholder(1)
-            ));
+            assert!(matches!(rows[0][0], vibesql_ast::arena::Expression::Placeholder(0)));
+            assert!(matches!(rows[0][1], vibesql_ast::arena::Expression::Placeholder(1)));
         }
         _ => panic!("Expected Values source"),
     }

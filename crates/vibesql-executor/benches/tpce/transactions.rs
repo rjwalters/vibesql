@@ -46,104 +46,104 @@ use vibesql_parser::Parser;
 /// Broker-Volume transaction input
 #[derive(Debug, Clone)]
 pub struct BrokerVolumeInput {
-    pub broker_list: Vec<String>,  // List of broker names to query
-    pub sector_name: String,       // Sector to filter by
+    pub broker_list: Vec<String>, // List of broker names to query
+    pub sector_name: String,      // Sector to filter by
 }
 
 /// Customer-Position transaction input
 #[derive(Debug, Clone)]
 pub struct CustomerPositionInput {
-    pub cust_id: i64,              // Customer ID
-    pub acct_id_idx: i32,          // Account index (0-based)
-    pub get_history: bool,         // Whether to get trade history
+    pub cust_id: i64,      // Customer ID
+    pub acct_id_idx: i32,  // Account index (0-based)
+    pub get_history: bool, // Whether to get trade history
 }
 
 /// Market-Watch transaction input
 #[derive(Debug, Clone)]
 pub struct MarketWatchInput {
-    pub acct_id: i64,              // Account ID (for watch list)
-    pub cust_id: i64,              // Customer ID
-    pub industry_name: String,     // Industry filter
-    pub starting_co_id: i64,       // Starting company ID
-    pub ending_co_id: i64,         // Ending company ID
+    pub acct_id: i64,          // Account ID (for watch list)
+    pub cust_id: i64,          // Customer ID
+    pub industry_name: String, // Industry filter
+    pub starting_co_id: i64,   // Starting company ID
+    pub ending_co_id: i64,     // Ending company ID
 }
 
 /// Security-Detail transaction input
 #[derive(Debug, Clone)]
 pub struct SecurityDetailInput {
-    pub symbol: String,            // Security symbol
-    pub max_comp_len: i32,         // Max competitor company names
-    pub access_lob: bool,          // Access LOB data (news)
+    pub symbol: String,    // Security symbol
+    pub max_comp_len: i32, // Max competitor company names
+    pub access_lob: bool,  // Access LOB data (news)
 }
 
 /// Trade-Lookup transaction input
 #[derive(Debug, Clone)]
 pub struct TradeLookupInput {
-    pub frame: i32,                // Which frame to execute (1-4)
-    pub acct_id: i64,              // Account ID
-    pub max_trades: i32,           // Max trades to return
-    pub trade_id: Vec<i64>,        // Trade IDs (frame 1)
-    pub start_trade_dts: String,   // Start timestamp
-    pub end_trade_dts: String,     // End timestamp
-    pub symbol: String,            // Security symbol
+    pub frame: i32,              // Which frame to execute (1-4)
+    pub acct_id: i64,            // Account ID
+    pub max_trades: i32,         // Max trades to return
+    pub trade_id: Vec<i64>,      // Trade IDs (frame 1)
+    pub start_trade_dts: String, // Start timestamp
+    pub end_trade_dts: String,   // End timestamp
+    pub symbol: String,          // Security symbol
 }
 
 /// Trade-Order transaction input
 #[derive(Debug, Clone)]
 pub struct TradeOrderInput {
-    pub acct_id: i64,              // Customer account ID
-    pub symbol: String,            // Security symbol
-    pub trade_qty: i32,            // Quantity to trade
-    pub trade_type_id: String,     // Trade type (TMB, TMS, etc.)
-    pub is_lifo: bool,             // LIFO flag
-    pub requested_price: f64,      // Requested price (for limit orders)
+    pub acct_id: i64,          // Customer account ID
+    pub symbol: String,        // Security symbol
+    pub trade_qty: i32,        // Quantity to trade
+    pub trade_type_id: String, // Trade type (TMB, TMS, etc.)
+    pub is_lifo: bool,         // LIFO flag
+    pub requested_price: f64,  // Requested price (for limit orders)
 }
 
 /// Trade-Status transaction input
 #[derive(Debug, Clone)]
 pub struct TradeStatusInput {
-    pub acct_id: i64,              // Customer account ID
+    pub acct_id: i64, // Customer account ID
 }
 
 /// Trade-Update transaction input
 #[derive(Debug, Clone)]
 pub struct TradeUpdateInput {
-    pub frame: i32,                // Which frame (1-3)
-    pub acct_id: i64,              // Account ID
-    pub max_trades: i32,           // Max trades to update
-    pub max_updates: i32,          // Max updates to perform
-    pub trade_id: Vec<i64>,        // Trade IDs
+    pub frame: i32,         // Which frame (1-3)
+    pub acct_id: i64,       // Account ID
+    pub max_trades: i32,    // Max trades to update
+    pub max_updates: i32,   // Max updates to perform
+    pub trade_id: Vec<i64>, // Trade IDs
 }
 
 /// Market-Feed transaction input
 #[derive(Debug, Clone)]
 pub struct MarketFeedInput {
-    pub symbols: Vec<String>,      // Securities to update
-    pub prices: Vec<f64>,          // New prices
+    pub symbols: Vec<String>, // Securities to update
+    pub prices: Vec<f64>,     // New prices
 }
 
 /// Trade-Result transaction input
 #[derive(Debug, Clone)]
 pub struct TradeResultInput {
-    pub trade_id: i64,             // Trade to complete
-    pub trade_price: f64,          // Execution price
+    pub trade_id: i64,    // Trade to complete
+    pub trade_price: f64, // Execution price
 }
 
 /// Data-Maintenance transaction input
 #[derive(Debug, Clone)]
 pub struct DataMaintenanceInput {
-    pub table_name: String,        // Table to update
-    pub c_id: i64,                 // Customer ID
-    pub co_id: i64,                // Company ID
-    pub vol_incr: i32,             // Volume increment
+    pub table_name: String, // Table to update
+    pub c_id: i64,          // Customer ID
+    pub co_id: i64,         // Company ID
+    pub vol_incr: i32,      // Volume increment
 }
 
 /// Trade-Cleanup transaction input
 #[derive(Debug, Clone)]
 pub struct TradeCleanupInput {
-    pub start_trade_id: i64,       // Starting trade ID
-    pub st_submitted_id: String,   // Submitted status ID
-    pub st_canceled_id: String,    // Canceled status ID
+    pub start_trade_id: i64,     // Starting trade ID
+    pub st_submitted_id: String, // Submitted status ID
+    pub st_canceled_id: String,  // Canceled status ID
 }
 
 // =============================================================================
@@ -161,21 +161,11 @@ pub struct TransactionResult {
 
 impl TransactionResult {
     pub fn success(duration_us: u64) -> Self {
-        Self {
-            success: true,
-            duration_us,
-            error: None,
-            rows_affected: 0,
-        }
+        Self { success: true, duration_us, error: None, rows_affected: 0 }
     }
 
     pub fn failure(duration_us: u64, error: String) -> Self {
-        Self {
-            success: false,
-            duration_us,
-            error: Some(error),
-            rows_affected: 0,
-        }
+        Self { success: false, duration_us, error: Some(error), rows_affected: 0 }
     }
 }
 
@@ -280,13 +270,7 @@ impl TPCEWorkload {
             })
             .collect();
 
-        Self {
-            rng,
-            num_customers,
-            num_accounts,
-            num_securities,
-            symbols,
-        }
+        Self { rng, num_customers, num_accounts, num_securities, symbols }
     }
 
     /// Select next transaction type based on TPC-E mix
@@ -298,18 +282,18 @@ impl TPCEWorkload {
         // Real implementation would use exact percentages
         let r = self.rng.random_int(1, 100);
         match r {
-            1..=5 => 0,      // Broker-Volume: 5%
-            6..=18 => 1,     // Customer-Position: 13%
-            19..=36 => 2,    // Market-Watch: 18%
-            37..=50 => 3,    // Security-Detail: 14%
-            51..=58 => 4,    // Trade-Lookup: 8%
-            59..=68 => 5,    // Trade-Order: 10%
-            69..=87 => 6,    // Trade-Status: 19%
-            88..=89 => 7,    // Trade-Update: 2%
-            90..=93 => 8,    // Market-Feed: 4%
-            94..=97 => 9,    // Trade-Result: 4%
-            98..=99 => 10,   // Data-Maintenance: 2%
-            _ => 11,         // Trade-Cleanup: 1%
+            1..=5 => 0,    // Broker-Volume: 5%
+            6..=18 => 1,   // Customer-Position: 13%
+            19..=36 => 2,  // Market-Watch: 18%
+            37..=50 => 3,  // Security-Detail: 14%
+            51..=58 => 4,  // Trade-Lookup: 8%
+            59..=68 => 5,  // Trade-Order: 10%
+            69..=87 => 6,  // Trade-Status: 19%
+            88..=89 => 7,  // Trade-Update: 2%
+            90..=93 => 8,  // Market-Feed: 4%
+            94..=97 => 9,  // Trade-Result: 4%
+            98..=99 => 10, // Data-Maintenance: 2%
+            _ => 11,       // Trade-Cleanup: 1%
         }
     }
 
@@ -327,13 +311,13 @@ impl TPCEWorkload {
     }
 
     pub fn generate_broker_volume(&mut self) -> BrokerVolumeInput {
-        let broker_names: Vec<String> = (0..5)
-            .map(|i| format!("Broker{}", i + self.rng.random_int(1, 100)))
-            .collect();
+        let broker_names: Vec<String> =
+            (0..5).map(|i| format!("Broker{}", i + self.rng.random_int(1, 100))).collect();
         let sectors = ["Energy", "Technology", "Finance", "Healthcare", "Consumer"];
         BrokerVolumeInput {
             broker_list: broker_names,
-            sector_name: sectors[self.rng.random_int(0, sectors.len() as i64 - 1) as usize].to_string(),
+            sector_name: sectors[self.rng.random_int(0, sectors.len() as i64 - 1) as usize]
+                .to_string(),
         }
     }
 
@@ -389,9 +373,7 @@ impl TPCEWorkload {
     }
 
     pub fn generate_trade_status(&mut self) -> TradeStatusInput {
-        TradeStatusInput {
-            acct_id: self.random_acct_id(),
-        }
+        TradeStatusInput { acct_id: self.random_acct_id() }
     }
 
     pub fn generate_trade_update(&mut self) -> TradeUpdateInput {
@@ -524,11 +506,8 @@ impl<'a> TPCEExecutor for VibesqlTransactionExecutor<'a> {
 
         // Frame 1: Get broker info and trade volume
         // Join broker -> customer_account -> trade -> security -> company -> industry -> sector
-        let broker_names: String = input.broker_list
-            .iter()
-            .map(|b| format!("'{}'", b))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let broker_names: String =
+            input.broker_list.iter().map(|b| format!("'{}'", b)).collect::<Vec<_>>().join(", ");
 
         let query = format!(
             "SELECT b.b_name, SUM(t.t_qty * t.t_trade_price) as volume
@@ -923,10 +902,8 @@ impl<'a> TPCEExecutor for VibesqlTransactionExecutor<'a> {
             1 => {
                 // Frame 1: Update executor name for trades
                 for t_id in input.trade_id.iter().take(input.max_updates as usize) {
-                    let query = format!(
-                        "SELECT t.t_exec_name FROM trade t WHERE t.t_id = {}",
-                        t_id
-                    );
+                    let query =
+                        format!("SELECT t.t_exec_name FROM trade t WHERE t.t_id = {}", t_id);
                     if let Err(e) = execute_query(self.db, &query) {
                         return TransactionResult::failure(start.elapsed().as_micros() as u64, e);
                     }

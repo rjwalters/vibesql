@@ -569,11 +569,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_ne() {
-        let values = vec![
-            "apple".to_string(),
-            "banana".to_string(),
-            "apple".to_string(),
-        ];
+        let values = vec!["apple".to_string(), "banana".to_string(), "apple".to_string()];
 
         let result = batch_string_ne(&values, None, "apple");
         assert_eq!(result, vec![false, true, false]);
@@ -630,16 +626,10 @@ mod tests {
         assert!(matches!(LikePattern::parse("%le"), LikePattern::Suffix(_)));
 
         // Contains match
-        assert!(matches!(
-            LikePattern::parse("%app%"),
-            LikePattern::Contains(_)
-        ));
+        assert!(matches!(LikePattern::parse("%app%"), LikePattern::Contains(_)));
 
         // Prefix and suffix match
-        assert!(matches!(
-            LikePattern::parse("a%e"),
-            LikePattern::PrefixSuffix { .. }
-        ));
+        assert!(matches!(LikePattern::parse("a%e"), LikePattern::PrefixSuffix { .. }));
 
         // General (has underscore)
         assert!(matches!(LikePattern::parse("a_ple"), LikePattern::General(_)));
@@ -647,11 +637,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_like_prefix() {
-        let values = vec![
-            "apple".to_string(),
-            "apricot".to_string(),
-            "banana".to_string(),
-        ];
+        let values = vec!["apple".to_string(), "apricot".to_string(), "banana".to_string()];
 
         let pattern = LikePattern::parse("ap%");
         let result = batch_string_like(&values, None, &pattern);
@@ -660,11 +646,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_like_suffix() {
-        let values = vec![
-            "apple".to_string(),
-            "pineapple".to_string(),
-            "banana".to_string(),
-        ];
+        let values = vec!["apple".to_string(), "pineapple".to_string(), "banana".to_string()];
 
         let pattern = LikePattern::parse("%ple");
         let result = batch_string_like(&values, None, &pattern);
@@ -673,11 +655,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_like_contains() {
-        let values = vec![
-            "apple".to_string(),
-            "pineapple".to_string(),
-            "banana".to_string(),
-        ];
+        let values = vec!["apple".to_string(), "pineapple".to_string(), "banana".to_string()];
 
         let pattern = LikePattern::parse("%app%");
         let result = batch_string_like(&values, None, &pattern);
@@ -686,12 +664,8 @@ mod tests {
 
     #[test]
     fn test_batch_string_like_prefix_suffix() {
-        let values = vec![
-            "apple".to_string(),
-            "ample".to_string(),
-            "banana".to_string(),
-            "ale".to_string(),
-        ];
+        let values =
+            vec!["apple".to_string(), "ample".to_string(), "banana".to_string(), "ale".to_string()];
 
         let pattern = LikePattern::parse("a%le");
         let result = batch_string_like(&values, None, &pattern);
@@ -744,11 +718,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_comparisons() {
-        let values = vec![
-            "apple".to_string(),
-            "banana".to_string(),
-            "cherry".to_string(),
-        ];
+        let values = vec!["apple".to_string(), "banana".to_string(), "cherry".to_string()];
 
         // Less than
         let result = batch_string_lt(&values, None, "banana");

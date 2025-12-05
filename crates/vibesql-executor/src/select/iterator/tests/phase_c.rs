@@ -18,9 +18,21 @@ fn test_phase_c_proof_of_concept_full_pipeline() {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("name".to_string(), vibesql_types::DataType::Varchar { max_length: None }, false),
-            vibesql_catalog::ColumnSchema::new("age".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: None },
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "age".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     let from_schema = CombinedSchema::from_table("users".to_string(), schema);
@@ -106,16 +118,36 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
     let orders_schema = vibesql_catalog::TableSchema::new(
         "orders".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("customer_id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("amount".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "customer_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "amount".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     let customers_schema = vibesql_catalog::TableSchema::new(
         "customers".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("name".to_string(), vibesql_types::DataType::Varchar { max_length: None }, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: None },
+                false,
+            ),
         ],
     );
 
@@ -128,7 +160,7 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
             Row::new(vec![
                 SqlValue::Integer(i),
                 SqlValue::Integer((i % 3) + 1), // customer_id cycles 1, 2, 3
-                SqlValue::Integer(i * 50),       // amount: 50, 100, 150, ...
+                SqlValue::Integer(i * 50),      // amount: 50, 100, 150, ...
             ])
         })
         .collect();
@@ -169,10 +201,8 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
     // Build combined schema for WHERE evaluation
     let mut combined_tables = orders_combined.table_schemas.clone();
     for (name, (start_idx, schema)) in customers_combined.table_schemas.iter() {
-        combined_tables.insert(
-            name.clone(),
-            (orders_combined.total_columns + start_idx, schema.clone()),
-        );
+        combined_tables
+            .insert(name.clone(), (orders_combined.total_columns + start_idx, schema.clone()));
     }
     let combined_schema = CombinedSchema {
         table_schemas: combined_tables,

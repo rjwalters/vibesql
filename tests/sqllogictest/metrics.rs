@@ -139,10 +139,7 @@ impl BenchmarkMetrics {
             return Duration::ZERO;
         }
 
-        assert!(
-            (0.0..=100.0).contains(&percentile),
-            "Percentile must be between 0 and 100"
-        );
+        assert!((0.0..=100.0).contains(&percentile), "Percentile must be between 0 and 100");
 
         let mut sorted = self.per_query_times.clone();
         sorted.sort();

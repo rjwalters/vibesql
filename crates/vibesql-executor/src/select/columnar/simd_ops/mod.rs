@@ -206,10 +206,7 @@ impl PackedMask {
     /// This is used for NOT IN operations.
     #[inline]
     pub fn not(&self) -> PackedMask {
-        let mut result = PackedMask {
-            words: vec![0; self.words.len()],
-            len: self.len,
-        };
+        let mut result = PackedMask { words: vec![0; self.words.len()], len: self.len };
 
         // Process in chunks of 4 for potential auto-vectorization
         let chunks = self.words.len() / 4;

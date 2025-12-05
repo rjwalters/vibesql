@@ -48,17 +48,13 @@ impl SelectionVector {
     /// Create a selection vector that selects all rows in range [0, count)
     #[inline]
     pub fn all(count: usize) -> Self {
-        Self {
-            indices: (0..count as u32).collect(),
-        }
+        Self { indices: (0..count as u32).collect() }
     }
 
     /// Create a selection vector from a range
     #[inline]
     pub fn from_range(range: Range<usize>) -> Self {
-        Self {
-            indices: (range.start as u32..range.end as u32).collect(),
-        }
+        Self { indices: (range.start as u32..range.end as u32).collect() }
     }
 
     /// Create from pre-computed indices (assumes sorted, unique)
@@ -208,11 +204,8 @@ impl SelectionVector {
     /// This is used when chaining operations: if we filter a filtered result,
     /// we need to map back to original row indices.
     pub fn remap(&self, base: &SelectionVector) -> SelectionVector {
-        let remapped: Vec<u32> = self
-            .indices
-            .iter()
-            .filter_map(|&idx| base.get(idx as usize))
-            .collect();
+        let remapped: Vec<u32> =
+            self.indices.iter().filter_map(|&idx| base.get(idx as usize)).collect();
 
         SelectionVector { indices: remapped }
     }
@@ -238,12 +231,8 @@ impl SelectionVector {
     where
         F: Fn(&T) -> bool,
     {
-        let filtered: Vec<u32> = self
-            .indices
-            .iter()
-            .filter(|&&idx| predicate(&data[idx as usize]))
-            .copied()
-            .collect();
+        let filtered: Vec<u32> =
+            self.indices.iter().filter(|&&idx| predicate(&data[idx as usize])).copied().collect();
 
         SelectionVector { indices: filtered }
     }

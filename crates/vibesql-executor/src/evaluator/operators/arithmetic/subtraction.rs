@@ -56,7 +56,10 @@ impl Subtraction {
             }
 
             // INTERVAL - DATE/TIMESTAMP/VARCHAR is not valid (subtraction is not commutative)
-            (Interval(_), Date(_)) | (Interval(_), Timestamp(_)) | (Interval(_), Varchar(_)) | (Interval(_), Character(_)) => {
+            (Interval(_), Date(_))
+            | (Interval(_), Timestamp(_))
+            | (Interval(_), Varchar(_))
+            | (Interval(_), Character(_)) => {
                 return Err(ExecutorError::UnsupportedFeature(
                     "Cannot subtract DATE/TIMESTAMP/VARCHAR from INTERVAL".to_string(),
                 ));
@@ -102,17 +105,11 @@ fn apply_interval_to_date(
         // TODO: Handle compound intervals properly in Phase 4
         let parts: Vec<&str> = amount_str.split('-').collect();
         parts[0].parse().map_err(|_| {
-            ExecutorError::UnsupportedFeature(format!(
-                "Invalid interval amount: '{}'",
-                amount_str
-            ))
+            ExecutorError::UnsupportedFeature(format!("Invalid interval amount: '{}'", amount_str))
         })?
     } else {
         amount_str.parse().map_err(|_| {
-            ExecutorError::UnsupportedFeature(format!(
-                "Invalid interval amount: '{}'",
-                amount_str
-            ))
+            ExecutorError::UnsupportedFeature(format!("Invalid interval amount: '{}'", amount_str))
         })?
     };
 

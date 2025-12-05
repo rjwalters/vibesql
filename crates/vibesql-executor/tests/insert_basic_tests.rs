@@ -1,7 +1,7 @@
 mod common;
 
-use vibesql_executor::{ExecutorError, InsertExecutor};
 use common::setup_users_table as setup_test_table;
+use vibesql_executor::{ExecutorError, InsertExecutor};
 
 #[test]
 fn test_basic_insert() {
@@ -40,11 +40,15 @@ fn test_multi_row_insert() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -91,7 +95,11 @@ fn test_insert_null_value() {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -127,7 +135,9 @@ fn test_insert_type_mismatch() {
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("not_a_number".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "not_a_number".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
         ]]),
         conflict_clause: None,

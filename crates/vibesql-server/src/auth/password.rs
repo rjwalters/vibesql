@@ -19,9 +19,7 @@ pub struct PasswordStore {
 impl PasswordStore {
     /// Create a new empty password store
     pub fn new() -> Self {
-        Self {
-            passwords: HashMap::new(),
-        }
+        Self { passwords: HashMap::new() }
     }
 
     /// Load passwords from a file
@@ -238,12 +236,8 @@ mod tests {
         let parsed1 = PasswordHash::new(&hash1).unwrap();
         let parsed2 = PasswordHash::new(&hash2).unwrap();
 
-        assert!(Argon2::default()
-            .verify_password(b"secret", &parsed1)
-            .is_ok());
-        assert!(Argon2::default()
-            .verify_password(b"secret", &parsed2)
-            .is_ok());
+        assert!(Argon2::default().verify_password(b"secret", &parsed1).is_ok());
+        assert!(Argon2::default().verify_password(b"secret", &parsed2).is_ok());
     }
 
     #[test]
@@ -316,10 +310,7 @@ mod tests {
 
         let store = PasswordStore::load_from_file(file.path()).unwrap();
         assert_eq!(store.passwords.len(), 1);
-        assert_eq!(
-            store.get_password("postgres"),
-            Some(&"{MD5}secret".to_string())
-        );
+        assert_eq!(store.get_password("postgres"), Some(&"{MD5}secret".to_string()));
 
         // Should work with MD5 wire protocol
         let salt: [u8; 4] = [1, 2, 3, 4];

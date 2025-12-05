@@ -1,7 +1,7 @@
 use super::*;
-use vibesql_types::{DataType, SqlValue};
-use std::sync::Arc;
 use crate::page::PageManager;
+use std::sync::Arc;
+use vibesql_types::{DataType, SqlValue};
 
 #[test]
 fn test_leaf_node_insert() {
@@ -23,7 +23,7 @@ fn test_leaf_node_duplicate_insert() {
     let mut leaf = LeafNode::new(1);
 
     assert!(leaf.insert(vec![SqlValue::Integer(10)], 0));
-    assert!(leaf.insert(vec![SqlValue::Integer(10)], 1));  // Duplicate now allowed
+    assert!(leaf.insert(vec![SqlValue::Integer(10)], 1)); // Duplicate now allowed
 
     // Should have 1 key with 2 row_ids
     assert_eq!(leaf.entries.len(), 1);
@@ -50,7 +50,7 @@ fn test_leaf_node_delete() {
     leaf.insert(vec![SqlValue::Integer(20)], 1);
 
     assert!(leaf.delete_all(&vec![SqlValue::Integer(10)]));
-    assert!(!leaf.delete_all(&vec![SqlValue::Integer(10)]));  // Already deleted
+    assert!(!leaf.delete_all(&vec![SqlValue::Integer(10)])); // Already deleted
 
     assert_eq!(leaf.entries.len(), 1);
     assert_eq!(leaf.entries[0].0[0], SqlValue::Integer(20));
@@ -83,11 +83,8 @@ fn test_leaf_node_split() {
 fn test_internal_node_find_child() {
     let mut node = InternalNode::new(1);
 
-    node.keys = vec![
-        vec![SqlValue::Integer(10)],
-        vec![SqlValue::Integer(20)],
-        vec![SqlValue::Integer(30)],
-    ];
+    node.keys =
+        vec![vec![SqlValue::Integer(10)], vec![SqlValue::Integer(20)], vec![SqlValue::Integer(30)]];
     node.children = vec![2, 3, 4, 5];
 
     assert_eq!(node.find_child_index(&vec![SqlValue::Integer(5)]), 0);
@@ -101,7 +98,7 @@ fn test_internal_node_find_child() {
 fn test_internal_node_insert_child() {
     let mut node = InternalNode::new(1);
 
-    node.children.push(2);  // Initial child
+    node.children.push(2); // Initial child
 
     node.insert_child(vec![SqlValue::Integer(10)], 3);
     node.insert_child(vec![SqlValue::Integer(5)], 4);
@@ -230,9 +227,8 @@ fn test_bulk_load_large() {
     let key_schema = vec![DataType::Integer];
 
     // Create 1000 sorted entries
-    let sorted_entries: Vec<(Key, RowId)> = (0..1000)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..1000).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager.clone()).unwrap();
 
@@ -358,10 +354,7 @@ fn test_insert_maintains_order() {
 
     // Verify entries are sorted
     for i in 1..root_leaf.entries.len() {
-        assert!(
-            root_leaf.entries[i - 1].0 < root_leaf.entries[i].0,
-            "Entries should be sorted"
-        );
+        assert!(root_leaf.entries[i - 1].0 < root_leaf.entries[i].0, "Entries should be sorted");
     }
 }
 
@@ -391,12 +384,7 @@ fn test_insert_increases_height() {
     }
 
     // Height should have increased to 2
-    assert_eq!(
-        index.height(),
-        2,
-        "Height should increase to 2 after inserting {} keys",
-        num_keys
-    );
+    assert_eq!(index.height(), 2, "Height should increase to 2 after inserting {} keys", num_keys);
 }
 
 #[test]
@@ -430,10 +418,7 @@ fn test_large_sequential_inserts() {
     // Verify tree structure is valid
     if height > 1 {
         let root = index.read_internal_node(index.root_page_id()).unwrap();
-        assert!(
-            root.children.len() >= 2,
-            "Root should have at least 2 children"
-        );
+        assert!(root.children.len() >= 2, "Root should have at least 2 children");
         assert_eq!(
             root.keys.len() + 1,
             root.children.len(),
@@ -482,10 +467,7 @@ fn test_insert_multi_column_keys() {
     let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
     let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
 
-    let key_schema = vec![
-        DataType::Integer,
-        DataType::Varchar { max_length: Some(20) },
-    ];
+    let key_schema = vec![DataType::Integer, DataType::Varchar { max_length: Some(20) }];
     let mut index = BTreeIndex::new(page_manager, key_schema).unwrap();
 
     // Insert multi-column keys
@@ -573,10 +555,7 @@ fn test_delete_all_entries_single_level() {
     let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
 
     let key_schema = vec![DataType::Integer];
-    let sorted_entries = vec![
-        (vec![SqlValue::Integer(10)], 0),
-        (vec![SqlValue::Integer(20)], 1),
-    ];
+    let sorted_entries = vec![(vec![SqlValue::Integer(10)], 0), (vec![SqlValue::Integer(20)], 1)];
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -600,9 +579,8 @@ fn test_delete_multi_level_tree() {
     let key_schema = vec![DataType::Integer];
 
     // Create enough entries to force multi-level tree
-    let sorted_entries: Vec<(Key, RowId)> = (0..100)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..100).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
     let original_height = index.height();
@@ -628,9 +606,8 @@ fn test_delete_causes_height_decrease() {
     let key_schema = vec![DataType::Integer];
 
     // Create enough entries to force multi-level tree (need more for bulk_load)
-    let sorted_entries: Vec<(Key, RowId)> = (0..1000)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..1000).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
     let original_height = index.height();
@@ -645,7 +622,11 @@ fn test_delete_causes_height_decrease() {
     }
 
     // Height should have decreased
-    assert!(index.height() < original_height, "Height should decrease from {} after deleting 990/1000 entries", original_height);
+    assert!(
+        index.height() < original_height,
+        "Height should decrease from {} after deleting 990/1000 entries",
+        original_height
+    );
 }
 
 #[test]
@@ -659,9 +640,8 @@ fn test_delete_sequence() {
     let key_schema = vec![DataType::Integer];
 
     // Create 500 entries
-    let sorted_entries: Vec<(Key, RowId)> = (0..500)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..500).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -696,7 +676,9 @@ fn test_delete_multi_column_keys() {
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
     // Delete middle entry
-    assert!(index.delete(&vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]).unwrap());
+    assert!(index
+        .delete(&vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())])
+        .unwrap());
 
     // Verify deletion
     let root_leaf = index.read_leaf_node(index.root_page_id()).unwrap();
@@ -741,7 +723,7 @@ fn test_delete_specific_one_of_many_row_ids() {
     assert_eq!(remaining_row_ids.len(), 2);
     assert!(remaining_row_ids.contains(&100));
     assert!(remaining_row_ids.contains(&300));
-    assert!(!remaining_row_ids.contains(&200));  // Deleted row_id should not exist
+    assert!(!remaining_row_ids.contains(&200)); // Deleted row_id should not exist
 }
 
 #[test]
@@ -753,10 +735,8 @@ fn test_delete_specific_last_row_id_removes_key() {
     let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
 
     let key_schema = vec![DataType::Integer];
-    let sorted_entries = vec![
-        (vec![SqlValue::Integer(10)], 100),
-        (vec![SqlValue::Integer(20)], 200),
-    ];
+    let sorted_entries =
+        vec![(vec![SqlValue::Integer(10)], 100), (vec![SqlValue::Integer(20)], 200)];
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -781,10 +761,8 @@ fn test_delete_specific_nonexistent_row_id() {
     let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
 
     let key_schema = vec![DataType::Integer];
-    let sorted_entries = vec![
-        (vec![SqlValue::Integer(10)], 100),
-        (vec![SqlValue::Integer(10)], 200),
-    ];
+    let sorted_entries =
+        vec![(vec![SqlValue::Integer(10)], 100), (vec![SqlValue::Integer(10)], 200)];
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -807,9 +785,7 @@ fn test_delete_specific_nonexistent_key() {
     let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
 
     let key_schema = vec![DataType::Integer];
-    let sorted_entries = vec![
-        (vec![SqlValue::Integer(10)], 100),
-    ];
+    let sorted_entries = vec![(vec![SqlValue::Integer(10)], 100)];
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -902,9 +878,8 @@ fn test_delete_specific_with_rebalancing() {
     let key_schema = vec![DataType::Integer];
 
     // Create enough entries to trigger rebalancing
-    let sorted_entries: Vec<(Key, RowId)> = (0..500)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..500).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
     let original_height = index.height();
@@ -965,9 +940,8 @@ fn test_bulk_load_maintains_prev_leaf() {
     let key_schema = vec![DataType::Integer];
 
     // Create enough entries to force multiple leaf nodes
-    let sorted_entries: Vec<(Key, RowId)> = (0..500)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..500).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -1004,7 +978,10 @@ fn test_bulk_load_maintains_prev_leaf() {
     }
 
     // Both counts should be equal
-    assert_eq!(forward_count, backward_count, "Forward and backward traversal should visit same number of leaves");
+    assert_eq!(
+        forward_count, backward_count,
+        "Forward and backward traversal should visit same number of leaves"
+    );
 }
 
 #[test]
@@ -1074,7 +1051,11 @@ fn test_range_scan_reverse_basic() {
 
     // Full reverse scan
     let result = index.range_scan_reverse(None, None, true, true).unwrap();
-    assert_eq!(result, vec![4, 3, 2, 1, 0], "Full reverse scan should return all rows in descending order");
+    assert_eq!(
+        result,
+        vec![4, 3, 2, 1, 0],
+        "Full reverse scan should return all rows in descending order"
+    );
 
     // Compare with forward scan reversed
     let forward = index.range_scan(None, None, true, true).unwrap();
@@ -1092,9 +1073,8 @@ fn test_range_scan_reverse_with_bounds() {
     let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
 
     let key_schema = vec![DataType::Integer];
-    let sorted_entries: Vec<(Key, RowId)> = (0..10)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..10).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -1124,9 +1104,8 @@ fn test_range_scan_reverse_multi_level() {
     let key_schema = vec![DataType::Integer];
 
     // Create enough entries for multi-level tree
-    let sorted_entries: Vec<(Key, RowId)> = (0..500)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..500).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
     assert!(index.height() > 1, "Test requires multi-level tree");
@@ -1152,9 +1131,8 @@ fn test_range_scan_reverse_first() {
     let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
 
     let key_schema = vec![DataType::Integer];
-    let sorted_entries: Vec<(Key, RowId)> = (0..100)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..100).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -1186,9 +1164,8 @@ fn test_find_rightmost_leaf() {
     let key_schema = vec![DataType::Integer];
 
     // Create entries for multi-level tree
-    let sorted_entries: Vec<(Key, RowId)> = (0..500)
-        .map(|i| (vec![SqlValue::Integer(i * 10)], i as usize))
-        .collect();
+    let sorted_entries: Vec<(Key, RowId)> =
+        (0..500).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
     let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
@@ -1200,7 +1177,11 @@ fn test_find_rightmost_leaf() {
     // Rightmost leaf should contain the highest keys
     assert!(!rightmost.entries.is_empty());
     let highest_key = &rightmost.entries.last().unwrap().0;
-    assert_eq!(*highest_key, vec![SqlValue::Integer(4990)], "Rightmost leaf should contain highest key");
+    assert_eq!(
+        *highest_key,
+        vec![SqlValue::Integer(4990)],
+        "Rightmost leaf should contain highest key"
+    );
 }
 
 #[test]

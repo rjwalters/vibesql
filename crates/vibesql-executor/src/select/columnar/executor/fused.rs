@@ -5,8 +5,8 @@
 //! a single pass. This provides significant performance improvement for
 //! simple aggregate queries like TPC-H Q6.
 
-use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::aggregate::{AggregateOp, AggregateSource, AggregateSpec};
+use super::super::batch::{ColumnArray, ColumnarBatch};
 use super::super::simd_filter::simd_create_filter_mask;
 use super::super::simd_ops;
 use crate::errors::ExecutorError;
@@ -18,10 +18,16 @@ pub fn can_use_fused_aggregation(aggregates: &[AggregateSpec]) -> bool {
     aggregates.iter().all(|spec| {
         matches!(
             spec.op,
-            AggregateOp::Sum | AggregateOp::Count | AggregateOp::Min | AggregateOp::Max | AggregateOp::Avg
+            AggregateOp::Sum
+                | AggregateOp::Count
+                | AggregateOp::Min
+                | AggregateOp::Max
+                | AggregateOp::Avg
         ) && matches!(
             spec.source,
-            AggregateSource::Column(_) | AggregateSource::CountStar | AggregateSource::Expression(_)
+            AggregateSource::Column(_)
+                | AggregateSource::CountStar
+                | AggregateSource::Expression(_)
         )
     })
 }
@@ -51,7 +57,9 @@ pub fn execute_fused_filter_aggregate(
         let passing = filter_mask.iter().filter(|&&b| b).count();
         eprintln!(
             "[PROFILE-Q6] Fused Path - Filter mask: {:?} ({}/{} pass)",
-            mask_time, passing, batch.row_count()
+            mask_time,
+            passing,
+            batch.row_count()
         );
     }
 
@@ -66,7 +74,8 @@ pub fn execute_fused_filter_aggregate(
         let agg_time = agg_start.elapsed();
         eprintln!(
             "[PROFILE-Q6] Fused Path - Aggregate: {:?} ({} aggregates)",
-            agg_time, aggregates.len()
+            agg_time,
+            aggregates.len()
         );
     }
 
@@ -107,11 +116,9 @@ fn compute_fused_column_aggregate(
     op: AggregateOp,
     filter_mask: &[bool],
 ) -> Result<SqlValue, ExecutorError> {
-    let column = batch.column(col_idx).ok_or_else(|| {
-        ExecutorError::ColumnarColumnNotFound {
-            column_index: col_idx,
-            batch_columns: batch.column_count(),
-        }
+    let column = batch.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: col_idx,
+        batch_columns: batch.column_count(),
     })?;
 
     match column {
@@ -153,12 +160,8 @@ fn compute_fused_i64_aggregate(
     filter_mask: &[bool],
 ) -> Result<SqlValue, ExecutorError> {
     match op {
-        AggregateOp::Sum => {
-            Ok(SqlValue::Integer(simd_ops::sum_i64_filtered(values, filter_mask)))
-        }
-        AggregateOp::Count => {
-            Ok(SqlValue::Integer(simd_ops::count_filtered(filter_mask)))
-        }
+        AggregateOp::Sum => Ok(SqlValue::Integer(simd_ops::sum_i64_filtered(values, filter_mask))),
+        AggregateOp::Count => Ok(SqlValue::Integer(simd_ops::count_filtered(filter_mask))),
         AggregateOp::Avg => {
             let sum = simd_ops::sum_i64_filtered(values, filter_mask);
             let count = simd_ops::count_filtered(filter_mask);
@@ -168,22 +171,18 @@ fn compute_fused_i64_aggregate(
                 Ok(SqlValue::Double(sum as f64 / count as f64))
             }
         }
-        AggregateOp::Min => {
-            simd_ops::min_i64_filtered(values, filter_mask)
-                .map(SqlValue::Integer)
-                .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                    operation: "MIN".to_string(),
-                    reason: "no rows pass filter".to_string(),
-                })
-        }
-        AggregateOp::Max => {
-            simd_ops::max_i64_filtered(values, filter_mask)
-                .map(SqlValue::Integer)
-                .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                    operation: "MAX".to_string(),
-                    reason: "no rows pass filter".to_string(),
-                })
-        }
+        AggregateOp::Min => simd_ops::min_i64_filtered(values, filter_mask)
+            .map(SqlValue::Integer)
+            .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                operation: "MIN".to_string(),
+                reason: "no rows pass filter".to_string(),
+            }),
+        AggregateOp::Max => simd_ops::max_i64_filtered(values, filter_mask)
+            .map(SqlValue::Integer)
+            .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                operation: "MAX".to_string(),
+                reason: "no rows pass filter".to_string(),
+            }),
     }
 }
 
@@ -194,12 +193,8 @@ fn compute_fused_f64_aggregate(
     filter_mask: &[bool],
 ) -> Result<SqlValue, ExecutorError> {
     match op {
-        AggregateOp::Sum => {
-            Ok(SqlValue::Double(simd_ops::sum_f64_filtered(values, filter_mask)))
-        }
-        AggregateOp::Count => {
-            Ok(SqlValue::Integer(simd_ops::count_filtered(filter_mask)))
-        }
+        AggregateOp::Sum => Ok(SqlValue::Double(simd_ops::sum_f64_filtered(values, filter_mask))),
+        AggregateOp::Count => Ok(SqlValue::Integer(simd_ops::count_filtered(filter_mask))),
         AggregateOp::Avg => {
             let sum = simd_ops::sum_f64_filtered(values, filter_mask);
             let count = simd_ops::count_filtered(filter_mask);
@@ -209,22 +204,18 @@ fn compute_fused_f64_aggregate(
                 Ok(SqlValue::Double(sum / count as f64))
             }
         }
-        AggregateOp::Min => {
-            simd_ops::min_f64_filtered(values, filter_mask)
-                .map(SqlValue::Double)
-                .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                    operation: "MIN".to_string(),
-                    reason: "no rows pass filter".to_string(),
-                })
-        }
-        AggregateOp::Max => {
-            simd_ops::max_f64_filtered(values, filter_mask)
-                .map(SqlValue::Double)
-                .ok_or_else(|| ExecutorError::SimdOperationFailed {
-                    operation: "MAX".to_string(),
-                    reason: "no rows pass filter".to_string(),
-                })
-        }
+        AggregateOp::Min => simd_ops::min_f64_filtered(values, filter_mask)
+            .map(SqlValue::Double)
+            .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                operation: "MIN".to_string(),
+                reason: "no rows pass filter".to_string(),
+            }),
+        AggregateOp::Max => simd_ops::max_f64_filtered(values, filter_mask)
+            .map(SqlValue::Double)
+            .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                operation: "MAX".to_string(),
+                reason: "no rows pass filter".to_string(),
+            }),
     }
 }
 
@@ -240,8 +231,9 @@ fn compute_fused_expression_aggregate(
         if *bin_op == BinaryOperator::Multiply {
             if let (
                 Expression::ColumnRef { column: col1, .. },
-                Expression::ColumnRef { column: col2, .. }
-            ) = (left.as_ref(), right.as_ref()) {
+                Expression::ColumnRef { column: col2, .. },
+            ) = (left.as_ref(), right.as_ref())
+            {
                 let left_idx = batch.column_index_by_name(col1);
                 let right_idx = batch.column_index_by_name(col2);
 
@@ -254,7 +246,7 @@ fn compute_fused_expression_aggregate(
 
     // Fall back to error for complex expressions (triggers standard path)
     Err(ExecutorError::UnsupportedExpression(
-        "Complex expression not supported in fused path".to_string()
+        "Complex expression not supported in fused path".to_string(),
     ))
 }
 
@@ -268,18 +260,15 @@ fn compute_fused_multiply_aggregate(
     op: AggregateOp,
     filter_mask: &[bool],
 ) -> Result<SqlValue, ExecutorError> {
-    let left_col = batch.column(left_idx).ok_or_else(|| {
-        ExecutorError::ColumnarColumnNotFound {
-            column_index: left_idx,
-            batch_columns: batch.column_count(),
-        }
+    let left_col = batch.column(left_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: left_idx,
+        batch_columns: batch.column_count(),
     })?;
-    let right_col = batch.column(right_idx).ok_or_else(|| {
-        ExecutorError::ColumnarColumnNotFound {
+    let right_col =
+        batch.column(right_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
             column_index: right_idx,
             batch_columns: batch.column_count(),
-        }
-    })?;
+        })?;
 
     // Fast path: Both columns are Float64
     if let (
@@ -298,10 +287,12 @@ fn compute_fused_multiply_aggregate(
         return match op {
             AggregateOp::Sum => Ok(if count > 0 { SqlValue::Double(sum) } else { SqlValue::Null }),
             AggregateOp::Count => Ok(SqlValue::Integer(count)),
-            AggregateOp::Avg => Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null }),
+            AggregateOp::Avg => {
+                Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null })
+            }
             _ => Err(ExecutorError::UnsupportedExpression(
-                "MIN/MAX not supported for expression aggregates".to_string()
-            ))
+                "MIN/MAX not supported for expression aggregates".to_string(),
+            )),
         };
     }
 

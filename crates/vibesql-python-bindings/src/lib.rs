@@ -119,6 +119,6 @@ fn vibesql(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("InternalError", m.py().get_type::<InternalError>())?;
     m.add("ProgrammingError", m.py().get_type::<ProgrammingError>())?;
     m.add("NotSupportedError", m.py().get_type::<NotSupportedError>())?;
-    
+
     Ok(())
 }

@@ -4,7 +4,9 @@
 
 use std::cell::RefCell;
 
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
+use crate::{
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
+};
 
 use super::RowIterator;
 
@@ -117,10 +119,8 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             right_total += schema.columns.len();
         }
 
-        let combined_schema = CombinedSchema {
-            table_schemas,
-            total_columns: left_total + right_total,
-        };
+        let combined_schema =
+            CombinedSchema { table_schemas, total_columns: left_total + right_total };
 
         let right_count = right_rows.len();
 
@@ -139,7 +139,10 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             // 2. The database reference ('schema) outlives the iterator
             // 3. We never expose this 'static lifetime outside the struct
             let db_static: &'static vibesql_storage::Database = unsafe {
-                std::mem::transmute::<&'schema vibesql_storage::Database, &'static vibesql_storage::Database>(db)
+                std::mem::transmute::<
+                    &'schema vibesql_storage::Database,
+                    &'static vibesql_storage::Database,
+                >(db)
             };
             CombinedExpressionEvaluator::with_database(evaluator_schema_ref, db_static)
         } else {
@@ -166,7 +169,10 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
 
     /// Combine two rows into a single row (left + right)
     #[inline]
-    fn combine_rows(left: &vibesql_storage::Row, right: &vibesql_storage::Row) -> vibesql_storage::Row {
+    fn combine_rows(
+        left: &vibesql_storage::Row,
+        right: &vibesql_storage::Row,
+    ) -> vibesql_storage::Row {
         let mut values = Vec::with_capacity(left.values.len() + right.values.len());
         values.extend_from_slice(&left.values);
         values.extend_from_slice(&right.values);
@@ -200,8 +206,12 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
                     vibesql_types::SqlValue::Integer(_)
                     | vibesql_types::SqlValue::Smallint(_)
                     | vibesql_types::SqlValue::Bigint(_) => Ok(true),
-                    vibesql_types::SqlValue::Float(0.0) | vibesql_types::SqlValue::Real(0.0) => Ok(false),
-                    vibesql_types::SqlValue::Float(_) | vibesql_types::SqlValue::Real(_) => Ok(true),
+                    vibesql_types::SqlValue::Float(0.0) | vibesql_types::SqlValue::Real(0.0) => {
+                        Ok(false)
+                    }
+                    vibesql_types::SqlValue::Float(_) | vibesql_types::SqlValue::Real(_) => {
+                        Ok(true)
+                    }
                     vibesql_types::SqlValue::Double(0.0) => Ok(false),
                     vibesql_types::SqlValue::Double(_) => Ok(true),
                     other => Err(ExecutorError::InvalidWhereClause(format!(
@@ -228,11 +238,18 @@ impl<'schema, I: RowIterator> Iterator for LazyNestedLoopJoin<'schema, I> {
 
                         if !self.right_matched[idx] {
                             // Emit: NULL + right_row
-                            let left_null_count = self.combined_schema.table_schemas.values()
+                            let left_null_count = self
+                                .combined_schema
+                                .table_schemas
+                                .values()
                                 .map(|(_, s)| s.columns.len())
-                                .sum::<usize>() - self.right_schema.table_schemas.values()
-                                .map(|(_, s)| s.columns.len())
-                                .sum::<usize>();
+                                .sum::<usize>()
+                                - self
+                                    .right_schema
+                                    .table_schemas
+                                    .values()
+                                    .map(|(_, s)| s.columns.len())
+                                    .sum::<usize>();
 
                             let mut values = Self::null_row(left_null_count);
                             values.extend_from_slice(&self.right_rows[idx].values);
@@ -261,7 +278,8 @@ impl<'schema, I: RowIterator> Iterator for LazyNestedLoopJoin<'schema, I> {
 
                         // For RIGHT/FULL OUTER, continue to emit unmatched right rows
                         match self.join_type {
-                            vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter => {
+                            vibesql_ast::JoinType::RightOuter
+                            | vibesql_ast::JoinType::FullOuter => {
                                 return self.next(); // Recurse to handle unmatched right rows
                             }
                             _ => return None,
@@ -321,7 +339,10 @@ impl<'schema, I: RowIterator> Iterator for LazyNestedLoopJoin<'schema, I> {
             if !self.current_left_matched {
                 match self.join_type {
                     vibesql_ast::JoinType::LeftOuter | vibesql_ast::JoinType::FullOuter => {
-                        let right_null_count = self.right_schema.table_schemas.values()
+                        let right_null_count = self
+                            .right_schema
+                            .table_schemas
+                            .values()
                             .map(|(_, s)| s.columns.len())
                             .sum::<usize>();
 

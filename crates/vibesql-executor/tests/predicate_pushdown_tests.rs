@@ -508,11 +508,11 @@ fn test_unqualified_columns_in_complex_predicates() {
     db.insert_row(
         "TAB4",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Integer(8),   // pk
-            vibesql_types::SqlValue::Integer(77),  // col0 - in IN list
-            vibesql_types::SqlValue::Real(65.5),   // col1 - in BETWEEN range
-            vibesql_types::SqlValue::Integer(50),  // col3
-            vibesql_types::SqlValue::Real(40.0),   // col4
+            vibesql_types::SqlValue::Integer(8),  // pk
+            vibesql_types::SqlValue::Integer(77), // col0 - in IN list
+            vibesql_types::SqlValue::Real(65.5),  // col1 - in BETWEEN range
+            vibesql_types::SqlValue::Integer(50), // col3
+            vibesql_types::SqlValue::Real(40.0),  // col4
         ]),
     )
     .unwrap();
@@ -520,11 +520,11 @@ fn test_unqualified_columns_in_complex_predicates() {
     db.insert_row(
         "TAB4",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Integer(10),  // pk
-            vibesql_types::SqlValue::Integer(31),  // col0 - in IN list
-            vibesql_types::SqlValue::Real(70.0),   // col1 - in BETWEEN range
-            vibesql_types::SqlValue::Integer(50),  // col3
-            vibesql_types::SqlValue::Real(40.0),   // col4
+            vibesql_types::SqlValue::Integer(10), // pk
+            vibesql_types::SqlValue::Integer(31), // col0 - in IN list
+            vibesql_types::SqlValue::Real(70.0),  // col1 - in BETWEEN range
+            vibesql_types::SqlValue::Integer(50), // col3
+            vibesql_types::SqlValue::Real(40.0),  // col4
         ]),
     )
     .unwrap();
@@ -532,11 +532,11 @@ fn test_unqualified_columns_in_complex_predicates() {
     db.insert_row(
         "TAB4",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Integer(99),   // pk
-            vibesql_types::SqlValue::Integer(100),  // col0 - NOT in IN list
-            vibesql_types::SqlValue::Real(70.0),    // col1
-            vibesql_types::SqlValue::Integer(50),   // col3
-            vibesql_types::SqlValue::Real(40.0),    // col4
+            vibesql_types::SqlValue::Integer(99),  // pk
+            vibesql_types::SqlValue::Integer(100), // col0 - NOT in IN list
+            vibesql_types::SqlValue::Real(70.0),   // col1
+            vibesql_types::SqlValue::Integer(50),  // col3
+            vibesql_types::SqlValue::Real(40.0),   // col4
         ]),
     )
     .unwrap();

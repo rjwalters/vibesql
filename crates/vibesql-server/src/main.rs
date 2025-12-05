@@ -32,12 +32,9 @@ async fn main() -> Result<()> {
     // Initialize basic tracing if observability didn't set it up
     if !config.observability.enabled || !config.observability.logs.bridge_tracing {
         tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| {
-                        tracing_subscriber::EnvFilter::new(config.logging.level.to_lowercase())
-                    }),
-            )
+            .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(
+                |_| tracing_subscriber::EnvFilter::new(config.logging.level.to_lowercase()),
+            ))
             .try_init()
             .ok(); // Ignore error if already initialized
     }
@@ -120,8 +117,9 @@ async fn main() -> Result<()> {
 
     // Spawn HTTP server if enabled
     if config.http.enabled {
-        let http_addr: SocketAddr =
-            format!("{}:{}", config.http.host, config.http.port).parse().expect("Invalid HTTP address");
+        let http_addr: SocketAddr = format!("{}:{}", config.http.host, config.http.port)
+            .parse()
+            .expect("Invalid HTTP address");
         let db_for_http = Arc::clone(&db);
         let subscription_manager_for_http = Arc::clone(&subscription_manager);
 
@@ -191,7 +189,8 @@ async fn main() -> Result<()> {
                             let observability = Arc::clone(&observability);
                             let password_store = password_store.clone();
                             let active_connections = Arc::clone(&active_connections);
-                            let subscription_manager = Arc::clone(&subscription_manager_for_handler);
+                            let subscription_manager =
+                                Arc::clone(&subscription_manager_for_handler);
 
                             // Record connection metric
                             if let Some(metrics) = observability.metrics() {

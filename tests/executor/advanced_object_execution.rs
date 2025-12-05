@@ -54,8 +54,8 @@ fn test_explain_select_basic() {
 
     match stmt {
         vibesql_ast::Statement::Explain(explain_stmt) => {
-            let result = ExplainExecutor::execute(&explain_stmt, &db)
-                .expect("EXPLAIN execution failed");
+            let result =
+                ExplainExecutor::execute(&explain_stmt, &db).expect("EXPLAIN execution failed");
 
             let output = result.to_text();
             assert!(output.contains("Select"), "Expected 'Select' in plan output");
@@ -76,8 +76,8 @@ fn test_explain_select_with_where() {
 
     match stmt {
         vibesql_ast::Statement::Explain(explain_stmt) => {
-            let result = ExplainExecutor::execute(&explain_stmt, &db)
-                .expect("EXPLAIN execution failed");
+            let result =
+                ExplainExecutor::execute(&explain_stmt, &db).expect("EXPLAIN execution failed");
 
             let output = result.to_text();
             assert!(output.contains("Filter"), "Expected filter info in plan");
@@ -94,8 +94,8 @@ fn test_explain_json_format() {
 
     match stmt {
         vibesql_ast::Statement::Explain(explain_stmt) => {
-            let result = ExplainExecutor::execute(&explain_stmt, &db)
-                .expect("EXPLAIN execution failed");
+            let result =
+                ExplainExecutor::execute(&explain_stmt, &db).expect("EXPLAIN execution failed");
 
             let output = result.to_json();
             assert!(output.starts_with("{"), "JSON should start with '{{': {}", output);
@@ -148,24 +148,21 @@ fn test_sequence_lifecycle() {
     let create_sql = "CREATE SEQUENCE lifecycle_seq START WITH 1";
     let create_stmt = Parser::parse_sql(create_sql).expect("Parse failed");
     if let vibesql_ast::Statement::CreateSequence(stmt) = create_stmt {
-        advanced_objects::execute_create_sequence(&stmt, &mut db)
-            .expect("CREATE SEQUENCE failed");
+        advanced_objects::execute_create_sequence(&stmt, &mut db).expect("CREATE SEQUENCE failed");
     }
 
     // Alter the sequence
     let alter_sql = "ALTER SEQUENCE lifecycle_seq RESTART WITH 100";
     let alter_stmt = Parser::parse_sql(alter_sql).expect("Parse failed");
     if let vibesql_ast::Statement::AlterSequence(stmt) = alter_stmt {
-        advanced_objects::execute_alter_sequence(&stmt, &mut db)
-            .expect("ALTER SEQUENCE failed");
+        advanced_objects::execute_alter_sequence(&stmt, &mut db).expect("ALTER SEQUENCE failed");
     }
 
     // Drop the sequence
     let drop_sql = "DROP SEQUENCE lifecycle_seq";
     let drop_stmt = Parser::parse_sql(drop_sql).expect("Parse failed");
     if let vibesql_ast::Statement::DropSequence(stmt) = drop_stmt {
-        advanced_objects::execute_drop_sequence(&stmt, &mut db)
-            .expect("DROP SEQUENCE failed");
+        advanced_objects::execute_drop_sequence(&stmt, &mut db).expect("DROP SEQUENCE failed");
     }
 }
 
@@ -189,8 +186,7 @@ fn test_collation_lifecycle() {
     let drop_sql = "DROP COLLATION test_coll";
     let drop_stmt = Parser::parse_sql(drop_sql).expect("Failed to parse DROP COLLATION");
     if let vibesql_ast::Statement::DropCollation(stmt) = drop_stmt {
-        advanced_objects::execute_drop_collation(&stmt, &mut db)
-            .expect("DROP COLLATION failed");
+        advanced_objects::execute_drop_collation(&stmt, &mut db).expect("DROP COLLATION failed");
     }
 }
 
@@ -261,24 +257,17 @@ fn test_procedure_lifecycle() {
     }
 
     // Verify procedure exists via function_exists (they share the namespace)
-    assert!(
-        db.catalog.procedure_exists("TEST_PROC"),
-        "Procedure should exist after creation"
-    );
+    assert!(db.catalog.procedure_exists("TEST_PROC"), "Procedure should exist after creation");
 
     // Drop the procedure
     let drop_sql = "DROP PROCEDURE test_proc";
     let drop_stmt = Parser::parse_sql(drop_sql).expect("Failed to parse DROP PROCEDURE");
     if let vibesql_ast::Statement::DropProcedure(stmt) = drop_stmt {
-        advanced_objects::execute_drop_procedure(&stmt, &mut db)
-            .expect("DROP PROCEDURE failed");
+        advanced_objects::execute_drop_procedure(&stmt, &mut db).expect("DROP PROCEDURE failed");
     }
 
     // Verify procedure was dropped
-    assert!(
-        !db.catalog.procedure_exists("TEST_PROC"),
-        "Procedure should not exist after drop"
-    );
+    assert!(!db.catalog.procedure_exists("TEST_PROC"), "Procedure should not exist after drop");
 }
 
 #[test]
@@ -306,29 +295,21 @@ fn test_function_lifecycle() {
     let create_sql = "CREATE FUNCTION add_one(x INT) RETURNS INT BEGIN RETURN x + 1; END";
     let create_stmt = Parser::parse_sql(create_sql).expect("Failed to parse CREATE FUNCTION");
     if let vibesql_ast::Statement::CreateFunction(stmt) = create_stmt {
-        advanced_objects::execute_create_function(&stmt, &mut db)
-            .expect("CREATE FUNCTION failed");
+        advanced_objects::execute_create_function(&stmt, &mut db).expect("CREATE FUNCTION failed");
     }
 
     // Verify function exists
-    assert!(
-        db.catalog.function_exists("ADD_ONE"),
-        "Function should exist after creation"
-    );
+    assert!(db.catalog.function_exists("ADD_ONE"), "Function should exist after creation");
 
     // Drop the function
     let drop_sql = "DROP FUNCTION add_one";
     let drop_stmt = Parser::parse_sql(drop_sql).expect("Failed to parse DROP FUNCTION");
     if let vibesql_ast::Statement::DropFunction(stmt) = drop_stmt {
-        advanced_objects::execute_drop_function(&stmt, &mut db)
-            .expect("DROP FUNCTION failed");
+        advanced_objects::execute_drop_function(&stmt, &mut db).expect("DROP FUNCTION failed");
     }
 
     // Verify function was dropped
-    assert!(
-        !db.catalog.function_exists("ADD_ONE"),
-        "Function should not exist after drop"
-    );
+    assert!(!db.catalog.function_exists("ADD_ONE"), "Function should not exist after drop");
 }
 
 #[test]

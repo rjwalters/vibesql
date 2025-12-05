@@ -926,17 +926,11 @@ fn test_json_view_preservation() {
         distinct: false,
         select_list: vec![
             SelectItem::Expression {
-                expr: Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                },
+                expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                 alias: None,
             },
             SelectItem::Expression {
-                expr: Expression::ColumnRef {
-                    table: None,
-                    column: "name".to_string(),
-                },
+                expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                 alias: None,
             },
         ],
@@ -948,10 +942,7 @@ fn test_json_view_preservation() {
             column_aliases: None,
         }),
         where_clause: Some(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "active".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "active".to_string() }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Boolean(true))),
         }),
@@ -990,8 +981,10 @@ fn test_json_view_preservation() {
 
     // Views are not automatically recreated (by design), but we verify the JSON preserved them
     // The load operation should succeed and log a warning about views
-    assert!(loaded_db.catalog.get_view("active_users").is_none(),
-        "Views should not be automatically recreated during deserialization");
+    assert!(
+        loaded_db.catalog.get_view("active_users").is_none(),
+        "Views should not be automatically recreated during deserialization"
+    );
 
     // Cleanup
     std::fs::remove_file(path).ok();
@@ -1039,12 +1032,7 @@ fn test_json_view_preservation_without_sql_definition() {
         set_operation: None,
     };
 
-    let view = ViewDefinition::new(
-        "all_products".to_string(),
-        None,
-        select_stmt,
-        false,
-    );
+    let view = ViewDefinition::new("all_products".to_string(), None, select_stmt, false);
     db.catalog.create_view(view).unwrap();
 
     // Save to JSON

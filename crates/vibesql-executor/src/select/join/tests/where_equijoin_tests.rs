@@ -78,7 +78,8 @@ fn test_where_equijoin_with_additional_filter() {
 
     // Query: SELECT * FROM t1, t2 WHERE t1.a = t2.b AND t1.x > 50
     let executor = SelectExecutor::new(&db);
-    let select_stmt = Parser::parse_sql("SELECT * FROM t1, t2 WHERE t1.a = t2.b AND t1.x > 50").unwrap();
+    let select_stmt =
+        Parser::parse_sql("SELECT * FROM t1, t2 WHERE t1.a = t2.b AND t1.x > 50").unwrap();
     let result = if let vibesql_ast::Statement::Select(s) = select_stmt {
         executor.execute(&s).unwrap()
     } else {

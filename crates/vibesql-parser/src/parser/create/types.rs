@@ -4,7 +4,9 @@ use super::super::*;
 
 impl Parser {
     /// Parse data type
-    pub(in crate::parser) fn parse_data_type(&mut self) -> Result<vibesql_types::DataType, ParseError> {
+    pub(in crate::parser) fn parse_data_type(
+        &mut self,
+    ) -> Result<vibesql_types::DataType, ParseError> {
         let type_upper = match self.peek() {
             Token::Identifier(type_name) => type_name.to_uppercase(),
             Token::Keyword(Keyword::Date) => "DATE".to_string(),
@@ -480,7 +482,7 @@ impl Parser {
                             Token::LParen => {
                                 paren_depth += 1;
                                 self.advance();
-                            },
+                            }
                             Token::RParen => {
                                 paren_depth -= 1;
                                 if paren_depth > 0 {
@@ -490,7 +492,7 @@ impl Parser {
                                     self.expect_token(Token::RParen)?;
                                     break;
                                 }
-                            },
+                            }
                             _ => {
                                 self.advance();
                             }
@@ -513,7 +515,8 @@ impl Parser {
                     Token::Keyword(Keyword::Character) => "CHARACTER".to_string(),
                     _ => {
                         return Err(ParseError {
-                            message: "Expected VARCHAR, CHARACTER, or CHAR after NATIONAL".to_string(),
+                            message: "Expected VARCHAR, CHARACTER, or CHAR after NATIONAL"
+                                .to_string(),
                         })
                     }
                 };
@@ -535,7 +538,8 @@ impl Parser {
                                 }
                                 _ => {
                                     return Err(ParseError {
-                                        message: "Expected number after NATIONAL VARCHAR(".to_string(),
+                                        message: "Expected number after NATIONAL VARCHAR("
+                                            .to_string(),
                                     })
                                 }
                             };
@@ -570,7 +574,8 @@ impl Parser {
                                 }
                                 _ => {
                                     return Err(ParseError {
-                                        message: "Expected number after NATIONAL CHARACTER(".to_string(),
+                                        message: "Expected number after NATIONAL CHARACTER("
+                                            .to_string(),
                                     })
                                 }
                             };
@@ -590,14 +595,12 @@ impl Parser {
 
                         Ok(vibesql_types::DataType::Character { length })
                     }
-                    _ => {
-                        Err(ParseError {
-                            message: format!(
-                                "Expected VARCHAR, CHARACTER, or CHAR after NATIONAL, got: {}",
-                                next
-                            ),
-                        })
-                    }
+                    _ => Err(ParseError {
+                        message: format!(
+                            "Expected VARCHAR, CHARACTER, or CHAR after NATIONAL, got: {}",
+                            next
+                        ),
+                    }),
                 }
             }
             "VECTOR" => {
@@ -605,14 +608,16 @@ impl Parser {
                 // Syntax: VECTOR(n) where n is the dimension count (e.g., VECTOR(1536) for OpenAI embeddings)
                 if !matches!(self.peek(), Token::LParen) {
                     return Err(ParseError {
-                        message: "VECTOR type requires dimension specification: VECTOR(n)".to_string(),
+                        message: "VECTOR type requires dimension specification: VECTOR(n)"
+                            .to_string(),
                     });
                 }
                 self.advance(); // consume (
                 let dimensions = match self.peek() {
                     Token::Number(n) => {
                         let d = n.parse::<u32>().map_err(|_| ParseError {
-                            message: "Invalid VECTOR dimension (must be positive integer)".to_string(),
+                            message: "Invalid VECTOR dimension (must be positive integer)"
+                                .to_string(),
                         })?;
                         if d == 0 {
                             return Err(ParseError {

@@ -18,9 +18,7 @@ impl SelectionBitmap {
     /// Create a new bitmap with all bits set to `value`
     #[inline]
     pub fn new(size: usize, value: bool) -> Self {
-        Self {
-            bits: vec![value; size],
-        }
+        Self { bits: vec![value; size] }
     }
 
     /// Create a bitmap with all bits set to true (all rows selected)
@@ -81,11 +79,7 @@ impl SelectionBitmap {
     where
         T: Clone,
     {
-        debug_assert_eq!(
-            self.len(),
-            rows.len(),
-            "Bitmap length must match row count"
-        );
+        debug_assert_eq!(self.len(), rows.len(), "Bitmap length must match row count");
 
         rows.iter()
             .zip(self.bits.iter())
@@ -101,11 +95,7 @@ impl SelectionBitmap {
     where
         T: Clone,
     {
-        debug_assert_eq!(
-            self.len(),
-            rows.len(),
-            "Bitmap length must match row count"
-        );
+        debug_assert_eq!(self.len(), rows.len(), "Bitmap length must match row count");
 
         buffer.clear();
         buffer.reserve(self.count_true());

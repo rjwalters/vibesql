@@ -61,39 +61,20 @@ fn create_oltp_database(row_count: usize) -> Database {
     // Users table with primary key
     let user_columns = vec![
         ColumnSchema::new("id".to_string(), DataType::Integer, false),
-        ColumnSchema::new(
-            "name".to_string(),
-            DataType::Varchar { max_length: Some(100) },
-            true,
-        ),
-        ColumnSchema::new(
-            "email".to_string(),
-            DataType::Varchar { max_length: Some(255) },
-            true,
-        ),
+        ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+        ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(255) }, true),
         ColumnSchema::new("age".to_string(), DataType::Integer, true),
-        ColumnSchema::new(
-            "status".to_string(),
-            DataType::Varchar { max_length: Some(20) },
-            true,
-        ),
+        ColumnSchema::new("status".to_string(), DataType::Varchar { max_length: Some(20) }, true),
     ];
-    let user_schema = TableSchema::with_primary_key(
-        "users".to_string(),
-        user_columns,
-        vec!["id".to_string()],
-    );
+    let user_schema =
+        TableSchema::with_primary_key("users".to_string(), user_columns, vec!["id".to_string()]);
     db.create_table(user_schema).unwrap();
 
     // Orders table with composite key
     let order_columns = vec![
         ColumnSchema::new("order_id".to_string(), DataType::Integer, false),
         ColumnSchema::new("user_id".to_string(), DataType::Integer, false),
-        ColumnSchema::new(
-            "product".to_string(),
-            DataType::Varchar { max_length: Some(100) },
-            true,
-        ),
+        ColumnSchema::new("product".to_string(), DataType::Varchar { max_length: Some(100) }, true),
         ColumnSchema::new("quantity".to_string(), DataType::Integer, true),
         ColumnSchema::new("price".to_string(), DataType::Decimal { precision: 10, scale: 2 }, true),
     ];
@@ -155,9 +136,7 @@ fn bench_arena_parsing(c: &mut Criterion) {
 
         // Standard owned parser
         group.bench_with_input(BenchmarkId::new("owned", name), sql, |b, sql| {
-            b.iter(|| {
-                black_box(Parser::parse_sql(black_box(sql)).unwrap())
-            });
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
         });
 
         // Arena parser (fresh arena each time)
@@ -194,7 +173,8 @@ fn bench_parameter_binding(c: &mut Criterion) {
     // Prepare statements with different placeholder counts
     let stmt_1param = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
     let stmt_2param = session.prepare("SELECT * FROM users WHERE id >= ? AND id < ?").unwrap();
-    let stmt_3param = session.prepare("SELECT * FROM users WHERE id = ? AND name = ? AND status = ?").unwrap();
+    let stmt_3param =
+        session.prepare("SELECT * FROM users WHERE id = ? AND name = ? AND status = ?").unwrap();
     let stmt_5param = session.prepare("SELECT * FROM users WHERE id IN (?, ?, ?, ?, ?)").unwrap();
 
     group.throughput(Throughput::Elements(100));
@@ -203,9 +183,8 @@ fn bench_parameter_binding(c: &mut Criterion) {
     group.bench_function("1_param", |b| {
         b.iter(|| {
             for i in 0..100 {
-                let result = session
-                    .execute_prepared(&stmt_1param, &[SqlValue::Integer(i)])
-                    .unwrap();
+                let result =
+                    session.execute_prepared(&stmt_1param, &[SqlValue::Integer(i)]).unwrap();
                 black_box(result);
             }
         });
@@ -217,10 +196,10 @@ fn bench_parameter_binding(c: &mut Criterion) {
             for i in 0..100 {
                 let start = i * 10;
                 let result = session
-                    .execute_prepared(&stmt_2param, &[
-                        SqlValue::Integer(start),
-                        SqlValue::Integer(start + 10),
-                    ])
+                    .execute_prepared(
+                        &stmt_2param,
+                        &[SqlValue::Integer(start), SqlValue::Integer(start + 10)],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -232,11 +211,14 @@ fn bench_parameter_binding(c: &mut Criterion) {
         b.iter(|| {
             for i in 0..100 {
                 let result = session
-                    .execute_prepared(&stmt_3param, &[
-                        SqlValue::Integer(i),
-                        SqlValue::Varchar(format!("User_{}", i)),
-                        SqlValue::Varchar("active".to_string()),
-                    ])
+                    .execute_prepared(
+                        &stmt_3param,
+                        &[
+                            SqlValue::Integer(i),
+                            SqlValue::Varchar(format!("User_{}", i)),
+                            SqlValue::Varchar("active".to_string()),
+                        ],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -249,13 +231,16 @@ fn bench_parameter_binding(c: &mut Criterion) {
             for i in 0..100 {
                 let base = i * 5;
                 let result = session
-                    .execute_prepared(&stmt_5param, &[
-                        SqlValue::Integer(base),
-                        SqlValue::Integer(base + 1),
-                        SqlValue::Integer(base + 2),
-                        SqlValue::Integer(base + 3),
-                        SqlValue::Integer(base + 4),
-                    ])
+                    .execute_prepared(
+                        &stmt_5param,
+                        &[
+                            SqlValue::Integer(base),
+                            SqlValue::Integer(base + 1),
+                            SqlValue::Integer(base + 2),
+                            SqlValue::Integer(base + 3),
+                            SqlValue::Integer(base + 4),
+                        ],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -288,9 +273,8 @@ fn bench_workload_point_lookup(c: &mut Criterion) {
                 b.iter(|| {
                     for i in 0..iterations {
                         let id = (i as i64) % (row_count as i64);
-                        let result = session
-                            .execute_prepared(&stmt, &[SqlValue::Integer(id)])
-                            .unwrap();
+                        let result =
+                            session.execute_prepared(&stmt, &[SqlValue::Integer(id)]).unwrap();
                         black_box(result);
                     }
                 });
@@ -331,18 +315,16 @@ fn bench_workload_multi_filter(c: &mut Criterion) {
     group.throughput(Throughput::Elements(iterations as u64));
 
     // 2-column filter
-    let stmt_2col = session
-        .prepare("SELECT * FROM users WHERE age >= ? AND age < ?")
-        .unwrap();
+    let stmt_2col = session.prepare("SELECT * FROM users WHERE age >= ? AND age < ?").unwrap();
     group.bench_function("2_columns", |b| {
         b.iter(|| {
             for i in 0..iterations {
                 let age_start = 20 + (i % 30) as i64;
                 let result = session
-                    .execute_prepared(&stmt_2col, &[
-                        SqlValue::Integer(age_start),
-                        SqlValue::Integer(age_start + 10),
-                    ])
+                    .execute_prepared(
+                        &stmt_2col,
+                        &[SqlValue::Integer(age_start), SqlValue::Integer(age_start + 10)],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -350,19 +332,21 @@ fn bench_workload_multi_filter(c: &mut Criterion) {
     });
 
     // 3-column filter
-    let stmt_3col = session
-        .prepare("SELECT * FROM users WHERE id >= ? AND id < ? AND status = ?")
-        .unwrap();
+    let stmt_3col =
+        session.prepare("SELECT * FROM users WHERE id >= ? AND id < ? AND status = ?").unwrap();
     group.bench_function("3_columns", |b| {
         b.iter(|| {
             for i in 0..iterations {
                 let start = (i * 10) as i64;
                 let result = session
-                    .execute_prepared(&stmt_3col, &[
-                        SqlValue::Integer(start),
-                        SqlValue::Integer(start + 100),
-                        SqlValue::Varchar("active".to_string()),
-                    ])
+                    .execute_prepared(
+                        &stmt_3col,
+                        &[
+                            SqlValue::Integer(start),
+                            SqlValue::Integer(start + 100),
+                            SqlValue::Varchar("active".to_string()),
+                        ],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -382,19 +366,20 @@ fn bench_workload_in_list(c: &mut Criterion) {
     group.throughput(Throughput::Elements(iterations as u64));
 
     // IN list with 3 values
-    let stmt_in3 = session
-        .prepare("SELECT * FROM users WHERE id IN (?, ?, ?)")
-        .unwrap();
+    let stmt_in3 = session.prepare("SELECT * FROM users WHERE id IN (?, ?, ?)").unwrap();
     group.bench_function("in_list_3", |b| {
         b.iter(|| {
             for i in 0..iterations {
                 let base = (i * 3) as i64;
                 let result = session
-                    .execute_prepared(&stmt_in3, &[
-                        SqlValue::Integer(base),
-                        SqlValue::Integer(base + 1),
-                        SqlValue::Integer(base + 2),
-                    ])
+                    .execute_prepared(
+                        &stmt_in3,
+                        &[
+                            SqlValue::Integer(base),
+                            SqlValue::Integer(base + 1),
+                            SqlValue::Integer(base + 2),
+                        ],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -402,21 +387,22 @@ fn bench_workload_in_list(c: &mut Criterion) {
     });
 
     // IN list with 5 values
-    let stmt_in5 = session
-        .prepare("SELECT * FROM users WHERE id IN (?, ?, ?, ?, ?)")
-        .unwrap();
+    let stmt_in5 = session.prepare("SELECT * FROM users WHERE id IN (?, ?, ?, ?, ?)").unwrap();
     group.bench_function("in_list_5", |b| {
         b.iter(|| {
             for i in 0..iterations {
                 let base = (i * 5) as i64;
                 let result = session
-                    .execute_prepared(&stmt_in5, &[
-                        SqlValue::Integer(base),
-                        SqlValue::Integer(base + 1),
-                        SqlValue::Integer(base + 2),
-                        SqlValue::Integer(base + 3),
-                        SqlValue::Integer(base + 4),
-                    ])
+                    .execute_prepared(
+                        &stmt_in5,
+                        &[
+                            SqlValue::Integer(base),
+                            SqlValue::Integer(base + 1),
+                            SqlValue::Integer(base + 2),
+                            SqlValue::Integer(base + 3),
+                            SqlValue::Integer(base + 4),
+                        ],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -424,26 +410,28 @@ fn bench_workload_in_list(c: &mut Criterion) {
     });
 
     // IN list with 10 values
-    let stmt_in10 = session
-        .prepare("SELECT * FROM users WHERE id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .unwrap();
+    let stmt_in10 =
+        session.prepare("SELECT * FROM users WHERE id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
     group.bench_function("in_list_10", |b| {
         b.iter(|| {
             for i in 0..iterations {
                 let base = (i * 10) as i64;
                 let result = session
-                    .execute_prepared(&stmt_in10, &[
-                        SqlValue::Integer(base),
-                        SqlValue::Integer(base + 1),
-                        SqlValue::Integer(base + 2),
-                        SqlValue::Integer(base + 3),
-                        SqlValue::Integer(base + 4),
-                        SqlValue::Integer(base + 5),
-                        SqlValue::Integer(base + 6),
-                        SqlValue::Integer(base + 7),
-                        SqlValue::Integer(base + 8),
-                        SqlValue::Integer(base + 9),
-                    ])
+                    .execute_prepared(
+                        &stmt_in10,
+                        &[
+                            SqlValue::Integer(base),
+                            SqlValue::Integer(base + 1),
+                            SqlValue::Integer(base + 2),
+                            SqlValue::Integer(base + 3),
+                            SqlValue::Integer(base + 4),
+                            SqlValue::Integer(base + 5),
+                            SqlValue::Integer(base + 6),
+                            SqlValue::Integer(base + 7),
+                            SqlValue::Integer(base + 8),
+                            SqlValue::Integer(base + 9),
+                        ],
+                    )
                     .unwrap();
                 black_box(result);
             }
@@ -470,17 +458,14 @@ fn bench_cache_efficiency(c: &mut Criterion) {
         let shared_cache = Arc::new(PreparedStatementCache::default_cache());
         // Pre-warm
         let warmup_session = Session::with_shared_cache(&db, Arc::clone(&shared_cache));
-        let _ = warmup_session
-            .prepare("SELECT * FROM users WHERE id = ?")
-            .unwrap();
+        let _ = warmup_session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
 
         b.iter(|| {
             let session = Session::with_shared_cache(&db, Arc::clone(&shared_cache));
             let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
             for i in 0..iterations {
-                let result = session
-                    .execute_prepared(&stmt, &[SqlValue::Integer(i as i64 % 1000)])
-                    .unwrap();
+                let result =
+                    session.execute_prepared(&stmt, &[SqlValue::Integer(i as i64 % 1000)]).unwrap();
                 black_box(result);
             }
         });
@@ -492,9 +477,8 @@ fn bench_cache_efficiency(c: &mut Criterion) {
             let session = Session::new(&db);
             let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
             for i in 0..iterations {
-                let result = session
-                    .execute_prepared(&stmt, &[SqlValue::Integer(i as i64 % 1000)])
-                    .unwrap();
+                let result =
+                    session.execute_prepared(&stmt, &[SqlValue::Integer(i as i64 % 1000)]).unwrap();
                 black_box(result);
             }
         });
@@ -514,7 +498,9 @@ fn bench_cache_efficiency(c: &mut Criterion) {
                 let query_type = i % 3;
                 let result = match query_type {
                     0 => session.execute_prepared(&stmt1, &[SqlValue::Integer(i as i64 % 1000)]),
-                    1 => session.execute_prepared(&stmt2, &[SqlValue::Integer(20 + (i as i64 % 50))]),
+                    1 => {
+                        session.execute_prepared(&stmt2, &[SqlValue::Integer(20 + (i as i64 % 50))])
+                    }
                     _ => session.execute_prepared(&stmt3, &[SqlValue::Integer(i as i64 % 1000)]),
                 };
                 black_box(result.unwrap());
@@ -554,9 +540,7 @@ fn bench_throughput(c: &mut Criterion) {
     });
 
     // High-throughput with projection
-    let stmt_proj = session
-        .prepare("SELECT id, name FROM users WHERE id = ?")
-        .unwrap();
+    let stmt_proj = session.prepare("SELECT id, name FROM users WHERE id = ?").unwrap();
     group.bench_function("projection_10k", |b| {
         b.iter(|| {
             for i in 0..iterations {
@@ -588,9 +572,7 @@ fn bench_latency_distribution(c: &mut Criterion) {
         let mut i = 0i64;
         b.iter(|| {
             i = (i + 1) % 10000;
-            let result = session
-                .execute_prepared(&stmt, &[SqlValue::Integer(i)])
-                .unwrap();
+            let result = session.execute_prepared(&stmt, &[SqlValue::Integer(i)]).unwrap();
             black_box(result)
         });
     });
@@ -678,11 +660,7 @@ fn bench_allocation_comparison(c: &mut Criterion) {
 // Benchmark Groups
 // ============================================================================
 
-criterion_group!(
-    micro_benchmarks,
-    bench_arena_parsing,
-    bench_parameter_binding,
-);
+criterion_group!(micro_benchmarks, bench_arena_parsing, bench_parameter_binding,);
 
 criterion_group!(
     workload_benchmarks,
@@ -691,10 +669,7 @@ criterion_group!(
     bench_workload_in_list,
 );
 
-criterion_group!(
-    cache_benchmarks,
-    bench_cache_efficiency,
-);
+criterion_group!(cache_benchmarks, bench_cache_efficiency,);
 
 criterion_group!(
     performance_benchmarks,
@@ -703,9 +678,4 @@ criterion_group!(
     bench_allocation_comparison,
 );
 
-criterion_main!(
-    micro_benchmarks,
-    workload_benchmarks,
-    cache_benchmarks,
-    performance_benchmarks,
-);
+criterion_main!(micro_benchmarks, workload_benchmarks, cache_benchmarks, performance_benchmarks,);

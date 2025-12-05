@@ -61,9 +61,10 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
         }
 
         // IsNull: recurse into expression
-        (Expression::IsNull { expr: e1, negated: n1 }, Expression::IsNull { expr: e2, negated: n2 }) => {
-            n1 == n2 && expressions_equal(e1, e2)
-        }
+        (
+            Expression::IsNull { expr: e1, negated: n1 },
+            Expression::IsNull { expr: e2, negated: n2 },
+        ) => n1 == n2 && expressions_equal(e1, e2),
 
         // Wildcard
         (Expression::Wildcard, Expression::Wildcard) => true,
@@ -192,9 +193,10 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
         (Expression::Default, Expression::Default) => true,
 
         // DuplicateKeyValue: case-insensitive column comparison
-        (Expression::DuplicateKeyValue { column: c1 }, Expression::DuplicateKeyValue { column: c2 }) => {
-            c1.eq_ignore_ascii_case(c2)
-        }
+        (
+            Expression::DuplicateKeyValue { column: c1 },
+            Expression::DuplicateKeyValue { column: c2 },
+        ) => c1.eq_ignore_ascii_case(c2),
 
         // WindowFunction: recurse into function spec and over clause
         (
@@ -203,9 +205,10 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
         ) => window_function_equal(f1, f2) && window_spec_equal(o1, o2),
 
         // NextValue: case-insensitive sequence name
-        (Expression::NextValue { sequence_name: s1 }, Expression::NextValue { sequence_name: s2 }) => {
-            s1.eq_ignore_ascii_case(s2)
-        }
+        (
+            Expression::NextValue { sequence_name: s1 },
+            Expression::NextValue { sequence_name: s2 },
+        ) => s1.eq_ignore_ascii_case(s2),
 
         // MatchAgainst: case-insensitive column names, recurse into search modifier
         (
@@ -490,10 +493,8 @@ mod tests {
 
     #[test]
     fn test_expressions_equal_is_null() {
-        let is_null = |e: Expression, negated: bool| Expression::IsNull {
-            expr: Box::new(e),
-            negated,
-        };
+        let is_null =
+            |e: Expression, negated: bool| Expression::IsNull { expr: Box::new(e), negated };
 
         assert!(expressions_equal(&is_null(col("a"), false), &is_null(col("a"), false)));
         assert!(expressions_equal(&is_null(col("A"), false), &is_null(col("a"), false)));
@@ -505,10 +506,8 @@ mod tests {
 
     #[test]
     fn test_expressions_equal_cast() {
-        let cast = |e: Expression, dt: DataType| Expression::Cast {
-            expr: Box::new(e),
-            data_type: dt,
-        };
+        let cast =
+            |e: Expression, dt: DataType| Expression::Cast { expr: Box::new(e), data_type: dt };
 
         assert!(expressions_equal(
             &cast(col("a"), DataType::Integer),

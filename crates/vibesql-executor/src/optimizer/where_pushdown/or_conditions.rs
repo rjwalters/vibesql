@@ -55,11 +55,9 @@ pub(super) fn extract_table_filters_from_or(
 ) -> Option<Vec<(String, Expression)>> {
     // Check if this is an OR expression
     let (left_branch, right_branch) = match expr {
-        Expression::BinaryOp {
-            op: vibesql_ast::BinaryOperator::Or,
-            left,
-            right,
-        } => (left.as_ref(), right.as_ref()),
+        Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Or, left, right } => {
+            (left.as_ref(), right.as_ref())
+        }
         _ => return None,
     };
 
@@ -121,7 +119,9 @@ fn extract_table_predicates_from_branch(
 }
 
 /// Combine a list of predicates into a single expression using AND
-pub(crate) fn combine_predicates_with_and(mut predicates: Vec<vibesql_ast::Expression>) -> vibesql_ast::Expression {
+pub(crate) fn combine_predicates_with_and(
+    mut predicates: Vec<vibesql_ast::Expression>,
+) -> vibesql_ast::Expression {
     if predicates.is_empty() {
         // This shouldn't happen, but default to TRUE
         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))

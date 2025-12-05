@@ -9,7 +9,6 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use vibesql_ast::{Expression, Statement};
 use vibesql_ast::arena::{
     Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
     FromClause as ArenaFromClause, GroupByClause as ArenaGroupByClause,
@@ -17,6 +16,7 @@ use vibesql_ast::arena::{
     MixedGroupingItem as ArenaMixedGroupingItem, SelectItem as ArenaSelectItem,
     SelectStmt as ArenaSelectStmt, WindowFunctionSpec as ArenaWindowFunctionSpec,
 };
+use vibesql_ast::{Expression, Statement};
 
 /// Unique identifier for a query based on its structure
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -295,9 +295,7 @@ impl QuerySignature {
             Expression::Literal(_)
             | Expression::Placeholder(_)
             | Expression::NumberedPlaceholder(_)
-            | Expression::NamedPlaceholder(_) => {
-                "LITERAL_PLACEHOLDER".hash(hasher)
-            }
+            | Expression::NamedPlaceholder(_) => "LITERAL_PLACEHOLDER".hash(hasher),
 
             Expression::ColumnRef { table, column } => {
                 "COLUMN".hash(hasher);
@@ -464,12 +462,7 @@ impl QuerySignature {
                 precision.hash(hasher);
             }
 
-            Expression::Interval {
-                value,
-                unit,
-                leading_precision,
-                fractional_precision,
-            } => {
+            Expression::Interval { value, unit, leading_precision, fractional_precision } => {
                 "INTERVAL".hash(hasher);
                 Self::hash_expression(value, hasher);
                 format!("{:?}", unit).hash(hasher);
@@ -624,13 +617,7 @@ impl QuerySignature {
                 name.hash(hasher);
                 alias.hash(hasher);
             }
-            ArenaFromClause::Join {
-                left,
-                join_type,
-                right,
-                condition,
-                ..
-            } => {
+            ArenaFromClause::Join { left, join_type, right, condition, .. } => {
                 "JOIN".hash(hasher);
                 Self::hash_arena_from_clause(left, hasher);
                 std::mem::discriminant(join_type).hash(hasher);
@@ -733,9 +720,7 @@ impl QuerySignature {
             ArenaExpression::Literal(_)
             | ArenaExpression::Placeholder(_)
             | ArenaExpression::NumberedPlaceholder(_)
-            | ArenaExpression::NamedPlaceholder(_) => {
-                "LITERAL_PLACEHOLDER".hash(hasher)
-            }
+            | ArenaExpression::NamedPlaceholder(_) => "LITERAL_PLACEHOLDER".hash(hasher),
 
             ArenaExpression::ColumnRef { table, column } => {
                 "COLUMN".hash(hasher);
@@ -1047,7 +1032,9 @@ mod tests {
 
     #[test]
     fn test_ast_based_same_structure_different_literals() {
-        use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt, Statement};
+        use vibesql_ast::{
+            BinaryOperator, Expression, FromClause, SelectItem, SelectStmt, Statement,
+        };
         use vibesql_types::SqlValue;
 
         // SELECT col0 FROM tab WHERE col1 > 5
@@ -1059,7 +1046,12 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
+            into_variables: None,
+            from: Some(FromClause::Table {
+                name: "tab".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
@@ -1082,7 +1074,12 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
+            into_variables: None,
+            from: Some(FromClause::Table {
+                name: "tab".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
@@ -1105,7 +1102,9 @@ mod tests {
 
     #[test]
     fn test_ast_based_different_structure() {
-        use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt, Statement};
+        use vibesql_ast::{
+            BinaryOperator, Expression, FromClause, SelectItem, SelectStmt, Statement,
+        };
         use vibesql_types::SqlValue;
 
         // SELECT col0 FROM tab WHERE col1 > 5
@@ -1117,7 +1116,12 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
+            into_variables: None,
+            from: Some(FromClause::Table {
+                name: "tab".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
@@ -1140,7 +1144,12 @@ mod tests {
                 alias: None,
             }],
             into_table: None,
-            into_variables: None,            from: Some(FromClause::Table { name: "tab".to_string(), alias: None, column_aliases: None }),
+            into_variables: None,
+            from: Some(FromClause::Table {
+                name: "tab".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::LessThan, // Different operator!
                 left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),

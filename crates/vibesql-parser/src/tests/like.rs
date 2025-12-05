@@ -14,12 +14,17 @@ fn test_parse_like_exact_match() {
         assert!(select.where_clause.is_some());
 
         // Should be a LIKE expression
-        if let vibesql_ast::Expression::Like { expr, pattern, negated } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::Like { expr, pattern, negated } =
+            &select.where_clause.unwrap()
+        {
             // Left side should be column reference
             assert!(matches!(**expr, vibesql_ast::Expression::ColumnRef { .. }));
 
             // Pattern should be string literal
-            assert!(matches!(**pattern, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(_))));
+            assert!(matches!(
+                **pattern,
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(_))
+            ));
 
             // Not negated
             assert!(!(*negated));

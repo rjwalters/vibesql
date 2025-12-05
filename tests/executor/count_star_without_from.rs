@@ -64,7 +64,9 @@ fn test_count_star_in_expression_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-18))),
+                left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    -18,
+                ))),
                 op: vibesql_ast::BinaryOperator::Multiply,
                 right: Box::new(vibesql_ast::Expression::AggregateFunction {
                     name: "COUNT".to_string(),
@@ -112,8 +114,10 @@ fn test_complex_expression_without_from() {
     };
 
     // - COUNT(*)
-    let neg_count =
-        vibesql_ast::Expression::UnaryOp { op: vibesql_ast::UnaryOperator::Minus, expr: Box::new(count_star) };
+    let neg_count = vibesql_ast::Expression::UnaryOp {
+        op: vibesql_ast::UnaryOperator::Minus,
+        expr: Box::new(count_star),
+    };
 
     // CAST(NULL AS DECIMAL)
     let cast_null = vibesql_ast::Expression::Cast {
@@ -135,8 +139,10 @@ fn test_complex_expression_without_from() {
     };
 
     // Another unary +
-    let plus_twenty =
-        vibesql_ast::Expression::UnaryOp { op: vibesql_ast::UnaryOperator::Plus, expr: Box::new(twenty) };
+    let plus_twenty = vibesql_ast::Expression::UnaryOp {
+        op: vibesql_ast::UnaryOperator::Plus,
+        expr: Box::new(twenty),
+    };
 
     // (CAST(NULL AS DECIMAL) * - COUNT(*)) / + + 20
     let div = vibesql_ast::Expression::BinaryOp {

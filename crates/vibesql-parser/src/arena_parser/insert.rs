@@ -80,13 +80,8 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = InsertStmt {
-            table_name,
-            columns,
-            source,
-            conflict_clause,
-            on_duplicate_key_update,
-        };
+        let stmt =
+            InsertStmt { table_name, columns, source, conflict_clause, on_duplicate_key_update };
 
         Ok(self.arena.alloc(stmt))
     }

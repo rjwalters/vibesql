@@ -97,10 +97,7 @@ fn test_truncate_multiple_tables() {
 
     match stmt {
         Statement::TruncateTable(truncate_stmt) => {
-            assert_eq!(
-                truncate_stmt.table_names,
-                vec!["ORDERS", "ORDER_ITEMS", "ORDER_HISTORY"]
-            );
+            assert_eq!(truncate_stmt.table_names, vec!["ORDERS", "ORDER_ITEMS", "ORDER_HISTORY"]);
             assert!(!truncate_stmt.if_exists);
         }
         _ => panic!("Expected TruncateTable statement, got {:?}", stmt),
@@ -134,10 +131,7 @@ fn test_truncate_multiple_tables_if_exists() {
 
     match stmt {
         Statement::TruncateTable(truncate_stmt) => {
-            assert_eq!(
-                truncate_stmt.table_names,
-                vec!["TEMP_DATA", "STAGING_DATA", "CACHE_DATA"]
-            );
+            assert_eq!(truncate_stmt.table_names, vec!["TEMP_DATA", "STAGING_DATA", "CACHE_DATA"]);
             assert!(truncate_stmt.if_exists);
         }
         _ => panic!("Expected TruncateTable statement, got {:?}", stmt),
@@ -154,10 +148,7 @@ fn test_truncate_multiple_qualified_tables() {
 
     match stmt {
         Statement::TruncateTable(truncate_stmt) => {
-            assert_eq!(
-                truncate_stmt.table_names,
-                vec!["SCHEMA1.TABLE1", "SCHEMA2.TABLE2"]
-            );
+            assert_eq!(truncate_stmt.table_names, vec!["SCHEMA1.TABLE1", "SCHEMA2.TABLE2"]);
             assert!(!truncate_stmt.if_exists);
         }
         _ => panic!("Expected TruncateTable statement, got {:?}", stmt),

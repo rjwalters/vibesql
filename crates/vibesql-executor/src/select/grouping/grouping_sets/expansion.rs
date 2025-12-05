@@ -66,17 +66,14 @@ pub fn get_base_expressions(clause: &GroupByClause) -> Vec<Expression> {
 /// - ()
 fn expand_rollup(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
     // Flatten elements to expressions for base expressions list
-    let base_exprs: Vec<Expression> =
-        elements.iter().flat_map(element_to_expressions).collect();
+    let base_exprs: Vec<Expression> = elements.iter().flat_map(element_to_expressions).collect();
 
     let mut result = Vec::with_capacity(elements.len() + 1);
 
     // Generate sets from full set down to empty set
     for prefix_len in (0..=elements.len()).rev() {
-        let group_by_exprs: Vec<Expression> = elements[0..prefix_len]
-            .iter()
-            .flat_map(element_to_expressions)
-            .collect();
+        let group_by_exprs: Vec<Expression> =
+            elements[0..prefix_len].iter().flat_map(element_to_expressions).collect();
 
         // Build rolled_up flags - elements beyond prefix_len are rolled up
         let mut rolled_up = Vec::with_capacity(base_exprs.len());
@@ -104,8 +101,7 @@ fn expand_rollup(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
 /// - (b)
 /// - ()
 fn expand_cube(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
-    let base_exprs: Vec<Expression> =
-        elements.iter().flat_map(element_to_expressions).collect();
+    let base_exprs: Vec<Expression> = elements.iter().flat_map(element_to_expressions).collect();
 
     let n = elements.len();
     let num_sets = 1 << n; // 2^n combinations
@@ -139,8 +135,7 @@ fn expand_cube(elements: &[GroupingElement]) -> Vec<ResolvedGroupingSet> {
 /// Expand GROUPING SETS into resolved grouping sets
 fn expand_grouping_sets(sets: &[GroupingSet]) -> Vec<ResolvedGroupingSet> {
     // Find the "universe" of all expressions used across all sets
-    let all_exprs: Vec<Expression> =
-        sets.iter().flat_map(|s| s.columns.clone()).collect();
+    let all_exprs: Vec<Expression> = sets.iter().flat_map(|s| s.columns.clone()).collect();
 
     // Deduplicate while preserving order (use first occurrence)
     let mut base_exprs: Vec<Expression> = Vec::new();
@@ -234,10 +229,7 @@ fn cross_product_grouping_sets(
     expansions: Vec<Vec<ResolvedGroupingSet>>,
 ) -> Vec<ResolvedGroupingSet> {
     if expansions.is_empty() {
-        return vec![ResolvedGroupingSet {
-            group_by_exprs: vec![],
-            rolled_up: vec![],
-        }];
+        return vec![ResolvedGroupingSet { group_by_exprs: vec![], rolled_up: vec![] }];
     }
 
     let mut result = expansions[0].clone();
@@ -313,8 +305,7 @@ mod tests {
 
     #[test]
     fn test_expand_cube() {
-        let elements =
-            vec![GroupingElement::Single(col("a")), GroupingElement::Single(col("b"))];
+        let elements = vec![GroupingElement::Single(col("a")), GroupingElement::Single(col("b"))];
 
         let sets = expand_cube(&elements);
         assert_eq!(sets.len(), 4); // (a,b), (a), (b), ()
@@ -452,10 +443,7 @@ mod tests {
     fn test_expand_mixed_only_simple() {
         // GROUP BY a, b (only simple expressions - but stored as Mixed)
         // Should behave like Simple
-        let items = vec![
-            MixedGroupingItem::Simple(col("a")),
-            MixedGroupingItem::Simple(col("b")),
-        ];
+        let items = vec![MixedGroupingItem::Simple(col("a")), MixedGroupingItem::Simple(col("b"))];
 
         let sets = expand_mixed(&items);
 

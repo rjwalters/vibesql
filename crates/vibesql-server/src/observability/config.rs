@@ -138,10 +138,7 @@ impl Default for OtlpConfig {
 
 impl Default for MetricsConfig {
     fn default() -> Self {
-        Self {
-            enabled: default_true(),
-            export_interval_seconds: default_metrics_interval(),
-        }
+        Self { enabled: default_true(), export_interval_seconds: default_metrics_interval() }
     }
 }
 
@@ -157,10 +154,7 @@ impl Default for TracesConfig {
 
 impl Default for LogsConfig {
     fn default() -> Self {
-        Self {
-            enabled: default_true(),
-            bridge_tracing: default_true(),
-        }
+        Self { enabled: default_true(), bridge_tracing: default_true() }
     }
 }
 

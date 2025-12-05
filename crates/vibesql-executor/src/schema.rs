@@ -104,19 +104,13 @@ pub struct SchemaBuilder {
 impl SchemaBuilder {
     /// Create a new empty schema builder
     pub fn new() -> Self {
-        SchemaBuilder {
-            table_schemas: HashMap::new(),
-            column_offset: 0,
-        }
+        SchemaBuilder { table_schemas: HashMap::new(), column_offset: 0 }
     }
 
     /// Create a schema builder initialized with an existing CombinedSchema
     pub fn from_schema(schema: CombinedSchema) -> Self {
         let column_offset = schema.total_columns;
-        SchemaBuilder {
-            table_schemas: schema.table_schemas,
-            column_offset,
-        }
+        SchemaBuilder { table_schemas: schema.table_schemas, column_offset }
     }
 
     /// Add a table to the schema
@@ -133,10 +127,7 @@ impl SchemaBuilder {
     ///
     /// This consumes the builder and produces the schema in O(1) time
     pub fn build(self) -> CombinedSchema {
-        CombinedSchema {
-            table_schemas: self.table_schemas,
-            total_columns: self.column_offset,
-        }
+        CombinedSchema { table_schemas: self.table_schemas, total_columns: self.column_offset }
     }
 }
 

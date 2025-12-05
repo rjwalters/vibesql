@@ -161,10 +161,10 @@ fn test_parse_varbinary_with_key_constraint() {
                 _ => panic!("Expected VARBINARY user-defined data type"),
             }
             // Also verify the KEY constraint was parsed
-            assert!(create.columns[0].constraints.iter().any(|c| matches!(
-                &c.kind,
-                vibesql_ast::ColumnConstraintKind::Key
-            )));
+            assert!(create.columns[0]
+                .constraints
+                .iter()
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Key)));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

@@ -87,37 +87,22 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
             left: Box::new(bind_expression(left, params)),
             right: Box::new(bind_expression(right, params)),
         },
-        Expression::UnaryOp { op, expr } => Expression::UnaryOp {
-            op: *op,
-            expr: Box::new(bind_expression(expr, params)),
-        },
-        Expression::Between {
-            expr,
-            low,
-            high,
-            negated,
-            symmetric,
-        } => Expression::Between {
+        Expression::UnaryOp { op, expr } => {
+            Expression::UnaryOp { op: *op, expr: Box::new(bind_expression(expr, params)) }
+        }
+        Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
             expr: Box::new(bind_expression(expr, params)),
             low: Box::new(bind_expression(low, params)),
             high: Box::new(bind_expression(high, params)),
             negated: *negated,
             symmetric: *symmetric,
         },
-        Expression::Function {
-            name,
-            args,
-            character_unit,
-        } => Expression::Function {
+        Expression::Function { name, args, character_unit } => Expression::Function {
             name: name.clone(),
             args: args.iter().map(|a| bind_expression(a, params)).collect(),
             character_unit: character_unit.clone(),
         },
-        Expression::AggregateFunction {
-            name,
-            distinct,
-            args,
-        } => Expression::AggregateFunction {
+        Expression::AggregateFunction { name, distinct, args } => Expression::AggregateFunction {
             name: name.clone(),
             distinct: *distinct,
             args: args.iter().map(|a| bind_expression(a, params)).collect(),
@@ -128,7 +113,10 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
 }
 
 /// Bind values to placeholders in a WHERE clause
-fn bind_where_clause(where_clause: &Option<WhereClause>, params: &[SqlValue]) -> Option<WhereClause> {
+fn bind_where_clause(
+    where_clause: &Option<WhereClause>,
+    params: &[SqlValue],
+) -> Option<WhereClause> {
     where_clause.as_ref().map(|wc| match wc {
         WhereClause::Condition(expr) => WhereClause::Condition(bind_expression(expr, params)),
         WhereClause::CurrentOf(cursor) => WhereClause::CurrentOf(cursor.clone()),
@@ -179,7 +167,6 @@ fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
     }
 }
 
-
 // =============================================================================
 // Pre-parsed Query Templates
 // =============================================================================
@@ -211,28 +198,26 @@ impl PreparedQueries {
             _ => panic!("Failed to parse point_select template"),
         };
 
-        let update_index =
-            match Parser::parse_sql("UPDATE sbtest1 SET k = k + 1 WHERE id = ?") {
-                Ok(vibesql_ast::Statement::Update(s)) => s,
-                _ => panic!("Failed to parse update_index template"),
-            };
+        let update_index = match Parser::parse_sql("UPDATE sbtest1 SET k = k + 1 WHERE id = ?") {
+            Ok(vibesql_ast::Statement::Update(s)) => s,
+            _ => panic!("Failed to parse update_index template"),
+        };
 
-        let update_non_index =
-            match Parser::parse_sql("UPDATE sbtest1 SET c = ? WHERE id = ?") {
-                Ok(vibesql_ast::Statement::Update(s)) => s,
-                _ => panic!("Failed to parse update_non_index template"),
-            };
+        let update_non_index = match Parser::parse_sql("UPDATE sbtest1 SET c = ? WHERE id = ?") {
+            Ok(vibesql_ast::Statement::Update(s)) => s,
+            _ => panic!("Failed to parse update_non_index template"),
+        };
 
         let delete = match Parser::parse_sql("DELETE FROM sbtest1 WHERE id = ?") {
             Ok(vibesql_ast::Statement::Delete(s)) => s,
             _ => panic!("Failed to parse delete template"),
         };
 
-        let simple_range =
-            match Parser::parse_sql("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?") {
-                Ok(vibesql_ast::Statement::Select(s)) => *s,
-                _ => panic!("Failed to parse simple_range template"),
-            };
+        let simple_range = match Parser::parse_sql("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
+        {
+            Ok(vibesql_ast::Statement::Select(s)) => *s,
+            _ => panic!("Failed to parse simple_range template"),
+        };
 
         let sum_range =
             match Parser::parse_sql("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?") {
@@ -240,12 +225,11 @@ impl PreparedQueries {
                 _ => panic!("Failed to parse sum_range template"),
             };
 
-        let order_range = match Parser::parse_sql(
-            "SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c",
-        ) {
-            Ok(vibesql_ast::Statement::Select(s)) => *s,
-            _ => panic!("Failed to parse order_range template"),
-        };
+        let order_range =
+            match Parser::parse_sql("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c") {
+                Ok(vibesql_ast::Statement::Select(s)) => *s,
+                _ => panic!("Failed to parse order_range template"),
+            };
 
         let distinct_range = match Parser::parse_sql(
             "SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c",
@@ -495,10 +479,7 @@ impl<'a> SqliteExecutor<'a> {
 #[cfg(feature = "benchmark-comparison")]
 impl<'a> SysbenchExecutor for SqliteExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1")
-            .unwrap();
+        let mut stmt = self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
         let mut rows = stmt.query([id]).unwrap();
         let mut count = 0;
         while rows.next().unwrap().is_some() {
@@ -516,34 +497,24 @@ impl<'a> SysbenchExecutor for SqliteExecutor<'a> {
     }
 
     fn update_index(&mut self, id: i64) {
-        let mut stmt = self
-            .conn
-            .prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1")
-            .unwrap();
+        let mut stmt =
+            self.conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
         let _ = stmt.execute(rusqlite::params![id]);
     }
 
     fn update_non_index(&mut self, id: i64, c: &str) {
-        let mut stmt = self
-            .conn
-            .prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2")
-            .unwrap();
+        let mut stmt = self.conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
         let _ = stmt.execute(rusqlite::params![c, id]);
     }
 
     fn delete(&mut self, id: i64) {
-        let mut stmt = self
-            .conn
-            .prepare_cached("DELETE FROM sbtest1 WHERE id = ?1")
-            .unwrap();
+        let mut stmt = self.conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
         let _ = stmt.execute(rusqlite::params![id]);
     }
 
     fn simple_range(&mut self, start: i64, end: i64) -> usize {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
-            .unwrap();
+        let mut stmt =
+            self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
         let mut rows = stmt.query([start, end]).unwrap();
         let mut count = 0;
         while rows.next().unwrap().is_some() {
@@ -615,10 +586,7 @@ impl<'a> DuckdbExecutor<'a> {
 #[cfg(feature = "benchmark-comparison")]
 impl<'a> SysbenchExecutor for DuckdbExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1")
-            .unwrap();
+        let mut stmt = self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
         let mut rows = stmt.query([id]).unwrap();
         let mut count = 0;
         while rows.next().unwrap().is_some() {
@@ -636,34 +604,24 @@ impl<'a> SysbenchExecutor for DuckdbExecutor<'a> {
     }
 
     fn update_index(&mut self, id: i64) {
-        let mut stmt = self
-            .conn
-            .prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1")
-            .unwrap();
+        let mut stmt =
+            self.conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
         let _ = stmt.execute(duckdb::params![id]);
     }
 
     fn update_non_index(&mut self, id: i64, c: &str) {
-        let mut stmt = self
-            .conn
-            .prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2")
-            .unwrap();
+        let mut stmt = self.conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
         let _ = stmt.execute(duckdb::params![c, id]);
     }
 
     fn delete(&mut self, id: i64) {
-        let mut stmt = self
-            .conn
-            .prepare_cached("DELETE FROM sbtest1 WHERE id = ?1")
-            .unwrap();
+        let mut stmt = self.conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
         let _ = stmt.execute(duckdb::params![id]);
     }
 
     fn simple_range(&mut self, start: i64, end: i64) -> usize {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?")
-            .unwrap();
+        let mut stmt =
+            self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
         let mut rows = stmt.query([start, end]).unwrap();
         let mut count = 0;
         while rows.next().unwrap().is_some() {
@@ -735,56 +693,39 @@ impl<'a> MysqlExecutor<'a> {
 #[cfg(feature = "benchmark-comparison")]
 impl<'a> SysbenchExecutor for MysqlExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
-        let result: Vec<mysql::Row> = self
-            .conn
-            .exec("SELECT c FROM sbtest1 WHERE id = ?", (id,))
-            .unwrap();
+        let result: Vec<mysql::Row> =
+            self.conn.exec("SELECT c FROM sbtest1 WHERE id = ?", (id,)).unwrap();
         result.len()
     }
 
     fn insert(&mut self, id: i64, k: i64, c: &str, pad: &str) {
-        let _ = self.conn.exec_drop(
-            "INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)",
-            (id, k, c, pad),
-        );
+        let _ = self
+            .conn
+            .exec_drop("INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)", (id, k, c, pad));
     }
 
     fn update_index(&mut self, id: i64) {
-        let _ = self
-            .conn
-            .exec_drop("UPDATE sbtest1 SET k = k + 1 WHERE id = ?", (id,));
+        let _ = self.conn.exec_drop("UPDATE sbtest1 SET k = k + 1 WHERE id = ?", (id,));
     }
 
     fn update_non_index(&mut self, id: i64, c: &str) {
-        let _ = self
-            .conn
-            .exec_drop("UPDATE sbtest1 SET c = ? WHERE id = ?", (c, id));
+        let _ = self.conn.exec_drop("UPDATE sbtest1 SET c = ? WHERE id = ?", (c, id));
     }
 
     fn delete(&mut self, id: i64) {
-        let _ = self
-            .conn
-            .exec_drop("DELETE FROM sbtest1 WHERE id = ?", (id,));
+        let _ = self.conn.exec_drop("DELETE FROM sbtest1 WHERE id = ?", (id,));
     }
 
     fn simple_range(&mut self, start: i64, end: i64) -> usize {
-        let result: Vec<mysql::Row> = self
-            .conn
-            .exec(
-                "SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?",
-                (start, end),
-            )
-            .unwrap();
+        let result: Vec<mysql::Row> =
+            self.conn.exec("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?", (start, end)).unwrap();
         result.len()
     }
 
     fn sum_range(&mut self, start: i64, end: i64) -> usize {
         let result: Vec<mysql::Row> = self
             .conn
-            .exec(
-                "SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?",
-                (start, end),
-            )
+            .exec("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?", (start, end))
             .unwrap();
         result.len()
     }
@@ -792,10 +733,7 @@ impl<'a> SysbenchExecutor for MysqlExecutor<'a> {
     fn order_range(&mut self, start: i64, end: i64) -> usize {
         let result: Vec<mysql::Row> = self
             .conn
-            .exec(
-                "SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c",
-                (start, end),
-            )
+            .exec("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c", (start, end))
             .unwrap();
         result.len()
     }
@@ -848,11 +786,8 @@ fn run_point_select_benchmark<E: SysbenchExecutor>(
         operations += 1;
     }
 
-    let avg_latency_us = if operations > 0 {
-        total_time_us as f64 / operations as f64
-    } else {
-        0.0
-    };
+    let avg_latency_us =
+        if operations > 0 { total_time_us as f64 / operations as f64 } else { 0.0 };
     let ops_per_second = if total_time_us > 0 {
         operations as f64 / (total_time_us as f64 / 1_000_000.0)
     } else {
@@ -905,11 +840,8 @@ fn run_insert_benchmark<E: SysbenchExecutor>(
         operations += 1;
     }
 
-    let avg_latency_us = if operations > 0 {
-        total_time_us as f64 / operations as f64
-    } else {
-        0.0
-    };
+    let avg_latency_us =
+        if operations > 0 { total_time_us as f64 / operations as f64 } else { 0.0 };
     let ops_per_second = if total_time_us > 0 {
         operations as f64 / (total_time_us as f64 / 1_000_000.0)
     } else {
@@ -955,11 +887,8 @@ fn run_update_index_benchmark<E: SysbenchExecutor>(
         operations += 1;
     }
 
-    let avg_latency_us = if operations > 0 {
-        total_time_us as f64 / operations as f64
-    } else {
-        0.0
-    };
+    let avg_latency_us =
+        if operations > 0 { total_time_us as f64 / operations as f64 } else { 0.0 };
     let ops_per_second = if total_time_us > 0 {
         operations as f64 / (total_time_us as f64 / 1_000_000.0)
     } else {
@@ -1007,11 +936,8 @@ fn run_update_non_index_benchmark<E: SysbenchExecutor>(
         operations += 1;
     }
 
-    let avg_latency_us = if operations > 0 {
-        total_time_us as f64 / operations as f64
-    } else {
-        0.0
-    };
+    let avg_latency_us =
+        if operations > 0 { total_time_us as f64 / operations as f64 } else { 0.0 };
     let ops_per_second = if total_time_us > 0 {
         operations as f64 / (total_time_us as f64 / 1_000_000.0)
     } else {
@@ -1060,11 +986,8 @@ fn run_delete_benchmark<E: SysbenchExecutor>(
         operations += 1;
     }
 
-    let avg_latency_us = if operations > 0 {
-        total_time_us as f64 / operations as f64
-    } else {
-        0.0
-    };
+    let avg_latency_us =
+        if operations > 0 { total_time_us as f64 / operations as f64 } else { 0.0 };
     let ops_per_second = if total_time_us > 0 {
         operations as f64 / (total_time_us as f64 / 1_000_000.0)
     } else {
@@ -1116,11 +1039,8 @@ fn run_range_benchmark<E: SysbenchExecutor>(
         operations += 4; // 4 range queries per iteration
     }
 
-    let avg_latency_us = if operations > 0 {
-        total_time_us as f64 / operations as f64
-    } else {
-        0.0
-    };
+    let avg_latency_us =
+        if operations > 0 { total_time_us as f64 / operations as f64 } else { 0.0 };
     let ops_per_second = if total_time_us > 0 {
         operations as f64 / (total_time_us as f64 / 1_000_000.0)
     } else {
@@ -1138,10 +1058,7 @@ fn run_range_benchmark<E: SysbenchExecutor>(
 
 fn print_results(results: &[WorkloadResults], db_name: &str) {
     eprintln!("\n--- {} Results ---", db_name);
-    eprintln!(
-        "{:<20} {:>12} {:>15} {:>12}",
-        "Workload", "Operations", "Avg Latency", "Ops/sec"
-    );
+    eprintln!("{:<20} {:>12} {:>15} {:>12}", "Workload", "Operations", "Avg Latency", "Ops/sec");
     eprintln!("{:-<20} {:->12} {:->15} {:->12}", "", "", "", "");
 
     for result in results {
@@ -1206,14 +1123,8 @@ fn main() {
         eprintln!("\nExamples:");
         eprintln!("  {}                           # Run all workloads", args[0]);
         eprintln!("  {} point-select              # Run only point selects", args[0]);
-        eprintln!(
-            "  SYSBENCH_TABLE_SIZE=50000 {}  # Run with 50k rows",
-            args[0]
-        );
-        eprintln!(
-            "  MYSQL_URL=mysql://user:pass@localhost/sysbench {}",
-            args[0]
-        );
+        eprintln!("  SYSBENCH_TABLE_SIZE=50000 {}  # Run with 50k rows", args[0]);
+        eprintln!("  MYSQL_URL=mysql://user:pass@localhost/sysbench {}", args[0]);
         std::process::exit(0);
     }
 
@@ -1223,15 +1134,11 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_TABLE_SIZE);
 
-    let duration_secs: u64 = env::var("SYSBENCH_DURATION_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(30);
+    let duration_secs: u64 =
+        env::var("SYSBENCH_DURATION_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
 
-    let warmup_secs: u64 = env::var("SYSBENCH_WARMUP_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(5);
+    let warmup_secs: u64 =
+        env::var("SYSBENCH_WARMUP_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
 
     let duration = Duration::from_secs(duration_secs);
     let warmup = Duration::from_secs(warmup_secs);
@@ -1241,10 +1148,7 @@ fn main() {
         match WorkloadType::from_str(&args[1]) {
             Some(t) => t,
             None => {
-                eprintln!(
-                    "Error: Unknown workload type '{}'. Run with --help for usage.",
-                    args[1]
-                );
+                eprintln!("Error: Unknown workload type '{}'. Run with --help for usage.", args[1]);
                 std::process::exit(1);
             }
         }
@@ -1279,8 +1183,12 @@ fn main() {
 
         match workload_type {
             WorkloadType::PointSelect => {
-                vibesql_results
-                    .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
+                vibesql_results.push(run_point_select_benchmark(
+                    &mut executor,
+                    table_size,
+                    duration,
+                    warmup,
+                ));
             }
             WorkloadType::Insert => {
                 vibesql_results.push(run_insert_benchmark(
@@ -1315,12 +1223,20 @@ fn main() {
                 ));
             }
             WorkloadType::Range => {
-                vibesql_results
-                    .push(run_range_benchmark(&mut executor, table_size, duration, warmup));
+                vibesql_results.push(run_range_benchmark(
+                    &mut executor,
+                    table_size,
+                    duration,
+                    warmup,
+                ));
             }
             WorkloadType::All => {
-                vibesql_results
-                    .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
+                vibesql_results.push(run_point_select_benchmark(
+                    &mut executor,
+                    table_size,
+                    duration,
+                    warmup,
+                ));
                 // Reload for insert benchmark (needs fresh DB)
                 let mut db2 = load_vibesql(table_size);
                 let mut executor2 = VibesqlExecutor::new(&mut db2, &queries);
@@ -1360,8 +1276,12 @@ fn main() {
                 // Reload for range benchmark
                 let mut db5 = load_vibesql(table_size);
                 let mut executor5 = VibesqlExecutor::new(&mut db5, &queries);
-                vibesql_results
-                    .push(run_range_benchmark(&mut executor5, table_size, duration, warmup));
+                vibesql_results.push(run_range_benchmark(
+                    &mut executor5,
+                    table_size,
+                    duration,
+                    warmup,
+                ));
             }
         }
     }
@@ -1385,8 +1305,12 @@ fn main() {
 
             match workload_type {
                 WorkloadType::PointSelect => {
-                    sqlite_results
-                        .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
+                    sqlite_results.push(run_point_select_benchmark(
+                        &mut executor,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                 }
                 WorkloadType::Insert => {
                     sqlite_results.push(run_insert_benchmark(
@@ -1421,12 +1345,20 @@ fn main() {
                     ));
                 }
                 WorkloadType::Range => {
-                    sqlite_results
-                        .push(run_range_benchmark(&mut executor, table_size, duration, warmup));
+                    sqlite_results.push(run_range_benchmark(
+                        &mut executor,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                 }
                 WorkloadType::All => {
-                    sqlite_results
-                        .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
+                    sqlite_results.push(run_point_select_benchmark(
+                        &mut executor,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                     drop(executor);
                     let conn2 = load_sqlite(table_size);
                     let mut executor2 = SqliteExecutor::new(&conn2);
@@ -1463,8 +1395,12 @@ fn main() {
 
                     let conn5 = load_sqlite(table_size);
                     let mut executor5 = SqliteExecutor::new(&conn5);
-                    sqlite_results
-                        .push(run_range_benchmark(&mut executor5, table_size, duration, warmup));
+                    sqlite_results.push(run_range_benchmark(
+                        &mut executor5,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                 }
             }
         }
@@ -1483,8 +1419,12 @@ fn main() {
 
             match workload_type {
                 WorkloadType::PointSelect => {
-                    duckdb_results
-                        .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
+                    duckdb_results.push(run_point_select_benchmark(
+                        &mut executor,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                 }
                 WorkloadType::Insert => {
                     duckdb_results.push(run_insert_benchmark(
@@ -1519,12 +1459,20 @@ fn main() {
                     ));
                 }
                 WorkloadType::Range => {
-                    duckdb_results
-                        .push(run_range_benchmark(&mut executor, table_size, duration, warmup));
+                    duckdb_results.push(run_range_benchmark(
+                        &mut executor,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                 }
                 WorkloadType::All => {
-                    duckdb_results
-                        .push(run_point_select_benchmark(&mut executor, table_size, duration, warmup));
+                    duckdb_results.push(run_point_select_benchmark(
+                        &mut executor,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                     drop(executor);
                     let conn2 = load_duckdb(table_size);
                     let mut executor2 = DuckdbExecutor::new(&conn2);
@@ -1561,8 +1509,12 @@ fn main() {
 
                     let conn5 = load_duckdb(table_size);
                     let mut executor5 = DuckdbExecutor::new(&conn5);
-                    duckdb_results
-                        .push(run_range_benchmark(&mut executor5, table_size, duration, warmup));
+                    duckdb_results.push(run_range_benchmark(
+                        &mut executor5,
+                        table_size,
+                        duration,
+                        warmup,
+                    ));
                 }
             }
         }
@@ -1619,8 +1571,12 @@ fn main() {
                         ));
                     }
                     WorkloadType::Range => {
-                        mysql_results
-                            .push(run_range_benchmark(&mut executor, table_size, duration, warmup));
+                        mysql_results.push(run_range_benchmark(
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                        ));
                     }
                     WorkloadType::All => {
                         mysql_results.push(run_point_select_benchmark(

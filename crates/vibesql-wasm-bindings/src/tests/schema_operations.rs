@@ -36,7 +36,8 @@ fn test_execute_drop_table() {
     let stmt = vibesql_parser::Parser::parse_sql(drop_sql).expect("Parse failed");
     match stmt {
         vibesql_ast::Statement::DropTable(drop_stmt) => {
-            vibesql_executor::DropTableExecutor::execute(&drop_stmt, &mut db).expect("Drop table failed");
+            vibesql_executor::DropTableExecutor::execute(&drop_stmt, &mut db)
+                .expect("Drop table failed");
         }
         _ => panic!("Expected DropTable statement"),
     }
@@ -58,8 +59,8 @@ fn test_execute_insert() {
     let stmt = vibesql_parser::Parser::parse_sql(insert_sql).expect("Parse failed");
     match stmt {
         vibesql_ast::Statement::Insert(insert_stmt) => {
-            let row_count =
-                vibesql_executor::InsertExecutor::execute(&mut db, &insert_stmt).expect("Insert failed");
+            let row_count = vibesql_executor::InsertExecutor::execute(&mut db, &insert_stmt)
+                .expect("Insert failed");
             assert_eq!(row_count, 1);
         }
         _ => panic!("Expected Insert statement"),
@@ -157,4 +158,3 @@ fn test_execute_sequences() {
         _ => panic!("Expected DropSequence statement"),
     }
 }
-

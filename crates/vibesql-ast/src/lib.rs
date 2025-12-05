@@ -48,15 +48,14 @@ pub use ddl::{
     DropSchemaStmt, DropSequenceStmt, DropTableStmt, DropTranslationStmt, DropTriggerStmt,
     DropTypeStmt, DropViewStmt, ExecuteStmt, FetchOrientation, FetchStmt, FunctionParameter,
     IndexColumn, IndexType, InsertMethod, IsolationLevel, ModifyColumnStmt, OpenCursorStmt,
-    VectorDistanceMetric,
-    ParameterMode, PrepareStmt, PreparedStatementBody, ProcedureBody, ProcedureParameter,
-    ProceduralStatement, ReferentialAction, ReindexStmt, ReleaseSavepointStmt, RenameTableStmt,
+    ParameterMode, PrepareStmt, PreparedStatementBody, ProceduralStatement, ProcedureBody,
+    ProcedureParameter, ReferentialAction, ReindexStmt, ReleaseSavepointStmt, RenameTableStmt,
     RollbackStmt, RollbackToSavepointStmt, RowFormat, SavepointStmt, ScheduleAfterStmt,
     ScheduleAtStmt, SchemaElement, SetCatalogStmt, SetNamesStmt, SetSchemaStmt, SetTimeZoneStmt,
     SetTransactionStmt, SetVariableStmt, SqlSecurity, StorageFormat, TableConstraint,
     TableConstraintKind, TableOption, TimeZoneSpec, TransactionAccessMode, TriggerAction,
     TriggerEvent, TriggerGranularity, TriggerTiming, TruncateCascadeOption, TruncateTableStmt,
-    TypeAttribute, TypeDefinition, VariableScope,
+    TypeAttribute, TypeDefinition, VariableScope, VectorDistanceMetric,
 };
 pub use dml::{
     Assignment, ConflictClause, DeleteStmt, InsertSource, InsertStmt, UpdateStmt, WhereClause,

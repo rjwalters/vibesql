@@ -113,8 +113,10 @@ fn test_rollup_two_columns() {
     let db = setup_db();
 
     // ROLLUP(year, quarter) produces: (year, quarter), (year), ()
-    let rows =
-        execute_query(&db, "SELECT year, quarter, SUM(amount) FROM sales GROUP BY ROLLUP(year, quarter)");
+    let rows = execute_query(
+        &db,
+        "SELECT year, quarter, SUM(amount) FROM sales GROUP BY ROLLUP(year, quarter)",
+    );
 
     // Should have 6 rows:
     // 2023 Q1, 2023 Q2, 2023 total, 2024 Q1, 2024 total, grand total
@@ -126,9 +128,8 @@ fn test_rollup_two_columns() {
     assert_eq!(get_i64(&grand_total_row.unwrap().values[2]), 890);
 
     // Verify 2023 subtotal
-    let subtotal_2023 = rows
-        .iter()
-        .find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
+    let subtotal_2023 =
+        rows.iter().find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
     assert!(subtotal_2023.is_some(), "Missing 2023 subtotal row");
     assert_eq!(get_i64(&subtotal_2023.unwrap().values[2]), 570);
 }
@@ -152,22 +153,21 @@ fn test_cube_two_columns() {
     let db = setup_db();
 
     // CUBE(year, quarter) produces: (year, quarter), (year), (quarter), ()
-    let rows = execute_query(&db, "SELECT year, quarter, SUM(amount) FROM sales GROUP BY CUBE(year, quarter)");
+    let rows = execute_query(
+        &db,
+        "SELECT year, quarter, SUM(amount) FROM sales GROUP BY CUBE(year, quarter)",
+    );
 
     // Should have 8 rows:
     // 2023 Q1, 2023 Q2, 2024 Q1, (2023, NULL), (2024, NULL), (NULL, Q1), (NULL, Q2), (NULL, NULL)
     assert_eq!(rows.len(), 8);
 
     // Verify quarter-only subtotals exist (distinguishes CUBE from ROLLUP)
-    let q1_subtotal = rows
-        .iter()
-        .find(|r| is_null(&r.values[0]) && get_i64(&r.values[1]) == 1);
+    let q1_subtotal = rows.iter().find(|r| is_null(&r.values[0]) && get_i64(&r.values[1]) == 1);
     assert!(q1_subtotal.is_some(), "Missing Q1-only subtotal (CUBE feature)");
     assert_eq!(get_i64(&q1_subtotal.unwrap().values[2]), 570); // 2023Q1 + 2024Q1 = 250 + 320 = 570
 
-    let q2_subtotal = rows
-        .iter()
-        .find(|r| is_null(&r.values[0]) && get_i64(&r.values[1]) == 2);
+    let q2_subtotal = rows.iter().find(|r| is_null(&r.values[0]) && get_i64(&r.values[1]) == 2);
     assert!(q2_subtotal.is_some(), "Missing Q2-only subtotal (CUBE feature)");
     assert_eq!(get_i64(&q2_subtotal.unwrap().values[2]), 320); // 2023Q2 only
 }
@@ -224,8 +224,10 @@ fn test_grouping_function_with_rollup() {
     let db = setup_db();
 
     // GROUPING() returns 1 if column is aggregated (NULL from ROLLUP), 0 otherwise
-    let rows =
-        execute_query(&db, "SELECT year, GROUPING(year), SUM(amount) FROM sales GROUP BY ROLLUP(year)");
+    let rows = execute_query(
+        &db,
+        "SELECT year, GROUPING(year), SUM(amount) FROM sales GROUP BY ROLLUP(year)",
+    );
 
     assert_eq!(rows.len(), 3);
 
@@ -253,25 +255,20 @@ fn test_grouping_function_multiple_columns() {
     assert_eq!(rows.len(), 6);
 
     // Grand total: GROUPING(year)=1, GROUPING(quarter)=1
-    let grand_total = rows
-        .iter()
-        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
+    let grand_total = rows.iter().find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
     assert!(grand_total.is_some());
     assert_eq!(get_i64(&grand_total.unwrap().values[2]), 1); // GROUPING(year)
     assert_eq!(get_i64(&grand_total.unwrap().values[3]), 1); // GROUPING(quarter)
 
     // Year subtotal: GROUPING(year)=0, GROUPING(quarter)=1
-    let year_subtotal = rows
-        .iter()
-        .find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
+    let year_subtotal =
+        rows.iter().find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
     assert!(year_subtotal.is_some());
     assert_eq!(get_i64(&year_subtotal.unwrap().values[2]), 0); // GROUPING(year)
     assert_eq!(get_i64(&year_subtotal.unwrap().values[3]), 1); // GROUPING(quarter)
 
     // Detail row: GROUPING(year)=0, GROUPING(quarter)=0
-    let detail = rows
-        .iter()
-        .find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
+    let detail = rows.iter().find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
     assert!(detail.is_some());
     assert_eq!(get_i64(&detail.unwrap().values[2]), 0); // GROUPING(year)
     assert_eq!(get_i64(&detail.unwrap().values[3]), 0); // GROUPING(quarter)
@@ -369,23 +366,18 @@ fn test_grouping_id_with_rollup_two_columns() {
     assert_eq!(rows.len(), 6);
 
     // Grand total: GROUPING_ID = 3 (binary 11)
-    let grand_total = rows
-        .iter()
-        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
+    let grand_total = rows.iter().find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
     assert!(grand_total.is_some());
     assert_eq!(get_i64(&grand_total.unwrap().values[2]), 3); // GROUPING_ID(year, quarter) = 3
 
     // Year subtotal: GROUPING_ID = 1 (binary 01)
-    let year_subtotal = rows
-        .iter()
-        .find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
+    let year_subtotal =
+        rows.iter().find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
     assert!(year_subtotal.is_some());
     assert_eq!(get_i64(&year_subtotal.unwrap().values[2]), 1); // GROUPING_ID(year, quarter) = 1
 
     // Detail row: GROUPING_ID = 0 (binary 00)
-    let detail = rows
-        .iter()
-        .find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
+    let detail = rows.iter().find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
     assert!(detail.is_some());
     assert_eq!(get_i64(&detail.unwrap().values[2]), 0); // GROUPING_ID(year, quarter) = 0
 }
@@ -411,16 +403,16 @@ fn test_grouping_id_with_cube_three_columns() {
     assert_eq!(get_i64(&grand_total.unwrap().values[3]), 7); // All rolled up
 
     // region-only subtotal: GROUPING_ID = 6 (binary 110) - year and quarter rolled up
-    let region_only = rows.iter().find(|r| {
-        is_null(&r.values[0]) && is_null(&r.values[1]) && !is_null(&r.values[2])
-    });
+    let region_only = rows
+        .iter()
+        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]) && !is_null(&r.values[2]));
     assert!(region_only.is_some());
     assert_eq!(get_i64(&region_only.unwrap().values[3]), 6);
 
     // Detail row: GROUPING_ID = 0 (binary 000)
-    let detail = rows.iter().find(|r| {
-        !is_null(&r.values[0]) && !is_null(&r.values[1]) && !is_null(&r.values[2])
-    });
+    let detail = rows
+        .iter()
+        .find(|r| !is_null(&r.values[0]) && !is_null(&r.values[1]) && !is_null(&r.values[2]));
     assert!(detail.is_some());
     assert_eq!(get_i64(&detail.unwrap().values[3]), 0);
 }
@@ -463,23 +455,17 @@ fn test_grouping_id_with_grouping_sets() {
 
     // Verify GROUPING_ID values match the grouping sets
     // Grand total (): GROUPING_ID = 3
-    let grand_total = rows
-        .iter()
-        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
+    let grand_total = rows.iter().find(|r| is_null(&r.values[0]) && is_null(&r.values[1]));
     assert!(grand_total.is_some());
     assert_eq!(get_i64(&grand_total.unwrap().values[2]), 3);
 
     // Year only (year): GROUPING_ID = 1
-    let year_only = rows
-        .iter()
-        .find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
+    let year_only = rows.iter().find(|r| get_i64(&r.values[0]) == 2023 && is_null(&r.values[1]));
     assert!(year_only.is_some());
     assert_eq!(get_i64(&year_only.unwrap().values[2]), 1);
 
     // Detail (year, quarter): GROUPING_ID = 0
-    let detail = rows
-        .iter()
-        .find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
+    let detail = rows.iter().find(|r| get_i64(&r.values[0]) == 2023 && get_i64(&r.values[1]) == 1);
     assert!(detail.is_some());
     assert_eq!(get_i64(&detail.unwrap().values[2]), 0);
 }
@@ -498,16 +484,16 @@ fn test_grouping_id_subset_of_groupby_columns() {
     // Find the row where only year is present (quarter and region are rolled up)
     // GROUPING_ID(year, region) for this row should be:
     // year present (0), region rolled up (1) = binary 01 = 1
-    let year_only = rows.iter().find(|r| {
-        !is_null(&r.values[0]) && is_null(&r.values[1]) && is_null(&r.values[2])
-    });
+    let year_only = rows
+        .iter()
+        .find(|r| !is_null(&r.values[0]) && is_null(&r.values[1]) && is_null(&r.values[2]));
     assert!(year_only.is_some());
     assert_eq!(get_i64(&year_only.unwrap().values[3]), 1);
 
     // Grand total: GROUPING_ID(year, region) = 3 (both rolled up)
-    let grand_total = rows.iter().find(|r| {
-        is_null(&r.values[0]) && is_null(&r.values[1]) && is_null(&r.values[2])
-    });
+    let grand_total = rows
+        .iter()
+        .find(|r| is_null(&r.values[0]) && is_null(&r.values[1]) && is_null(&r.values[2]));
     assert!(grand_total.is_some());
     assert_eq!(get_i64(&grand_total.unwrap().values[3]), 3);
 }

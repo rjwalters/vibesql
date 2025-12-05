@@ -8,10 +8,10 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use std::hint::black_box;
 use vibesql_ast::Statement;
+use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::{CreateIndexExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
-use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::{DataType, SqlValue};
 
 /// Parse a SELECT statement from SQL
@@ -165,10 +165,8 @@ fn create_test_db_with_10k_points() -> Database {
 
         let wkt = format!("POINT({} {})", x, y);
 
-        let row = vibesql_storage::Row::new(vec![
-            SqlValue::Integer(i as i64),
-            SqlValue::Varchar(wkt),
-        ]);
+        let row =
+            vibesql_storage::Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Varchar(wkt)]);
         db.insert_row("POINTS_OF_INTEREST", row).unwrap();
     }
 
@@ -180,7 +178,8 @@ fn bench_point_in_polygon_10k(c: &mut Criterion) {
     let mut group = c.benchmark_group("point_in_polygon_10k");
 
     // Test point at (505, 505) - should be in polygon at grid position (50, 50)
-    let query = "SELECT id FROM parcels WHERE ST_Contains(boundary, ST_GeomFromText('POINT(505 505)'))";
+    let query =
+        "SELECT id FROM parcels WHERE ST_Contains(boundary, ST_GeomFromText('POINT(505 505)'))";
 
     // Benchmark WITHOUT index
     {
@@ -343,7 +342,6 @@ criterion_main!(benches);
 
 #[cfg(test)]
 mod correctness_tests {
-    
 
     /// Verify that spatial index returns same results as full scan for point-in-polygon
     #[test]

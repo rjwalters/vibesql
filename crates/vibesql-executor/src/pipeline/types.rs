@@ -105,10 +105,7 @@ impl<'a> PipelineInput<'a> {
     /// Create native columnar input.
     #[inline]
     pub fn native_columnar(table_name: String, column_indices: Vec<usize>) -> Self {
-        PipelineInput::NativeColumnar {
-            table_name,
-            column_indices,
-        }
+        PipelineInput::NativeColumnar { table_name, column_indices }
     }
 
     /// Convert to owned rows, consuming the input.
@@ -160,7 +157,7 @@ impl<'a> PipelineInput<'a> {
             PipelineInput::RowsOwned(rows) => rows.is_empty(),
             PipelineInput::Batch(batch) => batch.row_count() == 0,
             PipelineInput::NativeColumnar { .. } => false, // Assume non-empty
-            PipelineInput::Empty => false, // Empty input has one implicit row
+            PipelineInput::Empty => false,                 // Empty input has one implicit row
         }
     }
 
@@ -233,8 +230,7 @@ impl<'a> PipelineInput<'a> {
 /// let output = PipelineOutput::from_batch(batch);
 /// let rows = output.into_rows(); // Materializes batch to rows
 /// ```
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub enum PipelineOutput {
     /// Row-based output (traditional format)
     Rows(Vec<Row>),
@@ -361,7 +357,6 @@ impl PipelineOutput {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

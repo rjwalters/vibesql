@@ -5,9 +5,9 @@
 //! - `triggers`: Trigger validation and coordination
 //! - `constraints`: Constraint and foreign key validation
 
+pub mod constraints;
 pub mod core;
 pub mod triggers;
-pub mod constraints;
 
 use vibesql_ast::TruncateTableStmt;
 use vibesql_storage::Database;
@@ -15,8 +15,8 @@ use vibesql_storage::Database;
 use crate::errors::ExecutorError;
 use crate::privilege_checker::PrivilegeChecker;
 
-use self::core::{execute_truncate, execute_truncate_cascade};
 use self::constraints::validate_truncate_allowed;
+use self::core::{execute_truncate, execute_truncate_cascade};
 
 /// Executor for TRUNCATE TABLE statements
 pub struct TruncateTableExecutor;
@@ -108,7 +108,7 @@ impl TruncateTableExecutor {
 
         // Determine CASCADE behavior - check explicit CASCADE, default to RESTRICT
         let cascade_mode = &stmt.cascade;
-        
+
         match cascade_mode {
             Some(vibesql_ast::TruncateCascadeOption::Cascade) => {
                 // CASCADE mode: recursively truncate dependent tables for each requested table
@@ -136,4 +136,3 @@ impl TruncateTableExecutor {
         }
     }
 }
-

@@ -17,9 +17,7 @@ fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
     };
 
     let executor = SelectExecutor::new(db);
-    executor
-        .execute(&select_stmt)
-        .map_err(|e| format!("Execution error: {:?}", e))
+    executor.execute(&select_stmt).map_err(|e| format!("Execution error: {:?}", e))
 }
 
 fn create_test_table() -> Database {
@@ -94,8 +92,8 @@ fn test_simple_where_clause() {
     let db = create_test_table();
 
     // Simple WHERE clause - baseline test
-    let result = execute_select(&db, "SELECT PK FROM TAB0 WHERE COL0 > 200")
-        .expect("Query should succeed");
+    let result =
+        execute_select(&db, "SELECT PK FROM TAB0 WHERE COL0 > 200").expect("Query should succeed");
 
     assert_eq!(result.len(), 2); // rows 1 and 2
 }
@@ -133,10 +131,7 @@ fn test_deeply_nested_predicates() {
     .expect("Query should succeed");
 
     // Verify we get some results (exact count depends on data)
-    assert!(
-        !result.is_empty(),
-        "Should return at least one row for complex nested query"
-    );
+    assert!(!result.is_empty(), "Should return at least one row for complex nested query");
 }
 
 #[test]
@@ -225,16 +220,8 @@ fn test_deterministic_results() {
     let result2 = execute_select(&db, sql).expect("Second execution should succeed");
     let result3 = execute_select(&db, sql).expect("Third execution should succeed");
 
-    assert_eq!(
-        result1.len(),
-        result2.len(),
-        "Results should be deterministic"
-    );
-    assert_eq!(
-        result1.len(),
-        result3.len(),
-        "Results should be deterministic"
-    );
+    assert_eq!(result1.len(), result2.len(), "Results should be deterministic");
+    assert_eq!(result1.len(), result3.len(), "Results should be deterministic");
 
     // Also check that the actual values match, not just count
     for (r1, r2) in result1.iter().zip(result2.iter()) {

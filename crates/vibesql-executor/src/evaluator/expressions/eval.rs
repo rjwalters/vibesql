@@ -22,7 +22,9 @@ impl ExpressionEvaluator<'_> {
         }
 
         // CSE: Check cache if enabled and expression is deterministic
-        if self.enable_cse && super::super::expression_hash::ExpressionHasher::is_deterministic(expr) {
+        if self.enable_cse
+            && super::super::expression_hash::ExpressionHasher::is_deterministic(expr)
+        {
             let hash = super::super::expression_hash::ExpressionHasher::hash(expr);
 
             // Check cache (get requires mut borrow to update LRU order)

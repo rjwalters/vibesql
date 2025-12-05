@@ -1,9 +1,11 @@
 //! Tests for multiple trigger coordination and execution ordering
 
-use vibesql_ast::{CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+use super::{count_audit_rows, create_audit_table, create_users_table};
+use crate::{CreateTableExecutor, InsertExecutor, SelectExecutor};
+use vibesql_ast::{
+    CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
+};
 use vibesql_storage::Database;
-use crate::{InsertExecutor, SelectExecutor, CreateTableExecutor};
-use super::{create_users_table, create_audit_table, count_audit_rows};
 
 #[test]
 fn test_multiple_triggers_fire_in_order() {
@@ -122,9 +124,9 @@ fn test_before_trigger_executes_first() {
     let init_insert = vibesql_ast::InsertStmt {
         table_name: "COUNTER".to_string(),
         columns: vec!["value".to_string()],
-        source: vibesql_ast::InsertSource::Values(vec![vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0)),
-        ]]),
+        source: vibesql_ast::InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
+            vibesql_types::SqlValue::Integer(0),
+        )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -138,9 +140,7 @@ fn test_before_trigger_executes_first() {
         table_name: "USERS".to_string(),
         granularity: TriggerGranularity::Row,
         when_condition: None,
-        triggered_action: TriggerAction::RawSql(
-            "UPDATE counter SET value = value + 1".to_string(),
-        ),
+        triggered_action: TriggerAction::RawSql("UPDATE counter SET value = value + 1".to_string()),
     };
     crate::advanced_objects::execute_create_trigger(&before_trigger, &mut db)
         .expect("Failed to create before trigger");
@@ -163,15 +163,16 @@ fn test_before_trigger_executes_first() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                column: "value".to_string(),
-                table: None,
-            },
+            expr: vibesql_ast::Expression::ColumnRef { column: "value".to_string(), table: None },
             alias: None,
         }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "COUNTER".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "COUNTER".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -192,7 +193,11 @@ fn test_before_trigger_executes_first() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "USERS".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "USERS".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

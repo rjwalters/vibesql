@@ -3,8 +3,11 @@
 //! This module provides utilities for parallel evaluation of expressions,
 //! including component extraction and reconstruction for thread-safe execution.
 
+use crate::{
+    schema::CombinedSchema,
+    select::{cte::CteResult, WindowFunctionKey},
+};
 use std::collections::HashMap;
-use crate::{schema::CombinedSchema, select::{cte::CteResult, WindowFunctionKey}};
 
 /// Components returned by get_parallel_components for parallel execution
 ///
@@ -20,5 +23,5 @@ pub(super) type ParallelComponents<'a> = (
     Option<&'a CombinedSchema>,
     Option<&'a HashMap<WindowFunctionKey, usize>>,
     Option<&'a HashMap<String, CteResult>>, // cte_context
-    bool, // enable_cse
+    bool,                                   // enable_cse
 );

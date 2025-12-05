@@ -39,10 +39,14 @@ fn test_phase_2_table_local_pushdown() {
     db.create_table(schema).unwrap();
 
     for i in 1..=1000 {
-        db.insert_row("T1", vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Integer(i),
-            vibesql_types::SqlValue::Integer(i * 10),
-        ])).unwrap();
+        db.insert_row(
+            "T1",
+            vibesql_storage::Row::new(vec![
+                vibesql_types::SqlValue::Integer(i),
+                vibesql_types::SqlValue::Integer(i * 10),
+            ]),
+        )
+        .unwrap();
     }
 
     // Query with table-local predicate: a > 990
@@ -81,9 +85,11 @@ fn test_phase_3_equijoin_hash_join() {
         db.create_table(schema).unwrap();
 
         for i in 1..=100 {
-            db.insert_row(&table_name, vibesql_storage::Row::new(vec![
-                vibesql_types::SqlValue::Integer(i),
-            ])).unwrap();
+            db.insert_row(
+                &table_name,
+                vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i)]),
+            )
+            .unwrap();
         }
     }
 
@@ -130,10 +136,14 @@ fn test_phases_2_and_3_combined() {
         db.create_table(schema).unwrap();
 
         for i in 1..=50 {
-            db.insert_row(&table_name, vibesql_storage::Row::new(vec![
-                vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Integer(i * 10),
-            ])).unwrap();
+            db.insert_row(
+                &table_name,
+                vibesql_storage::Row::new(vec![
+                    vibesql_types::SqlValue::Integer(i),
+                    vibesql_types::SqlValue::Integer(i * 10),
+                ]),
+            )
+            .unwrap();
         }
     }
 

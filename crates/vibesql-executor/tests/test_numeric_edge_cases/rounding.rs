@@ -109,10 +109,8 @@ fn test_round_numeric() {
 #[test]
 fn test_round_numeric_with_precision() {
     let (evaluator, row) = create_test_evaluator();
-    let expr = create_function_expr(
-        "ROUND",
-        vec![SqlValue::Numeric(3.14159), SqlValue::Integer(2)],
-    );
+    let expr =
+        create_function_expr("ROUND", vec![SqlValue::Numeric(3.14159), SqlValue::Integer(2)]);
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
         SqlValue::Numeric(n) => {
@@ -125,10 +123,8 @@ fn test_round_numeric_with_precision() {
 #[test]
 fn test_round_numeric_negative_precision() {
     let (evaluator, row) = create_test_evaluator();
-    let expr = create_function_expr(
-        "ROUND",
-        vec![SqlValue::Numeric(123.456), SqlValue::Integer(-1)],
-    );
+    let expr =
+        create_function_expr("ROUND", vec![SqlValue::Numeric(123.456), SqlValue::Integer(-1)]);
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
         SqlValue::Numeric(n) => {
@@ -206,10 +202,8 @@ fn test_truncate_numeric() {
 #[test]
 fn test_truncate_numeric_with_precision() {
     let (evaluator, row) = create_test_evaluator();
-    let expr = create_function_expr(
-        "TRUNCATE",
-        vec![SqlValue::Numeric(3.14159), SqlValue::Integer(2)],
-    );
+    let expr =
+        create_function_expr("TRUNCATE", vec![SqlValue::Numeric(3.14159), SqlValue::Integer(2)]);
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
         SqlValue::Numeric(n) => {

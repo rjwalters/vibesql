@@ -43,7 +43,9 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         // LIKE patterns don't have NULL values in the pattern itself
         ColumnPredicate::Like { .. } => false,
         // IN list may contain NULL values
-        ColumnPredicate::InList { values, .. } => values.iter().any(|v| matches!(v, SqlValue::Null)),
+        ColumnPredicate::InList { values, .. } => {
+            values.iter().any(|v| matches!(v, SqlValue::Null))
+        }
     }
 }
 
@@ -169,12 +171,10 @@ fn evaluate_predicate_simd_packed(
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
     };
 
-    let column = batch
-        .column(column_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-            column_index: column_idx,
-            batch_columns: batch.column_count(),
-        })?;
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
 
     match column {
         // Packed path for i64 columns
@@ -228,12 +228,10 @@ fn evaluate_predicate_simd(
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
     };
 
-    let column = batch
-        .column(column_idx)
-        .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-            column_index: column_idx,
-            batch_columns: batch.column_count(),
-        })?;
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
 
     match column {
         // SIMD path for i64 columns
@@ -315,10 +313,8 @@ mod tests {
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
 
         // Filter: column_0 < 18
-        let predicates = vec![ColumnPredicate::LessThan {
-            column_idx: 0,
-            value: SqlValue::Integer(18),
-        }];
+        let predicates =
+            vec![ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(18) }];
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
 
@@ -371,14 +367,8 @@ mod tests {
 
         // Filter: column_0 > 10 AND column_1 < 0.07
         let predicates = vec![
-            ColumnPredicate::GreaterThan {
-                column_idx: 0,
-                value: SqlValue::Integer(10),
-            },
-            ColumnPredicate::LessThan {
-                column_idx: 1,
-                value: SqlValue::Double(0.07),
-            },
+            ColumnPredicate::GreaterThan { column_idx: 0, value: SqlValue::Integer(10) },
+            ColumnPredicate::LessThan { column_idx: 1, value: SqlValue::Double(0.07) },
         ];
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
@@ -395,26 +385,10 @@ mod tests {
 
         // Create a batch with date column
         let rows = vec![
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1994,
-                month: 1,
-                day: 1,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1995,
-                month: 6,
-                day: 15,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1996,
-                month: 12,
-                day: 31,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1997,
-                month: 3,
-                day: 10,
-            })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1994, month: 1, day: 1 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1995, month: 6, day: 15 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1996, month: 12, day: 31 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1997, month: 3, day: 10 })]),
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
@@ -422,11 +396,7 @@ mod tests {
         // Filter: date < 1996-01-01
         let predicates = vec![ColumnPredicate::LessThan {
             column_idx: 0,
-            value: SqlValue::Date(Date {
-                year: 1996,
-                month: 1,
-                day: 1,
-            }),
+            value: SqlValue::Date(Date { year: 1996, month: 1, day: 1 }),
         }];
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
@@ -441,26 +411,10 @@ mod tests {
 
         // Create a batch with date column
         let rows = vec![
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1994,
-                month: 1,
-                day: 1,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1995,
-                month: 6,
-                day: 15,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1996,
-                month: 12,
-                day: 31,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1997,
-                month: 3,
-                day: 10,
-            })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1994, month: 1, day: 1 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1995, month: 6, day: 15 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1996, month: 12, day: 31 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1997, month: 3, day: 10 })]),
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
@@ -468,16 +422,8 @@ mod tests {
         // Filter: date BETWEEN 1995-01-01 AND 1996-12-31
         let predicates = vec![ColumnPredicate::Between {
             column_idx: 0,
-            low: SqlValue::Date(Date {
-                year: 1995,
-                month: 1,
-                day: 1,
-            }),
-            high: SqlValue::Date(Date {
-                year: 1996,
-                month: 12,
-                day: 31,
-            }),
+            low: SqlValue::Date(Date { year: 1995, month: 1, day: 1 }),
+            high: SqlValue::Date(Date { year: 1996, month: 12, day: 31 }),
         }];
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
@@ -492,22 +438,10 @@ mod tests {
 
         // Create a batch with date column including NULLs
         let rows = vec![
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1994,
-                month: 1,
-                day: 1,
-            })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1994, month: 1, day: 1 })]),
             Row::new(vec![SqlValue::Null]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1996,
-                month: 12,
-                day: 31,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1997,
-                month: 3,
-                day: 10,
-            })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1996, month: 12, day: 31 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1997, month: 3, day: 10 })]),
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
@@ -515,11 +449,7 @@ mod tests {
         // Filter: date >= 1996-01-01
         let predicates = vec![ColumnPredicate::GreaterThanOrEqual {
             column_idx: 0,
-            value: SqlValue::Date(Date {
-                year: 1996,
-                month: 1,
-                day: 1,
-            }),
+            value: SqlValue::Date(Date { year: 1996, month: 1, day: 1 }),
         }];
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
@@ -534,26 +464,10 @@ mod tests {
 
         // Create a batch with date column
         let rows = vec![
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1994,
-                month: 1,
-                day: 1,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1995,
-                month: 6,
-                day: 15,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1995,
-                month: 6,
-                day: 15,
-            })]),
-            Row::new(vec![SqlValue::Date(Date {
-                year: 1997,
-                month: 3,
-                day: 10,
-            })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1994, month: 1, day: 1 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1995, month: 6, day: 15 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1995, month: 6, day: 15 })]),
+            Row::new(vec![SqlValue::Date(Date { year: 1997, month: 3, day: 10 })]),
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
@@ -561,11 +475,7 @@ mod tests {
         // Filter: date = 1995-06-15
         let predicates = vec![ColumnPredicate::Equal {
             column_idx: 0,
-            value: SqlValue::Date(Date {
-                year: 1995,
-                month: 6,
-                day: 15,
-            }),
+            value: SqlValue::Date(Date { year: 1995, month: 6, day: 15 }),
         }];
 
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
@@ -595,11 +505,7 @@ mod tests {
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
 
         // All 3 rows should pass
-        assert_eq!(
-            filtered.row_count(),
-            3,
-            "All rows should pass BETWEEN 0.02 AND 0.03"
-        );
+        assert_eq!(filtered.row_count(), 3, "All rows should pass BETWEEN 0.02 AND 0.03");
     }
 
     /// Reproduce the exact issue #2857 scenario
@@ -617,29 +523,17 @@ mod tests {
         // (2024-01-20, 1500.0, 0.025)
         let rows = vec![
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 10,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 10 }),
                 SqlValue::Double(1000.0),
                 SqlValue::Double(0.02),
             ]),
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 15,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 15 }),
                 SqlValue::Double(2000.0),
                 SqlValue::Double(0.03),
             ]),
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 20,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 20 }),
                 SqlValue::Double(1500.0),
                 SqlValue::Double(0.025),
             ]),
@@ -654,19 +548,11 @@ mod tests {
         let predicates = vec![
             ColumnPredicate::GreaterThanOrEqual {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 2024, month: 1, day: 1 }),
             },
             ColumnPredicate::LessThan {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 2024,
-                    month: 2,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 2024, month: 2, day: 1 }),
             },
             ColumnPredicate::Between {
                 column_idx: 2,
@@ -680,11 +566,7 @@ mod tests {
         // All 3 rows should pass all predicates:
         // - All dates are in Jan 2024
         // - All fees are in [0.02, 0.03] range
-        assert_eq!(
-            filtered.row_count(),
-            3,
-            "All rows should pass all predicates"
-        );
+        assert_eq!(filtered.row_count(), 3, "All rows should pass all predicates");
     }
 
     /// Test with SqlValue::Numeric predicates (what the parser generates)
@@ -695,29 +577,17 @@ mod tests {
         // Data uses SqlValue::Double (from storage)
         let rows = vec![
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 10,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 10 }),
                 SqlValue::Double(1000.0),
                 SqlValue::Double(0.02), // Data is Double
             ]),
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 15,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 15 }),
                 SqlValue::Double(2000.0),
                 SqlValue::Double(0.03),
             ]),
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 20,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 20 }),
                 SqlValue::Double(1500.0),
                 SqlValue::Double(0.025),
             ]),
@@ -730,19 +600,11 @@ mod tests {
         let predicates = vec![
             ColumnPredicate::GreaterThanOrEqual {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 2024, month: 1, day: 1 }),
             },
             ColumnPredicate::LessThan {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 2024,
-                    month: 2,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 2024, month: 2, day: 1 }),
             },
             ColumnPredicate::Between {
                 column_idx: 2,
@@ -769,39 +631,23 @@ mod tests {
         // Create rows the same way the integration test does
         let rows = vec![
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 10,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 10 }),
                 SqlValue::Double(1000.0),
                 SqlValue::Double(0.02),
             ]),
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 15,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 15 }),
                 SqlValue::Double(2000.0),
                 SqlValue::Double(0.03),
             ]),
             Row::new(vec![
-                SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 20,
-                }),
+                SqlValue::Date(Date { year: 2024, month: 1, day: 20 }),
                 SqlValue::Double(1500.0),
                 SqlValue::Double(0.025),
             ]),
         ];
 
-        let column_names = vec![
-            "TXN_DATE".to_string(),
-            "AMOUNT".to_string(),
-            "FEE".to_string(),
-        ];
+        let column_names = vec!["TXN_DATE".to_string(), "AMOUNT".to_string(), "FEE".to_string()];
         let storage_columnar =
             vibesql_storage::ColumnarTable::from_rows(&rows, &column_names).unwrap();
 
@@ -813,19 +659,11 @@ mod tests {
         let predicates = vec![
             ColumnPredicate::GreaterThanOrEqual {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 2024,
-                    month: 1,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 2024, month: 1, day: 1 }),
             },
             ColumnPredicate::LessThan {
                 column_idx: 0,
-                value: SqlValue::Date(Date {
-                    year: 2024,
-                    month: 2,
-                    day: 1,
-                }),
+                value: SqlValue::Date(Date { year: 2024, month: 2, day: 1 }),
             },
             ColumnPredicate::Between {
                 column_idx: 2,
@@ -837,10 +675,6 @@ mod tests {
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
 
         // All 3 rows should pass all predicates
-        assert_eq!(
-            filtered.row_count(),
-            3,
-            "All rows should pass from_storage_columnar path"
-        );
+        assert_eq!(filtered.row_count(), 3, "All rows should pass from_storage_columnar path");
     }
 }

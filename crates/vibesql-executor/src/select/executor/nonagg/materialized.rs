@@ -9,9 +9,12 @@
 
 #![allow(clippy::ptr_arg)]
 
-use super::{builder::SelectExecutor, simd::try_simd_filter, validation::validate_select_column_references_with_context};
 #[cfg(feature = "spatial")]
 use super::super::index_optimization::try_spatial_index_optimization;
+use super::{
+    builder::SelectExecutor, simd::try_simd_filter,
+    validation::validate_select_column_references_with_context,
+};
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
@@ -50,7 +53,12 @@ impl SelectExecutor<'_> {
         // This ensures proper error messages even when the table is empty
         // Pass procedural context to allow procedure variables in WHERE clause
         // Pass outer_schema for correlated subqueries (#2694)
-        validate_select_column_references_with_context(stmt, &from_result.schema, self.procedural_context, self.outer_schema)?;
+        validate_select_column_references_with_context(
+            stmt,
+            &from_result.schema,
+            self.procedural_context,
+            self.outer_schema,
+        )?;
 
         // Phase D: Use iterator-based execution for simple queries
         // This provides memory efficiency and early termination for LIMIT queries
@@ -87,11 +95,7 @@ impl SelectExecutor<'_> {
 
         // Create evaluator using consolidated ExecutionContext
         // Handles: outer context (subqueries), procedural context, CTE context
-        let cte_ctx = if !cte_results.is_empty() {
-            Some(cte_results)
-        } else {
-            self.cte_context
-        };
+        let cte_ctx = if !cte_results.is_empty() { Some(cte_results) } else { self.cte_context };
 
         let mut ctx = ExecutionContext::new(&schema, self.database);
         if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
@@ -126,17 +130,13 @@ impl SelectExecutor<'_> {
         };
 
         // Evaluate window functions if present
-        let mut window_mapping = self.evaluate_select_windows(
-            stmt,
-            &mut filtered_rows,
-            &evaluator,
-        )?;
+        let mut window_mapping =
+            self.evaluate_select_windows(stmt, &mut filtered_rows, &evaluator)?;
 
         // Evaluate ORDER BY window functions
         if let Some(order_by) = &stmt.order_by {
-            let has_order_by_windows = order_by
-                .iter()
-                .any(|item| expression_has_window_function(&item.expr));
+            let has_order_by_windows =
+                order_by.iter().any(|item| expression_has_window_function(&item.expr));
 
             if has_order_by_windows {
                 let order_by_window_functions = collect_order_by_window_functions(order_by);
@@ -168,13 +168,8 @@ impl SelectExecutor<'_> {
         self.apply_sorting(stmt, &mut result_rows, &sorted_by, &schema, &window_mapping, cte_ctx)?;
 
         // Apply projection strategy
-        let final_rows = self.apply_projection(
-            stmt,
-            result_rows,
-            &schema,
-            &evaluator,
-            &window_mapping,
-        )?;
+        let final_rows =
+            self.apply_projection(stmt, result_rows, &schema, &evaluator, &window_mapping)?;
 
         Ok(final_rows)
     }
@@ -258,8 +253,11 @@ impl SelectExecutor<'_> {
         let has_select_windows = has_window_functions(&stmt.select_list);
 
         if has_select_windows {
-            let (rows_with_windows, mapping) =
-                evaluate_window_functions(std::mem::take(filtered_rows), &stmt.select_list, evaluator)?;
+            let (rows_with_windows, mapping) = evaluate_window_functions(
+                std::mem::take(filtered_rows),
+                &stmt.select_list,
+                evaluator,
+            )?;
             *filtered_rows = rows_with_windows;
             Ok(Some(mapping))
         } else {
@@ -287,7 +285,9 @@ impl SelectExecutor<'_> {
                 let mut ctx = ExecutionContext::new(schema, self.database);
                 if let Some(ref mapping) = window_mapping {
                     ctx = ctx.with_window_mapping(mapping);
-                } else if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+                } else if let (Some(outer_row), Some(outer_schema)) =
+                    (self.outer_row, self.outer_schema)
+                {
                     ctx = ctx.with_outer_context(outer_row, outer_schema);
                 } else if let Some(proc_ctx) = self.procedural_context {
                     ctx = ctx.with_procedural_context(proc_ctx);
@@ -442,10 +442,7 @@ impl SelectExecutor<'_> {
         } else {
             // Fall back to row-by-row projection
             // Use pooled buffer to reduce allocation overhead
-            let mut result = self
-                .database
-                .query_buffer_pool()
-                .get_row_buffer(rows.len());
+            let mut result = self.database.query_buffer_pool().get_row_buffer(rows.len());
 
             for row in rows {
                 // Check timeout during projection
@@ -475,11 +472,8 @@ impl SelectExecutor<'_> {
         };
 
         // Apply DISTINCT if specified
-        let projected_rows = if stmt.distinct {
-            apply_distinct(projected_rows)
-        } else {
-            projected_rows
-        };
+        let projected_rows =
+            if stmt.distinct { apply_distinct(projected_rows) } else { projected_rows };
 
         // Don't apply LIMIT/OFFSET if we have a set operation - it will be applied later
         if stmt.set_operation.is_some() {
@@ -533,9 +527,7 @@ impl SelectExecutor<'_> {
 
         // Return buffer to pool and move data to result
         let result = std::mem::take(&mut final_rows);
-        self.database
-            .query_buffer_pool()
-            .return_row_buffer(final_rows);
+        self.database.query_buffer_pool().return_row_buffer(final_rows);
         Ok(result)
     }
 }

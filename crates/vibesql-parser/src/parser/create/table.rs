@@ -86,8 +86,9 @@ impl Parser {
             let constraints = self.parse_column_constraints()?;
 
             // Determine nullability based on constraints
-            let nullable =
-                !constraints.iter().any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::NotNull));
+            let nullable = !constraints
+                .iter()
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::NotNull));
 
             columns.push(vibesql_ast::ColumnDef {
                 name,

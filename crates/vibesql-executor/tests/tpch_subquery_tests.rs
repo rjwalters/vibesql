@@ -29,8 +29,7 @@ fn execute_tpch_query(db: &Database, sql: &str) -> Result<usize, String> {
 
     if let vibesql_ast::Statement::Select(select) = stmt {
         let executor = SelectExecutor::new(db);
-        let result = executor.execute(&select)
-            .map_err(|e| format!("Execution error: {:?}", e))?;
+        let result = executor.execute(&select).map_err(|e| format!("Execution error: {:?}", e))?;
         Ok(result.len())
     } else {
         Err("Not a SELECT statement".to_string())
@@ -240,7 +239,9 @@ fn test_q18_in_subquery_with_having() {
     // That's correct behavior - not a bug
     if subquery_count == 0 {
         assert_eq!(q18_count, 0, "Q18 should return 0 rows if subquery returns 0");
-        println!("Q18 correctly returns 0 rows because no orders have SUM(l_quantity) > 300 at SF 0.01");
+        println!(
+            "Q18 correctly returns 0 rows because no orders have SUM(l_quantity) > 300 at SF 0.01"
+        );
     } else {
         assert!(q18_count > 0, "Q18 should return rows if subquery found matching orders");
     }

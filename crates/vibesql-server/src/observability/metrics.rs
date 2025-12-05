@@ -125,16 +125,12 @@ impl ServerMetrics {
     /// Record a connection error
     #[allow(dead_code)]
     pub fn record_connection_error(&self, error_type: &str) {
-        self.connection_errors_total.add(
-            1,
-            &[KeyValue::new("error_type", error_type.to_string())],
-        );
+        self.connection_errors_total.add(1, &[KeyValue::new("error_type", error_type.to_string())]);
     }
 
     /// Record connection duration
     pub fn record_connection_duration(&self, duration: Duration) {
-        self.connection_duration
-            .record(duration.as_secs_f64(), &[]);
+        self.connection_duration.record(duration.as_secs_f64(), &[]);
     }
 
     // Query metrics methods
@@ -152,8 +148,7 @@ impl ServerMetrics {
             KeyValue::new("success", success),
         ];
 
-        self.query_duration
-            .record(duration.as_secs_f64(), &attributes);
+        self.query_duration.record(duration.as_secs_f64(), &attributes);
         self.queries_total.add(1, &attributes);
 
         if success {
@@ -184,8 +179,7 @@ impl ServerMetrics {
     /// Record a sent message
     #[allow(dead_code)]
     pub fn record_message_sent(&self, message_type: &str) {
-        self.messages_sent_total
-            .add(1, &[KeyValue::new("message_type", message_type.to_string())]);
+        self.messages_sent_total.add(1, &[KeyValue::new("message_type", message_type.to_string())]);
     }
 
     /// Record bytes received

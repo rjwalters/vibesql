@@ -26,11 +26,7 @@ pub struct CodegenConfig {
 
 impl Default for CodegenConfig {
     fn default() -> Self {
-        CodegenConfig {
-            output: "types.ts".to_string(),
-            include_metadata: true,
-            camel_case: false,
-        }
+        CodegenConfig { output: "types.ts".to_string(), include_metadata: true, camel_case: false }
     }
 }
 
@@ -122,7 +118,7 @@ fn strip_sql_comments(sql: &str) -> String {
         // Handle single-line comments (--)
         if ch == '-' && chars.peek() == Some(&'-') {
             chars.next(); // consume second -
-            // Skip until end of line
+                          // Skip until end of line
             for c in chars.by_ref() {
                 if c == '\n' {
                     result.push('\n'); // Preserve line breaks
@@ -135,7 +131,7 @@ fn strip_sql_comments(sql: &str) -> String {
         // Handle multi-line comments (/* ... */)
         if ch == '/' && chars.peek() == Some(&'*') {
             chars.next(); // consume *
-            // Skip until */
+                          // Skip until */
             while let Some(c) = chars.next() {
                 if c == '*' && chars.peek() == Some(&'/') {
                     chars.next(); // consume /
@@ -215,7 +211,7 @@ fn generate_metadata(schemas: &[&&TableSchema], config: &CodegenConfig) -> Strin
     output.push_str("// Table metadata for runtime use\n");
     output.push_str("export const tables = {\n");
 
-    for (i, schema) in schemas.iter().enumerate() {
+    for schema in schemas.iter() {
         let table_key = if config.camel_case {
             to_camel_case(&schema.name)
         } else {
@@ -242,11 +238,8 @@ fn generate_metadata(schemas: &[&&TableSchema], config: &CodegenConfig) -> Strin
         // Primary key
         if let Some(pk) = &schema.primary_key {
             if pk.len() == 1 {
-                let pk_name = if config.camel_case {
-                    to_camel_case(&pk[0])
-                } else {
-                    pk[0].to_lowercase()
-                };
+                let pk_name =
+                    if config.camel_case { to_camel_case(&pk[0]) } else { pk[0].to_lowercase() };
                 output.push_str(&format!("    primaryKey: '{}',\n", pk_name));
             } else {
                 let pk_names: Vec<String> = pk
@@ -291,11 +284,7 @@ fn generate_metadata(schemas: &[&&TableSchema], config: &CodegenConfig) -> Strin
             .collect();
         output.push_str(&format!("    nullable: [{}],\n", nullable_cols.join(", ")));
 
-        if i < schemas.len() - 1 {
-            output.push_str("  },\n");
-        } else {
-            output.push_str("  },\n");
-        }
+        output.push_str("  },\n");
     }
 
     output.push_str("} as const;\n\n");
@@ -436,7 +425,9 @@ fn to_pascal_case(s: &str) -> String {
         .map(|word| {
             let mut chars = word.chars();
             match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars.flat_map(|c| c.to_lowercase())).collect(),
+                Some(first) => {
+                    first.to_uppercase().chain(chars.flat_map(|c| c.to_lowercase())).collect()
+                }
                 None => String::new(),
             }
         })
@@ -476,10 +467,26 @@ mod tests {
     fn create_test_schema() -> TableSchema {
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(255) }, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
-            ColumnSchema::new("created_at".to_string(), DataType::Timestamp { with_timezone: false }, false),
-            ColumnSchema::new("balance".to_string(), DataType::Decimal { precision: 10, scale: 2 }, true),
+            ColumnSchema::new(
+                "email".to_string(),
+                DataType::Varchar { max_length: Some(255) },
+                false,
+            ),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
+            ColumnSchema::new(
+                "created_at".to_string(),
+                DataType::Timestamp { with_timezone: false },
+                false,
+            ),
+            ColumnSchema::new(
+                "balance".to_string(),
+                DataType::Decimal { precision: 10, scale: 2 },
+                true,
+            ),
             ColumnSchema::new("is_active".to_string(), DataType::Boolean, false),
         ];
         TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()])
@@ -508,7 +515,10 @@ mod tests {
         assert_eq!(sql_type_to_typescript(&DataType::Varchar { max_length: Some(255) }), "string");
         assert_eq!(sql_type_to_typescript(&DataType::Boolean), "boolean");
         assert_eq!(sql_type_to_typescript(&DataType::Timestamp { with_timezone: false }), "Date");
-        assert_eq!(sql_type_to_typescript(&DataType::Decimal { precision: 10, scale: 2 }), "string");
+        assert_eq!(
+            sql_type_to_typescript(&DataType::Decimal { precision: 10, scale: 2 }),
+            "string"
+        );
         assert_eq!(sql_type_to_typescript(&DataType::Vector { dimensions: 128 }), "number[]");
     }
 

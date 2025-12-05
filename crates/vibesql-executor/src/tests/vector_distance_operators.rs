@@ -259,7 +259,11 @@ fn test_dimension_mismatch_error() {
     let err = evaluator.eval(&expr, &row).unwrap_err();
     match err {
         ExecutorError::TypeError(msg) => {
-            assert!(msg.contains("dimension mismatch"), "Expected dimension mismatch error, got: {}", msg);
+            assert!(
+                msg.contains("dimension mismatch"),
+                "Expected dimension mismatch error, got: {}",
+                msg
+            );
         }
         other => panic!("Expected TypeError, got {:?}", other),
     }

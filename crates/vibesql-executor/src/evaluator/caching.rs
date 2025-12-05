@@ -6,10 +6,10 @@
 //!
 //! Caches use LRU eviction and can be configured via environment variables.
 
+use lru::LruCache;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
-use lru::LruCache;
 
 /// Default maximum size for CSE cache (entries)
 /// Can be overridden via CSE_CACHE_SIZE environment variable
@@ -24,9 +24,8 @@ pub(crate) const DEFAULT_SUBQUERY_CACHE_SIZE: usize = 5000;
 /// Check if CSE is enabled via environment variable
 /// Defaults to true, can be disabled by setting CSE_ENABLED=false
 pub(crate) fn is_cse_enabled() -> bool {
-    std::env::var("CSE_ENABLED")
-        .map(|v| v.to_lowercase() != "false" && v != "0")
-        .unwrap_or(true) // Default: enabled
+    std::env::var("CSE_ENABLED").map(|v| v.to_lowercase() != "false" && v != "0").unwrap_or(true)
+    // Default: enabled
 }
 
 /// Get CSE cache size from environment variable

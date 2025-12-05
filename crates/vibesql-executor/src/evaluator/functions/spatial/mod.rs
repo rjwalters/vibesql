@@ -11,24 +11,24 @@
 //! - Output functions: Convert to text/binary formats
 //! - Measurement functions: Distance and area calculations
 
-pub mod constructors;
 pub mod accessors;
-pub mod srid;
-pub mod predicates;
+pub mod constructors;
 pub mod measurements;
 pub mod operations;
+pub mod predicates;
+pub mod srid;
 pub(crate) mod wkb;
 
-use vibesql_types::SqlValue;
 use crate::errors::ExecutorError;
 use hex;
+use vibesql_types::SqlValue;
 
 /// A geometry representation with SRID support (Phase 2+)
 /// Stores geometries internally for efficient processing
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeometryWithSRID {
     pub geometry: Geometry,
-    pub srid: i32,  // 0 = undefined, otherwise EPSG code
+    pub srid: i32, // 0 = undefined, otherwise EPSG code
 }
 
 /// Core geometry enum for Phase 1+
@@ -146,11 +146,7 @@ impl Geometry {
                 format!("MULTIPOLYGON({})", poly_strs)
             }
             Geometry::Collection { geometries } => {
-                let geo_strs = geometries
-                    .iter()
-                    .map(|g| g.to_wkt())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let geo_strs = geometries.iter().map(|g| g.to_wkt()).collect::<Vec<_>>().join(", ");
                 format!("GEOMETRYCOLLECTION({})", geo_strs)
             }
         }
@@ -231,7 +227,13 @@ const GEOMETRY_SEPARATOR: &str = "|";
 
 pub fn geometry_to_sql_value(geom: Geometry, srid: i32) -> SqlValue {
     let wkt = geom.to_ewkt(srid);
-    SqlValue::Varchar(format!("{}{}{}{}", GEOMETRY_TYPE_MARKER, GEOMETRY_SEPARATOR, srid, GEOMETRY_SEPARATOR.to_string() + &wkt))
+    SqlValue::Varchar(format!(
+        "{}{}{}{}",
+        GEOMETRY_TYPE_MARKER,
+        GEOMETRY_SEPARATOR,
+        srid,
+        GEOMETRY_SEPARATOR.to_string() + &wkt
+    ))
 }
 
 pub fn sql_value_to_geometry(value: &SqlValue) -> Result<GeometryWithSRID, ExecutorError> {
@@ -258,9 +260,7 @@ pub fn sql_value_to_geometry(value: &SqlValue) -> Result<GeometryWithSRID, Execu
                     let geometry = constructors::parse_wkt(wkt)?;
                     Ok(GeometryWithSRID::new(geometry, srid))
                 } else {
-                    Err(ExecutorError::UnsupportedFeature(
-                        "Invalid EWKT format".to_string(),
-                    ))
+                    Err(ExecutorError::UnsupportedFeature("Invalid EWKT format".to_string()))
                 }
             } else {
                 // Try to parse as WKT directly if not marked
@@ -268,9 +268,9 @@ pub fn sql_value_to_geometry(value: &SqlValue) -> Result<GeometryWithSRID, Execu
                 Ok(GeometryWithSRID::new(geometry, 0))
             }
         }
-        SqlValue::Null => Err(ExecutorError::UnsupportedFeature(
-            "Cannot convert NULL to geometry".to_string(),
-        )),
+        SqlValue::Null => {
+            Err(ExecutorError::UnsupportedFeature("Cannot convert NULL to geometry".to_string()))
+        }
         _ => Err(ExecutorError::UnsupportedFeature(format!(
             "Cannot convert {} to geometry",
             value.type_name()
@@ -292,7 +292,6 @@ pub fn parse_binary_data(hex_str: &str) -> Result<Vec<u8>, ExecutorError> {
         hex_str
     };
 
-    hex::decode(hex_str).map_err(|e| {
-        ExecutorError::UnsupportedFeature(format!("Invalid hex data: {}", e))
-    })
+    hex::decode(hex_str)
+        .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid hex data: {}", e)))
 }

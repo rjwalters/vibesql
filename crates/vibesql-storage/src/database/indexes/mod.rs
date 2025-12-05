@@ -18,21 +18,21 @@
 // - ivfflat: IVFFlat index for approximate nearest neighbor search on vectors
 // - hnsw: HNSW index for high-performance approximate nearest neighbor search
 
-mod index_metadata;
-mod value_normalization;
-mod range_bounds;
-mod point_lookup;
-mod range_scan;
-mod prefix_match;
-mod reverse_scan;
-mod index_operations;
+pub mod hnsw;
 mod index_maintenance;
 mod index_manager;
+mod index_metadata;
+mod index_operations;
 pub mod ivfflat;
-pub mod hnsw;
+mod point_lookup;
+mod prefix_match;
+mod range_bounds;
+mod range_scan;
+mod reverse_scan;
+mod value_normalization;
 
 // Re-export public API
-pub use index_metadata::{IndexData, IndexMetadata};
-pub use index_manager::IndexManager;
-pub use ivfflat::IVFFlatIndex;
 pub use hnsw::HnswIndex;
+pub use index_manager::IndexManager;
+pub use index_metadata::{IndexData, IndexMetadata};
+pub use ivfflat::IVFFlatIndex;

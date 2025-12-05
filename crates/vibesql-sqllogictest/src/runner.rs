@@ -10,19 +10,18 @@
 //! - [`result_updater`] - Query result updating
 
 // Re-export the main Runner struct
-pub use crate::executor::{Runner, AsyncDB, DB, Partitioner, default_partitioner};
+pub use crate::executor::{default_partitioner, AsyncDB, Partitioner, Runner, DB};
 
 // Re-export error types
 pub use crate::error_handling::{
-    TestError, TestErrorDisplay, TestErrorKind, TestErrorKindDisplay, 
-    ParallelTestError, ParallelTestErrorDisplay, RecordKind, AnyError,
-    format_diff, format_column_diff,
+    format_column_diff, format_diff, AnyError, ParallelTestError, ParallelTestErrorDisplay,
+    RecordKind, TestError, TestErrorDisplay, TestErrorKind, TestErrorKindDisplay,
 };
 
 // Re-export output types
 pub use crate::output::{
-    RecordOutput, DBOutput, Normalizer, Validator, ColumnTypeValidator,
-    default_normalizer, default_validator, default_column_validator, strict_column_validator,
+    default_column_validator, default_normalizer, default_validator, strict_column_validator,
+    ColumnTypeValidator, DBOutput, Normalizer, RecordOutput, Validator,
 };
 
 // Re-export result updater
@@ -435,11 +434,7 @@ Caused by:
     impl TestCase<'_> {
         #[track_caller]
         fn run(self) {
-            let Self {
-                input,
-                record_output,
-                expected,
-            } = self;
+            let Self { input, record_output, expected } = self;
             println!("TestCase");
             println!("**input:\n{input}\n");
             println!("**record_output:\n{record_output:#?}\n");
@@ -459,14 +454,8 @@ Caused by:
                 &output,
                 &expected,
                 "\n\noutput:\n\n{}\n\nexpected:\n\n{}",
-                output
-                    .as_ref()
-                    .map(|r| r.to_string())
-                    .unwrap_or_else(|| "None".into()),
-                expected
-                    .as_ref()
-                    .map(|r| r.to_string())
-                    .unwrap_or_else(|| "None".into()),
+                output.as_ref().map(|r| r.to_string()).unwrap_or_else(|| "None".into()),
+                expected.as_ref().map(|r| r.to_string()).unwrap_or_else(|| "None".into()),
             );
         }
     }
@@ -487,11 +476,7 @@ Caused by:
             .map(|cols| cols.iter().map(|c| c.to_string()).collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
-        RecordOutput::Query {
-            types,
-            rows,
-            error: None,
-        }
+        RecordOutput::Query { types, rows, error: None }
     }
 
     /// Returns a RecordOutput that models the error of a query
@@ -535,11 +520,7 @@ Caused by:
     #[test]
     fn test_default_validator_ignore_multiple_fragments() {
         let normalizer = default_normalizer;
-        let actual = vec![vec![
-            "one".to_string(),
-            "two".to_string(),
-            "three".to_string(),
-        ]];
+        let actual = vec![vec!["one".to_string(), "two".to_string(), "three".to_string()]];
         let expected = vec!["one<slt:ignore>three".to_string()];
         assert!(default_validator(normalizer, &actual, &expected));
     }
@@ -547,11 +528,7 @@ Caused by:
     #[test]
     fn test_default_validator_ignore_fail() {
         let normalizer = default_normalizer;
-        let actual = vec![vec![
-            "alpha".to_string(),
-            "beta".to_string(),
-            "gamma".to_string(),
-        ]];
+        let actual = vec![vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]];
         let expected = vec!["alpha<slt:ignore>delta".to_string()];
         assert!(!default_validator(normalizer, &actual, &expected));
     }

@@ -49,9 +49,7 @@ fn test_issue_2852_sqlite_integer_division() {
 fn test_issue_2852_mysql_floating_division() {
     // Verify MySQL mode returns floating-point division
     let mut db = Database::new();
-    db.set_sql_mode(SqlMode::MySQL {
-        flags: MySqlModeFlags::default(),
-    });
+    db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
 
     // In MySQL: 22 / 49 ≈ 0.449
     let sql = "SELECT 22 / 49";
@@ -93,9 +91,7 @@ fn test_issue_2852_negative_division_sqlite() {
 fn test_issue_2852_negative_division_mysql() {
     // Test negative division in MySQL mode - this is what the failing tests expect
     let mut db = Database::new();
-    db.set_sql_mode(SqlMode::MySQL {
-        flags: MySqlModeFlags::default(),
-    });
+    db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
 
     // In MySQL: -22 / 49 ≈ -0.449
     let sql = "SELECT -22 / 49";
@@ -119,9 +115,7 @@ fn test_issue_2851_division_values() {
     // Test the exact division values from issue #2851's slt_good_11.test
     // Expected: 26/6=4.333, 43/6=7.167, 83/6=13.833
     let mut db = Database::new();
-    db.set_sql_mode(SqlMode::MySQL {
-        flags: MySqlModeFlags::default(),
-    });
+    db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
 
     // Test 83/6
     let sql = "SELECT 83 / 6";
@@ -177,9 +171,7 @@ fn test_issue_2852_division_values() {
     // Test the exact division values from issue #2852's slt_good_12.test
     // Expected: 22/49=-0.449, 28/49=-0.571, 82/49=-1.673 (with negation)
     let mut db = Database::new();
-    db.set_sql_mode(SqlMode::MySQL {
-        flags: MySqlModeFlags::default(),
-    });
+    db.set_sql_mode(SqlMode::MySQL { flags: MySqlModeFlags::default() });
 
     // Test -22/49
     let sql = "SELECT -22 / 49";

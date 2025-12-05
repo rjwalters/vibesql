@@ -84,20 +84,12 @@ async fn upload_blob(
 
     let size = body.len() as i64;
 
-    debug!(
-        "Uploading blob: {} bytes, content-type: {}",
-        size, content_type
-    );
+    debug!("Uploading blob: {} bytes, content-type: {}", size, content_type);
 
     match state.blob_service.store(body, content_type.clone()).await {
         Ok(blob_id) => {
             let url = state.blob_service.get_url(&blob_id);
-            let response = BlobUploadResponse {
-                id: blob_id.to_string(),
-                size,
-                content_type,
-                url,
-            };
+            let response = BlobUploadResponse { id: blob_id.to_string(), size, content_type, url };
             (StatusCode::CREATED, Json(response)).into_response()
         }
         Err(e) => {
@@ -149,14 +141,11 @@ async fn download_blob(
             let mut headers = HeaderMap::new();
             headers.insert(
                 header::CONTENT_TYPE,
-                content_type.parse().unwrap_or(header::HeaderValue::from_static(
-                    "application/octet-stream",
-                )),
+                content_type
+                    .parse()
+                    .unwrap_or(header::HeaderValue::from_static("application/octet-stream")),
             );
-            headers.insert(
-                header::CONTENT_LENGTH,
-                data.len().to_string().parse().unwrap(),
-            );
+            headers.insert(header::CONTENT_LENGTH, data.len().to_string().parse().unwrap());
 
             (StatusCode::OK, headers, data).into_response()
         }
@@ -254,10 +243,7 @@ async fn delete_blob(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{
-        body::Body,
-        http::Request,
-    };
+    use axum::{body::Body, http::Request};
     use tower::ServiceExt;
 
     fn create_test_router() -> Router {
@@ -302,11 +288,8 @@ mod tests {
     async fn test_download_invalid_blob_id() {
         let router = create_test_router();
 
-        let request = Request::builder()
-            .method("GET")
-            .uri("/invalid-id")
-            .body(Body::empty())
-            .unwrap();
+        let request =
+            Request::builder().method("GET").uri("/invalid-id").body(Body::empty()).unwrap();
 
         let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);

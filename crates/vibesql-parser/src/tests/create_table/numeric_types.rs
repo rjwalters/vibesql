@@ -47,12 +47,16 @@ fn test_parse_create_table_long_type() {
 
             match create.columns[0].data_type {
                 vibesql_types::DataType::Bigint => {} // LONG maps to Bigint
-                _ => panic!("Expected LONG to map to Bigint, got {:?}", create.columns[0].data_type),
+                _ => {
+                    panic!("Expected LONG to map to Bigint, got {:?}", create.columns[0].data_type)
+                }
             }
 
             match create.columns[1].data_type {
                 vibesql_types::DataType::Bigint => {} // LONG maps to Bigint
-                _ => panic!("Expected LONG to map to Bigint, got {:?}", create.columns[1].data_type),
+                _ => {
+                    panic!("Expected LONG to map to Bigint, got {:?}", create.columns[1].data_type)
+                }
             }
         }
         _ => panic!("Expected CREATE TABLE statement"),

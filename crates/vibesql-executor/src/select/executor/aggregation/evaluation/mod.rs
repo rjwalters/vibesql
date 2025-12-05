@@ -12,8 +12,7 @@ mod subquery;
 
 use super::super::builder::SelectExecutor;
 use crate::{
-    errors::ExecutorError,
-    evaluator::CombinedExpressionEvaluator,
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator,
     select::grouping::GroupingContext,
 };
 
@@ -162,7 +161,9 @@ impl SelectExecutor<'_> {
                         // Try to extract column name from expression
                         match expr {
                             vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
-                            vibesql_ast::Expression::AggregateFunction { name, .. } => name.to_lowercase(),
+                            vibesql_ast::Expression::AggregateFunction { name, .. } => {
+                                name.to_lowercase()
+                            }
                             _ => format!("col{}", idx + 1),
                         }
                     };
@@ -172,7 +173,8 @@ impl SelectExecutor<'_> {
                         true,
                     ));
                 }
-                vibesql_ast::SelectItem::Wildcard { .. } | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                vibesql_ast::SelectItem::Wildcard { .. }
+                | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
                     // This should not happen after expansion, but keep for safety
                     return Err(ExecutorError::UnsupportedFeature(
                         "SELECT * and qualified wildcards not supported with aggregates"
@@ -182,7 +184,8 @@ impl SelectExecutor<'_> {
             }
         }
 
-        let result_table_schema = vibesql_catalog::TableSchema::new("result".to_string(), result_columns);
+        let result_table_schema =
+            vibesql_catalog::TableSchema::new("result".to_string(), result_columns);
 
         // Create a CombinedSchema for the result set
         let mut table_schemas = std::collections::HashMap::new();
@@ -192,11 +195,14 @@ impl SelectExecutor<'_> {
             total_columns: result_table_schema.columns.len(),
         };
 
-        let result_evaluator = CombinedExpressionEvaluator::with_database(&result_schema, self.database);
+        let result_evaluator =
+            CombinedExpressionEvaluator::with_database(&result_schema, self.database);
 
         // Evaluate ORDER BY expressions and attach sort keys to rows
-        let mut rows_with_keys: Vec<(vibesql_storage::Row, Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection)>)> =
-            Vec::new();
+        let mut rows_with_keys: Vec<(
+            vibesql_storage::Row,
+            Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection)>,
+        )> = Vec::new();
         for row in rows {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
@@ -348,7 +354,10 @@ impl SelectExecutor<'_> {
                                     grouping_context,
                                 )?;
 
-                                if crate::evaluator::ExpressionEvaluator::values_are_equal(&operand_value, &when_value) {
+                                if crate::evaluator::ExpressionEvaluator::values_are_equal(
+                                    &operand_value,
+                                    &when_value,
+                                ) {
                                     return self.evaluate_with_aggregates_and_grouping(
                                         &when_clause.result,
                                         group_rows,
@@ -361,7 +370,13 @@ impl SelectExecutor<'_> {
                         }
 
                         if let Some(else_expr) = else_result {
-                            self.evaluate_with_aggregates_and_grouping(else_expr, group_rows, group_key, evaluator, grouping_context)
+                            self.evaluate_with_aggregates_and_grouping(
+                                else_expr,
+                                group_rows,
+                                group_key,
+                                evaluator,
+                                grouping_context,
+                            )
                         } else {
                             Ok(vibesql_types::SqlValue::Null)
                         }
@@ -381,7 +396,8 @@ impl SelectExecutor<'_> {
 
                                 let is_true = match condition_value {
                                     vibesql_types::SqlValue::Boolean(true) => true,
-                                    vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
+                                    vibesql_types::SqlValue::Boolean(false)
+                                    | vibesql_types::SqlValue::Null => false,
                                     vibesql_types::SqlValue::Integer(0) => false,
                                     vibesql_types::SqlValue::Integer(_) => true,
                                     _ => false,
@@ -400,7 +416,13 @@ impl SelectExecutor<'_> {
                         }
 
                         if let Some(else_expr) = else_result {
-                            self.evaluate_with_aggregates_and_grouping(else_expr, group_rows, group_key, evaluator, grouping_context)
+                            self.evaluate_with_aggregates_and_grouping(
+                                else_expr,
+                                group_rows,
+                                group_key,
+                                evaluator,
+                                grouping_context,
+                            )
                         } else {
                             Ok(vibesql_types::SqlValue::Null)
                         }
@@ -431,7 +453,11 @@ impl SelectExecutor<'_> {
                     evaluator,
                     grouping_context,
                 )?;
-                crate::evaluator::casting::cast_value(&inner_val, data_type, &self.database.sql_mode())
+                crate::evaluator::casting::cast_value(
+                    &inner_val,
+                    data_type,
+                    &self.database.sql_mode(),
+                )
             }
 
             // IsNull - evaluate inner expression with grouping context

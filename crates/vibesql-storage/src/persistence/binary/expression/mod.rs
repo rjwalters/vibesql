@@ -16,18 +16,23 @@ mod operators;
 mod types;
 mod window;
 
+use crate::StorageError;
 use std::io::{Read, Write};
 use vibesql_ast::Expression;
-use crate::StorageError;
 
 // Import helper functions from submodules
 use case::{read_case_when, write_case_when};
-use operators::{read_binary_operator, read_unary_operator, write_binary_operator, write_unary_operator};
-use types::{
-    read_character_unit, read_fulltext_mode, read_interval_unit, read_pseudo_table, read_trim_position,
-    write_character_unit, write_fulltext_mode, write_interval_unit, write_pseudo_table, write_trim_position,
+use operators::{
+    read_binary_operator, read_unary_operator, write_binary_operator, write_unary_operator,
 };
-use window::{read_window_function_spec, read_window_spec, write_window_function_spec, write_window_spec};
+use types::{
+    read_character_unit, read_fulltext_mode, read_interval_unit, read_pseudo_table,
+    read_trim_position, write_character_unit, write_fulltext_mode, write_interval_unit,
+    write_pseudo_table, write_trim_position,
+};
+use window::{
+    read_window_function_spec, read_window_spec, write_window_function_spec, write_window_spec,
+};
 
 use super::{io::*, value::*};
 
@@ -106,10 +111,9 @@ impl ExprTag {
             0x1E => Ok(ExprTag::Extract),
             0x1F => Ok(ExprTag::Conjunction),
             0x20 => Ok(ExprTag::Disjunction),
-            _ => Err(StorageError::NotImplemented(format!(
-                "Unknown expression tag: 0x{:02X}",
-                tag
-            ))),
+            _ => {
+                Err(StorageError::NotImplemented(format!("Unknown expression tag: 0x{:02X}", tag)))
+            }
         }
     }
 }
@@ -148,11 +152,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_unary_operator(writer, op)?;
             write_expression(writer, expr)?;
         }
-        Expression::Function {
-            name,
-            args,
-            character_unit,
-        } => {
+        Expression::Function { name, args, character_unit } => {
             write_tag!(writer, ExprTag::Function);
             write_string(writer, name)?;
             write_u32(writer, args.len() as u32)?;
@@ -164,11 +164,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_character_unit(writer, unit)?;
             }
         }
-        Expression::AggregateFunction {
-            name,
-            distinct,
-            args,
-        } => {
+        Expression::AggregateFunction { name, distinct, args } => {
             write_tag!(writer, ExprTag::AggregateFunction);
             write_string(writer, name)?;
             write_bool(writer, *distinct)?;
@@ -185,11 +181,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
         Expression::Wildcard => {
             write_tag!(writer, ExprTag::Wildcard);
         }
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-        } => {
+        Expression::Case { operand, when_clauses, else_result } => {
             write_tag!(writer, ExprTag::Case);
             write_bool(writer, operand.is_some())?;
             if let Some(op) = operand {
@@ -214,11 +206,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 "IN with subquery serialization not yet implemented".to_string(),
             ));
         }
-        Expression::InList {
-            expr,
-            values,
-            negated,
-        } => {
+        Expression::InList { expr, values, negated } => {
             write_tag!(writer, ExprTag::InList);
             write_expression(writer, expr)?;
             write_u32(writer, values.len() as u32)?;
@@ -227,13 +215,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             }
             write_bool(writer, *negated)?;
         }
-        Expression::Between {
-            expr,
-            low,
-            high,
-            negated,
-            symmetric,
-        } => {
+        Expression::Between { expr, low, high, negated, symmetric } => {
             write_tag!(writer, ExprTag::Between);
             write_expression(writer, expr)?;
             write_expression(writer, low)?;
@@ -247,11 +229,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             let type_str = crate::persistence::save::format_data_type(data_type);
             write_string(writer, &type_str)?;
         }
-        Expression::Position {
-            substring,
-            string,
-            character_unit,
-        } => {
+        Expression::Position { substring, string, character_unit } => {
             write_tag!(writer, ExprTag::Position);
             write_expression(writer, substring)?;
             write_expression(writer, string)?;
@@ -260,11 +238,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_character_unit(writer, unit)?;
             }
         }
-        Expression::Trim {
-            position,
-            removal_char,
-            string,
-        } => {
+        Expression::Trim { position, removal_char, string } => {
             write_tag!(writer, ExprTag::Trim);
             write_bool(writer, position.is_some())?;
             if let Some(pos) = position {
@@ -276,11 +250,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             }
             write_expression(writer, string)?;
         }
-        Expression::Like {
-            expr,
-            pattern,
-            negated,
-        } => {
+        Expression::Like { expr, pattern, negated } => {
             write_tag!(writer, ExprTag::Like);
             write_expression(writer, expr)?;
             write_expression(writer, pattern)?;
@@ -313,12 +283,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_u32(writer, *p)?;
             }
         }
-        Expression::Interval {
-            value,
-            unit,
-            leading_precision,
-            fractional_precision,
-        } => {
+        Expression::Interval { value, unit, leading_precision, fractional_precision } => {
             write_tag!(writer, ExprTag::Interval);
             write_expression(writer, value)?;
             write_interval_unit(writer, unit)?;
@@ -347,11 +312,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_tag!(writer, ExprTag::NextValue);
             write_string(writer, sequence_name)?;
         }
-        Expression::MatchAgainst {
-            columns,
-            search_modifier,
-            mode,
-        } => {
+        Expression::MatchAgainst { columns, search_modifier, mode } => {
             write_tag!(writer, ExprTag::MatchAgainst);
             write_u32(writer, columns.len() as u32)?;
             for col in columns {
@@ -360,10 +321,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_expression(writer, search_modifier)?;
             write_fulltext_mode(writer, mode)?;
         }
-        Expression::PseudoVariable {
-            pseudo_table,
-            column,
-        } => {
+        Expression::PseudoVariable { pseudo_table, column } => {
             write_tag!(writer, ExprTag::PseudoVariable);
             write_pseudo_table(writer, pseudo_table)?;
             write_string(writer, column)?;
@@ -426,11 +384,7 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
         }
         ExprTag::ColumnRef => {
             let has_table = read_bool(reader)?;
-            let table = if has_table {
-                Some(read_string(reader)?)
-            } else {
-                None
-            };
+            let table = if has_table { Some(read_string(reader)?) } else { None };
             let column = read_string(reader)?;
             Ok(Expression::ColumnRef { table, column })
         }
@@ -453,16 +407,8 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
                 args.push(read_expression(reader)?);
             }
             let has_unit = read_bool(reader)?;
-            let character_unit = if has_unit {
-                Some(read_character_unit(reader)?)
-            } else {
-                None
-            };
-            Ok(Expression::Function {
-                name,
-                args,
-                character_unit,
-            })
+            let character_unit = if has_unit { Some(read_character_unit(reader)?) } else { None };
+            Ok(Expression::Function { name, args, character_unit })
         }
         ExprTag::AggregateFunction => {
             let name = read_string(reader)?;
@@ -472,11 +418,7 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             for _ in 0..arg_count {
                 args.push(read_expression(reader)?);
             }
-            Ok(Expression::AggregateFunction {
-                name,
-                distinct,
-                args,
-            })
+            Ok(Expression::AggregateFunction { name, distinct, args })
         }
         ExprTag::IsNull => {
             let expr = Box::new(read_expression(reader)?);
@@ -486,27 +428,16 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
         ExprTag::Wildcard => Ok(Expression::Wildcard),
         ExprTag::Case => {
             let has_operand = read_bool(reader)?;
-            let operand = if has_operand {
-                Some(Box::new(read_expression(reader)?))
-            } else {
-                None
-            };
+            let operand = if has_operand { Some(Box::new(read_expression(reader)?)) } else { None };
             let when_count = read_u32(reader)?;
             let mut when_clauses = Vec::new();
             for _ in 0..when_count {
                 when_clauses.push(read_case_when(reader)?);
             }
             let has_else = read_bool(reader)?;
-            let else_result = if has_else {
-                Some(Box::new(read_expression(reader)?))
-            } else {
-                None
-            };
-            Ok(Expression::Case {
-                operand,
-                when_clauses,
-                else_result,
-            })
+            let else_result =
+                if has_else { Some(Box::new(read_expression(reader)?)) } else { None };
+            Ok(Expression::Case { operand, when_clauses, else_result })
         }
         ExprTag::ScalarSubquery => Err(StorageError::NotImplemented(
             "ScalarSubquery deserialization not yet implemented".to_string(),
@@ -522,11 +453,7 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
                 values.push(read_expression(reader)?);
             }
             let negated = read_bool(reader)?;
-            Ok(Expression::InList {
-                expr,
-                values,
-                negated,
-            })
+            Ok(Expression::InList { expr, values, negated })
         }
         ExprTag::Between => {
             let expr = Box::new(read_expression(reader)?);
@@ -534,13 +461,7 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let high = Box::new(read_expression(reader)?);
             let negated = read_bool(reader)?;
             let symmetric = read_bool(reader)?;
-            Ok(Expression::Between {
-                expr,
-                low,
-                high,
-                negated,
-                symmetric,
-            })
+            Ok(Expression::Between { expr, low, high, negated, symmetric })
         }
         ExprTag::Cast => {
             let expr = Box::new(read_expression(reader)?);
@@ -552,46 +473,23 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let substring = Box::new(read_expression(reader)?);
             let string = Box::new(read_expression(reader)?);
             let has_unit = read_bool(reader)?;
-            let character_unit = if has_unit {
-                Some(read_character_unit(reader)?)
-            } else {
-                None
-            };
-            Ok(Expression::Position {
-                substring,
-                string,
-                character_unit,
-            })
+            let character_unit = if has_unit { Some(read_character_unit(reader)?) } else { None };
+            Ok(Expression::Position { substring, string, character_unit })
         }
         ExprTag::Trim => {
             let has_position = read_bool(reader)?;
-            let position = if has_position {
-                Some(read_trim_position(reader)?)
-            } else {
-                None
-            };
+            let position = if has_position { Some(read_trim_position(reader)?) } else { None };
             let has_removal_char = read_bool(reader)?;
-            let removal_char = if has_removal_char {
-                Some(Box::new(read_expression(reader)?))
-            } else {
-                None
-            };
+            let removal_char =
+                if has_removal_char { Some(Box::new(read_expression(reader)?)) } else { None };
             let string = Box::new(read_expression(reader)?);
-            Ok(Expression::Trim {
-                position,
-                removal_char,
-                string,
-            })
+            Ok(Expression::Trim { position, removal_char, string })
         }
         ExprTag::Like => {
             let expr = Box::new(read_expression(reader)?);
             let pattern = Box::new(read_expression(reader)?);
             let negated = read_bool(reader)?;
-            Ok(Expression::Like {
-                expr,
-                pattern,
-                negated,
-            })
+            Ok(Expression::Like { expr, pattern, negated })
         }
         ExprTag::Exists => Err(StorageError::NotImplemented(
             "EXISTS deserialization not yet implemented".to_string(),
@@ -602,43 +500,24 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
         ExprTag::CurrentDate => Ok(Expression::CurrentDate),
         ExprTag::CurrentTime => {
             let has_precision = read_bool(reader)?;
-            let precision = if has_precision {
-                Some(read_u32(reader)?)
-            } else {
-                None
-            };
+            let precision = if has_precision { Some(read_u32(reader)?) } else { None };
             Ok(Expression::CurrentTime { precision })
         }
         ExprTag::CurrentTimestamp => {
             let has_precision = read_bool(reader)?;
-            let precision = if has_precision {
-                Some(read_u32(reader)?)
-            } else {
-                None
-            };
+            let precision = if has_precision { Some(read_u32(reader)?) } else { None };
             Ok(Expression::CurrentTimestamp { precision })
         }
         ExprTag::Interval => {
             let value = Box::new(read_expression(reader)?);
             let unit = read_interval_unit(reader)?;
             let has_leading_precision = read_bool(reader)?;
-            let leading_precision = if has_leading_precision {
-                Some(read_u32(reader)?)
-            } else {
-                None
-            };
+            let leading_precision =
+                if has_leading_precision { Some(read_u32(reader)?) } else { None };
             let has_fractional_precision = read_bool(reader)?;
-            let fractional_precision = if has_fractional_precision {
-                Some(read_u32(reader)?)
-            } else {
-                None
-            };
-            Ok(Expression::Interval {
-                value,
-                unit,
-                leading_precision,
-                fractional_precision,
-            })
+            let fractional_precision =
+                if has_fractional_precision { Some(read_u32(reader)?) } else { None };
+            Ok(Expression::Interval { value, unit, leading_precision, fractional_precision })
         }
         ExprTag::Default => Ok(Expression::Default),
         ExprTag::DuplicateKeyValue => {
@@ -662,19 +541,12 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             }
             let search_modifier = Box::new(read_expression(reader)?);
             let mode = read_fulltext_mode(reader)?;
-            Ok(Expression::MatchAgainst {
-                columns,
-                search_modifier,
-                mode,
-            })
+            Ok(Expression::MatchAgainst { columns, search_modifier, mode })
         }
         ExprTag::PseudoVariable => {
             let pseudo_table = read_pseudo_table(reader)?;
             let column = read_string(reader)?;
-            Ok(Expression::PseudoVariable {
-                pseudo_table,
-                column,
-            })
+            Ok(Expression::PseudoVariable { pseudo_table, column })
         }
         ExprTag::SessionVariable => {
             let name = read_string(reader)?;
@@ -723,10 +595,8 @@ mod tests {
 
     #[test]
     fn test_column_ref_roundtrip() {
-        let expr = Expression::ColumnRef {
-            table: Some("users".to_string()),
-            column: "id".to_string(),
-        };
+        let expr =
+            Expression::ColumnRef { table: Some("users".to_string()), column: "id".to_string() };
         let mut buf = Vec::new();
         write_expression(&mut buf, &expr).unwrap();
 

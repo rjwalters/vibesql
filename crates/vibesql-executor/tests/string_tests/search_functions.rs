@@ -97,7 +97,9 @@ fn test_position_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -126,7 +128,9 @@ fn test_position_character_type() {
         name: "POSITION".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("lo".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "hello".to_string(),
+            )),
         ],
         character_unit: None,
     };
@@ -188,7 +192,9 @@ fn test_instr_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -216,7 +222,9 @@ fn test_instr_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "hello".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("ll".to_string())),
         ],
         character_unit: None,
@@ -297,7 +305,9 @@ fn test_locate_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("l".to_string()))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "l".to_string(),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -358,7 +368,9 @@ fn test_locate_character_type() {
         name: "LOCATE".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("ll".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+                "hello".to_string(),
+            )),
         ],
         character_unit: None,
     };

@@ -128,7 +128,8 @@ impl ColumnData {
             ColumnData::Vector { values, nulls } => {
                 // Vector contains Vec<f32>, so we need to account for each inner vector
                 let vec_overhead = std::mem::size_of::<Vec<f32>>();
-                let vector_data: usize = values.iter().map(|v| v.capacity() * std::mem::size_of::<f32>()).sum();
+                let vector_data: usize =
+                    values.iter().map(|v| v.capacity() * std::mem::size_of::<f32>()).sum();
                 VEC_OVERHEAD * 2
                     + values.capacity() * vec_overhead
                     + vector_data

@@ -11,7 +11,11 @@ use vibesql_types::SqlValue;
 pub(crate) fn test_schema() -> CombinedSchema {
     let table_schema = vibesql_catalog::TableSchema::new(
         "test".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "id".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     CombinedSchema::from_table("test".to_string(), table_schema)
 }
@@ -21,15 +25,31 @@ pub(crate) fn test_join_schemas() -> (CombinedSchema, CombinedSchema) {
     let left_schema = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "value".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     let right_schema = vibesql_catalog::TableSchema::new(
         "t2".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("data".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "data".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     (

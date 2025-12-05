@@ -9,15 +9,16 @@
 
 use crate::errors::ExecutorError;
 use arrow::array::{
-    Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray,
-    Date32Array, TimestampMicrosecondArray,
-    PrimitiveBuilder, StringBuilder, BooleanBuilder,
+    Array, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Float64Array, Int64Array,
+    PrimitiveBuilder, StringArray, StringBuilder, TimestampMicrosecondArray,
 };
-use arrow::datatypes::{DataType, Field, Schema, Float64Type, Int64Type, Date32Type, TimestampMicrosecondType, TimeUnit};
+use arrow::datatypes::{
+    DataType, Date32Type, Field, Float64Type, Int64Type, Schema, TimeUnit, TimestampMicrosecondType,
+};
 use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
 use vibesql_storage::Row;
-use vibesql_types::{SqlValue, Date, Time, Timestamp};
+use vibesql_types::{Date, SqlValue, Time, Timestamp};
 
 /// Default batch size for vectorized operations
 /// Tuned for balance between memory usage and SIMD efficiency
@@ -107,31 +108,33 @@ pub fn rows_to_record_batch_with_columns(
     };
 
     if indices.is_empty() {
-        return Err(ExecutorError::ColumnarColumnNotFound {
-            column_index: 0,
-            batch_columns: 0,
-        });
+        return Err(ExecutorError::ColumnarColumnNotFound { column_index: 0, batch_columns: 0 });
     }
 
     // Build schema for selected columns only
     let mut schema_fields = Vec::with_capacity(indices.len());
     for &col_idx in &indices {
-        let name = column_names.get(col_idx)
-            .cloned()
-            .unwrap_or_else(|| format!("col_{}", col_idx));
+        let name = column_names.get(col_idx).cloned().unwrap_or_else(|| format!("col_{}", col_idx));
 
         let data_type = match &rows[0].values.get(col_idx) {
-            Some(SqlValue::Integer(_)) | Some(SqlValue::Bigint(_)) | Some(SqlValue::Smallint(_)) => DataType::Int64,
-            Some(SqlValue::Float(_)) | Some(SqlValue::Real(_)) | Some(SqlValue::Double(_)) | Some(SqlValue::Numeric(_)) => DataType::Float64,
+            Some(SqlValue::Integer(_))
+            | Some(SqlValue::Bigint(_))
+            | Some(SqlValue::Smallint(_)) => DataType::Int64,
+            Some(SqlValue::Float(_))
+            | Some(SqlValue::Real(_))
+            | Some(SqlValue::Double(_))
+            | Some(SqlValue::Numeric(_)) => DataType::Float64,
             Some(SqlValue::Character(_)) | Some(SqlValue::Varchar(_)) => DataType::Utf8,
             Some(SqlValue::Boolean(_)) => DataType::Boolean,
             Some(SqlValue::Date(_)) => DataType::Date32,
             Some(SqlValue::Timestamp(_)) => DataType::Timestamp(TimeUnit::Microsecond, None),
             Some(SqlValue::Null) => DataType::Int64,
-            _ => return Err(ExecutorError::UnsupportedArrayType {
-                operation: format!("SIMD conversion at column {}", col_idx),
-                array_type: format!("{:?}", rows[0].values.get(col_idx)),
-            }),
+            _ => {
+                return Err(ExecutorError::UnsupportedArrayType {
+                    operation: format!("SIMD conversion at column {}", col_idx),
+                    array_type: format!("{:?}", rows[0].values.get(col_idx)),
+                })
+            }
         };
 
         schema_fields.push(Field::new(name, data_type, true));
@@ -146,11 +149,12 @@ pub fn rows_to_record_batch_with_columns(
         columns.push(array);
     }
 
-    RecordBatch::try_new(Arc::new(schema), columns)
-        .map_err(|e| ExecutorError::SimdOperationFailed {
+    RecordBatch::try_new(Arc::new(schema), columns).map_err(|e| {
+        ExecutorError::SimdOperationFailed {
             operation: "RecordBatch creation".to_string(),
             reason: e.to_string(),
-        })
+        }
+    })
 }
 
 /// Convert RecordBatch back to row format
@@ -179,7 +183,8 @@ pub(super) fn date_to_days_since_epoch(date: &Date) -> i32 {
     // Simple calculation: days since Unix epoch
     // Note: This is a simplified calculation and doesn't account for all leap years perfectly
     let year_days = (date.year - 1970) * 365;
-    let leap_years = ((date.year - 1969) / 4) - ((date.year - 1901) / 100) + ((date.year - 1601) / 400);
+    let leap_years =
+        ((date.year - 1969) / 4) - ((date.year - 1901) / 100) + ((date.year - 1601) / 400);
     let month_days: i32 = match date.month {
         1 => 0,
         2 => 31,
@@ -211,7 +216,8 @@ pub(super) fn days_since_epoch_to_date(days: i32) -> Date {
 
     // Handle years
     loop {
-        let year_days = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
+        let year_days =
+            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
         if remaining_days < year_days {
             break;
         }
@@ -248,7 +254,7 @@ pub(super) fn timestamp_to_microseconds(ts: &Timestamp) -> i64 {
     let time_micros = (ts.time.hour as i64) * 3_600_000_000
         + (ts.time.minute as i64) * 60_000_000
         + (ts.time.second as i64) * 1_000_000
-        + (ts.time.nanosecond as i64) / 1_000;  // Convert nanoseconds to microseconds
+        + (ts.time.nanosecond as i64) / 1_000; // Convert nanoseconds to microseconds
     day_micros + time_micros
 }
 
@@ -264,7 +270,7 @@ pub(super) fn microseconds_to_timestamp(micros: i64) -> Timestamp {
     let minutes = (remaining_micros / 60_000_000) as u8;
     let remaining_micros = remaining_micros % 60_000_000;
     let seconds = (remaining_micros / 1_000_000) as u8;
-    let nanoseconds = ((remaining_micros % 1_000_000) * 1_000) as u32;  // Convert microseconds to nanoseconds
+    let nanoseconds = ((remaining_micros % 1_000_000) * 1_000) as u32; // Convert microseconds to nanoseconds
 
     let time = Time::new(hours, minutes, seconds, nanoseconds)
         .unwrap_or_else(|_| Time::new(0, 0, 0, 0).unwrap());
@@ -274,27 +280,37 @@ pub(super) fn microseconds_to_timestamp(micros: i64) -> Timestamp {
 
 /// Infer Arrow schema from vibesql Row
 fn infer_schema_from_row(row: &Row, column_names: &[String]) -> Result<Schema, ExecutorError> {
-    let fields: Result<Vec<_>, _> = row.values.iter().enumerate().map(|(idx, value)| {
-        let name = column_names.get(idx)
-            .cloned()
-            .unwrap_or_else(|| format!("col_{}", idx));
+    let fields: Result<Vec<_>, _> = row
+        .values
+        .iter()
+        .enumerate()
+        .map(|(idx, value)| {
+            let name = column_names.get(idx).cloned().unwrap_or_else(|| format!("col_{}", idx));
 
-        let data_type = match value {
-            SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => DataType::Int64,
-            SqlValue::Float(_) | SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) => DataType::Float64,
-            SqlValue::Character(_) | SqlValue::Varchar(_) => DataType::Utf8,
-            SqlValue::Boolean(_) => DataType::Boolean,
-            SqlValue::Date(_) => DataType::Date32,
-            SqlValue::Timestamp(_) => DataType::Timestamp(TimeUnit::Microsecond, None),
-            SqlValue::Null => DataType::Int64, // Default to Int64 for nulls
-            _ => return Err(ExecutorError::UnsupportedArrayType {
-                operation: "SIMD schema inference".to_string(),
-                array_type: format!("{:?}", value),
-            }),
-        };
+            let data_type = match value {
+                SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => {
+                    DataType::Int64
+                }
+                SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_) => DataType::Float64,
+                SqlValue::Character(_) | SqlValue::Varchar(_) => DataType::Utf8,
+                SqlValue::Boolean(_) => DataType::Boolean,
+                SqlValue::Date(_) => DataType::Date32,
+                SqlValue::Timestamp(_) => DataType::Timestamp(TimeUnit::Microsecond, None),
+                SqlValue::Null => DataType::Int64, // Default to Int64 for nulls
+                _ => {
+                    return Err(ExecutorError::UnsupportedArrayType {
+                        operation: "SIMD schema inference".to_string(),
+                        array_type: format!("{:?}", value),
+                    })
+                }
+            };
 
-        Ok(Field::new(name, data_type, true))
-    }).collect();
+            Ok(Field::new(name, data_type, true))
+        })
+        .collect();
 
     Ok(Schema::new(fields?))
 }
@@ -393,51 +409,58 @@ fn arrow_value_to_sql(array: &dyn Array, idx: usize) -> Result<SqlValue, Executo
 
     match array.data_type() {
         DataType::Int64 => {
-            let arr = array.as_any().downcast_ref::<Int64Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Int64Array".to_string(),
                     context: "arrow_value_to_sql".to_string(),
-                })?;
+                }
+            })?;
             Ok(SqlValue::Integer(arr.value(idx)))
         }
         DataType::Float64 => {
-            let arr = array.as_any().downcast_ref::<Float64Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Float64Array".to_string(),
                     context: "arrow_value_to_sql".to_string(),
-                })?;
+                }
+            })?;
             Ok(SqlValue::Double(arr.value(idx)))
         }
         DataType::Utf8 => {
-            let arr = array.as_any().downcast_ref::<StringArray>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "StringArray".to_string(),
                     context: "arrow_value_to_sql".to_string(),
-                })?;
+                }
+            })?;
             Ok(SqlValue::Varchar(arr.value(idx).to_string()))
         }
         DataType::Boolean => {
-            let arr = array.as_any().downcast_ref::<BooleanArray>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<BooleanArray>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "BooleanArray".to_string(),
                     context: "arrow_value_to_sql".to_string(),
-                })?;
+                }
+            })?;
             Ok(SqlValue::Boolean(arr.value(idx)))
         }
         DataType::Date32 => {
-            let arr = array.as_any().downcast_ref::<Date32Array>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
+            let arr = array.as_any().downcast_ref::<Date32Array>().ok_or_else(|| {
+                ExecutorError::ArrowDowncastError {
                     expected_type: "Date32Array".to_string(),
                     context: "arrow_value_to_sql".to_string(),
-                })?;
+                }
+            })?;
             let days = arr.value(idx);
             Ok(SqlValue::Date(days_since_epoch_to_date(days)))
         }
         DataType::Timestamp(TimeUnit::Microsecond, None) => {
-            let arr = array.as_any().downcast_ref::<TimestampMicrosecondArray>()
-                .ok_or_else(|| ExecutorError::ArrowDowncastError {
-                    expected_type: "TimestampMicrosecondArray".to_string(),
-                    context: "arrow_value_to_sql".to_string(),
+            let arr =
+                array.as_any().downcast_ref::<TimestampMicrosecondArray>().ok_or_else(|| {
+                    ExecutorError::ArrowDowncastError {
+                        expected_type: "TimestampMicrosecondArray".to_string(),
+                        context: "arrow_value_to_sql".to_string(),
+                    }
                 })?;
             let micros = arr.value(idx);
             Ok(SqlValue::Timestamp(microseconds_to_timestamp(micros)))
@@ -456,12 +479,8 @@ mod tests {
     #[test]
     fn test_rows_to_record_batch_basic() {
         let rows = vec![
-            Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("hello".to_string())],
-            },
-            Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("world".to_string())],
-            },
+            Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("hello".to_string())] },
+            Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("world".to_string())] },
         ];
 
         let column_names = vec!["id".to_string(), "name".to_string()];
@@ -492,12 +511,8 @@ mod tests {
             },
         ];
 
-        let column_names = vec![
-            "id".to_string(),
-            "value".to_string(),
-            "name".to_string(),
-            "flag".to_string(),
-        ];
+        let column_names =
+            vec!["id".to_string(), "value".to_string(), "name".to_string(), "flag".to_string()];
 
         let batch = rows_to_record_batch(&original_rows, &column_names).unwrap();
         let converted_rows = record_batch_to_rows(&batch).unwrap();
@@ -528,16 +543,13 @@ mod tests {
             },
         ];
 
-        let column_names = vec![
-            "id".to_string(),
-            "value".to_string(),
-            "name".to_string(),
-            "flag".to_string(),
-        ];
+        let column_names =
+            vec!["id".to_string(), "value".to_string(), "name".to_string(), "flag".to_string()];
 
         // Only convert columns 0 and 2 (id and name)
         let column_indices = vec![0, 2];
-        let batch = rows_to_record_batch_with_columns(&rows, &column_names, Some(&column_indices)).unwrap();
+        let batch =
+            rows_to_record_batch_with_columns(&rows, &column_names, Some(&column_indices)).unwrap();
 
         // Batch should only have 2 columns
         assert_eq!(batch.num_columns(), 2);
@@ -573,12 +585,8 @@ mod tests {
         let date2 = Date::new(2024, 12, 25).unwrap();
 
         let rows = vec![
-            Row {
-                values: vec![SqlValue::Date(date1), SqlValue::Integer(1)],
-            },
-            Row {
-                values: vec![SqlValue::Date(date2), SqlValue::Integer(2)],
-            },
+            Row { values: vec![SqlValue::Date(date1), SqlValue::Integer(1)] },
+            Row { values: vec![SqlValue::Date(date2), SqlValue::Integer(2)] },
         ];
 
         let column_names = vec!["date_col".to_string(), "id".to_string()];
@@ -597,14 +605,10 @@ mod tests {
         use vibesql_types::{Date, Time, Timestamp};
 
         let date = Date::new(2024, 6, 15).unwrap();
-        let time = Time::new(14, 30, 45, 123456000).unwrap();  // 123.456 milliseconds in nanoseconds
+        let time = Time::new(14, 30, 45, 123456000).unwrap(); // 123.456 milliseconds in nanoseconds
         let ts = Timestamp::new(date, time);
 
-        let rows = vec![
-            Row {
-                values: vec![SqlValue::Timestamp(ts), SqlValue::Integer(1)],
-            },
-        ];
+        let rows = vec![Row { values: vec![SqlValue::Timestamp(ts), SqlValue::Integer(1)] }];
 
         let column_names = vec!["ts_col".to_string(), "id".to_string()];
         let batch = rows_to_record_batch(&rows, &column_names).unwrap();
@@ -624,7 +628,7 @@ mod tests {
         let date1 = Date::new(2020, 1, 1).unwrap();
         let date2 = Date::new(2025, 12, 31).unwrap();
         let ts_date = Date::new(2024, 7, 4).unwrap();
-        let ts_time = Time::new(10, 20, 30, 500000000).unwrap();  // 500 milliseconds in nanoseconds
+        let ts_time = Time::new(10, 20, 30, 500000000).unwrap(); // 500 milliseconds in nanoseconds
         let ts = Timestamp::new(ts_date, ts_time);
 
         let original_rows = vec![
@@ -644,11 +648,7 @@ mod tests {
             },
         ];
 
-        let column_names = vec![
-            "date_col".to_string(),
-            "ts_col".to_string(),
-            "id".to_string(),
-        ];
+        let column_names = vec!["date_col".to_string(), "ts_col".to_string(), "id".to_string()];
 
         let batch = rows_to_record_batch(&original_rows, &column_names).unwrap();
         let converted_rows = record_batch_to_rows(&batch).unwrap();
@@ -661,28 +661,23 @@ mod tests {
     fn test_null_values_in_numeric_columns() {
         // Test that NULL values are preserved in Int64 and Float64 columns
         let original_rows = vec![
+            Row { values: vec![SqlValue::Integer(100), SqlValue::Double(3.5)] },
             Row {
                 values: vec![
-                    SqlValue::Integer(100),
-                    SqlValue::Double(3.5),
-                ],
-            },
-            Row {
-                values: vec![
-                    SqlValue::Null,  // NULL integer
+                    SqlValue::Null, // NULL integer
                     SqlValue::Double(2.5),
                 ],
             },
             Row {
                 values: vec![
                     SqlValue::Integer(200),
-                    SqlValue::Null,  // NULL float
+                    SqlValue::Null, // NULL float
                 ],
             },
             Row {
                 values: vec![
-                    SqlValue::Null,  // NULL integer
-                    SqlValue::Null,  // NULL float
+                    SqlValue::Null, // NULL integer
+                    SqlValue::Null, // NULL float
                 ],
             },
         ];
@@ -696,16 +691,16 @@ mod tests {
 
         // Verify NULL values are tracked
         let int_array = batch.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
-        assert!(!int_array.is_null(0));  // First row is not NULL
-        assert!(int_array.is_null(1));   // Second row is NULL
-        assert!(!int_array.is_null(2));  // Third row is not NULL
-        assert!(int_array.is_null(3));   // Fourth row is NULL
+        assert!(!int_array.is_null(0)); // First row is not NULL
+        assert!(int_array.is_null(1)); // Second row is NULL
+        assert!(!int_array.is_null(2)); // Third row is not NULL
+        assert!(int_array.is_null(3)); // Fourth row is NULL
 
         let float_array = batch.column(1).as_any().downcast_ref::<Float64Array>().unwrap();
         assert!(!float_array.is_null(0)); // First row is not NULL
         assert!(!float_array.is_null(1)); // Second row is not NULL
-        assert!(float_array.is_null(2));  // Third row is NULL
-        assert!(float_array.is_null(3));  // Fourth row is NULL
+        assert!(float_array.is_null(2)); // Third row is NULL
+        assert!(float_array.is_null(3)); // Fourth row is NULL
 
         // Test round-trip conversion preserves NULLs
         let converted_rows = record_batch_to_rows(&batch).unwrap();
@@ -730,14 +725,7 @@ mod tests {
                     SqlValue::Boolean(true),
                 ],
             },
-            Row {
-                values: vec![
-                    SqlValue::Null,
-                    SqlValue::Null,
-                    SqlValue::Null,
-                    SqlValue::Null,
-                ],
-            },
+            Row { values: vec![SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null] },
             Row {
                 values: vec![
                     SqlValue::Integer(3),
@@ -759,19 +747,19 @@ mod tests {
 
         // Verify NULLs in each column
         assert!(!batch.column(0).is_null(0));
-        assert!(batch.column(0).is_null(1));  // NULL integer
+        assert!(batch.column(0).is_null(1)); // NULL integer
         assert!(!batch.column(0).is_null(2));
 
         assert!(!batch.column(1).is_null(0));
-        assert!(batch.column(1).is_null(1));  // NULL float
+        assert!(batch.column(1).is_null(1)); // NULL float
         assert!(!batch.column(1).is_null(2));
 
         assert!(!batch.column(2).is_null(0));
-        assert!(batch.column(2).is_null(1));  // NULL string
+        assert!(batch.column(2).is_null(1)); // NULL string
         assert!(!batch.column(2).is_null(2));
 
         assert!(!batch.column(3).is_null(0));
-        assert!(batch.column(3).is_null(1));  // NULL boolean
+        assert!(batch.column(3).is_null(1)); // NULL boolean
         assert!(!batch.column(3).is_null(2));
 
         // Round-trip conversion
@@ -791,28 +779,18 @@ mod tests {
         // Simulates a query like: SELECT quantity * discount FROM orders
         // where discount can be NULL for some rows
         let original_rows = vec![
-            Row {
-                values: vec![
-                    SqlValue::Integer(10),
-                    SqlValue::Double(0.1),
-                ],
-            },
+            Row { values: vec![SqlValue::Integer(10), SqlValue::Double(0.1)] },
             Row {
                 values: vec![
                     SqlValue::Integer(20),
-                    SqlValue::Null,  // No discount applied
+                    SqlValue::Null, // No discount applied
                 ],
             },
-            Row {
-                values: vec![
-                    SqlValue::Integer(30),
-                    SqlValue::Double(0.2),
-                ],
-            },
+            Row { values: vec![SqlValue::Integer(30), SqlValue::Double(0.2)] },
             Row {
                 values: vec![
                     SqlValue::Integer(40),
-                    SqlValue::Null,  // No discount applied
+                    SqlValue::Null, // No discount applied
                 ],
             },
         ];

@@ -162,7 +162,12 @@ impl JoinOrderAnalyzer {
     }
 
     /// Analyze a predicate with an explicit join type
-    pub fn analyze_predicate_with_type(&mut self, expr: &Expression, tables: &HashSet<String>, join_type: vibesql_ast::JoinType) {
+    pub fn analyze_predicate_with_type(
+        &mut self,
+        expr: &Expression,
+        tables: &HashSet<String>,
+        join_type: vibesql_ast::JoinType,
+    ) {
         match expr {
             // Recursively handle AND expressions
             Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
@@ -202,14 +207,22 @@ impl JoinOrderAnalyzer {
                     let common_edges = self.find_common_edges(&branch_edges);
 
                     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                        eprintln!("[ANALYZER] Found {} common join edges across all OR branches", common_edges.len());
+                        eprintln!(
+                            "[ANALYZER] Found {} common join edges across all OR branches",
+                            common_edges.len()
+                        );
                     }
 
                     // Add common edges to our join graph
                     for edge in common_edges {
                         if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                            eprintln!("[ANALYZER] Added common edge from OR: {}.{} = {}.{}",
-                                edge.left_table, edge.left_column, edge.right_table, edge.right_column);
+                            eprintln!(
+                                "[ANALYZER] Added common edge from OR: {}.{} = {}.{}",
+                                edge.left_table,
+                                edge.left_column,
+                                edge.right_table,
+                                edge.right_column
+                            );
                         }
                         self.edges.push(edge);
                     }
@@ -236,7 +249,10 @@ impl JoinOrderAnalyzer {
                             join_type: join_type.clone(),
                         };
                         if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                            eprintln!("[ANALYZER] Added edge: {}.{} = {}.{} (join_type: {:?})", lt, lc, rt, rc, join_type);
+                            eprintln!(
+                                "[ANALYZER] Added edge: {}.{} = {}.{} (join_type: {:?})",
+                                lt, lc, rt, rc, join_type
+                            );
                         }
                         self.edges.push(edge);
                     }
@@ -292,9 +308,9 @@ impl JoinOrderAnalyzer {
 
         for edge in first_branch {
             // Check if this edge appears in all other branches
-            let appears_in_all = branch_edges[1..].iter().all(|branch| {
-                branch.iter().any(|e| self.edges_match(e, edge))
-            });
+            let appears_in_all = branch_edges[1..]
+                .iter()
+                .all(|branch| branch.iter().any(|e| self.edges_match(e, edge)));
 
             if appears_in_all {
                 common_edges.push(edge.clone());
@@ -354,7 +370,10 @@ impl JoinOrderAnalyzer {
         // Schema-based lookup only - no heuristic fallbacks
         if self.column_to_table.is_empty() {
             if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                eprintln!("[ANALYZER] Warning: No column-to-table map available for column {}", column);
+                eprintln!(
+                    "[ANALYZER] Warning: No column-to-table map available for column {}",
+                    column
+                );
             }
             return None;
         }
@@ -378,8 +397,11 @@ impl JoinOrderAnalyzer {
                 eprintln!("[ANALYZER] Warning: Table {} not in tables set {:?}", table, tables);
             }
         } else if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-            eprintln!("[ANALYZER] Warning: Column {} not found in schema map (available: {:?})",
-                col_lower, self.column_to_table.keys().take(10).collect::<Vec<_>>());
+            eprintln!(
+                "[ANALYZER] Warning: Column {} not found in schema map (available: {:?})",
+                col_lower,
+                self.column_to_table.keys().take(10).collect::<Vec<_>>()
+            );
         }
 
         None

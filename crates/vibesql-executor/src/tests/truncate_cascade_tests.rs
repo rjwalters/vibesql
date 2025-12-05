@@ -9,8 +9,8 @@
 //! - DELETE trigger validation
 
 use vibesql_ast::{
-    ColumnDef, CreateTableStmt, Expression, InsertStmt,
-    InsertSource, TableConstraint, TableConstraintKind, TruncateCascadeOption, TruncateTableStmt,
+    ColumnDef, CreateTableStmt, Expression, InsertSource, InsertStmt, TableConstraint,
+    TableConstraintKind, TruncateCascadeOption, TruncateTableStmt,
 };
 use vibesql_storage::Database;
 use vibesql_types::{DataType, SqlValue};
@@ -26,22 +26,20 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
             name: pk_column.to_string(),
             data_type: DataType::Integer,
             nullable: false,
-            constraints: vec![],  // Use table-level PK instead
+            constraints: vec![], // Use table-level PK instead
             default_value: None,
             comment: None,
         }],
-        table_constraints: vec![
-            TableConstraint {
-                name: None,
-                kind: TableConstraintKind::PrimaryKey {
-                    columns: vec![vibesql_ast::IndexColumn {
-                        column_name: pk_column.to_string(),
-                        direction: vibesql_ast::OrderDirection::Asc,
-                        prefix_length: None,
-                    }],
-                },
+        table_constraints: vec![TableConstraint {
+            name: None,
+            kind: TableConstraintKind::PrimaryKey {
+                columns: vec![vibesql_ast::IndexColumn {
+                    column_name: pk_column.to_string(),
+                    direction: vibesql_ast::OrderDirection::Asc,
+                    prefix_length: None,
+                }],
             },
-        ],
+        }],
         table_options: vec![],
     };
     CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -64,7 +62,7 @@ fn create_table_with_fk(
                 name: pk_column.to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
-                constraints: vec![],  // Use table-level PK instead
+                constraints: vec![], // Use table-level PK instead
                 default_value: None,
                 comment: None,
             },
@@ -72,7 +70,7 @@ fn create_table_with_fk(
                 name: fk_column.to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
-                constraints: vec![],  // Use table-level FK instead
+                constraints: vec![], // Use table-level FK instead
                 default_value: None,
                 comment: None,
             },
@@ -111,10 +109,7 @@ fn insert_row(db: &mut Database, table_name: &str, values: Vec<SqlValue>) {
     let stmt = InsertStmt {
         table_name: table_name.to_string(),
         columns: vec![],
-        source: InsertSource::Values(vec![values
-            .into_iter()
-            .map(Expression::Literal)
-            .collect()]),
+        source: InsertSource::Values(vec![values.into_iter().map(Expression::Literal).collect()]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -141,10 +136,7 @@ fn test_truncate_restrict_default() {
 
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("referenced by foreign keys"));
+    assert!(result.unwrap_err().to_string().contains("referenced by foreign keys"));
 
     // Verify no data was deleted
     assert_eq!(db.get_table("parent").unwrap().row_count(), 1);
@@ -171,10 +163,7 @@ fn test_truncate_restrict_explicit() {
 
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("referenced by foreign keys"));
+    assert!(result.unwrap_err().to_string().contains("referenced by foreign keys"));
 
     // Verify no data was deleted
     assert_eq!(db.get_table("parent").unwrap().row_count(), 1);
@@ -222,11 +211,7 @@ fn test_truncate_cascade_multi_level() {
 
     insert_row(&mut db, "parent", vec![SqlValue::Integer(1)]);
     insert_row(&mut db, "child", vec![SqlValue::Integer(1), SqlValue::Integer(1)]);
-    insert_row(
-        &mut db,
-        "grandchild",
-        vec![SqlValue::Integer(1), SqlValue::Integer(1)],
-    );
+    insert_row(&mut db, "grandchild", vec![SqlValue::Integer(1), SqlValue::Integer(1)]);
 
     // Truncate parent with CASCADE
     let stmt = TruncateTableStmt {

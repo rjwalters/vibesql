@@ -3,7 +3,7 @@
 //! These tests verify that default value expressions are properly evaluated
 //! when foreign key constraints trigger SET DEFAULT actions.
 
-use vibesql_executor::{CreateTableExecutor, InsertExecutor, DeleteExecutor, UpdateExecutor};
+use vibesql_executor::{CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
@@ -206,14 +206,8 @@ fn test_on_delete_set_default_composite_key() {
     // Child row should now reference (0, 0) - the defaults
     let rows = get_all_rows(&db, "child");
     assert_eq!(rows.len(), 2);
-    assert_eq!(
-        rows[0],
-        vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(1)]
-    );
-    assert_eq!(
-        rows[1],
-        vec![SqlValue::Integer(2), SqlValue::Integer(0), SqlValue::Integer(0)]
-    );
+    assert_eq!(rows[0], vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(1)]);
+    assert_eq!(rows[1], vec![SqlValue::Integer(2), SqlValue::Integer(0), SqlValue::Integer(0)]);
 }
 
 #[test]

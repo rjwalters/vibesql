@@ -126,11 +126,9 @@ pub trait TypeBehavior {
 
 /// Helper to check if a SqlValue is a floating-point type
 fn is_float_value(value: &SqlValue) -> bool {
-    matches!(value,
-        SqlValue::Float(_) |
-        SqlValue::Real(_) |
-        SqlValue::Double(_) |
-        SqlValue::Numeric(_)  // Numeric is stored as f64, treated as float-like in SQLite
+    matches!(
+        value,
+        SqlValue::Float(_) | SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) // Numeric is stored as f64, treated as float-like in SQLite
     )
 }
 
@@ -272,10 +270,7 @@ mod tests {
         use crate::MySqlModeFlags;
 
         // MySQL with sqlite_division_semantics flag uses SQLite's integer division
-        let flags = MySqlModeFlags {
-            sqlite_division_semantics: true,
-            ..Default::default()
-        };
+        let flags = MySqlModeFlags { sqlite_division_semantics: true, ..Default::default() };
         let mode = SqlMode::MySQL { flags };
 
         // int / int → Integer (truncated, like SQLite)

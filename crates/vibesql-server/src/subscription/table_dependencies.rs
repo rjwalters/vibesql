@@ -439,8 +439,7 @@ mod tests {
 
     #[test]
     fn test_insert_statement() {
-        let deps =
-            extract_table_dependencies("INSERT INTO users (name) VALUES ('Alice')").unwrap();
+        let deps = extract_table_dependencies("INSERT INTO users (name) VALUES ('Alice')").unwrap();
         assert_eq!(deps.len(), 1);
         assert!(deps.contains("USERS"));
     }

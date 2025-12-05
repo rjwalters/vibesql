@@ -17,9 +17,7 @@ fn execute_sql(db: &mut Database, sql: &str) -> Result<Vec<vibesql_storage::Row>
     match stmt {
         Statement::Select(select_stmt) => {
             let select_executor = SelectExecutor::new(db);
-            select_executor
-                .execute(&select_stmt)
-                .map_err(|e| format!("Select error: {:?}", e))
+            select_executor.execute(&select_stmt).map_err(|e| format!("Select error: {:?}", e))
         }
         Statement::CreateTable(create) => {
             CreateTableExecutor::execute(&create, db)
@@ -73,22 +71,10 @@ fn setup_q15_tables(db: &mut Database) {
 
     // Insert lineitem data
     // Supplier #1 total: 100*(1-0.1) + 200*(1-0.05) = 90 + 190 = 280
-    execute_sql(
-        db,
-        "INSERT INTO lineitem_q15 VALUES (1, 1, 100.0, 0.1, '1996-02-01')",
-    )
-    .unwrap();
-    execute_sql(
-        db,
-        "INSERT INTO lineitem_q15 VALUES (2, 1, 200.0, 0.05, '1996-02-15')",
-    )
-    .unwrap();
+    execute_sql(db, "INSERT INTO lineitem_q15 VALUES (1, 1, 100.0, 0.1, '1996-02-01')").unwrap();
+    execute_sql(db, "INSERT INTO lineitem_q15 VALUES (2, 1, 200.0, 0.05, '1996-02-15')").unwrap();
     // Supplier #2 total: 150*(1-0.1) = 135
-    execute_sql(
-        db,
-        "INSERT INTO lineitem_q15 VALUES (3, 2, 150.0, 0.1, '1996-03-01')",
-    )
-    .unwrap();
+    execute_sql(db, "INSERT INTO lineitem_q15 VALUES (3, 2, 150.0, 0.1, '1996-03-01')").unwrap();
 }
 
 #[test]
@@ -109,11 +95,7 @@ ORDER BY total DESC
 "#;
 
     let result = execute_sql(&mut db, cte_query);
-    assert!(
-        result.is_ok(),
-        "CTE with GROUP BY should work: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "CTE with GROUP BY should work: {:?}", result);
     let rows = result.unwrap();
     assert_eq!(rows.len(), 2, "Should return 2 suppliers");
 
@@ -147,11 +129,7 @@ ORDER BY total_revenue DESC
 "#;
 
     let result = execute_sql(&mut db, cte_query);
-    assert!(
-        result.is_ok(),
-        "CTE joined with table should work: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "CTE joined with table should work: {:?}", result);
     let rows = result.unwrap();
     assert_eq!(rows.len(), 2, "Should return 2 suppliers");
 
@@ -189,11 +167,7 @@ LIMIT 1
 "#;
 
     let result = execute_sql(&mut db, q15_simplified);
-    assert!(
-        result.is_ok(),
-        "Simplified Q15 should work: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Simplified Q15 should work: {:?}", result);
     let rows = result.unwrap();
     assert_eq!(rows.len(), 1, "Should return top 1 supplier");
 
@@ -234,4 +208,3 @@ FROM revenue
     let rows = result.unwrap();
     assert_eq!(rows.len(), 0, "Should return 0 rows (empty result set)");
 }
-

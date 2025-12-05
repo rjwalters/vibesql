@@ -166,19 +166,25 @@ fn collect_correlation_refs_from_expr(
         vibesql_ast::Expression::IsNull { expr, .. } => {
             collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
         }
-        vibesql_ast::Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-        } => {
+        vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
                 collect_correlation_refs_from_expr(op, outer_schema, subquery_tables, refs);
             }
             for when in when_clauses {
                 for condition in &when.conditions {
-                    collect_correlation_refs_from_expr(condition, outer_schema, subquery_tables, refs);
+                    collect_correlation_refs_from_expr(
+                        condition,
+                        outer_schema,
+                        subquery_tables,
+                        refs,
+                    );
                 }
-                collect_correlation_refs_from_expr(&when.result, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    &when.result,
+                    outer_schema,
+                    subquery_tables,
+                    refs,
+                );
             }
             if let Some(else_expr) = else_result {
                 collect_correlation_refs_from_expr(else_expr, outer_schema, subquery_tables, refs);

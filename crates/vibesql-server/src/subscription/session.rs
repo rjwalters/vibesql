@@ -93,10 +93,7 @@ impl SessionSubscriptionManager {
 
         // Update table -> subscription index
         for table in &table_dependencies {
-            self.table_to_subscriptions
-                .entry(table.clone())
-                .or_default()
-                .insert(id);
+            self.table_to_subscriptions.entry(table.clone()).or_default().insert(id);
         }
 
         self.subscriptions.insert(id, subscription);
@@ -137,7 +134,10 @@ impl SessionSubscriptionManager {
     /// Unsubscribe from a query
     ///
     /// Returns the subscription if it existed, None otherwise
-    pub fn unsubscribe(&mut self, subscription_id: &SessionSubscriptionId) -> Option<SessionSubscription> {
+    pub fn unsubscribe(
+        &mut self,
+        subscription_id: &SessionSubscriptionId,
+    ) -> Option<SessionSubscription> {
         if let Some(subscription) = self.subscriptions.remove(subscription_id) {
             // Clean up table -> subscription index
             for table in &subscription.table_dependencies {
@@ -217,11 +217,13 @@ mod tests {
         deps.insert("users".to_string());
         deps.insert("orders".to_string());
 
-        let id = manager.subscribe(
-            "SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string(),
-            vec![],
-            deps,
-        ).unwrap();
+        let id = manager
+            .subscribe(
+                "SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string(),
+                vec![],
+                deps,
+            )
+            .unwrap();
 
         assert_eq!(manager.subscription_count(), 1);
         assert!(manager.get(&id).is_some());
@@ -257,11 +259,13 @@ mod tests {
         deps2.insert("products".to_string());
 
         let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1).unwrap();
-        let id2 = manager.subscribe(
-            "SELECT * FROM users JOIN products ON users.id = products.seller_id".to_string(),
-            vec![],
-            deps2,
-        ).unwrap();
+        let id2 = manager
+            .subscribe(
+                "SELECT * FROM users JOIN products ON users.id = products.seller_id".to_string(),
+                vec![],
+                deps2,
+            )
+            .unwrap();
 
         assert_eq!(manager.subscription_count(), 2);
 
@@ -330,11 +334,17 @@ mod tests {
 
         // First two subscriptions should succeed
         manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
-        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone()).unwrap();
+        manager
+            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone())
+            .unwrap();
 
         // Third subscription should fail with limit exceeded
-        let result = manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
-        assert!(matches!(result, Err(SubscriptionError::ConnectionLimitExceeded { current: 2, max: 2 })));
+        let result =
+            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
+        assert!(matches!(
+            result,
+            Err(SubscriptionError::ConnectionLimitExceeded { current: 2, max: 2 })
+        ));
     }
 
     #[test]
@@ -354,10 +364,13 @@ mod tests {
 
         // First two subscriptions should succeed (rate limit = 2/sec)
         manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
-        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone()).unwrap();
+        manager
+            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone())
+            .unwrap();
 
         // Third subscription should be rate limited
-        let result = manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
+        let result =
+            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
         assert!(matches!(result, Err(SubscriptionError::RateLimited { .. })));
     }
 }

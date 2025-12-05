@@ -63,11 +63,7 @@ pub(super) fn expression_has_in_subquery(expr: &Expression) -> bool {
 
         Expression::IsNull { expr, .. } => expression_has_in_subquery(expr),
 
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-        } => {
+        Expression::Case { operand, when_clauses, else_result } => {
             operand.as_ref().is_some_and(|e| expression_has_in_subquery(e))
                 || when_clauses.iter().any(|clause| {
                     clause.conditions.iter().any(expression_has_in_subquery)
@@ -104,11 +100,7 @@ pub(super) fn expression_has_in_subquery(expr: &Expression) -> bool {
             expression_has_in_subquery(substring) || expression_has_in_subquery(string)
         }
 
-        Expression::Trim {
-            removal_char,
-            string,
-            ..
-        } => {
+        Expression::Trim { removal_char, string, .. } => {
             removal_char.as_ref().is_some_and(|e| expression_has_in_subquery(e))
                 || expression_has_in_subquery(string)
         }
@@ -127,12 +119,7 @@ pub(super) fn expression_has_in_subquery(expr: &Expression) -> bool {
 fn from_clause_has_in_subquery(from: &vibesql_ast::FromClause) -> bool {
     match from {
         vibesql_ast::FromClause::Table { .. } => false,
-        vibesql_ast::FromClause::Join {
-            left,
-            right,
-            condition,
-            ..
-        } => {
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
             from_clause_has_in_subquery(left)
                 || from_clause_has_in_subquery(right)
                 || condition.as_ref().is_some_and(expression_has_in_subquery)

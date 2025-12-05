@@ -35,11 +35,7 @@ fn get_python_config_macos() -> Option<PythonConfig> {
         .arg("--ldflags")
         .arg("--embed")
         .output()
-        .or_else(|_| {
-            Command::new("python3-config")
-                .arg("--ldflags")
-                .output()
-        })
+        .or_else(|_| Command::new("python3-config").arg("--ldflags").output())
         .ok()?;
 
     if !output.status.success() {
@@ -69,10 +65,7 @@ fn get_python_config_macos() -> Option<PythonConfig> {
 
 fn get_python_config_unix() -> Option<PythonConfig> {
     // For non-macOS Unix systems, use python3-config
-    let output = Command::new("python3-config")
-        .arg("--ldflags")
-        .output()
-        .ok()?;
+    let output = Command::new("python3-config").arg("--ldflags").output().ok()?;
 
     if !output.status.success() {
         return None;

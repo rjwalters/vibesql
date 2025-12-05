@@ -13,35 +13,19 @@ use crate::schema::CombinedSchema;
 pub(crate) enum PredicatePattern {
     /// Numeric comparison: column_idx op constant (e.g., "price < 100.0")
     /// Optimized for f64 comparisons without enum matching
-    NumericComparison {
-        col_idx: usize,
-        op: ComparisonOp,
-        constant: f64,
-    },
+    NumericComparison { col_idx: usize, op: ComparisonOp, constant: f64 },
 
     /// Date range check: column >= min_date AND column < max_date
     /// Common in TPC-H queries (e.g., l_shipdate >= '1994-01-01' AND l_shipdate < '1995-01-01')
-    DateRange {
-        col_idx: usize,
-        min_date: vibesql_types::Date,
-        max_date: vibesql_types::Date,
-    },
+    DateRange { col_idx: usize, min_date: vibesql_types::Date, max_date: vibesql_types::Date },
 
     /// BETWEEN for numeric values: column BETWEEN min AND max
     /// Optimized for contiguous range checks
-    BetweenNumeric {
-        col_idx: usize,
-        min: f64,
-        max: f64,
-    },
+    BetweenNumeric { col_idx: usize, min: f64, max: f64 },
 
     /// Integer comparison: column_idx op constant (e.g., "quantity > 10")
     /// Optimized for i64 comparisons without enum matching
-    IntegerComparison {
-        col_idx: usize,
-        op: ComparisonOp,
-        constant: i64,
-    },
+    IntegerComparison { col_idx: usize, op: ComparisonOp, constant: i64 },
 
     /// General predicate that doesn't match any fast path
     /// Falls back to standard SqlValue enum matching
@@ -52,12 +36,12 @@ pub(crate) enum PredicatePattern {
 /// Comparison operators supported by fast paths
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComparisonOp {
-    Lt,      // <
-    Le,      // <=
-    Gt,      // >
-    Ge,      // >=
-    Eq,      // =
-    NotEq,   // <>
+    Lt,    // <
+    Le,    // <=
+    Gt,    // >
+    Ge,    // >=
+    Eq,    // =
+    NotEq, // <>
 }
 
 impl ComparisonOp {
@@ -77,17 +61,16 @@ impl ComparisonOp {
 
 impl PredicatePattern {
     /// Analyze WHERE clause expression and detect optimization opportunities
-    pub(crate) fn from_where_clause(
-        where_expr: &Expression,
-        schema: &CombinedSchema,
-    ) -> Self {
+    pub(crate) fn from_where_clause(where_expr: &Expression, schema: &CombinedSchema) -> Self {
         // Try to detect date range pattern first (most specific)
         if let Some(pattern) = Self::detect_date_range(where_expr, schema) {
             return pattern;
         }
 
         // Try to detect numeric BETWEEN pattern
-        if let Expression::Between { expr, low, high, negated: false, symmetric: false } = where_expr {
+        if let Expression::Between { expr, low, high, negated: false, symmetric: false } =
+            where_expr
+        {
             if let Some(pattern) = Self::detect_between_numeric(expr, low, high, schema) {
                 return pattern;
             }
@@ -97,12 +80,16 @@ impl PredicatePattern {
         if let Expression::BinaryOp { left, op, right } = where_expr {
             if let Some(comp_op) = ComparisonOp::from_binary_op(op) {
                 // Check for: column op constant
-                if let Some(pattern) = Self::detect_column_constant_comparison(left, comp_op, right, schema) {
+                if let Some(pattern) =
+                    Self::detect_column_constant_comparison(left, comp_op, right, schema)
+                {
                     return pattern;
                 }
 
                 // Check for: constant op column (reversed)
-                if let Some(pattern) = Self::detect_constant_column_comparison(left, comp_op, right, schema) {
+                if let Some(pattern) =
+                    Self::detect_constant_column_comparison(left, comp_op, right, schema)
+                {
                     return pattern;
                 }
             }
@@ -115,15 +102,11 @@ impl PredicatePattern {
     /// Detect pattern: date_column >= min AND date_column < max
     fn detect_date_range(expr: &Expression, schema: &CombinedSchema) -> Option<PredicatePattern> {
         // Match: AND expression
-        if let Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } = expr
-        {
+        if let Expression::BinaryOp { left, op: BinaryOperator::And, right } = expr {
             // Check if both sides are comparisons on the same column
             let (left_col_idx, left_op, left_date) = Self::extract_date_comparison(left, schema)?;
-            let (right_col_idx, right_op, right_date) = Self::extract_date_comparison(right, schema)?;
+            let (right_col_idx, right_op, right_date) =
+                Self::extract_date_comparison(right, schema)?;
 
             // Must be the same column
             if left_col_idx != right_col_idx {
@@ -203,11 +186,7 @@ impl PredicatePattern {
             let min_val = Self::extract_f64_literal(low)?;
             let max_val = Self::extract_f64_literal(high)?;
 
-            return Some(PredicatePattern::BetweenNumeric {
-                col_idx,
-                min: min_val,
-                max: max_val,
-            });
+            return Some(PredicatePattern::BetweenNumeric { col_idx, min: min_val, max: max_val });
         }
 
         None
@@ -227,20 +206,12 @@ impl PredicatePattern {
             // Try to extract integer constant FIRST (before f64)
             // This ensures Integer literals are detected as IntegerComparison
             if let Some(val) = Self::extract_i64_literal(right) {
-                return Some(PredicatePattern::IntegerComparison {
-                    col_idx,
-                    op,
-                    constant: val,
-                });
+                return Some(PredicatePattern::IntegerComparison { col_idx, op, constant: val });
             }
 
             // Try to extract numeric constant (f64)
             if let Some(val) = Self::extract_f64_literal(right) {
-                return Some(PredicatePattern::NumericComparison {
-                    col_idx,
-                    op,
-                    constant: val,
-                });
+                return Some(PredicatePattern::NumericComparison { col_idx, op, constant: val });
             }
         }
 
@@ -326,9 +297,9 @@ impl PredicatePattern {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
-    use std::collections::HashMap;
 
     fn create_test_schema() -> CombinedSchema {
         let columns = vec![
@@ -357,10 +328,7 @@ mod tests {
         let mut table_schemas = HashMap::new();
         table_schemas.insert("lineitem".to_string(), (0, schema));
 
-        CombinedSchema {
-            table_schemas,
-            total_columns: 3,
-        }
+        CombinedSchema { table_schemas, total_columns: 3 }
     }
 
     #[test]
@@ -450,7 +418,11 @@ mod tests {
         let pattern = PredicatePattern::from_where_clause(&expr, &schema);
 
         match pattern {
-            PredicatePattern::DateRange { col_idx, min_date: detected_min, max_date: detected_max } => {
+            PredicatePattern::DateRange {
+                col_idx,
+                min_date: detected_min,
+                max_date: detected_max,
+            } => {
                 assert_eq!(col_idx, 2);
                 assert_eq!(detected_min, min_date);
                 assert_eq!(detected_max, max_date);

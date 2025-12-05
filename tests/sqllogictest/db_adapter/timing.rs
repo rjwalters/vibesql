@@ -157,7 +157,8 @@ pub fn detect_statement_type(sql: &str) -> &'static str {
     let sql_upper = sql.trim().to_uppercase();
     if sql_upper.starts_with("INSERT") {
         "INSERT"
-    } else if sql_upper.starts_with("CREATE INDEX") || sql_upper.starts_with("CREATE UNIQUE INDEX") {
+    } else if sql_upper.starts_with("CREATE INDEX") || sql_upper.starts_with("CREATE UNIQUE INDEX")
+    {
         "CREATE_INDEX"
     } else if sql_upper.starts_with("SELECT") {
         "SELECT"

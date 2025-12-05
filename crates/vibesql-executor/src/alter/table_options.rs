@@ -45,8 +45,5 @@ pub(super) fn execute_rename_table(
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
     }
 
-    Ok(format!(
-        "Table '{}' renamed to '{}'",
-        stmt.table_name, stmt.new_table_name
-    ))
+    Ok(format!("Table '{}' renamed to '{}'", stmt.table_name, stmt.new_table_name))
 }

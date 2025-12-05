@@ -65,10 +65,7 @@ pub fn execute_create_function(
     let catalog_params = stmt
         .parameters
         .iter()
-        .map(|param| FunctionParam {
-            name: param.name.clone(),
-            data_type: param.data_type.clone(),
-        })
+        .map(|param| FunctionParam { name: param.name.clone(), data_type: param.data_type.clone() })
         .collect();
 
     // Convert AST body to catalog body
@@ -82,12 +79,20 @@ pub fn execute_create_function(
 
     // Convert characteristics (Phase 6)
     let deterministic = stmt.deterministic.unwrap_or(false);
-    let sql_security = stmt.sql_security.as_ref().map(|sec| match sec {
-        vibesql_ast::SqlSecurity::Definer => SqlSecurity::Definer,
-        vibesql_ast::SqlSecurity::Invoker => SqlSecurity::Invoker,
-    }).unwrap_or(SqlSecurity::Definer);
+    let sql_security = stmt
+        .sql_security
+        .as_ref()
+        .map(|sec| match sec {
+            vibesql_ast::SqlSecurity::Definer => SqlSecurity::Definer,
+            vibesql_ast::SqlSecurity::Invoker => SqlSecurity::Invoker,
+        })
+        .unwrap_or(SqlSecurity::Definer);
 
-    let function = if stmt.deterministic.is_some() || stmt.sql_security.is_some() || stmt.comment.is_some() || stmt.language.is_some() {
+    let function = if stmt.deterministic.is_some()
+        || stmt.sql_security.is_some()
+        || stmt.comment.is_some()
+        || stmt.language.is_some()
+    {
         Function::with_characteristics(
             stmt.function_name.clone(),
             db.catalog.get_current_schema().to_string(),

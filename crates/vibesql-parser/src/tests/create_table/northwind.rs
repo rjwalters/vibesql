@@ -24,7 +24,10 @@ fn test_parse_northwind_categories_table() {
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::PrimaryKey, .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
+                    ..
+                }
             ));
         }
         _ => panic!("Expected CREATE TABLE statement"),
@@ -55,7 +58,10 @@ fn test_parse_northwind_products_table() {
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
-                vibesql_ast::ColumnConstraint { kind: vibesql_ast::ColumnConstraintKind::PrimaryKey, .. }
+                vibesql_ast::ColumnConstraint {
+                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
+                    ..
+                }
             ));
 
             // product_name has NOT NULL (nullable = false)

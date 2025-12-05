@@ -115,8 +115,11 @@ fn test_sign_zero() {
 fn test_pi_function() {
     let (evaluator, row) = create_test_evaluator();
 
-    let expr =
-        vibesql_ast::Expression::Function { name: "PI".to_string(), args: vec![], character_unit: None };
+    let expr = vibesql_ast::Expression::Function {
+        name: "PI".to_string(),
+        args: vec![],
+        character_unit: None,
+    };
     let result = evaluator.eval(&expr, &row).unwrap();
 
     if let vibesql_types::SqlValue::Double(val) = result {

@@ -227,7 +227,11 @@ impl Session {
     ///
     /// Combines prepare + execute_prepared in one call.
     #[allow(dead_code)]
-    pub fn execute_with_params(&mut self, sql: &str, params: &[SqlValue]) -> Result<ExecutionResult> {
+    pub fn execute_with_params(
+        &mut self,
+        sql: &str,
+        params: &[SqlValue],
+    ) -> Result<ExecutionResult> {
         let prepared = self.prepare(sql)?;
         self.execute_prepared(&prepared, params)
     }
@@ -245,7 +249,9 @@ impl Session {
 
                 // TODO: Get actual column names from select statement
                 let columns = if !rows.is_empty() {
-                    (0..rows[0].values.len()).map(|i| Column { name: format!("col{}", i) }).collect()
+                    (0..rows[0].values.len())
+                        .map(|i| Column { name: format!("col{}", i) })
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -254,21 +260,24 @@ impl Session {
             }
 
             vibesql_ast::Statement::Insert(insert_stmt) => {
-                let affected = vibesql_executor::InsertExecutor::execute(&mut self.db, insert_stmt)?;
+                let affected =
+                    vibesql_executor::InsertExecutor::execute(&mut self.db, insert_stmt)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&insert_stmt.table_name);
                 Ok(ExecutionResult::Insert { rows_affected: affected })
             }
 
             vibesql_ast::Statement::Update(update_stmt) => {
-                let affected = vibesql_executor::UpdateExecutor::execute(update_stmt, &mut self.db)?;
+                let affected =
+                    vibesql_executor::UpdateExecutor::execute(update_stmt, &mut self.db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&update_stmt.table_name);
                 Ok(ExecutionResult::Update { rows_affected: affected })
             }
 
             vibesql_ast::Statement::Delete(delete_stmt) => {
-                let affected = vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut self.db)?;
+                let affected =
+                    vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut self.db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&delete_stmt.table_name);
                 Ok(ExecutionResult::Delete { rows_affected: affected })
@@ -307,25 +316,19 @@ impl Session {
             }
 
             vibesql_ast::Statement::Analyze(analyze_stmt) => {
-                let message = vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut self.db)?;
+                let message =
+                    vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut self.db)?;
                 // Extract table count from message - the executor returns a message like
                 // "ANALYZE completed - N table(s) analyzed"
-                let tables_analyzed = if analyze_stmt.table_name.is_some() {
-                    1
-                } else {
-                    self.db.list_tables().len()
-                };
+                let tables_analyzed =
+                    if analyze_stmt.table_name.is_some() { 1 } else { self.db.list_tables().len() };
                 let _ = message; // Message is informational, we track count
                 Ok(ExecutionResult::Analyze { tables_analyzed })
             }
 
-            vibesql_ast::Statement::Prepare(prepare_stmt) => {
-                self.execute_prepare(prepare_stmt)
-            }
+            vibesql_ast::Statement::Prepare(prepare_stmt) => self.execute_prepare(prepare_stmt),
 
-            vibesql_ast::Statement::Execute(execute_stmt) => {
-                self.execute_execute(execute_stmt)
-            }
+            vibesql_ast::Statement::Execute(execute_stmt) => self.execute_execute(execute_stmt),
 
             vibesql_ast::Statement::Deallocate(deallocate_stmt) => {
                 self.execute_deallocate(deallocate_stmt)
@@ -335,13 +338,9 @@ impl Session {
                 self.execute_declare_cursor(declare_stmt)
             }
 
-            vibesql_ast::Statement::OpenCursor(open_stmt) => {
-                self.execute_open_cursor(open_stmt)
-            }
+            vibesql_ast::Statement::OpenCursor(open_stmt) => self.execute_open_cursor(open_stmt),
 
-            vibesql_ast::Statement::Fetch(fetch_stmt) => {
-                self.execute_fetch(fetch_stmt)
-            }
+            vibesql_ast::Statement::Fetch(fetch_stmt) => self.execute_fetch(fetch_stmt),
 
             vibesql_ast::Statement::CloseCursor(close_stmt) => {
                 self.execute_close_cursor(close_stmt)
@@ -355,7 +354,10 @@ impl Session {
     }
 
     /// Execute PREPARE statement - registers a named prepared statement
-    fn execute_prepare(&mut self, prepare_stmt: &vibesql_ast::PrepareStmt) -> Result<ExecutionResult> {
+    fn execute_prepare(
+        &mut self,
+        prepare_stmt: &vibesql_ast::PrepareStmt,
+    ) -> Result<ExecutionResult> {
         use vibesql_ast::PreparedStatementBody;
 
         let name = prepare_stmt.name.clone();
@@ -375,7 +377,9 @@ impl Session {
         };
 
         // Create the prepared statement
-        let prepared = self.stmt_cache.get_or_prepare(&sql)
+        let prepared = self
+            .stmt_cache
+            .get_or_prepare(&sql)
             .map_err(|e| anyhow::anyhow!("Failed to prepare statement: {}", e))?;
 
         // Store in named statements registry
@@ -385,25 +389,32 @@ impl Session {
     }
 
     /// Execute EXECUTE statement - runs a named prepared statement
-    fn execute_execute(&mut self, execute_stmt: &vibesql_ast::ExecuteStmt) -> Result<ExecutionResult> {
+    fn execute_execute(
+        &mut self,
+        execute_stmt: &vibesql_ast::ExecuteStmt,
+    ) -> Result<ExecutionResult> {
         let name = &execute_stmt.name;
 
         // Look up the named statement
-        let prepared = self.named_statements.get(name)
+        let prepared = self
+            .named_statements
+            .get(name)
             .ok_or_else(|| anyhow::anyhow!("Prepared statement '{}' not found", name))?
             .clone();
 
         // Evaluate parameter expressions to get values
-        let params: Vec<SqlValue> = execute_stmt.params.iter()
-            .map(evaluate_expression)
-            .collect::<Result<Vec<_>>>()?;
+        let params: Vec<SqlValue> =
+            execute_stmt.params.iter().map(evaluate_expression).collect::<Result<Vec<_>>>()?;
 
         // Execute the prepared statement with parameters
         self.execute_prepared(&prepared, &params)
     }
 
     /// Execute DEALLOCATE statement - removes a named prepared statement
-    fn execute_deallocate(&mut self, deallocate_stmt: &vibesql_ast::DeallocateStmt) -> Result<ExecutionResult> {
+    fn execute_deallocate(
+        &mut self,
+        deallocate_stmt: &vibesql_ast::DeallocateStmt,
+    ) -> Result<ExecutionResult> {
         use vibesql_ast::DeallocateTarget;
 
         match &deallocate_stmt.target {
@@ -422,7 +433,6 @@ impl Session {
             }
         }
     }
-
 
     /// Get prepared statement cache statistics
     #[allow(dead_code)]
@@ -471,11 +481,8 @@ impl Session {
         &mut self,
         stmt: &vibesql_ast::DeclareCursorStmt,
     ) -> Result<ExecutionResult> {
-        CursorExecutor::declare(&mut self.cursors, stmt)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-        Ok(ExecutionResult::DeclareCursor {
-            cursor_name: stmt.cursor_name.clone(),
-        })
+        CursorExecutor::declare(&mut self.cursors, stmt).map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(ExecutionResult::DeclareCursor { cursor_name: stmt.cursor_name.clone() })
     }
 
     /// Execute OPEN CURSOR statement
@@ -485,27 +492,19 @@ impl Session {
     ) -> Result<ExecutionResult> {
         CursorExecutor::open(&mut self.cursors, stmt, &self.db)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
-        Ok(ExecutionResult::OpenCursor {
-            cursor_name: stmt.cursor_name.clone(),
-        })
+        Ok(ExecutionResult::OpenCursor { cursor_name: stmt.cursor_name.clone() })
     }
 
     /// Execute FETCH statement
     fn execute_fetch(&mut self, stmt: &vibesql_ast::FetchStmt) -> Result<ExecutionResult> {
-        let fetch_result: CursorFetchResult = CursorExecutor::fetch(&mut self.cursors, stmt)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let fetch_result: CursorFetchResult =
+            CursorExecutor::fetch(&mut self.cursors, stmt).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Convert cursor rows to session rows
-        let rows: Vec<Row> = fetch_result
-            .rows
-            .iter()
-            .map(|r| Row { values: r.values.clone() })
-            .collect();
-        let columns: Vec<Column> = fetch_result
-            .columns
-            .iter()
-            .map(|name| Column { name: name.clone() })
-            .collect();
+        let rows: Vec<Row> =
+            fetch_result.rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+        let columns: Vec<Column> =
+            fetch_result.columns.iter().map(|name| Column { name: name.clone() }).collect();
 
         Ok(ExecutionResult::Fetch { rows, columns })
     }
@@ -515,11 +514,8 @@ impl Session {
         &mut self,
         stmt: &vibesql_ast::CloseCursorStmt,
     ) -> Result<ExecutionResult> {
-        CursorExecutor::close(&mut self.cursors, stmt)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-        Ok(ExecutionResult::CloseCursor {
-            cursor_name: stmt.cursor_name.clone(),
-        })
+        CursorExecutor::close(&mut self.cursors, stmt).map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(ExecutionResult::CloseCursor { cursor_name: stmt.cursor_name.clone() })
     }
 }
 

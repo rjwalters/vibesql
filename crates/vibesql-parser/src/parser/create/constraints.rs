@@ -56,7 +56,10 @@ impl Parser {
     /// Parse ON DELETE/UPDATE referential actions
     fn parse_referential_actions(
         &mut self,
-    ) -> Result<(Option<vibesql_ast::ReferentialAction>, Option<vibesql_ast::ReferentialAction>), ParseError> {
+    ) -> Result<
+        (Option<vibesql_ast::ReferentialAction>, Option<vibesql_ast::ReferentialAction>),
+        ParseError,
+    > {
         let mut on_delete = None;
         let mut on_update = None;
 
@@ -113,9 +116,7 @@ impl Parser {
                 self.advance(); // consume DEFAULT
                 Ok(vibesql_ast::ReferentialAction::SetDefault)
             } else {
-                Err(ParseError {
-                    message: "Expected NULL or DEFAULT after SET".to_string(),
-                })
+                Err(ParseError { message: "Expected NULL or DEFAULT after SET".to_string() })
             }
         } else {
             Err(ParseError {
@@ -155,7 +156,7 @@ impl Parser {
                     // MySQL allows standalone NULL keyword to explicitly indicate nullable column
                     // (which is the default anyway), so we just consume it and skip it
                     self.advance(); // consume NULL
-                    // This is a no-op - nullable is the default
+                                    // This is a no-op - nullable is the default
                 }
                 Token::Keyword(Keyword::Not) => {
                     self.advance(); // consume NOT
@@ -175,7 +176,7 @@ impl Parser {
                 }
                 Token::Keyword(Keyword::Unique) => {
                     self.advance(); // consume UNIQUE
-                    // MySQL allows optional KEY keyword after UNIQUE
+                                    // MySQL allows optional KEY keyword after UNIQUE
                     if self.peek_keyword(Keyword::Key) {
                         self.advance(); // consume KEY
                     }
@@ -412,17 +413,18 @@ impl Parser {
             }
             Token::Keyword(Keyword::Fulltext) => {
                 self.advance(); // consume FULLTEXT
-                
+
                 // Optional INDEX keyword
                 if self.peek_keyword(Keyword::Index) {
                     self.advance(); // consume INDEX
                 }
-                
+
                 // Optional index name
                 let index_name = if matches!(self.peek(), Token::Identifier(_)) {
                     // Look ahead to see if next token is LParen
-                    if self.position + 1 < self.tokens.len() 
-                        && matches!(self.tokens[self.position + 1], Token::LParen) {
+                    if self.position + 1 < self.tokens.len()
+                        && matches!(self.tokens[self.position + 1], Token::LParen)
+                    {
                         let name = match self.peek() {
                             Token::Identifier(n) => Some(n.clone()),
                             _ => None,
@@ -437,7 +439,7 @@ impl Parser {
                 } else {
                     None
                 };
-                
+
                 self.expect_token(Token::LParen)?;
 
                 let mut columns = Vec::new();
@@ -454,12 +456,11 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 vibesql_ast::TableConstraintKind::Fulltext { index_name, columns }
             }
-            _ => {
-                return Err(ParseError {
-                    message: "Expected table constraint keyword (PRIMARY, FOREIGN, UNIQUE, CHECK, FULLTEXT)"
+            _ => return Err(ParseError {
+                message:
+                    "Expected table constraint keyword (PRIMARY, FOREIGN, UNIQUE, CHECK, FULLTEXT)"
                         .to_string(),
-                })
-            }
+            }),
         };
 
         Ok(vibesql_ast::TableConstraint { name, kind })

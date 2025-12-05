@@ -39,7 +39,8 @@ fn test_parse_select_string() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) if s == "hello" => {} /* Success */
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s))
+                        if s == "hello" => {} /* Success */
                     _ => panic!("Expected Varchar('hello'), got {:?}", expr),
                 },
                 _ => panic!("Expected Expression select item"),
@@ -63,11 +64,15 @@ fn test_parse_select_arithmetic() {
                     vibesql_ast::Expression::BinaryOp { op, left, right } => {
                         assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
                         match **left {
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)) => {}
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                                1,
+                            )) => {}
                             _ => panic!("Expected left = 1"),
                         }
                         match **right {
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)) => {}
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                                2,
+                            )) => {}
                             _ => panic!("Expected right = 2"),
                         }
                     }

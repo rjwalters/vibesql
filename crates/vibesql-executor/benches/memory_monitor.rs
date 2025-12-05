@@ -30,8 +30,8 @@
 // by other benchmarks or future enhancements
 #![allow(dead_code)]
 
-use sysinfo::System;
 use std::sync::atomic::{AtomicU64, Ordering};
+use sysinfo::System;
 
 /// macOS-specific memory detection using host_statistics64
 ///
@@ -101,12 +101,7 @@ mod macos_memory {
             let mut vm_stats = MaybeUninit::<VmStatistics64>::zeroed();
             let mut count = HOST_VM_INFO64_COUNT;
 
-            let result = host_statistics64(
-                host,
-                HOST_VM_INFO64,
-                vm_stats.as_mut_ptr(),
-                &mut count,
-            );
+            let result = host_statistics64(host, HOST_VM_INFO64, vm_stats.as_mut_ptr(), &mut count);
 
             if result != KERN_SUCCESS {
                 return None;
@@ -166,10 +161,7 @@ pub enum MemoryPressure {
     /// Memory usage is within acceptable limits
     Ok(MemoryStats),
     /// Memory usage exceeds threshold
-    High {
-        stats: MemoryStats,
-        threshold_percent: f64,
-    },
+    High { stats: MemoryStats, threshold_percent: f64 },
 }
 
 impl MemoryPressure {
@@ -244,7 +236,9 @@ impl MemoryMonitor {
             // If sysinfo returns 0 or suspiciously low available memory (< 1% of total),
             // fall back to native Mach API
             if sysinfo_available == 0 || (total > 0 && sysinfo_available < total / 100) {
-                if let Some((_native_total, native_available)) = macos_memory::get_available_memory() {
+                if let Some((_native_total, native_available)) =
+                    macos_memory::get_available_memory()
+                {
                     // Use sysinfo's total (from sysctl) as it's more reliable,
                     // but use our native available memory calculation
                     (total, native_available.min(total))
@@ -260,11 +254,7 @@ impl MemoryMonitor {
         let available = sysinfo_available;
 
         let used = total.saturating_sub(available);
-        let usage_percent = if total > 0 {
-            (used as f64 / total as f64) * 100.0
-        } else {
-            0.0
-        };
+        let usage_percent = if total > 0 { (used as f64 / total as f64) * 100.0 } else { 0.0 };
 
         // Update high-water mark
         self.high_water_mark_bytes.fetch_max(used, Ordering::Relaxed);
@@ -285,10 +275,7 @@ impl MemoryMonitor {
         let stats = self.current_stats();
 
         if stats.usage_percent >= self.threshold_percent {
-            MemoryPressure::High {
-                stats,
-                threshold_percent: self.threshold_percent,
-            }
+            MemoryPressure::High { stats, threshold_percent: self.threshold_percent }
         } else {
             MemoryPressure::Ok(stats)
         }
@@ -344,10 +331,7 @@ pub enum GuardedResult<T> {
     /// Operation completed successfully
     Success(T),
     /// Operation skipped due to memory pressure
-    Skipped {
-        reason: String,
-        stats: MemoryStats,
-    },
+    Skipped { reason: String, stats: MemoryStats },
 }
 
 impl<T> GuardedResult<T> {

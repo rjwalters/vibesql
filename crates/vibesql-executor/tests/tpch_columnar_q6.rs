@@ -24,9 +24,7 @@ fn execute_sql(db: &mut Database, sql: &str) -> Result<Vec<vibesql_storage::Row>
     match stmt {
         Statement::Select(select_stmt) => {
             let select_executor = SelectExecutor::new(db);
-            select_executor
-                .execute(&select_stmt)
-                .map_err(|e| format!("Select error: {:?}", e))
+            select_executor.execute(&select_stmt).map_err(|e| format!("Select error: {:?}", e))
         }
         Statement::CreateTable(create) => {
             CreateTableExecutor::execute(&create, db)
@@ -191,11 +189,7 @@ fn test_q6_columnar_execution() {
     // Expected revenue: 60.0 + 100.0 + 105.0 = 265.0
     match row.get(0) {
         Some(SqlValue::Double(revenue)) => {
-            assert!(
-                (revenue - 265.0).abs() < 0.01,
-                "Expected revenue 265.0, got {}",
-                revenue
-            );
+            assert!((revenue - 265.0).abs() < 0.01, "Expected revenue 265.0, got {}", revenue);
         }
         other => panic!("Expected Double revenue, got {:?}", other),
     }
@@ -219,11 +213,8 @@ fn test_q6_with_no_matches() {
     .unwrap();
 
     // Insert data that doesn't match Q6 predicates
-    execute_sql(
-        &mut db,
-        "INSERT INTO lineitem VALUES (1, 30.0, 1000.0, 0.01, '1994-06-15')",
-    )
-    .unwrap();
+    execute_sql(&mut db, "INSERT INTO lineitem VALUES (1, 30.0, 1000.0, 0.01, '1994-06-15')")
+        .unwrap();
 
     // Q6 query (simplified)
     let q6 = r#"
@@ -259,31 +250,22 @@ fn test_q6_columnar_simple_aggregates() {
 
     // Insert test data
     for i in 1..=100 {
-        let sql = format!(
-            "INSERT INTO test_agg VALUES ({}.0, {})",
-            i,
-            if i % 2 == 0 { 2 } else { 1 }
-        );
+        let sql =
+            format!("INSERT INTO test_agg VALUES ({}.0, {})", i, if i % 2 == 0 { 2 } else { 1 });
         execute_sql(&mut db, &sql).unwrap();
     }
 
     // Test SUM with condition
-    let result = execute_sql(
-        &mut db,
-        "SELECT SUM(value * multiplier) FROM test_agg WHERE value < 50",
-    )
-    .expect("SUM query should execute");
+    let result =
+        execute_sql(&mut db, "SELECT SUM(value * multiplier) FROM test_agg WHERE value < 50")
+            .expect("SUM query should execute");
 
     assert_eq!(result.len(), 1);
     // Values 1-49: odds=1+3+5+...+49=625, evens=2+4+6+...+48=600
     // Sum: 625*1 + 600*2 = 625 + 1200 = 1825
     match result[0].get(0) {
         Some(SqlValue::Double(sum)) => {
-            assert!(
-                (sum - 1825.0).abs() < 0.01,
-                "Expected sum 1825.0, got {}",
-                sum
-            );
+            assert!((sum - 1825.0).abs() < 0.01, "Expected sum 1825.0, got {}", sum);
         }
         other => panic!("Expected Double, got {:?}", other),
     }
@@ -299,13 +281,20 @@ fn test_diagnostic_where_clause() {
     eprintln!("Total rows in table: {:?}", result[0].get(0));
 
     // Diagnostic: Check each predicate separately
-    let result = execute_sql(&mut db, "SELECT COUNT(*) FROM lineitem WHERE l_quantity < 24.0").unwrap();
+    let result =
+        execute_sql(&mut db, "SELECT COUNT(*) FROM lineitem WHERE l_quantity < 24.0").unwrap();
     eprintln!("Rows with l_quantity < 24.0: {:?}", result[0].get(0));
 
-    let result = execute_sql(&mut db, "SELECT COUNT(*) FROM lineitem WHERE l_shipdate >= '1994-01-01'").unwrap();
+    let result =
+        execute_sql(&mut db, "SELECT COUNT(*) FROM lineitem WHERE l_shipdate >= '1994-01-01'")
+            .unwrap();
     eprintln!("Rows with l_shipdate >= '1994-01-01': {:?}", result[0].get(0));
 
-    let result = execute_sql(&mut db, "SELECT COUNT(*) FROM lineitem WHERE l_discount BETWEEN 0.05 AND 0.07").unwrap();
+    let result = execute_sql(
+        &mut db,
+        "SELECT COUNT(*) FROM lineitem WHERE l_discount BETWEEN 0.05 AND 0.07",
+    )
+    .unwrap();
     eprintln!("Rows with l_discount BETWEEN 0.05 AND 0.07: {:?}", result[0].get(0));
 }
 
@@ -366,11 +355,7 @@ fn verify_q6_uses_columnar_execution() {
 
     match result[0].get(0) {
         Some(SqlValue::Double(revenue)) => {
-            assert!(
-                (revenue - 265.0).abs() < 0.01,
-                "Expected revenue 265.0, got {}",
-                revenue
-            );
+            assert!((revenue - 265.0).abs() < 0.01, "Expected revenue 265.0, got {}", revenue);
         }
         other => panic!("Expected Double revenue, got {:?}", other),
     }

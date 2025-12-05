@@ -24,10 +24,7 @@ pub struct TestError {
 
 impl TestError {
     pub fn display(&self, colorize: bool) -> TestErrorDisplay<'_> {
-        TestErrorDisplay {
-            err: self,
-            colorize,
-        }
+        TestErrorDisplay { err: self, colorize }
     }
 }
 
@@ -39,12 +36,7 @@ pub struct TestErrorDisplay<'a> {
 
 impl Display for TestErrorDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}\nat {}\n",
-            self.err.kind.display(self.colorize),
-            self.err.loc
-        )
+        write!(f, "{}\nat {}\n", self.err.kind.display(self.colorize), self.err.loc)
     }
 }
 
@@ -85,10 +77,7 @@ impl Display for ParallelTestErrorDisplay<'_> {
 
 impl ParallelTestError {
     pub fn display(&self, colorize: bool) -> ParallelTestErrorDisplay<'_> {
-        ParallelTestErrorDisplay {
-            err: self,
-            colorize,
-        }
+        ParallelTestErrorDisplay { err: self, colorize }
     }
 }
 
@@ -136,63 +125,35 @@ pub enum TestErrorKind {
     #[error("{kind} is expected to fail, but actually succeed:\n[SQL] {sql}")]
     Ok { sql: String, kind: RecordKind },
     #[error("{kind} failed: {err}\n[SQL] {sql}")]
-    Fail {
-        sql: String,
-        err: AnyError,
-        kind: RecordKind,
-    },
+    Fail { sql: String, err: AnyError, kind: RecordKind },
     #[error("system command failed: {err}\n[CMD] {command}")]
     SystemFail { command: String, err: AnyError },
     #[error(
         "system command stdout mismatch:\n[command] {command}\n[Diff] (-expected|+actual)\n{}",
         TextDiff::from_lines(.expected_stdout, .actual_stdout).iter_all_changes().format_with("\n", |diff, f| format_diff(&diff, f, false))
     )]
-    SystemStdoutMismatch {
-        command: String,
-        expected_stdout: String,
-        actual_stdout: String,
-    },
+    SystemStdoutMismatch { command: String, expected_stdout: String, actual_stdout: String },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
-    ErrorMismatch {
-        sql: String,
-        err: AnyError,
-        expected_err: String,
-        kind: RecordKind,
-    },
+    ErrorMismatch { sql: String, err: AnyError, expected_err: String, kind: RecordKind },
     #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
-    StatementResultMismatch {
-        sql: String,
-        expected: u64,
-        actual: String,
-    },
+    StatementResultMismatch { sql: String, expected: u64, actual: String },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error(
         "query result mismatch:\n[SQL] {sql}\n[Diff] (-expected|+actual)\n{}",
         TextDiff::from_lines(.expected, .actual).iter_all_changes().format_with("\n", |diff, f| format_diff(&diff, f, false))
     )]
-    QueryResultMismatch {
-        sql: String,
-        expected: String,
-        actual: String,
-    },
+    QueryResultMismatch { sql: String, expected: String, actual: String },
     #[error(
         "query columns mismatch:\n[SQL] {sql}\n{}",
         format_column_diff(expected, actual, false)
     )]
-    QueryResultColumnsMismatch {
-        sql: String,
-        expected: String,
-        actual: String,
-    },
+    QueryResultColumnsMismatch { sql: String, expected: String, actual: String },
 }
 
 impl From<crate::parser::ParseError> for TestError {
     fn from(e: crate::parser::ParseError) -> Self {
-        TestError {
-            kind: TestErrorKind::ParseError(e.kind()),
-            loc: e.location(),
-        }
+        TestError { kind: TestErrorKind::ParseError(e.kind()), loc: e.location() }
     }
 }
 
@@ -202,10 +163,7 @@ impl TestErrorKind {
     }
 
     pub fn display(&self, colorize: bool) -> TestErrorKindDisplay<'_> {
-        TestErrorKindDisplay {
-            error: self,
-            colorize,
-        }
+        TestErrorKindDisplay { error: self, colorize }
     }
 }
 
@@ -221,22 +179,13 @@ impl Display for TestErrorKindDisplay<'_> {
             return write!(f, "{}", self.error);
         }
         match self.error {
-            TestErrorKind::ErrorMismatch {
-                sql,
-                err,
-                expected_err,
-                kind,
-            } => write!(
+            TestErrorKind::ErrorMismatch { sql, err, expected_err, kind } => write!(
                 f,
                 "{kind} is expected to fail with error:\n\t{}\nbut got error:\n\t{}\n[SQL] {sql}",
                 expected_err.bright_green(),
                 err.bright_red(),
             ),
-            TestErrorKind::QueryResultMismatch {
-                sql,
-                expected,
-                actual,
-            } => write!(
+            TestErrorKind::QueryResultMismatch { sql, expected, actual } => write!(
                 f,
                 "query result mismatch:\n[SQL] {sql}\n[Diff] ({}|{})\n{}",
                 "-expected".bright_red(),
@@ -245,22 +194,14 @@ impl Display for TestErrorKindDisplay<'_> {
                     .iter_all_changes()
                     .format_with("\n", |diff, f| format_diff(&diff, f, true))
             ),
-            TestErrorKind::QueryResultColumnsMismatch {
-                sql,
-                expected,
-                actual,
-            } => {
+            TestErrorKind::QueryResultColumnsMismatch { sql, expected, actual } => {
                 write!(
                     f,
                     "query columns mismatch:\n[SQL] {sql}\n{}",
                     format_column_diff(expected, actual, true)
                 )
             }
-            TestErrorKind::SystemStdoutMismatch {
-                command,
-                expected_stdout,
-                actual_stdout,
-            } => {
+            TestErrorKind::SystemStdoutMismatch { command, expected_stdout, actual_stdout } => {
                 write!(
                     f,
                     "system command stdout mismatch:\n[command] {command}\n[Diff] (-expected|+actual)\n{}",
@@ -280,10 +221,9 @@ pub fn format_diff(
     colorize: bool,
 ) -> std::fmt::Result {
     match diff.tag() {
-        ChangeTag::Equal => f(&diff
-            .value()
-            .lines()
-            .format_with("\n", |line, f| f(&format_args!("    {line}")))),
+        ChangeTag::Equal => {
+            f(&diff.value().lines().format_with("\n", |line, f| f(&format_args!("    {line}"))))
+        }
         ChangeTag::Insert => f(&diff.value().lines().format_with("\n", |line, f| {
             if colorize {
                 f(&format_args!("+   {line}").bright_green())
@@ -302,33 +242,29 @@ pub fn format_diff(
 }
 
 pub fn format_column_diff(expected: &str, actual: &str, colorize: bool) -> String {
-
-    let (expected, actual) = TextDiff::from_chars(expected, actual)
-        .iter_all_changes()
-        .fold(
-            ("".to_string(), "".to_string()),
-            |(expected, actual), change| match change.tag() {
-                ChangeTag::Equal => (
-                    format!("{}{}", expected, change.value()),
-                    format!("{}{}", actual, change.value()),
-                ),
-                ChangeTag::Delete => (
-                    if colorize {
-                        format!("{}[{}]", expected, change.value().bright_red())
-                    } else {
-                        format!("{}[{}]", expected, change.value())
-                    },
-                    actual,
-                ),
-                ChangeTag::Insert => (
-                    expected,
-                    if colorize {
-                        format!("{}[{}]", actual, change.value().bright_green())
-                    } else {
-                        format!("{}[{}]", actual, change.value())
-                    },
-                ),
-            },
-        );
+    let (expected, actual) = TextDiff::from_chars(expected, actual).iter_all_changes().fold(
+        ("".to_string(), "".to_string()),
+        |(expected, actual), change| match change.tag() {
+            ChangeTag::Equal => {
+                (format!("{}{}", expected, change.value()), format!("{}{}", actual, change.value()))
+            }
+            ChangeTag::Delete => (
+                if colorize {
+                    format!("{}[{}]", expected, change.value().bright_red())
+                } else {
+                    format!("{}[{}]", expected, change.value())
+                },
+                actual,
+            ),
+            ChangeTag::Insert => (
+                expected,
+                if colorize {
+                    format!("{}[{}]", actual, change.value().bright_green())
+                } else {
+                    format!("{}[{}]", actual, change.value())
+                },
+            ),
+        },
+    );
     format!("[Expected] {expected}\n[Actual  ] {actual}")
 }

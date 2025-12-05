@@ -44,14 +44,14 @@
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 // Module declarations
-mod scan;
 mod filter;
-mod projection;
 mod join;
+mod projection;
+mod scan;
 
 // Re-export public types
-pub use scan::TableScanIterator;
 pub use filter::FilterIterator;
+pub use scan::TableScanIterator;
 
 /// Core trait for row-producing iterators in the query execution pipeline
 ///

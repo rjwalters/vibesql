@@ -30,11 +30,7 @@ impl<'a> ColumnarScan<'a> {
     /// Returns references to SqlValues, avoiding clones.
     /// Returns None for rows that don't have the column index.
     pub fn column(&self, index: usize) -> ColumnIterator<'a> {
-        ColumnIterator {
-            rows: self.rows,
-            column_index: index,
-            row_index: 0,
-        }
+        ColumnIterator { rows: self.rows, column_index: index, row_index: 0 }
     }
 
     /// Get number of rows in this scan

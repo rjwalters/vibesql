@@ -12,8 +12,7 @@ use vibesql_storage::Row;
 use crate::{
     errors::ExecutorError,
     select::{
-        filter::apply_where_filter_combined_auto,
-        projection::project_row_combined,
+        filter::apply_where_filter_combined_auto, projection::project_row_combined,
         window::WindowFunctionKey,
     },
     SelectExecutor,
@@ -52,10 +51,7 @@ impl<'a> RowOrientedPipeline<'a> {
     /// * `executor` - The SelectExecutor providing query infrastructure
     #[inline]
     pub fn new(executor: &'a SelectExecutor<'a>) -> Self {
-        Self {
-            executor,
-            window_mapping: None,
-        }
+        Self { executor, window_mapping: None }
     }
 
     /// Create a new row-oriented pipeline with window function mapping.
@@ -68,17 +64,17 @@ impl<'a> RowOrientedPipeline<'a> {
         executor: &'a SelectExecutor<'a>,
         window_mapping: HashMap<WindowFunctionKey, usize>,
     ) -> Self {
-        Self {
-            executor,
-            window_mapping: Some(window_mapping),
-        }
+        Self { executor, window_mapping: Some(window_mapping) }
     }
 }
 
 impl ExecutionPipeline for RowOrientedPipeline<'_> {
     /// Create an evaluator with context for row-oriented execution.
     #[inline]
-    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
+    fn create_evaluator<'a>(
+        &self,
+        ctx: &'a ExecutionContext<'a>,
+    ) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
         ctx.create_evaluator()
     }
 
@@ -106,7 +102,8 @@ impl ExecutionPipeline for RowOrientedPipeline<'_> {
         let evaluator = ctx.create_evaluator();
 
         // Apply filter using the auto-selecting implementation
-        let filtered = apply_where_filter_combined_auto(rows, predicate, &evaluator, self.executor)?;
+        let filtered =
+            apply_where_filter_combined_auto(rows, predicate, &evaluator, self.executor)?;
 
         Ok(PipelineOutput::from_rows(filtered))
     }

@@ -1,9 +1,9 @@
 //! Utility functions for join reordering
 
-use std::collections::HashMap;
-use vibesql_ast::{Expression, FromClause, SelectItem};
 use crate::schema::CombinedSchema;
 use crate::select::cte::CteResult;
+use std::collections::HashMap;
+use vibesql_ast::{Expression, FromClause, SelectItem};
 
 /// Extract column names from a SELECT list for subquery schema inference
 ///
@@ -138,13 +138,15 @@ pub(super) fn build_reordered_schema(
             .table_schemas
             .get(table_name)
             .or_else(|| {
-                current_schema.table_schemas.iter().find_map(|(k, v): (&String, &(usize, vibesql_catalog::TableSchema))| {
-                    if k.to_lowercase() == table_lower {
-                        Some(v)
-                    } else {
-                        None
-                    }
-                })
+                current_schema.table_schemas.iter().find_map(
+                    |(k, v): (&String, &(usize, vibesql_catalog::TableSchema))| {
+                        if k.to_lowercase() == table_lower {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    },
+                )
             })
             .map(|(_, schema): &(usize, vibesql_catalog::TableSchema)| schema.clone());
 
@@ -222,10 +224,14 @@ pub(super) fn build_column_to_table_map(
     let mut column_to_table: HashMap<String, Vec<String>> = HashMap::new();
 
     if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-        eprintln!("[JOIN_REORDER] build_column_to_table_map: database.tables.keys(): {:?}",
-            database.tables.keys().collect::<Vec<_>>());
-        eprintln!("[JOIN_REORDER] build_column_to_table_map: table_refs: {:?}",
-            table_refs.iter().map(|r| (&r.name, &r.alias)).collect::<Vec<_>>());
+        eprintln!(
+            "[JOIN_REORDER] build_column_to_table_map: database.tables.keys(): {:?}",
+            database.tables.keys().collect::<Vec<_>>()
+        );
+        eprintln!(
+            "[JOIN_REORDER] build_column_to_table_map: table_refs: {:?}",
+            table_refs.iter().map(|r| (&r.name, &r.alias)).collect::<Vec<_>>()
+        );
     }
 
     for table_name in table_names {
@@ -247,7 +253,8 @@ pub(super) fn build_column_to_table_map(
                 } else {
                     continue;
                 }
-            } else if let Some(cte_result) = cte_results.get(&tr.name)
+            } else if let Some(cte_result) = cte_results
+                .get(&tr.name)
                 .or_else(|| cte_results.get(&tr.name.to_lowercase()))
                 .or_else(|| cte_results.get(&tr.name.to_uppercase()))
             {
@@ -258,7 +265,9 @@ pub(super) fn build_column_to_table_map(
                 // Try multiple case variations and schema prefixes since database keys may vary
                 let actual_table_name = &tr.name;
                 let public_prefixed = format!("public.{}", actual_table_name);
-                let table = database.tables.get(actual_table_name)
+                let table = database
+                    .tables
+                    .get(actual_table_name)
                     .or_else(|| database.tables.get(&actual_table_name.to_lowercase()))
                     .or_else(|| database.tables.get(&actual_table_name.to_uppercase()))
                     .or_else(|| database.tables.get(&public_prefixed))
@@ -267,10 +276,14 @@ pub(super) fn build_column_to_table_map(
                     .or_else(|| {
                         // Case-insensitive search through all tables (handles schema.table format)
                         let target = actual_table_name.to_lowercase();
-                        database.tables.iter().find(|(k, _)| {
-                            let key_lower = k.to_lowercase();
-                            key_lower == target || key_lower.ends_with(&format!(".{}", target))
-                        }).map(|(_, v)| v)
+                        database
+                            .tables
+                            .iter()
+                            .find(|(k, _)| {
+                                let key_lower = k.to_lowercase();
+                                key_lower == target || key_lower.ends_with(&format!(".{}", target))
+                            })
+                            .map(|(_, v)| v)
                     });
 
                 if let Some(t) = table {
@@ -283,7 +296,9 @@ pub(super) fn build_column_to_table_map(
         } else {
             // Direct table lookup without TableRef
             let public_prefixed = format!("public.{}", table_name);
-            let table = database.tables.get(table_name)
+            let table = database
+                .tables
+                .get(table_name)
                 .or_else(|| database.tables.get(&table_lower))
                 .or_else(|| database.tables.get(&table_name.to_uppercase()))
                 .or_else(|| database.tables.get(&public_prefixed))
@@ -291,10 +306,15 @@ pub(super) fn build_column_to_table_map(
                 .or_else(|| database.tables.get(&public_prefixed.to_uppercase()))
                 .or_else(|| {
                     // Case-insensitive search through all tables (handles schema.table format)
-                    database.tables.iter().find(|(k, _)| {
-                        let key_lower = k.to_lowercase();
-                        key_lower == table_lower || key_lower.ends_with(&format!(".{}", table_lower))
-                    }).map(|(_, v)| v)
+                    database
+                        .tables
+                        .iter()
+                        .find(|(k, _)| {
+                            let key_lower = k.to_lowercase();
+                            key_lower == table_lower
+                                || key_lower.ends_with(&format!(".{}", table_lower))
+                        })
+                        .map(|(_, v)| v)
                 });
 
             if let Some(t) = table {
@@ -361,47 +381,32 @@ fn qualify_columns(expr: &vibesql_ast::Expression, table_name: &str) -> vibesql_
     match expr {
         Expression::ColumnRef { table: None, column } => {
             // Add table qualifier to unqualified column
-            Expression::ColumnRef {
-                table: Some(table_name_lower.clone()),
-                column: column.clone(),
-            }
+            Expression::ColumnRef { table: Some(table_name_lower.clone()), column: column.clone() }
         }
         Expression::ColumnRef { table: Some(t), column } => {
             // Already qualified, keep as is
-            Expression::ColumnRef {
-                table: Some(t.clone()),
-                column: column.clone(),
-            }
+            Expression::ColumnRef { table: Some(t.clone()), column: column.clone() }
         }
-        Expression::BinaryOp { op, left, right } => {
-            Expression::BinaryOp {
-                op: *op,
-                left: Box::new(qualify_columns(left, table_name)),
-                right: Box::new(qualify_columns(right, table_name)),
-            }
-        }
+        Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
+            op: *op,
+            left: Box::new(qualify_columns(left, table_name)),
+            right: Box::new(qualify_columns(right, table_name)),
+        },
         Expression::UnaryOp { op, expr: inner } => {
-            Expression::UnaryOp {
-                op: *op,
-                expr: Box::new(qualify_columns(inner, table_name)),
-            }
+            Expression::UnaryOp { op: *op, expr: Box::new(qualify_columns(inner, table_name)) }
         }
-        Expression::InList { expr: inner, values, negated } => {
-            Expression::InList {
-                expr: Box::new(qualify_columns(inner, table_name)),
-                values: values.iter().map(|v| qualify_columns(v, table_name)).collect(),
-                negated: *negated,
-            }
-        }
-        Expression::Between { expr: inner, low, high, negated, symmetric } => {
-            Expression::Between {
-                expr: Box::new(qualify_columns(inner, table_name)),
-                low: Box::new(qualify_columns(low, table_name)),
-                high: Box::new(qualify_columns(high, table_name)),
-                negated: *negated,
-                symmetric: *symmetric,
-            }
-        }
+        Expression::InList { expr: inner, values, negated } => Expression::InList {
+            expr: Box::new(qualify_columns(inner, table_name)),
+            values: values.iter().map(|v| qualify_columns(v, table_name)).collect(),
+            negated: *negated,
+        },
+        Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(qualify_columns(inner, table_name)),
+            low: Box::new(qualify_columns(low, table_name)),
+            high: Box::new(qualify_columns(high, table_name)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
         // For other expressions (literals, etc.), return as-is
         _ => expr.clone(),
     }

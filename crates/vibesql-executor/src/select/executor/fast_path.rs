@@ -66,10 +66,7 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::builder::SelectExecutor;
-use crate::{
-    errors::ExecutorError,
-    schema::CombinedSchema,
-};
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Check if a query is a simple point-lookup that can use the fast path
 ///
@@ -169,7 +166,8 @@ fn is_simple_order_by(order_by: &[vibesql_ast::OrderByItem]) -> bool {
 /// the fast path sorts before projection and can't resolve aliases.
 fn uses_select_alias(order_by: &[vibesql_ast::OrderByItem], select_list: &[SelectItem]) -> bool {
     // Collect all aliases from the SELECT list
-    let aliases: Vec<&str> = select_list.iter()
+    let aliases: Vec<&str> = select_list
+        .iter()
         .filter_map(|item| {
             if let SelectItem::Expression { alias: Some(alias), .. } = item {
                 Some(alias.as_str())
@@ -255,13 +253,15 @@ fn is_simple_expression(expr: &Expression) -> bool {
         Expression::ColumnRef { .. } | Expression::Literal(_) => true,
         Expression::BinaryOp { left, right, op } => {
             // Allow simple arithmetic on columns/literals
-            matches!(op,
-                vibesql_ast::BinaryOperator::Plus |
-                vibesql_ast::BinaryOperator::Minus |
-                vibesql_ast::BinaryOperator::Multiply |
-                vibesql_ast::BinaryOperator::Divide |
-                vibesql_ast::BinaryOperator::Concat
-            ) && is_simple_expression(left) && is_simple_expression(right)
+            matches!(
+                op,
+                vibesql_ast::BinaryOperator::Plus
+                    | vibesql_ast::BinaryOperator::Minus
+                    | vibesql_ast::BinaryOperator::Multiply
+                    | vibesql_ast::BinaryOperator::Divide
+                    | vibesql_ast::BinaryOperator::Concat
+            ) && is_simple_expression(left)
+                && is_simple_expression(right)
         }
         Expression::UnaryOp { expr, .. } => is_simple_expression(expr),
         Expression::Cast { expr, .. } => is_simple_expression(expr),
@@ -333,10 +333,7 @@ impl SelectExecutor<'_> {
     ///
     /// This bypasses the optimizer infrastructure and goes directly to table scan
     /// with optional index optimization.
-    pub(super) fn execute_fast_path(
-        &self,
-        stmt: &SelectStmt,
-    ) -> Result<Vec<Row>, ExecutorError> {
+    pub(super) fn execute_fast_path(&self, stmt: &SelectStmt) -> Result<Vec<Row>, ExecutorError> {
         // Extract table name from FROM clause
         let (table_name, alias) = match &stmt.from {
             Some(vibesql_ast::FromClause::Table { name, alias, .. }) => {
@@ -356,7 +353,9 @@ impl SelectExecutor<'_> {
         }
 
         // Try secondary index prefix lookup with ORDER BY + LIMIT (TPC-C Order-Status optimization)
-        if let Some(result) = self.try_secondary_index_prefix_with_limit_fast(table_name, alias, stmt)? {
+        if let Some(result) =
+            self.try_secondary_index_prefix_with_limit_fast(table_name, alias, stmt)?
+        {
             return Ok(result);
         }
 
@@ -374,8 +373,8 @@ impl SelectExecutor<'_> {
             stmt.where_clause.as_ref(),
             stmt.order_by.as_deref(),
             stmt.limit, // LIMIT pushdown for ORDER BY optimization
-            None, // No outer row
-            None, // No outer schema
+            None,       // No outer row
+            None,       // No outer schema
             |_| unreachable!("Fast path doesn't support subqueries"),
         )?;
 
@@ -406,11 +405,8 @@ impl SelectExecutor<'_> {
         let projected_rows = self.apply_projection_fast(&stmt.select_list, sorted_rows, &schema)?;
 
         // Apply LIMIT/OFFSET
-        let final_rows = crate::select::helpers::apply_limit_offset(
-            projected_rows,
-            stmt.limit,
-            stmt.offset,
-        );
+        let final_rows =
+            crate::select::helpers::apply_limit_offset(projected_rows, stmt.limit, stmt.offset);
 
         Ok(final_rows)
     }
@@ -444,9 +440,7 @@ impl SelectExecutor<'_> {
             _ => return Ok(None), // No PK to use
         };
 
-        let pk_columns: Vec<&str> = pk_column_names.iter()
-            .map(|s| s.as_str())
-            .collect();
+        let pk_columns: Vec<&str> = pk_column_names.iter().map(|s| s.as_str()).collect();
 
         // Try to extract equality predicates for PK columns from WHERE clause
         let pk_values = match self.extract_pk_values(where_clause, &pk_columns) {
@@ -464,7 +458,8 @@ impl SelectExecutor<'_> {
         }
 
         // Build PK values in column order (use lowercase for lookup to match insert)
-        let pk_key: Vec<vibesql_types::SqlValue> = pk_columns.iter()
+        let pk_key: Vec<vibesql_types::SqlValue> = pk_columns
+            .iter()
             .filter_map(|col| pk_values.get(&col.to_ascii_lowercase()).cloned())
             .collect();
 
@@ -474,10 +469,12 @@ impl SelectExecutor<'_> {
 
         // Direct PK lookup - O(log n)
         let row = if pk_key.len() == 1 {
-            self.database.get_row_by_pk(table_name, &pk_key[0])
+            self.database
+                .get_row_by_pk(table_name, &pk_key[0])
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?
         } else {
-            self.database.get_row_by_composite_pk(table_name, &pk_key)
+            self.database
+                .get_row_by_composite_pk(table_name, &pk_key)
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?
         };
 
@@ -498,10 +495,11 @@ impl SelectExecutor<'_> {
 
         // Try ultra-fast direct column projection (no full row clone)
         // Only clone the columns we actually need
-        if let Some(col_indices) = self.try_extract_simple_column_indices(&stmt.select_list, &table.schema) {
-            let projected_values: Vec<SqlValue> = col_indices.iter()
-                .map(|&idx| row.values[idx].clone())
-                .collect();
+        if let Some(col_indices) =
+            self.try_extract_simple_column_indices(&stmt.select_list, &table.schema)
+        {
+            let projected_values: Vec<SqlValue> =
+                col_indices.iter().map(|&idx| row.values[idx].clone()).collect();
             return Ok(Some(vec![Row { values: projected_values }]));
         }
 
@@ -510,7 +508,8 @@ impl SelectExecutor<'_> {
         let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
 
         // Apply projection
-        let projected = self.apply_projection_fast(&stmt.select_list, vec![row.clone()], &schema)?;
+        let projected =
+            self.apply_projection_fast(&stmt.select_list, vec![row.clone()], &schema)?;
         Ok(Some(projected))
     }
 
@@ -566,9 +565,7 @@ impl SelectExecutor<'_> {
             _ => return Ok(None),
         };
 
-        let pk_columns: Vec<&str> = pk_column_names.iter()
-            .map(|s| s.as_str())
-            .collect();
+        let pk_columns: Vec<&str> = pk_column_names.iter().map(|s| s.as_str()).collect();
 
         // Extract equality predicates from WHERE clause
         let equality_values = match self.extract_pk_values(where_clause, &pk_columns) {
@@ -723,9 +720,8 @@ impl SelectExecutor<'_> {
             };
 
             // Get index column names in order
-            let index_columns: Vec<&str> = metadata.columns.iter()
-                .map(|c| c.column_name.as_str())
-                .collect();
+            let index_columns: Vec<&str> =
+                metadata.columns.iter().map(|c| c.column_name.as_str()).collect();
 
             // Need at least 2 columns for prefix + ORDER BY pattern
             if index_columns.len() < 2 {
@@ -800,9 +796,8 @@ impl SelectExecutor<'_> {
 
             // Fetch the rows
             let all_rows = table.scan();
-            let rows: Vec<Row> = row_indices.iter()
-                .filter_map(|&idx| all_rows.get(idx).cloned())
-                .collect();
+            let rows: Vec<Row> =
+                row_indices.iter().filter_map(|&idx| all_rows.get(idx).cloned()).collect();
 
             // Build schema for projection and filtering
             let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
@@ -820,7 +815,8 @@ impl SelectExecutor<'_> {
                 .collect();
 
             // Check if WHERE clause is fully satisfied by the index lookup
-            let needs_where_filter = !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
+            let needs_where_filter =
+                !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
 
             // Apply residual WHERE filter if needed
             let filtered_rows = if needs_where_filter && !rows.is_empty() {
@@ -837,7 +833,8 @@ impl SelectExecutor<'_> {
                 return Ok(Some(filtered_rows));
             }
 
-            let projected = self.apply_projection_fast(&stmt.select_list, filtered_rows, &schema)?;
+            let projected =
+                self.apply_projection_fast(&stmt.select_list, filtered_rows, &schema)?;
             return Ok(Some(projected));
         }
 
@@ -883,9 +880,8 @@ impl SelectExecutor<'_> {
             };
 
             // Get index column names in order
-            let index_columns: Vec<&str> = metadata.columns.iter()
-                .map(|c| c.column_name.as_str())
-                .collect();
+            let index_columns: Vec<&str> =
+                metadata.columns.iter().map(|c| c.column_name.as_str()).collect();
 
             // Try to extract equality values from WHERE clause
             let index_values = match self.extract_pk_values(where_clause, &index_columns) {
@@ -934,7 +930,9 @@ impl SelectExecutor<'_> {
             // Perform index lookup
             let rows = if key_values.len() == index_columns.len() {
                 // Full key match - use exact lookup
-                let rows_result = self.database.lookup_by_index(index_name, &key_values)
+                let rows_result = self
+                    .database
+                    .lookup_by_index(index_name, &key_values)
                     .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
                 match rows_result {
                     Some(refs) => refs.into_iter().cloned().collect::<Vec<_>>(),
@@ -942,9 +940,12 @@ impl SelectExecutor<'_> {
                 }
             } else {
                 // Prefix match - use prefix lookup
-                self.database.lookup_by_index_prefix(index_name, &key_values)
+                self.database
+                    .lookup_by_index_prefix(index_name, &key_values)
                     .map_err(|e| ExecutorError::StorageError(e.to_string()))?
-                    .into_iter().cloned().collect::<Vec<_>>()
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
             };
 
             // Check if WHERE clause has predicates not covered by the index lookup.
@@ -957,7 +958,8 @@ impl SelectExecutor<'_> {
                 .collect();
 
             // Check if WHERE clause is fully satisfied by the index lookup
-            let needs_where_filter = !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
+            let needs_where_filter =
+                !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
 
             // Apply residual WHERE filter if needed
             let filtered_rows = if needs_where_filter && !rows.is_empty() {
@@ -981,11 +983,8 @@ impl SelectExecutor<'_> {
             };
 
             // Apply LIMIT/OFFSET
-            let limited_rows = crate::select::helpers::apply_limit_offset(
-                sorted_rows,
-                stmt.limit,
-                stmt.offset,
-            );
+            let limited_rows =
+                crate::select::helpers::apply_limit_offset(sorted_rows, stmt.limit, stmt.offset);
 
             // Check if this is SELECT * - no projection needed
             let is_select_star = stmt.select_list.len() == 1
@@ -996,7 +995,9 @@ impl SelectExecutor<'_> {
             }
 
             // Try ultra-fast direct column projection (no schema clone, no evaluator)
-            if let Some(col_indices) = self.try_extract_simple_column_indices(&stmt.select_list, &table.schema) {
+            if let Some(col_indices) =
+                self.try_extract_simple_column_indices(&stmt.select_list, &table.schema)
+            {
                 let projected = self.project_by_indices_fast(limited_rows, &col_indices);
                 return Ok(Some(projected));
             }
@@ -1017,11 +1018,7 @@ impl SelectExecutor<'_> {
     /// Returns `EqualityResult::Contradiction` if multiple equality predicates on the
     /// same column have different values (e.g., col = 1 AND col = 2), which means
     /// the WHERE clause is always false and no rows can match.
-    fn extract_pk_values(
-        &self,
-        expr: &Expression,
-        pk_columns: &[&str],
-    ) -> EqualityResult {
+    fn extract_pk_values(&self, expr: &Expression, pk_columns: &[&str]) -> EqualityResult {
         let mut values = HashMap::new();
         if self.collect_pk_equality_values(expr, pk_columns, &mut values) {
             EqualityResult::Values(values)
@@ -1187,10 +1184,8 @@ impl SelectExecutor<'_> {
 
         if compiled.is_fully_compiled() {
             // Fast path: use compiled predicate
-            let filtered: Vec<Row> = rows
-                .into_iter()
-                .filter(|row| compiled.evaluate(row).unwrap_or(false))
-                .collect();
+            let filtered: Vec<Row> =
+                rows.into_iter().filter(|row| compiled.evaluate(row).unwrap_or(false)).collect();
             Ok(filtered)
         } else {
             // Fall back to standard evaluator
@@ -1216,8 +1211,8 @@ impl SelectExecutor<'_> {
         rows: Vec<Row>,
         schema: &CombinedSchema,
     ) -> Result<Vec<Row>, ExecutorError> {
-        use crate::select::projection::project_row_combined;
         use crate::evaluator::CombinedExpressionEvaluator;
+        use crate::select::projection::project_row_combined;
 
         // Check if this is SELECT * - no projection needed
         if select_list.len() == 1 && matches!(&select_list[0], SelectItem::Wildcard { .. }) {
@@ -1233,7 +1228,8 @@ impl SelectExecutor<'_> {
 
         let mut projected = Vec::with_capacity(rows.len());
         for row in &rows {
-            let projected_row = project_row_combined(row, select_list, &evaluator, schema, &None, buffer_pool)?;
+            let projected_row =
+                project_row_combined(row, select_list, &evaluator, schema, &None, buffer_pool)?;
             projected.push(projected_row);
         }
 
@@ -1303,26 +1299,26 @@ impl SelectExecutor<'_> {
         mut rows: Vec<Row>,
         schema: &CombinedSchema,
     ) -> Result<Vec<Row>, ExecutorError> {
-        use std::cmp::Ordering;
         use crate::select::grouping::compare_sql_values;
+        use std::cmp::Ordering;
 
         // Pre-compute column indices for ORDER BY columns
-        let mut sort_indices: Vec<(usize, vibesql_ast::OrderDirection)> = Vec::with_capacity(order_by.len());
+        let mut sort_indices: Vec<(usize, vibesql_ast::OrderDirection)> =
+            Vec::with_capacity(order_by.len());
 
         for item in order_by {
             let col_idx = match &item.expr {
-                Expression::ColumnRef { table, column } => {
-                    schema.get_column_index(table.as_deref(), column)
-                        .ok_or_else(|| ExecutorError::ColumnNotFound {
-                            column_name: column.clone(),
-                            table_name: table.clone().unwrap_or_default(),
-                            searched_tables: schema.table_schemas.keys().cloned().collect(),
-                            available_columns: vec![],
-                        })?
-                }
+                Expression::ColumnRef { table, column } => schema
+                    .get_column_index(table.as_deref(), column)
+                    .ok_or_else(|| ExecutorError::ColumnNotFound {
+                        column_name: column.clone(),
+                        table_name: table.clone().unwrap_or_default(),
+                        searched_tables: schema.table_schemas.keys().cloned().collect(),
+                        available_columns: vec![],
+                    })?,
                 _ => {
                     return Err(ExecutorError::Other(
-                        "Fast path ORDER BY requires simple column references".to_string()
+                        "Fast path ORDER BY requires simple column references".to_string(),
                     ));
                 }
             };
@@ -1344,7 +1340,9 @@ impl SelectExecutor<'_> {
                         // Compare non-NULL values, respecting direction
                         match dir {
                             vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
-                            vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                            vibesql_ast::OrderDirection::Desc => {
+                                compare_sql_values(val_a, val_b).reverse()
+                            }
                         }
                     }
                 };
@@ -1375,9 +1373,13 @@ impl SelectExecutor<'_> {
 
         for item in select_list {
             match item {
-                SelectItem::Expression { expr: Expression::ColumnRef { table: _, column }, .. } => {
+                SelectItem::Expression {
+                    expr: Expression::ColumnRef { table: _, column }, ..
+                } => {
                     // Find column index by name (case-insensitive)
-                    let idx = table_schema.columns.iter()
+                    let idx = table_schema
+                        .columns
+                        .iter()
                         .position(|c| c.name.eq_ignore_ascii_case(column))?;
                     indices.push(idx);
                 }
@@ -1396,16 +1398,11 @@ impl SelectExecutor<'_> {
     /// - Going through the full evaluator machinery
     ///
     /// For simple column projections, this is 10-100x faster than the full path.
-    fn project_by_indices_fast(
-        &self,
-        rows: Vec<Row>,
-        col_indices: &[usize],
-    ) -> Vec<Row> {
+    fn project_by_indices_fast(&self, rows: Vec<Row>, col_indices: &[usize]) -> Vec<Row> {
         rows.into_iter()
             .map(|row| {
-                let projected_values: Vec<SqlValue> = col_indices.iter()
-                    .map(|&idx| row.values[idx].clone())
-                    .collect();
+                let projected_values: Vec<SqlValue> =
+                    col_indices.iter().map(|&idx| row.values[idx].clone()).collect();
                 Row { values: projected_values }
             })
             .collect()
@@ -1415,8 +1412,8 @@ impl SelectExecutor<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibesql_parser::Parser;
     use vibesql_ast::Statement;
+    use vibesql_parser::Parser;
 
     fn parse_select(sql: &str) -> SelectStmt {
         match Parser::parse_sql(sql).unwrap() {
@@ -1442,7 +1439,9 @@ mod tests {
         // Complex queries should not be detected as simple
         assert!(!is_simple_point_query(&parse_select("SELECT COUNT(*) FROM t WHERE id = 1")));
         assert!(!is_simple_point_query(&parse_select("SELECT a FROM t1, t2 WHERE t1.id = t2.id")));
-        assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE id IN (SELECT id FROM t2)")));
+        assert!(!is_simple_point_query(&parse_select(
+            "SELECT a FROM t WHERE id IN (SELECT id FROM t2)"
+        )));
         assert!(!is_simple_point_query(&parse_select("SELECT DISTINCT a FROM t")));
         assert!(!is_simple_point_query(&parse_select("SELECT a FROM t GROUP BY a")));
         assert!(!is_simple_point_query(&parse_select("WITH cte AS (SELECT 1) SELECT * FROM cte")));
@@ -1458,21 +1457,37 @@ mod tests {
     #[test]
     fn test_order_by_simple_queries() {
         // Simple ORDER BY with column references should be detected as simple
-        assert!(is_simple_point_query(&parse_select("SELECT no_o_id FROM new_order WHERE no_w_id = 1 ORDER BY no_o_id")));
-        assert!(is_simple_point_query(&parse_select("SELECT * FROM t WHERE id = 1 ORDER BY col ASC")));
-        assert!(is_simple_point_query(&parse_select("SELECT a, b FROM t WHERE x = 1 ORDER BY a DESC")));
+        assert!(is_simple_point_query(&parse_select(
+            "SELECT no_o_id FROM new_order WHERE no_w_id = 1 ORDER BY no_o_id"
+        )));
+        assert!(is_simple_point_query(&parse_select(
+            "SELECT * FROM t WHERE id = 1 ORDER BY col ASC"
+        )));
+        assert!(is_simple_point_query(&parse_select(
+            "SELECT a, b FROM t WHERE x = 1 ORDER BY a DESC"
+        )));
         assert!(is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a, b")));
-        assert!(is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a DESC, b ASC")));
+        assert!(is_simple_point_query(&parse_select(
+            "SELECT a FROM t WHERE x = 1 ORDER BY a DESC, b ASC"
+        )));
         // ORDER BY with LIMIT
-        assert!(is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a LIMIT 1")));
+        assert!(is_simple_point_query(&parse_select(
+            "SELECT a FROM t WHERE x = 1 ORDER BY a LIMIT 1"
+        )));
     }
 
     #[test]
     fn test_order_by_complex_not_simple() {
         // Complex ORDER BY expressions should not be detected as simple
-        assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY UPPER(a)")));
-        assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY a + 1")));
-        assert!(!is_simple_point_query(&parse_select("SELECT a FROM t WHERE x = 1 ORDER BY COALESCE(a, b)")));
+        assert!(!is_simple_point_query(&parse_select(
+            "SELECT a FROM t WHERE x = 1 ORDER BY UPPER(a)"
+        )));
+        assert!(!is_simple_point_query(&parse_select(
+            "SELECT a FROM t WHERE x = 1 ORDER BY a + 1"
+        )));
+        assert!(!is_simple_point_query(&parse_select(
+            "SELECT a FROM t WHERE x = 1 ORDER BY COALESCE(a, b)"
+        )));
     }
 
     #[test]
@@ -1529,11 +1544,17 @@ mod tests {
         assert!(needs_sorting(
             &[
                 vibesql_ast::OrderByItem {
-                    expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                    expr: vibesql_ast::Expression::ColumnRef {
+                        table: None,
+                        column: "a".to_string()
+                    },
                     direction: vibesql_ast::OrderDirection::Asc,
                 },
                 vibesql_ast::OrderByItem {
-                    expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
+                    expr: vibesql_ast::Expression::ColumnRef {
+                        table: None,
+                        column: "b".to_string()
+                    },
                     direction: vibesql_ast::OrderDirection::Asc,
                 },
             ],

@@ -9,20 +9,32 @@ use super::operator_test_utils::*;
 fn test_string_concat_basic() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello".to_string()))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "Hello".to_string(),
+        ))),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(" World".to_string()))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            " World".to_string(),
+        ))),
     };
-    assert_expression_result(&db, expr, vibesql_types::SqlValue::Varchar("Hello World".to_string()));
+    assert_expression_result(
+        &db,
+        expr,
+        vibesql_types::SqlValue::Varchar("Hello World".to_string()),
+    );
 }
 
 #[test]
 fn test_string_concat_empty() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello".to_string()))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "Hello".to_string(),
+        ))),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("".to_string()))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "".to_string(),
+        ))),
     };
     assert_expression_result(&db, expr, vibesql_types::SqlValue::Varchar("Hello".to_string()));
 }
@@ -31,7 +43,9 @@ fn test_string_concat_empty() {
 fn test_string_concat_null() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello".to_string()))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "Hello".to_string(),
+        ))),
         op: vibesql_ast::BinaryOperator::Concat,
         right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
     };
@@ -47,24 +61,28 @@ fn test_string_concat_multiple() {
         left: Box::new(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                        "Hello".to_string(),
-                    ))),
+                    left: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Varchar("Hello".to_string()),
+                    )),
                     op: vibesql_ast::BinaryOperator::Concat,
-                    right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                        " ".to_string(),
-                    ))),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Varchar(" ".to_string()),
+                    )),
                 }),
                 op: vibesql_ast::BinaryOperator::Concat,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "Beautiful".to_string(),
-                ))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("Beautiful".to_string()),
+                )),
             }),
             op: vibesql_ast::BinaryOperator::Concat,
-            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(" ".to_string()))),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                " ".to_string(),
+            ))),
         }),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("World".to_string()))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "World".to_string(),
+        ))),
     };
 
     assert_expression_result(

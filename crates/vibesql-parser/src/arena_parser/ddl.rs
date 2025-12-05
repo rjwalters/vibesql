@@ -34,9 +34,7 @@ impl<'arena> ArenaParser<'arena> {
         } else if self.peek_keyword(Keyword::Start) {
             self.consume_keyword(Keyword::Start)?;
         } else {
-            return Err(ParseError {
-                message: "Expected BEGIN or START".to_string(),
-            });
+            return Err(ParseError { message: "Expected BEGIN or START".to_string() });
         }
 
         // Optional TRANSACTION keyword
@@ -69,9 +67,7 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse SAVEPOINT statement.
-    pub(crate) fn parse_savepoint_statement(
-        &mut self,
-    ) -> Result<SavepointStmt, ParseError> {
+    pub(crate) fn parse_savepoint_statement(&mut self) -> Result<SavepointStmt, ParseError> {
         self.consume_keyword(Keyword::Savepoint)?;
         let name = self.parse_arena_identifier()?;
         Ok(SavepointStmt { name })
@@ -128,13 +124,7 @@ impl<'arena> ArenaParser<'arena> {
         let columns = self.parse_index_columns()?;
         self.expect_token(Token::RParen)?;
 
-        Ok(CreateIndexStmt {
-            if_not_exists,
-            index_name,
-            table_name,
-            index_type,
-            columns,
-        })
+        Ok(CreateIndexStmt { if_not_exists, index_name, table_name, index_type, columns })
     }
 
     /// Parse CREATE VIEW statement.
@@ -152,8 +142,8 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         // Check for TEMP/TEMPORARY
-        let temporary = self.try_consume_keyword(Keyword::Temp)
-            || self.try_consume_keyword(Keyword::Temporary);
+        let temporary =
+            self.try_consume_keyword(Keyword::Temp) || self.try_consume_keyword(Keyword::Temporary);
 
         self.consume_keyword(Keyword::View)?;
 
@@ -181,14 +171,7 @@ impl<'arena> ArenaParser<'arena> {
             false
         };
 
-        Ok(CreateViewStmt {
-            view_name,
-            columns,
-            query,
-            with_check_option,
-            or_replace,
-            temporary,
-        })
+        Ok(CreateViewStmt { view_name, columns, query, with_check_option, or_replace, temporary })
     }
 
     // ========================================================================
@@ -196,9 +179,7 @@ impl<'arena> ArenaParser<'arena> {
     // ========================================================================
 
     /// Parse DROP TABLE statement.
-    pub(crate) fn parse_drop_table_statement(
-        &mut self,
-    ) -> Result<DropTableStmt, ParseError> {
+    pub(crate) fn parse_drop_table_statement(&mut self) -> Result<DropTableStmt, ParseError> {
         self.consume_keyword(Keyword::Drop)?;
         self.consume_keyword(Keyword::Table)?;
 
@@ -211,16 +192,11 @@ impl<'arena> ArenaParser<'arena> {
 
         let table_name = self.parse_arena_identifier()?;
 
-        Ok(DropTableStmt {
-            table_name,
-            if_exists,
-        })
+        Ok(DropTableStmt { table_name, if_exists })
     }
 
     /// Parse DROP INDEX statement.
-    pub(crate) fn parse_drop_index_statement(
-        &mut self,
-    ) -> Result<DropIndexStmt, ParseError> {
+    pub(crate) fn parse_drop_index_statement(&mut self) -> Result<DropIndexStmt, ParseError> {
         self.consume_keyword(Keyword::Drop)?;
         self.consume_keyword(Keyword::Index)?;
 
@@ -233,16 +209,11 @@ impl<'arena> ArenaParser<'arena> {
 
         let index_name = self.parse_arena_identifier()?;
 
-        Ok(DropIndexStmt {
-            if_exists,
-            index_name,
-        })
+        Ok(DropIndexStmt { if_exists, index_name })
     }
 
     /// Parse DROP VIEW statement.
-    pub(crate) fn parse_drop_view_statement(
-        &mut self,
-    ) -> Result<DropViewStmt, ParseError> {
+    pub(crate) fn parse_drop_view_statement(&mut self) -> Result<DropViewStmt, ParseError> {
         self.consume_keyword(Keyword::Drop)?;
         self.consume_keyword(Keyword::View)?;
 
@@ -263,12 +234,7 @@ impl<'arena> ArenaParser<'arena> {
             (false, false)
         };
 
-        Ok(DropViewStmt {
-            view_name,
-            if_exists,
-            cascade,
-            restrict,
-        })
+        Ok(DropViewStmt { view_name, if_exists, cascade, restrict })
     }
 
     /// Parse TRUNCATE TABLE statement.
@@ -302,11 +268,7 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        Ok(TruncateTableStmt {
-            table_names,
-            if_exists,
-            cascade,
-        })
+        Ok(TruncateTableStmt { table_names, if_exists, cascade })
     }
 
     // ========================================================================
@@ -344,8 +306,9 @@ impl<'arena> ArenaParser<'arena> {
                     Token::Identifier(_) => self.parse_add_column(table_name)?,
                     _ => {
                         return Err(ParseError {
-                            message: "Expected COLUMN, constraint keyword, or column name after ADD"
-                                .to_string(),
+                            message:
+                                "Expected COLUMN, constraint keyword, or column name after ADD"
+                                    .to_string(),
                         })
                     }
                 }
@@ -405,9 +368,9 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => Err(ParseError {
-                message: format!("Expected table name, found {:?}", self.peek()),
-            }),
+            _ => {
+                Err(ParseError { message: format!("Expected table name, found {:?}", self.peek()) })
+            }
         }
     }
 
@@ -464,10 +427,8 @@ impl<'arena> ArenaParser<'arena> {
                 }
                 Token::Keyword(Keyword::Unique) => {
                     self.advance();
-                    constraints.push(ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::Unique,
-                    });
+                    constraints
+                        .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique });
                 }
                 Token::Keyword(Keyword::References) => {
                     self.advance();
@@ -570,9 +531,7 @@ impl<'arena> ArenaParser<'arena> {
                     }),
                 }
             }
-            _ => Err(ParseError {
-                message: "Expected SET or DROP after column name".to_string(),
-            }),
+            _ => Err(ParseError { message: "Expected SET or DROP after column name".to_string() }),
         }
     }
 
@@ -713,10 +672,8 @@ impl<'arena> ArenaParser<'arena> {
                 }
                 Token::Keyword(Keyword::Unique) => {
                     self.advance();
-                    constraints.push(ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::Unique,
-                    });
+                    constraints
+                        .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique });
                 }
                 Token::Keyword(Keyword::References) => {
                     self.advance();
@@ -806,9 +763,7 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse index column list for constraints.
-    fn parse_index_column_list(
-        &mut self,
-    ) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
+    fn parse_index_column_list(&mut self) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
 
         loop {
@@ -915,9 +870,7 @@ impl<'arena> ArenaParser<'arena> {
     // ========================================================================
 
     /// Parse ANALYZE statement.
-    pub(crate) fn parse_analyze_statement(
-        &mut self,
-    ) -> Result<AnalyzeStmt<'arena>, ParseError> {
+    pub(crate) fn parse_analyze_statement(&mut self) -> Result<AnalyzeStmt<'arena>, ParseError> {
         self.consume_keyword(Keyword::Analyze)?;
 
         // Parse optional table name
@@ -936,10 +889,7 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        Ok(AnalyzeStmt {
-            table_name,
-            columns,
-        })
+        Ok(AnalyzeStmt { table_name, columns })
     }
 
     // ========================================================================
@@ -947,9 +897,7 @@ impl<'arena> ArenaParser<'arena> {
     // ========================================================================
 
     /// Parse index column specifications.
-    fn parse_index_columns(
-        &mut self,
-    ) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
+    fn parse_index_columns(&mut self) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
         loop {
             let column_name = self.parse_arena_identifier()?;
@@ -959,9 +907,7 @@ impl<'arena> ArenaParser<'arena> {
                 let len = match self.peek() {
                     Token::Number(n) => n
                         .parse::<u64>()
-                        .map_err(|_| ParseError {
-                            message: "Invalid prefix length".to_string(),
-                        })?,
+                        .map_err(|_| ParseError { message: "Invalid prefix length".to_string() })?,
                     _ => {
                         return Err(ParseError {
                             message: "Expected number for prefix length".to_string(),
@@ -983,11 +929,7 @@ impl<'arena> ArenaParser<'arena> {
                 OrderDirection::Asc
             };
 
-            columns.push(IndexColumn {
-                column_name,
-                direction,
-                prefix_length,
-            });
+            columns.push(IndexColumn { column_name, direction, prefix_length });
 
             if !self.try_consume(&Token::Comma) {
                 break;

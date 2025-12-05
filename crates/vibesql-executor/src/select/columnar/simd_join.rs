@@ -66,9 +66,8 @@ impl OrderedFloat {
 impl HashTable {
     /// Build hash table from right batch's key column
     fn build(right: &ColumnarBatch, right_key_col: usize) -> Result<Self, ExecutorError> {
-        let key_column = right
-            .column(right_key_col)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        let key_column =
+            right.column(right_key_col).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: right_key_col,
                 batch_columns: right.column_count(),
             })?;
@@ -104,10 +103,7 @@ impl HashTable {
                         continue; // NaN != NaN in SQL
                     }
 
-                    table
-                        .entry(OrderedFloat::new(value))
-                        .or_insert_with(Vec::new)
-                        .push(row_idx);
+                    table.entry(OrderedFloat::new(value)).or_insert_with(Vec::new).push(row_idx);
                 }
 
                 Ok(HashTable::Float64(table))
@@ -127,9 +123,8 @@ impl HashTable {
         left: &ColumnarBatch,
         left_key_col: usize,
     ) -> Result<Vec<(usize, usize)>, ExecutorError> {
-        let key_column = left
-            .column(left_key_col)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        let key_column =
+            left.column(left_key_col).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: left_key_col,
                 batch_columns: left.column_count(),
             })?;
@@ -247,8 +242,8 @@ fn materialize_join_results(
 
     // Process left columns
     for col_idx in 0..left.column_count() {
-        let left_col = left.column(col_idx)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        let left_col =
+            left.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: col_idx,
                 batch_columns: left.column_count(),
             })?;
@@ -259,8 +254,8 @@ fn materialize_join_results(
 
     // Process right columns
     for col_idx in 0..right.column_count() {
-        let right_col = right.column(col_idx)
-            .ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        let right_col =
+            right.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: col_idx,
                 batch_columns: right.column_count(),
             })?;
@@ -286,11 +281,8 @@ where
     match source {
         ColumnArray::Int64(values, nulls) => {
             let mut output_values = Vec::with_capacity(indices.len());
-            let mut output_nulls = if nulls.is_some() {
-                Some(Vec::with_capacity(indices.len()))
-            } else {
-                None
-            };
+            let mut output_nulls =
+                if nulls.is_some() { Some(Vec::with_capacity(indices.len())) } else { None };
 
             for pair in indices {
                 let idx = index_fn(pair);
@@ -306,11 +298,8 @@ where
         }
         ColumnArray::Float64(values, nulls) => {
             let mut output_values = Vec::with_capacity(indices.len());
-            let mut output_nulls = if nulls.is_some() {
-                Some(Vec::with_capacity(indices.len()))
-            } else {
-                None
-            };
+            let mut output_nulls =
+                if nulls.is_some() { Some(Vec::with_capacity(indices.len())) } else { None };
 
             for pair in indices {
                 let idx = index_fn(pair);
@@ -326,11 +315,8 @@ where
         }
         ColumnArray::String(values, nulls) => {
             let mut output_values = Vec::with_capacity(indices.len());
-            let mut output_nulls = if nulls.is_some() {
-                Some(Vec::with_capacity(indices.len()))
-            } else {
-                None
-            };
+            let mut output_nulls =
+                if nulls.is_some() { Some(Vec::with_capacity(indices.len())) } else { None };
 
             for pair in indices {
                 let idx = index_fn(pair);
@@ -412,12 +398,8 @@ mod tests {
         let row_count = key_values.len();
         let mut batch = ColumnarBatch::with_capacity(row_count, 2);
 
-        batch
-            .add_column(ColumnArray::Int64(Arc::new(key_values), None))
-            .unwrap();
-        batch
-            .add_column(ColumnArray::Int64(Arc::new(data_values), None))
-            .unwrap();
+        batch.add_column(ColumnArray::Int64(Arc::new(key_values), None)).unwrap();
+        batch.add_column(ColumnArray::Int64(Arc::new(data_values), None)).unwrap();
 
         batch
     }
@@ -426,12 +408,8 @@ mod tests {
         let row_count = key_values.len();
         let mut batch = ColumnarBatch::with_capacity(row_count, 2);
 
-        batch
-            .add_column(ColumnArray::Float64(Arc::new(key_values), None))
-            .unwrap();
-        batch
-            .add_column(ColumnArray::Int64(Arc::new(data_values), None))
-            .unwrap();
+        batch.add_column(ColumnArray::Float64(Arc::new(key_values), None)).unwrap();
+        batch.add_column(ColumnArray::Int64(Arc::new(data_values), None)).unwrap();
 
         batch
     }
@@ -525,8 +503,7 @@ mod tests {
             Some(Arc::new(vec![false, true, false])),
         ))
         .unwrap();
-        left.add_column(ColumnArray::Int64(Arc::new(vec![10, 20, 30]), None))
-            .unwrap();
+        left.add_column(ColumnArray::Int64(Arc::new(vec![10, 20, 30]), None)).unwrap();
 
         // Right with NULL key: [(1, 100), (3, 300), (NULL, 400)]
         let mut right = ColumnarBatch::with_capacity(3, 2);
@@ -536,9 +513,7 @@ mod tests {
                 Some(Arc::new(vec![false, false, true])),
             ))
             .unwrap();
-        right
-            .add_column(ColumnArray::Int64(Arc::new(vec![100, 300, 400]), None))
-            .unwrap();
+        right.add_column(ColumnArray::Int64(Arc::new(vec![100, 300, 400]), None)).unwrap();
 
         let result = columnar_hash_join_inner(&left, &right, 0, 0).unwrap();
 

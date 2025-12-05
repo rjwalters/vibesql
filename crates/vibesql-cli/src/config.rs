@@ -85,7 +85,6 @@ fn default_sql_mode() -> String {
     "mysql".to_string()
 }
 
-
 impl Default for DisplayConfig {
     fn default() -> Self {
         DisplayConfig { format: default_format() }
@@ -107,7 +106,6 @@ impl Default for HistoryConfig {
         HistoryConfig { file: default_history_file(), max_entries: default_max_entries() }
     }
 }
-
 
 impl Config {
     /// Load configuration from ~/.vibesqlrc
@@ -221,14 +219,16 @@ timeout_seconds = 30
         let mut config = Config::default();
 
         config.database.sql_mode = "mysql".to_string();
-        assert_eq!(config.get_sql_mode(), Some(vibesql_types::SqlMode::MySQL {
-            flags: vibesql_types::MySqlModeFlags::default()
-        }));
+        assert_eq!(
+            config.get_sql_mode(),
+            Some(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() })
+        );
 
         config.database.sql_mode = "MySQL".to_string(); // case insensitive
-        assert_eq!(config.get_sql_mode(), Some(vibesql_types::SqlMode::MySQL {
-            flags: vibesql_types::MySqlModeFlags::default()
-        }));
+        assert_eq!(
+            config.get_sql_mode(),
+            Some(vibesql_types::SqlMode::MySQL { flags: vibesql_types::MySqlModeFlags::default() })
+        );
 
         config.database.sql_mode = "sqlite".to_string();
         assert_eq!(config.get_sql_mode(), Some(vibesql_types::SqlMode::SQLite));

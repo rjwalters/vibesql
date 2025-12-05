@@ -18,8 +18,12 @@ pub(in crate::evaluator::functions) fn upper(
 
     match &args[0] {
         vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-        vibesql_types::SqlValue::Varchar(s) => Ok(vibesql_types::SqlValue::Varchar(s.to_uppercase())),
-        vibesql_types::SqlValue::Character(s) => Ok(vibesql_types::SqlValue::Varchar(s.to_uppercase())),
+        vibesql_types::SqlValue::Varchar(s) => {
+            Ok(vibesql_types::SqlValue::Varchar(s.to_uppercase()))
+        }
+        vibesql_types::SqlValue::Character(s) => {
+            Ok(vibesql_types::SqlValue::Varchar(s.to_uppercase()))
+        }
         val => Err(ExecutorError::UnsupportedFeature(format!(
             "UPPER requires string argument, got {:?}",
             val
@@ -41,8 +45,12 @@ pub(in crate::evaluator::functions) fn lower(
 
     match &args[0] {
         vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-        vibesql_types::SqlValue::Varchar(s) => Ok(vibesql_types::SqlValue::Varchar(s.to_lowercase())),
-        vibesql_types::SqlValue::Character(s) => Ok(vibesql_types::SqlValue::Varchar(s.to_lowercase())),
+        vibesql_types::SqlValue::Varchar(s) => {
+            Ok(vibesql_types::SqlValue::Varchar(s.to_lowercase()))
+        }
+        vibesql_types::SqlValue::Character(s) => {
+            Ok(vibesql_types::SqlValue::Varchar(s.to_lowercase()))
+        }
         val => Err(ExecutorError::UnsupportedFeature(format!(
             "LOWER requires string argument, got {:?}",
             val

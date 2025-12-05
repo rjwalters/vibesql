@@ -3,9 +3,9 @@
 //! This module provides utilities to compute and validate the schema of
 //! subquery results, particularly for handling wildcards and column counts.
 
-use std::collections::HashMap;
 use crate::errors::ExecutorError;
 use crate::select::cte::CteResult;
+use std::collections::HashMap;
 
 /// Build a merged outer schema that includes all parent scopes
 ///
@@ -70,9 +70,7 @@ pub(super) fn build_merged_outer_row<'a>(
         let mut merged_values = outer.values.clone();
         merged_values.extend(current_row.values.iter().cloned());
 
-        std::borrow::Cow::Owned(vibesql_storage::Row {
-            values: merged_values,
-        })
+        std::borrow::Cow::Owned(vibesql_storage::Row { values: merged_values })
     } else {
         // No outer row to merge, just use current row
         std::borrow::Cow::Borrowed(current_row)
@@ -107,11 +105,12 @@ pub(super) fn compute_select_list_column_count(
                 // Expand table.* to count columns from that specific table
                 // Issue #3562: Check CTEs first before database tables
                 if let Some(cte_ctx) = cte_results {
-                    if let Some((schema, _)) = cte_ctx.get(qualifier)
-                        .or_else(|| cte_ctx.iter()
+                    if let Some((schema, _)) = cte_ctx.get(qualifier).or_else(|| {
+                        cte_ctx
+                            .iter()
                             .find(|(k, _)| k.eq_ignore_ascii_case(qualifier))
-                            .map(|(_, v)| v))
-                    {
+                            .map(|(_, v)| v)
+                    }) {
                         count += schema.columns.len();
                         continue;
                     }
@@ -143,11 +142,9 @@ fn count_columns_in_from_clause(
         vibesql_ast::FromClause::Table { name, .. } => {
             // Issue #3562: Check CTEs first before database tables
             if let Some(cte_ctx) = cte_results {
-                if let Some((schema, _)) = cte_ctx.get(name)
-                    .or_else(|| cte_ctx.iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                        .map(|(_, v)| v))
-                {
+                if let Some((schema, _)) = cte_ctx.get(name).or_else(|| {
+                    cte_ctx.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v)
+                }) {
                     return Ok(schema.columns.len());
                 }
             }

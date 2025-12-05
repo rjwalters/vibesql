@@ -3,16 +3,14 @@
 use vibesql_ast::Expression;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::ExpressionEvaluator;
-use vibesql_types::{DataType, SqlValue};
 use vibesql_storage::Row;
+use vibesql_types::{DataType, SqlValue};
 
 /// Helper to create a simple schema for testing
 fn create_test_schema() -> TableSchema {
     TableSchema::new(
         "test_table".to_string(),
-        vec![
-            ColumnSchema::new("id".to_string(), DataType::Integer, false),
-        ],
+        vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
     )
 }
 
@@ -21,17 +19,13 @@ fn eval_expr(expr: Expression) -> Result<SqlValue, String> {
     let schema = create_test_schema();
     let evaluator = ExpressionEvaluator::new(&schema);
     let row = Row::new(vec![SqlValue::Integer(1)]);
-    
+
     evaluator.eval(&expr, &row).map_err(|e| format!("{:?}", e))
 }
 
 /// Helper to create a function call expression
 fn function_call(name: &str, args: Vec<Expression>) -> Expression {
-    Expression::Function {
-        name: name.to_string(),
-        args,
-        character_unit: None,
-    }
+    Expression::Function { name: name.to_string(), args, character_unit: None }
 }
 
 /// Helper to create a literal expression
@@ -42,22 +36,26 @@ fn literal(value: SqlValue) -> Expression {
 #[test]
 fn test_st_union_polygons() {
     // Two adjacent squares should union into a result geometry
-    let expr = function_call("ST_UNION", vec![
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string())),
-        ]),
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))".to_string())),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_UNION",
+        vec![
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string()))],
+            ),
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))".to_string()))],
+            ),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
-    
+
     // Result should be a geometry (WKT format)
     match result {
         SqlValue::Varchar(s) => {
-            assert!(s.starts_with("__GEOMETRY__"),
-                    "Expected geometry marker, got: {}", s);
+            assert!(s.starts_with("__GEOMETRY__"), "Expected geometry marker, got: {}", s);
         }
         _ => panic!("Expected Varchar result, got: {:?}", result),
     }
@@ -66,13 +64,17 @@ fn test_st_union_polygons() {
 #[test]
 fn test_st_union_null_handling() {
     // Union with NULL should return NULL
-    let expr = function_call("ST_UNION", vec![
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string())),
-        ]),
-        literal(SqlValue::Null),
-    ]);
-    
+    let expr = function_call(
+        "ST_UNION",
+        vec![
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string()))],
+            ),
+            literal(SqlValue::Null),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     assert_eq!(result, SqlValue::Null);
 }
@@ -80,20 +82,24 @@ fn test_st_union_null_handling() {
 #[test]
 fn test_st_intersection_overlapping_polygons() {
     // Intersection of two overlapping squares
-    let expr = function_call("ST_INTERSECTION", vec![
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string())),
-        ]),
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))".to_string())),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_INTERSECTION",
+        vec![
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string()))],
+            ),
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))".to_string()))],
+            ),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Varchar(s) => {
-            assert!(s.starts_with("__GEOMETRY__"),
-                    "Expected geometry, got: {}", s);
+            assert!(s.starts_with("__GEOMETRY__"), "Expected geometry, got: {}", s);
         }
         _ => panic!("Expected Varchar result"),
     }
@@ -101,13 +107,17 @@ fn test_st_intersection_overlapping_polygons() {
 
 #[test]
 fn test_st_intersection_null_handling() {
-    let expr = function_call("ST_INTERSECTION", vec![
-        literal(SqlValue::Null),
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string())),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_INTERSECTION",
+        vec![
+            literal(SqlValue::Null),
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string()))],
+            ),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     assert_eq!(result, SqlValue::Null);
 }
@@ -115,22 +125,35 @@ fn test_st_intersection_null_handling() {
 #[test]
 fn test_st_difference_polygons() {
     // Difference of two overlapping squares
-    let expr = function_call("ST_ASTEXT", vec![
-        function_call("ST_DIFFERENCE", vec![
-            function_call("ST_GEOMFROMTEXT", vec![
-                literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string())),
-            ]),
-            function_call("ST_GEOMFROMTEXT", vec![
-                literal(SqlValue::Varchar("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))".to_string())),
-            ]),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_ASTEXT",
+        vec![function_call(
+            "ST_DIFFERENCE",
+            vec![
+                function_call(
+                    "ST_GEOMFROMTEXT",
+                    vec![literal(SqlValue::Varchar(
+                        "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string(),
+                    ))],
+                ),
+                function_call(
+                    "ST_GEOMFROMTEXT",
+                    vec![literal(SqlValue::Varchar(
+                        "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))".to_string(),
+                    ))],
+                ),
+            ],
+        )],
+    );
+
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Varchar(s) => {
-            assert!(s.contains("POLYGON") || s.contains("MULTIPOLYGON"),
-                    "Expected POLYGON or MULTIPOLYGON, got: {}", s);
+            assert!(
+                s.contains("POLYGON") || s.contains("MULTIPOLYGON"),
+                "Expected POLYGON or MULTIPOLYGON, got: {}",
+                s
+            );
         }
         _ => panic!("Expected Varchar result"),
     }
@@ -138,13 +161,17 @@ fn test_st_difference_polygons() {
 
 #[test]
 fn test_st_difference_null_handling() {
-    let expr = function_call("ST_DIFFERENCE", vec![
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string())),
-        ]),
-        literal(SqlValue::Null),
-    ]);
-    
+    let expr = function_call(
+        "ST_DIFFERENCE",
+        vec![
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string()))],
+            ),
+            literal(SqlValue::Null),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     assert_eq!(result, SqlValue::Null);
 }
@@ -152,17 +179,27 @@ fn test_st_difference_null_handling() {
 #[test]
 fn test_st_symdifference_polygons() {
     // Symmetric difference of two overlapping squares
-    let expr = function_call("ST_ASTEXT", vec![
-        function_call("ST_SYMDIFFERENCE", vec![
-            function_call("ST_GEOMFROMTEXT", vec![
-                literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string())),
-            ]),
-            function_call("ST_GEOMFROMTEXT", vec![
-                literal(SqlValue::Varchar("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))".to_string())),
-            ]),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_ASTEXT",
+        vec![function_call(
+            "ST_SYMDIFFERENCE",
+            vec![
+                function_call(
+                    "ST_GEOMFROMTEXT",
+                    vec![literal(SqlValue::Varchar(
+                        "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string(),
+                    ))],
+                ),
+                function_call(
+                    "ST_GEOMFROMTEXT",
+                    vec![literal(SqlValue::Varchar(
+                        "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))".to_string(),
+                    ))],
+                ),
+            ],
+        )],
+    );
+
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Varchar(s) => {
@@ -174,13 +211,17 @@ fn test_st_symdifference_polygons() {
 
 #[test]
 fn test_st_symdifference_null_handling() {
-    let expr = function_call("ST_SYMDIFFERENCE", vec![
-        literal(SqlValue::Null),
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string())),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_SYMDIFFERENCE",
+        vec![
+            literal(SqlValue::Null),
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))".to_string()))],
+            ),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     assert_eq!(result, SqlValue::Null);
 }
@@ -188,19 +229,25 @@ fn test_st_symdifference_null_handling() {
 #[test]
 fn test_st_boundary_polygon() {
     // Boundary of a polygon is its rings
-    let expr = function_call("ST_ASTEXT", vec![
-        function_call("ST_BOUNDARY", vec![
-            function_call("ST_GEOMFROMTEXT", vec![
-                literal(SqlValue::Varchar("POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))".to_string())),
-            ]),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_ASTEXT",
+        vec![function_call(
+            "ST_BOUNDARY",
+            vec![function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))".to_string()))],
+            )],
+        )],
+    );
+
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Varchar(s) => {
-            assert!(s.contains("LINESTRING") || s.contains("MULTILINESTRING"),
-                    "Expected LINESTRING or MULTILINESTRING, got: {}", s);
+            assert!(
+                s.contains("LINESTRING") || s.contains("MULTILINESTRING"),
+                "Expected LINESTRING or MULTILINESTRING, got: {}",
+                s
+            );
         }
         _ => panic!("Expected Varchar result"),
     }
@@ -209,19 +256,25 @@ fn test_st_boundary_polygon() {
 #[test]
 fn test_st_boundary_linestring() {
     // Boundary of a line is its endpoints
-    let expr = function_call("ST_ASTEXT", vec![
-        function_call("ST_BOUNDARY", vec![
-            function_call("ST_GEOMFROMTEXT", vec![
-                literal(SqlValue::Varchar("LINESTRING(0 0, 1 1, 2 0)".to_string())),
-            ]),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_ASTEXT",
+        vec![function_call(
+            "ST_BOUNDARY",
+            vec![function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("LINESTRING(0 0, 1 1, 2 0)".to_string()))],
+            )],
+        )],
+    );
+
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Varchar(s) => {
-            assert!(s.contains("POINT") || s.contains("MULTIPOINT"),
-                    "Expected POINT or MULTIPOINT, got: {}", s);
+            assert!(
+                s.contains("POINT") || s.contains("MULTIPOINT"),
+                "Expected POINT or MULTIPOINT, got: {}",
+                s
+            );
         }
         _ => panic!("Expected Varchar result"),
     }
@@ -229,10 +282,8 @@ fn test_st_boundary_linestring() {
 
 #[test]
 fn test_st_boundary_null_handling() {
-    let expr = function_call("ST_BOUNDARY", vec![
-        literal(SqlValue::Null),
-    ]);
-    
+    let expr = function_call("ST_BOUNDARY", vec![literal(SqlValue::Null)]);
+
     let result = eval_expr(expr).unwrap();
     assert_eq!(result, SqlValue::Null);
 }
@@ -240,15 +291,20 @@ fn test_st_boundary_null_handling() {
 #[test]
 fn test_st_hausdorff_distance_points() {
     // Hausdorff distance between two points should be the distance between them
-    let expr = function_call("ST_HAUSDORFF_DISTANCE", vec![
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POINT(0 0)".to_string())),
-        ]),
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POINT(3 4)".to_string())),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_HAUSDORFF_DISTANCE",
+        vec![
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POINT(0 0)".to_string()))],
+            ),
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POINT(3 4)".to_string()))],
+            ),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Double(d) => {
@@ -261,13 +317,17 @@ fn test_st_hausdorff_distance_points() {
 
 #[test]
 fn test_st_hausdorff_distance_null_handling() {
-    let expr = function_call("ST_HAUSDORFF_DISTANCE", vec![
-        literal(SqlValue::Null),
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POINT(0 0)".to_string())),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_HAUSDORFF_DISTANCE",
+        vec![
+            literal(SqlValue::Null),
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POINT(0 0)".to_string()))],
+            ),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     assert_eq!(result, SqlValue::Null);
 }
@@ -275,15 +335,20 @@ fn test_st_hausdorff_distance_null_handling() {
 #[test]
 fn test_st_hausdorff_distance_same_geometry() {
     // Hausdorff distance of a geometry to itself should be 0
-    let expr = function_call("ST_HAUSDORFF_DISTANCE", vec![
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string())),
-        ]),
-        function_call("ST_GEOMFROMTEXT", vec![
-            literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string())),
-        ]),
-    ]);
-    
+    let expr = function_call(
+        "ST_HAUSDORFF_DISTANCE",
+        vec![
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string()))],
+            ),
+            function_call(
+                "ST_GEOMFROMTEXT",
+                vec![literal(SqlValue::Varchar("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))".to_string()))],
+            ),
+        ],
+    );
+
     let result = eval_expr(expr).unwrap();
     match result {
         SqlValue::Double(d) => {

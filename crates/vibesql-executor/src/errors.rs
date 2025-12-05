@@ -187,7 +187,9 @@ pub enum ExecutorError {
         batch_columns: usize,
     },
     /// Column not found in batch by name
-    ColumnarColumnNotFoundByName { column_name: String },
+    ColumnarColumnNotFoundByName {
+        column_name: String,
+    },
     /// Column length mismatch in batch operations
     ColumnarLengthMismatch {
         context: String,
@@ -285,9 +287,7 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
         for (j, c2) in s2.chars().enumerate() {
             let cost = if c1 == c2 { 0 } else { 1 };
-            curr_row[j + 1] = (curr_row[j] + 1)
-                .min(prev_row[j + 1] + 1)
-                .min(prev_row[j] + cost);
+            curr_row[j + 1] = (curr_row[j] + 1).min(prev_row[j + 1] + 1).min(prev_row[j] + cost);
         }
 
         std::mem::swap(&mut prev_row, &mut curr_row);
@@ -340,9 +340,13 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::IndexNotFound(name) => write!(f, "Index '{}' not found", name),
             ExecutorError::IndexAlreadyExists(name) => write!(f, "Index '{}' already exists", name),
-            ExecutorError::InvalidIndexDefinition(msg) => write!(f, "Invalid index definition: {}", msg),
+            ExecutorError::InvalidIndexDefinition(msg) => {
+                write!(f, "Invalid index definition: {}", msg)
+            }
             ExecutorError::TriggerNotFound(name) => write!(f, "Trigger '{}' not found", name),
-            ExecutorError::TriggerAlreadyExists(name) => write!(f, "Trigger '{}' already exists", name),
+            ExecutorError::TriggerAlreadyExists(name) => {
+                write!(f, "Trigger '{}' already exists", name)
+            }
             ExecutorError::SchemaNotFound(name) => write!(f, "Schema '{}' not found", name),
             ExecutorError::SchemaAlreadyExists(name) => {
                 write!(f, "Schema '{}' already exists", name)
@@ -465,9 +469,17 @@ impl std::fmt::Display for ExecutorError {
                     if *actual == 1 { "" } else { "s" }
                 )
             }
-            ExecutorError::ProcedureNotFound { procedure_name, schema_name, available_procedures } => {
+            ExecutorError::ProcedureNotFound {
+                procedure_name,
+                schema_name,
+                available_procedures,
+            } => {
                 if available_procedures.is_empty() {
-                    write!(f, "Procedure '{}' not found in schema '{}'", procedure_name, schema_name)
+                    write!(
+                        f,
+                        "Procedure '{}' not found in schema '{}'",
+                        procedure_name, schema_name
+                    )
                 } else {
                     // Check for similar names using simple edit distance
                     let suggestion = find_closest_match(procedure_name, available_procedures);
@@ -516,7 +528,13 @@ impl std::fmt::Display for ExecutorError {
                     }
                 }
             }
-            ExecutorError::ParameterCountMismatch { routine_name, routine_type, expected, actual, parameter_signature } => {
+            ExecutorError::ParameterCountMismatch {
+                routine_name,
+                routine_type,
+                expected,
+                actual,
+                parameter_signature,
+            } => {
                 write!(
                     f,
                     "{} '{}' expects {} parameter{} ({}), got {} argument{}",
@@ -529,14 +547,16 @@ impl std::fmt::Display for ExecutorError {
                     if *actual == 1 { "" } else { "s" }
                 )
             }
-            ExecutorError::ParameterTypeMismatch { parameter_name, expected_type, actual_type, actual_value } => {
+            ExecutorError::ParameterTypeMismatch {
+                parameter_name,
+                expected_type,
+                actual_type,
+                actual_value,
+            } => {
                 write!(
                     f,
                     "Parameter '{}' expects {}, got {} '{}'",
-                    parameter_name,
-                    expected_type,
-                    actual_type,
-                    actual_value
+                    parameter_name, expected_type, actual_type, actual_value
                 )
             }
             ExecutorError::TypeError(msg) => {
@@ -571,32 +591,16 @@ impl std::fmt::Display for ExecutorError {
                 write!(f, "Parse error: {}", msg)
             }
             ExecutorError::InvalidExtractField { field, value_type } => {
-                write!(
-                    f,
-                    "Cannot extract {} from {} value",
-                    field, value_type
-                )
+                write!(f, "Cannot extract {} from {} value", field, value_type)
             }
             ExecutorError::ArrowDowncastError { expected_type, context } => {
-                write!(
-                    f,
-                    "Failed to downcast Arrow array to {} ({})",
-                    expected_type, context
-                )
+                write!(f, "Failed to downcast Arrow array to {} ({})", expected_type, context)
             }
             ExecutorError::ColumnarTypeMismatch { operation, left_type, right_type } => {
                 if let Some(right) = right_type {
-                    write!(
-                        f,
-                        "Incompatible types for {}: {} vs {}",
-                        operation, left_type, right
-                    )
+                    write!(f, "Incompatible types for {}: {} vs {}", operation, left_type, right)
                 } else {
-                    write!(
-                        f,
-                        "Incompatible type for {}: {}",
-                        operation, left_type
-                    )
+                    write!(f, "Incompatible type for {}: {}", operation, left_type)
                 }
             }
             ExecutorError::SimdOperationFailed { operation, reason } => {
@@ -620,11 +624,7 @@ impl std::fmt::Display for ExecutorError {
                 )
             }
             ExecutorError::UnsupportedArrayType { operation, array_type } => {
-                write!(
-                    f,
-                    "Unsupported array type for {}: {}",
-                    operation, array_type
-                )
+                write!(f, "Unsupported array type for {}: {}", operation, array_type)
             }
             ExecutorError::SpatialGeometryError { function_name, message } => {
                 write!(f, "{}: {}", function_name, message)
@@ -660,11 +660,15 @@ impl std::error::Error for ExecutorError {}
 impl From<vibesql_storage::StorageError> for ExecutorError {
     fn from(err: vibesql_storage::StorageError) -> Self {
         match err {
-            vibesql_storage::StorageError::TableNotFound(name) => ExecutorError::TableNotFound(name),
+            vibesql_storage::StorageError::TableNotFound(name) => {
+                ExecutorError::TableNotFound(name)
+            }
             vibesql_storage::StorageError::IndexAlreadyExists(name) => {
                 ExecutorError::IndexAlreadyExists(name)
             }
-            vibesql_storage::StorageError::IndexNotFound(name) => ExecutorError::IndexNotFound(name),
+            vibesql_storage::StorageError::IndexNotFound(name) => {
+                ExecutorError::IndexNotFound(name)
+            }
             vibesql_storage::StorageError::ColumnCountMismatch { expected, actual } => {
                 ExecutorError::ColumnCountMismatch { expected, provided: actual }
             }
@@ -672,7 +676,9 @@ impl From<vibesql_storage::StorageError> for ExecutorError {
                 ExecutorError::ColumnIndexOutOfBounds { index }
             }
             vibesql_storage::StorageError::CatalogError(msg) => ExecutorError::StorageError(msg),
-            vibesql_storage::StorageError::TransactionError(msg) => ExecutorError::StorageError(msg),
+            vibesql_storage::StorageError::TransactionError(msg) => {
+                ExecutorError::StorageError(msg)
+            }
             vibesql_storage::StorageError::RowNotFound => {
                 ExecutorError::StorageError("Row not found".to_string())
             }
@@ -724,12 +730,10 @@ impl From<vibesql_storage::StorageError> for ExecutorError {
                     used, budget
                 ))
             }
-            vibesql_storage::StorageError::NoIndexToEvict => {
-                ExecutorError::StorageError("No index available to evict (all indexes are already disk-backed)".to_string())
-            }
-            vibesql_storage::StorageError::Other(msg) => {
-                ExecutorError::StorageError(msg)
-            }
+            vibesql_storage::StorageError::NoIndexToEvict => ExecutorError::StorageError(
+                "No index available to evict (all indexes are already disk-backed)".to_string(),
+            ),
+            vibesql_storage::StorageError::Other(msg) => ExecutorError::StorageError(msg),
         }
     }
 }
@@ -746,20 +750,23 @@ impl From<vibesql_catalog::CatalogError> for ExecutorError {
             vibesql_catalog::CatalogError::ColumnAlreadyExists(name) => {
                 ExecutorError::ColumnAlreadyExists(name)
             }
-            vibesql_catalog::CatalogError::ColumnNotFound {
-                column_name,
-                table_name,
-            } => ExecutorError::ColumnNotFound {
-                column_name,
-                table_name,
-                searched_tables: vec![],
-                available_columns: vec![],
-            },
-            vibesql_catalog::CatalogError::SchemaNotFound(name) => ExecutorError::SchemaNotFound(name),
+            vibesql_catalog::CatalogError::ColumnNotFound { column_name, table_name } => {
+                ExecutorError::ColumnNotFound {
+                    column_name,
+                    table_name,
+                    searched_tables: vec![],
+                    available_columns: vec![],
+                }
+            }
+            vibesql_catalog::CatalogError::SchemaNotFound(name) => {
+                ExecutorError::SchemaNotFound(name)
+            }
             vibesql_catalog::CatalogError::SchemaAlreadyExists(name) => {
                 ExecutorError::SchemaAlreadyExists(name)
             }
-            vibesql_catalog::CatalogError::SchemaNotEmpty(name) => ExecutorError::SchemaNotEmpty(name),
+            vibesql_catalog::CatalogError::SchemaNotEmpty(name) => {
+                ExecutorError::SchemaNotEmpty(name)
+            }
             vibesql_catalog::CatalogError::RoleAlreadyExists(name) => {
                 ExecutorError::StorageError(format!("Role '{}' already exists", name))
             }
@@ -865,18 +872,18 @@ impl From<vibesql_catalog::CatalogError> for ExecutorError {
             vibesql_catalog::CatalogError::ConstraintAlreadyExists(name) => {
                 ExecutorError::ConstraintViolation(format!("Constraint '{}' already exists", name))
             }
-            vibesql_catalog::CatalogError::ConstraintNotFound(name) => ExecutorError::ConstraintNotFound {
-                constraint_name: name,
-                table_name: "unknown".to_string(),
-            },
-            vibesql_catalog::CatalogError::IndexAlreadyExists {
-                index_name,
-                table_name,
-            } => ExecutorError::IndexAlreadyExists(format!("{} on table {}", index_name, table_name)),
-            vibesql_catalog::CatalogError::IndexNotFound {
-                index_name,
-                table_name,
-            } => ExecutorError::IndexNotFound(format!("{} on table {}", index_name, table_name)),
+            vibesql_catalog::CatalogError::ConstraintNotFound(name) => {
+                ExecutorError::ConstraintNotFound {
+                    constraint_name: name,
+                    table_name: "unknown".to_string(),
+                }
+            }
+            vibesql_catalog::CatalogError::IndexAlreadyExists { index_name, table_name } => {
+                ExecutorError::IndexAlreadyExists(format!("{} on table {}", index_name, table_name))
+            }
+            vibesql_catalog::CatalogError::IndexNotFound { index_name, table_name } => {
+                ExecutorError::IndexNotFound(format!("{} on table {}", index_name, table_name))
+            }
             vibesql_catalog::CatalogError::CircularForeignKey { table_name, message } => {
                 ExecutorError::ConstraintViolation(format!(
                     "Circular foreign key dependency on table '{}': {}",

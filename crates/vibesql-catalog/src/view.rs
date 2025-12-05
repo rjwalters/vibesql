@@ -37,6 +37,12 @@ impl ViewDefinition {
         with_check_option: bool,
         sql_definition: String,
     ) -> Self {
-        ViewDefinition { name, columns, query, with_check_option, sql_definition: Some(sql_definition) }
+        ViewDefinition {
+            name,
+            columns,
+            query,
+            with_check_option,
+            sql_definition: Some(sql_definition),
+        }
     }
 }

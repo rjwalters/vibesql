@@ -15,11 +15,11 @@
 //! - `should_use_index_scan()`: Determines if an index scan is beneficial
 //! - `execute_index_scan()`: Executes an index scan to retrieve rows
 
-pub(crate) mod selection;
-pub(crate) mod predicate;
 mod execution;
+pub(crate) mod predicate;
+pub(crate) mod selection;
 
 // Re-export public APIs
-pub(crate) use selection::cost_based_index_selection;
 pub(crate) use execution::execute_index_scan;
+pub(crate) use selection::cost_based_index_selection;
 // predicate types are accessed directly via predicate::* for better type clarity

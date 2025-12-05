@@ -8,20 +8,14 @@ fn simple_table_from(name: &str) -> FromClause {
 }
 
 fn column_ref(column: &str) -> Expression {
-    Expression::ColumnRef {
-        table: None,
-        column: column.to_string(),
-    }
+    Expression::ColumnRef { table: None, column: column.to_string() }
 }
 
 fn simple_select(table: &str, column: &str) -> SelectStmt {
     SelectStmt {
         with_clause: None,
         distinct: false,
-        select_list: vec![SelectItem::Expression {
-            expr: column_ref(column),
-            alias: None,
-        }],
+        select_list: vec![SelectItem::Expression { expr: column_ref(column), alias: None }],
         into_table: None,
         into_variables: None,
         from: Some(simple_table_from(table)),
@@ -149,11 +143,7 @@ fn test_multiple_subqueries_to_joins() {
 
     // Should have two joins (SEMI and ANTI)
     match transformed.from {
-        Some(FromClause::Join {
-            left: inner_join_box,
-            join_type: outer_join_type,
-            ..
-        }) => {
+        Some(FromClause::Join { left: inner_join_box, join_type: outer_join_type, .. }) => {
             // Outer join should be either SEMI or ANTI
             assert!(
                 matches!(outer_join_type, JoinType::Semi | JoinType::Anti),
@@ -220,12 +210,7 @@ fn test_nested_in_subquery_self_join_column_qualification() {
 
     // Should have transformed to a SEMI JOIN
     match &transformed.from {
-        Some(FromClause::Join {
-            join_type,
-            condition,
-            right,
-            ..
-        }) => {
+        Some(FromClause::Join { join_type, condition, right, .. }) => {
             assert!(matches!(join_type, JoinType::Semi), "Should be SEMI join");
 
             // Check that the right side has the alias
@@ -252,7 +237,8 @@ fn test_nested_in_subquery_self_join_column_qualification() {
                             }
                         }
                         Expression::BinaryOp { left, right, .. } => {
-                            check_nested_in_qualification(left) || check_nested_in_qualification(right)
+                            check_nested_in_qualification(left)
+                                || check_nested_in_qualification(right)
                         }
                         _ => false,
                     }
@@ -270,14 +256,15 @@ fn test_nested_in_subquery_self_join_column_qualification() {
 }
 
 fn table_from_with_alias(name: &str, alias: &str) -> FromClause {
-    FromClause::Table { name: name.to_string(), alias: Some(alias.to_string()), column_aliases: None }
+    FromClause::Table {
+        name: name.to_string(),
+        alias: Some(alias.to_string()),
+        column_aliases: None,
+    }
 }
 
 fn qualified_column_ref(table: &str, column: &str) -> Expression {
-    Expression::ColumnRef {
-        table: Some(table.to_string()),
-        column: column.to_string(),
-    }
+    Expression::ColumnRef { table: Some(table.to_string()), column: column.to_string() }
 }
 
 #[test]
@@ -339,10 +326,8 @@ fn test_exists_self_join_column_qualification() {
         set_operation: None,
     };
 
-    stmt.where_clause = Some(Expression::Exists {
-        subquery: Box::new(exists_subquery),
-        negated: false,
-    });
+    stmt.where_clause =
+        Some(Expression::Exists { subquery: Box::new(exists_subquery), negated: false });
 
     let transformed = transform_subqueries_to_joins(&stmt);
 
@@ -353,12 +338,7 @@ fn test_exists_self_join_column_qualification() {
     );
 
     match &transformed.from {
-        Some(FromClause::Join {
-            join_type,
-            condition,
-            right,
-            ..
-        }) => {
+        Some(FromClause::Join { join_type, condition, right, .. }) => {
             assert!(
                 matches!(join_type, JoinType::Semi),
                 "EXISTS should transform to SEMI join, got: {:?}",
@@ -386,9 +366,7 @@ fn test_exists_self_join_column_qualification() {
             if let Some(cond) = condition {
                 fn contains_rewritten_alias(expr: &Expression) -> bool {
                     match expr {
-                        Expression::ColumnRef { table: Some(t), .. } => {
-                            t == "__subquery_l2"
-                        }
+                        Expression::ColumnRef { table: Some(t), .. } => t == "__subquery_l2",
                         Expression::BinaryOp { left, right, .. } => {
                             contains_rewritten_alias(left) || contains_rewritten_alias(right)
                         }
@@ -478,12 +456,7 @@ fn test_not_exists_self_join_column_qualification() {
     );
 
     match &transformed.from {
-        Some(FromClause::Join {
-            join_type,
-            condition,
-            right,
-            ..
-        }) => {
+        Some(FromClause::Join { join_type, condition, right, .. }) => {
             assert!(
                 matches!(join_type, JoinType::Anti),
                 "NOT EXISTS should transform to ANTI join, got: {:?}",
@@ -512,9 +485,7 @@ fn test_not_exists_self_join_column_qualification() {
             if let Some(cond) = condition {
                 fn contains_rewritten_l3_ref(expr: &Expression) -> bool {
                     match expr {
-                        Expression::ColumnRef { table: Some(t), .. } => {
-                            t == "__subquery_l3"
-                        }
+                        Expression::ColumnRef { table: Some(t), .. } => t == "__subquery_l3",
                         Expression::BinaryOp { left, right, .. } => {
                             contains_rewritten_l3_ref(left) || contains_rewritten_l3_ref(right)
                         }

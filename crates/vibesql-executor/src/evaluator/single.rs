@@ -3,9 +3,9 @@
 //! This module provides the ExpressionEvaluator for evaluating expressions
 //! in the context of a single table schema.
 
-use std::{cell::RefCell, rc::Rc};
-use lru::LruCache;
 use crate::errors::ExecutorError;
+use lru::LruCache;
+use std::{cell::RefCell, rc::Rc};
 
 /// Evaluates expressions in the context of a row
 pub struct ExpressionEvaluator<'a> {
@@ -154,10 +154,7 @@ impl<'a> ExpressionEvaluator<'a> {
         right: &vibesql_types::SqlValue,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         // Extract SQL mode from database, default to MySQL if not available
-        let sql_mode = self
-            .database
-            .map(|db| db.sql_mode())
-            .unwrap_or_default();
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
         super::core::eval_binary_op_static(left, op, right, sql_mode)
     }
@@ -197,7 +194,10 @@ impl<'a> ExpressionEvaluator<'a> {
     /// Compare two SQL values for equality in simple CASE expressions
     ///
     /// Delegates to the core module's implementation.
-    pub(crate) fn values_are_equal(left: &vibesql_types::SqlValue, right: &vibesql_types::SqlValue) -> bool {
+    pub(crate) fn values_are_equal(
+        left: &vibesql_types::SqlValue,
+        right: &vibesql_types::SqlValue,
+    ) -> bool {
         super::core::values_are_equal(left, right)
     }
 

@@ -146,7 +146,10 @@ fn test_create_type_structured() {
                     assert_eq!(attributes[0].name, "NAME");
                     assert_eq!(attributes[1].name, "AGE");
                     // Check data types
-                    assert!(matches!(attributes[0].data_type, vibesql_types::DataType::Varchar { .. }));
+                    assert!(matches!(
+                        attributes[0].data_type,
+                        vibesql_types::DataType::Varchar { .. }
+                    ));
                     assert!(matches!(attributes[1].data_type, vibesql_types::DataType::Integer));
                 }
                 _ => panic!("Expected Structured type definition"),

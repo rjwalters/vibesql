@@ -59,10 +59,7 @@ impl TimeoutContext {
 
     /// Create a timeout context from a `SelectExecutor`.
     pub fn from_executor(executor: &crate::SelectExecutor<'_>) -> Self {
-        Self {
-            start_time: executor.start_time,
-            timeout_seconds: executor.timeout_seconds,
-        }
+        Self { start_time: executor.start_time, timeout_seconds: executor.timeout_seconds }
     }
 
     /// Create a default timeout context (for use when no executor is available).
@@ -70,10 +67,7 @@ impl TimeoutContext {
     /// This creates a context with the current time as start and default timeout.
     /// Use sparingly - prefer `from_executor` when an executor is available.
     pub fn new_default() -> Self {
-        Self {
-            start_time: Instant::now(),
-            timeout_seconds: MAX_QUERY_EXECUTION_SECONDS,
-        }
+        Self { start_time: Instant::now(), timeout_seconds: MAX_QUERY_EXECUTION_SECONDS }
     }
 
     /// Check if the timeout has been exceeded.

@@ -24,9 +24,9 @@ use super::batch::ColumnarBatch;
 use super::scan::ColumnarScan;
 
 // Re-export public types and functions to maintain API compatibility
-pub use expression::extract_aggregates;
 pub use expression::evaluate_expression_to_column;
 pub use expression::evaluate_expression_with_cached_column;
+pub use expression::extract_aggregates;
 pub use group_by::columnar_group_by;
 // SIMD-accelerated GROUP BY for ColumnarBatch - used in native columnar execution path
 pub use group_by::columnar_group_by_batch;
@@ -85,7 +85,9 @@ pub fn compute_columnar_aggregate(
 ) -> Result<SqlValue, ExecutorError> {
     // Try SIMD path for numeric columns (5-10x speedup via LLVM auto-vectorization)
     {
-        use super::simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
+        use super::simd_aggregate::{
+            can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64,
+        };
 
         // Detect if column is SIMD-compatible
         if let Some(is_integer) = can_use_simd_for_column(scan, column_idx) {
@@ -126,15 +128,19 @@ pub fn compute_multiple_aggregates(
             AggregateSource::Expression(expr) => {
                 let schema = schema.ok_or_else(|| {
                     ExecutorError::UnsupportedExpression(
-                        "Schema required for expression aggregates".to_string()
+                        "Schema required for expression aggregates".to_string(),
                     )
                 })?;
-                expression::compute_expression_aggregate(rows, expr, spec.op, filter_bitmap, schema)?
+                expression::compute_expression_aggregate(
+                    rows,
+                    expr,
+                    spec.op,
+                    filter_bitmap,
+                    schema,
+                )?
             }
             // COUNT(*) path: count all rows
-            AggregateSource::CountStar => {
-                functions::compute_count(&scan, filter_bitmap)?
-            }
+            AggregateSource::CountStar => functions::compute_count(&scan, filter_bitmap)?,
         };
         results.push(result);
     }
@@ -193,7 +199,7 @@ pub fn compute_aggregates_from_batch(
             AggregateSource::Expression(expr) => {
                 let schema = schema.ok_or_else(|| {
                     ExecutorError::UnsupportedExpression(
-                        "Schema required for expression aggregates".to_string()
+                        "Schema required for expression aggregates".to_string(),
                     )
                 })?;
                 // Try batch-native expression evaluation first
@@ -203,15 +209,15 @@ pub fn compute_aggregates_from_batch(
                     Err(ExecutorError::UnsupportedExpression(_)) => {
                         // Fall back to row-based for unsupported column types (Mixed, Date, etc.)
                         let rows = batch.to_rows()?;
-                        expression::compute_expression_aggregate(&rows, expr, spec.op, None, schema)?
+                        expression::compute_expression_aggregate(
+                            &rows, expr, spec.op, None, schema,
+                        )?
                     }
                     Err(other) => return Err(other),
                 }
             }
             // COUNT(*) path: just count rows in batch
-            AggregateSource::CountStar => {
-                SqlValue::Integer(batch.row_count() as i64)
-            }
+            AggregateSource::CountStar => SqlValue::Integer(batch.row_count() as i64),
         };
         results.push(result);
     }
@@ -297,10 +303,7 @@ mod tests {
         let exprs = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef {
-                table: None,
-                column: "col1".to_string(),
-            }],
+            args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -329,18 +332,12 @@ mod tests {
             Expression::AggregateFunction {
                 name: "SUM".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef {
-                    table: None,
-                    column: "col1".to_string(),
-                }],
+                args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
             },
             Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef {
-                    table: None,
-                    column: "col2".to_string(),
-                }],
+                args: vec![Expression::ColumnRef { table: None, column: "col2".to_string() }],
             },
         ];
 
@@ -371,20 +368,14 @@ mod tests {
         let exprs = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: true,
-            args: vec![Expression::ColumnRef {
-                table: None,
-                column: "col1".to_string(),
-            }],
+            args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
         assert!(result.is_none());
 
         // Test non-aggregate expression (should return None)
-        let exprs = vec![Expression::ColumnRef {
-            table: None,
-            column: "col1".to_string(),
-        }];
+        let exprs = vec![Expression::ColumnRef { table: None, column: "col1".to_string() }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
         assert!(result.is_none());
@@ -436,10 +427,7 @@ mod tests {
             name: "SUM".to_string(),
             distinct: false,
             args: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "price".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
                 op: vibesql_ast::BinaryOperator::Multiply,
                 right: Box::new(Expression::ColumnRef {
                     table: None,
@@ -487,11 +475,15 @@ mod tests {
 
         // Check group A: SUM = 250.0
         assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar("A".to_string())));
-        assert!(matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001));
+        assert!(
+            matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
+        );
 
         // Check group B: SUM = 250.0
         assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar("B".to_string())));
-        assert!(matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001));
+        assert!(
+            matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
+        );
     }
 
     #[test]
@@ -570,14 +562,22 @@ mod tests {
 
         // Group 1: SUM=250, AVG=12.5, COUNT=2
         assert_eq!(sorted[0].get(0), Some(&SqlValue::Integer(1)));
-        assert!(matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001));
-        assert!(matches!(sorted[0].get(2), Some(&SqlValue::Double(avg)) if (avg - 12.5).abs() < 0.001));
+        assert!(
+            matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
+        );
+        assert!(
+            matches!(sorted[0].get(2), Some(&SqlValue::Double(avg)) if (avg - 12.5).abs() < 0.001)
+        );
         assert_eq!(sorted[0].get(3), Some(&SqlValue::Integer(2)));
 
         // Group 2: SUM=200, AVG=20.0, COUNT=1
         assert_eq!(sorted[1].get(0), Some(&SqlValue::Integer(2)));
-        assert!(matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 200.0).abs() < 0.001));
-        assert!(matches!(sorted[1].get(2), Some(&SqlValue::Double(avg)) if (avg - 20.0).abs() < 0.001));
+        assert!(
+            matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 200.0).abs() < 0.001)
+        );
+        assert!(
+            matches!(sorted[1].get(2), Some(&SqlValue::Double(avg)) if (avg - 20.0).abs() < 0.001)
+        );
         assert_eq!(sorted[1].get(3), Some(&SqlValue::Integer(1)));
     }
 
@@ -613,11 +613,15 @@ mod tests {
 
         // Check group A: only row 2 (150.0) passes filter
         assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar("A".to_string())));
-        assert!(matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 150.0).abs() < 0.001));
+        assert!(
+            matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 150.0).abs() < 0.001)
+        );
 
         // Check group B: only row 1 (200.0) passes filter
         assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar("B".to_string())));
-        assert!(matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 200.0).abs() < 0.001));
+        assert!(
+            matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 200.0).abs() < 0.001)
+        );
     }
 
     #[test]
@@ -651,16 +655,21 @@ mod tests {
         assert_eq!(result.len(), 2);
 
         // Find the groups
-        let a_group = result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Varchar(s)) if s == "A"));
+        let a_group =
+            result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Varchar(s)) if s == "A"));
         let null_group = result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Null)));
 
         assert!(a_group.is_some());
         assert!(null_group.is_some());
 
         // Check "A" group: 100 + 150 = 250
-        assert!(matches!(a_group.unwrap().get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001));
+        assert!(
+            matches!(a_group.unwrap().get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
+        );
 
         // Check NULL group: 200 + 50 = 250
-        assert!(matches!(null_group.unwrap().get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001));
+        assert!(
+            matches!(null_group.unwrap().get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
+        );
     }
 }

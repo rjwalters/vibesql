@@ -127,24 +127,13 @@ fn parse_example_object(
     let expected_rows = obj.get("expectedRows").and_then(|v| v.as_array()).map(|arr| {
         arr.iter()
             .filter_map(|row| row.as_array())
-            .map(|row| {
-                row.iter()
-                    .filter_map(|cell| cell.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
+            .map(|row| row.iter().filter_map(|cell| cell.as_str().map(|s| s.to_string())).collect())
             .collect()
     });
 
     let expected_count = obj.get("expectedCount").and_then(|v| v.as_u64()).map(|n| n as usize);
 
-    Some(WebDemoExample {
-        id,
-        title,
-        database,
-        sql,
-        expected_rows,
-        expected_count,
-    })
+    Some(WebDemoExample { id, title, database, sql, expected_rows, expected_count })
 }
 
 /// Parse expected results from SQL comment blocks

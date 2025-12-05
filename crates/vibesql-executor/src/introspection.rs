@@ -3,7 +3,10 @@
 //! This module implements MySQL-style introspection commands that query
 //! database metadata and return result sets.
 
-use vibesql_ast::{DescribeStmt, ShowColumnsStmt, ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt};
+use vibesql_ast::{
+    DescribeStmt, ShowColumnsStmt, ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt,
+    ShowTablesStmt,
+};
 use vibesql_catalog::{IndexType, ReferentialAction, SortOrder};
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
@@ -26,11 +29,13 @@ impl<'a> IntrospectionExecutor<'a> {
     ///
     /// Returns a result set with a single column "Tables_in_<database>" containing
     /// the names of all tables in the specified (or current) schema.
-    pub fn execute_show_tables(&self, stmt: &ShowTablesStmt) -> Result<SelectResult, ExecutorError> {
+    pub fn execute_show_tables(
+        &self,
+        stmt: &ShowTablesStmt,
+    ) -> Result<SelectResult, ExecutorError> {
         // Get the schema to query (default to current schema)
-        let schema_name = stmt.database.as_deref().unwrap_or_else(|| {
-            self.db.catalog.get_current_schema()
-        });
+        let schema_name =
+            stmt.database.as_deref().unwrap_or_else(|| self.db.catalog.get_current_schema());
 
         // Get tables from the schema
         let tables = if let Some(schema) = self.db.catalog.get_schema(schema_name) {
@@ -38,7 +43,9 @@ impl<'a> IntrospectionExecutor<'a> {
         } else {
             // Try case-insensitive lookup
             let upper_name = schema_name.to_uppercase();
-            self.db.catalog.list_schemas()
+            self.db
+                .catalog
+                .list_schemas()
                 .into_iter()
                 .find(|s| s.to_uppercase() == upper_name)
                 .and_then(|actual_name| self.db.catalog.get_schema(&actual_name))
@@ -60,17 +67,17 @@ impl<'a> IntrospectionExecutor<'a> {
             .map(|name| Row::new(vec![SqlValue::Varchar(name)]))
             .collect();
 
-        Ok(SelectResult {
-            columns: vec![column_name],
-            rows,
-        })
+        Ok(SelectResult { columns: vec![column_name], rows })
     }
 
     /// Execute SHOW DATABASES statement
     ///
     /// Returns a result set with a single column "Database" containing
     /// the names of all schemas (databases) in the catalog.
-    pub fn execute_show_databases(&self, stmt: &ShowDatabasesStmt) -> Result<SelectResult, ExecutorError> {
+    pub fn execute_show_databases(
+        &self,
+        stmt: &ShowDatabasesStmt,
+    ) -> Result<SelectResult, ExecutorError> {
         let schemas = self.db.catalog.list_schemas();
 
         // Filter by LIKE pattern if provided
@@ -85,16 +92,16 @@ impl<'a> IntrospectionExecutor<'a> {
             .map(|name| Row::new(vec![SqlValue::Varchar(name)]))
             .collect();
 
-        Ok(SelectResult {
-            columns: vec!["Database".to_string()],
-            rows,
-        })
+        Ok(SelectResult { columns: vec!["Database".to_string()], rows })
     }
 
     /// Execute SHOW COLUMNS statement
     ///
     /// Returns a result set with columns: Field, Type, Null, Key, Default, Extra
-    pub fn execute_show_columns(&self, stmt: &ShowColumnsStmt) -> Result<SelectResult, ExecutorError> {
+    pub fn execute_show_columns(
+        &self,
+        stmt: &ShowColumnsStmt,
+    ) -> Result<SelectResult, ExecutorError> {
         // Get the table
         let table_name = if let Some(ref db) = stmt.database {
             format!("{}.{}", db, stmt.table_name)
@@ -102,21 +109,19 @@ impl<'a> IntrospectionExecutor<'a> {
             stmt.table_name.clone()
         };
 
-        let table = self.db.catalog.get_table(&table_name)
+        let table = self
+            .db
+            .catalog
+            .get_table(&table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Determine which columns are part of the primary key
-        let pk_columns: std::collections::HashSet<String> = table.primary_key
-            .as_ref()
-            .map(|pk| pk.iter().cloned().collect())
-            .unwrap_or_default();
+        let pk_columns: std::collections::HashSet<String> =
+            table.primary_key.as_ref().map(|pk| pk.iter().cloned().collect()).unwrap_or_default();
 
         // Determine which columns are part of unique constraints
-        let unique_columns: std::collections::HashSet<String> = table.unique_constraints
-            .iter()
-            .flatten()
-            .cloned()
-            .collect();
+        let unique_columns: std::collections::HashSet<String> =
+            table.unique_constraints.iter().flatten().cloned().collect();
 
         let mut rows: Vec<Row> = Vec::with_capacity(table.columns.len());
 
@@ -148,7 +153,8 @@ impl<'a> IntrospectionExecutor<'a> {
             };
 
             // Default: default value or NULL
-            let default = col.default_value
+            let default = col
+                .default_value
                 .as_ref()
                 .map(|expr| SqlValue::Varchar(format!("{:?}", expr)))
                 .unwrap_or(SqlValue::Null);
@@ -167,7 +173,7 @@ impl<'a> IntrospectionExecutor<'a> {
                     default,
                     extra,
                     SqlValue::Varchar("select,insert,update,references".into()), // Privileges
-                    SqlValue::Varchar("".into()), // Comment
+                    SqlValue::Varchar("".into()),                                // Comment
                 ]));
             } else {
                 rows.push(Row::new(vec![field, col_type, nullable, key, default, extra]));
@@ -225,7 +231,10 @@ impl<'a> IntrospectionExecutor<'a> {
         };
 
         // Verify table exists
-        let table = self.db.catalog.get_table(&table_name)
+        let table = self
+            .db
+            .catalog
+            .get_table(&table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         let mut rows: Vec<Row> = Vec::new();
@@ -235,19 +244,19 @@ impl<'a> IntrospectionExecutor<'a> {
             for (seq, col_name) in pk_cols.iter().enumerate() {
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(stmt.table_name.clone()), // Table
-                    SqlValue::Integer(0), // Non_unique (0 = unique)
-                    SqlValue::Varchar("PRIMARY".into()), // Key_name
-                    SqlValue::Integer((seq + 1) as i64), // Seq_in_index
-                    SqlValue::Varchar(col_name.clone()), // Column_name
-                    SqlValue::Varchar("A".into()), // Collation (A = ascending)
-                    SqlValue::Null, // Cardinality
-                    SqlValue::Null, // Sub_part
-                    SqlValue::Null, // Packed
-                    SqlValue::Varchar("".into()), // Null
-                    SqlValue::Varchar("BTREE".into()), // Index_type
-                    SqlValue::Varchar("".into()), // Comment
-                    SqlValue::Varchar("".into()), // Index_comment
-                    SqlValue::Varchar("YES".into()), // Visible
+                    SqlValue::Integer(0),                       // Non_unique (0 = unique)
+                    SqlValue::Varchar("PRIMARY".into()),        // Key_name
+                    SqlValue::Integer((seq + 1) as i64),        // Seq_in_index
+                    SqlValue::Varchar(col_name.clone()),        // Column_name
+                    SqlValue::Varchar("A".into()),              // Collation (A = ascending)
+                    SqlValue::Null,                             // Cardinality
+                    SqlValue::Null,                             // Sub_part
+                    SqlValue::Null,                             // Packed
+                    SqlValue::Varchar("".into()),               // Null
+                    SqlValue::Varchar("BTREE".into()),          // Index_type
+                    SqlValue::Varchar("".into()),               // Comment
+                    SqlValue::Varchar("".into()),               // Index_comment
+                    SqlValue::Varchar("YES".into()),            // Visible
                 ]));
             }
         }
@@ -272,19 +281,21 @@ impl<'a> IntrospectionExecutor<'a> {
 
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(stmt.table_name.clone()), // Table
-                    SqlValue::Integer(non_unique), // Non_unique
-                    SqlValue::Varchar(index.name.clone()), // Key_name
-                    SqlValue::Integer((seq + 1) as i64), // Seq_in_index
+                    SqlValue::Integer(non_unique),              // Non_unique
+                    SqlValue::Varchar(index.name.clone()),      // Key_name
+                    SqlValue::Integer((seq + 1) as i64),        // Seq_in_index
                     SqlValue::Varchar(col.column_name.clone()), // Column_name
-                    SqlValue::Varchar(collation.into()), // Collation
-                    SqlValue::Null, // Cardinality
-                    col.prefix_length.map(|l| SqlValue::Integer(l as i64)).unwrap_or(SqlValue::Null), // Sub_part
-                    SqlValue::Null, // Packed
-                    SqlValue::Varchar("".into()), // Null
-                    SqlValue::Varchar(index_type.into()), // Index_type
-                    SqlValue::Varchar("".into()), // Comment
-                    SqlValue::Varchar("".into()), // Index_comment
-                    SqlValue::Varchar("YES".into()), // Visible
+                    SqlValue::Varchar(collation.into()),        // Collation
+                    SqlValue::Null,                             // Cardinality
+                    col.prefix_length
+                        .map(|l| SqlValue::Integer(l as i64))
+                        .unwrap_or(SqlValue::Null), // Sub_part
+                    SqlValue::Null,                             // Packed
+                    SqlValue::Varchar("".into()),               // Null
+                    SqlValue::Varchar(index_type.into()),       // Index_type
+                    SqlValue::Varchar("".into()),               // Comment
+                    SqlValue::Varchar("".into()),               // Index_comment
+                    SqlValue::Varchar("YES".into()),            // Visible
                 ]));
             }
         }
@@ -313,8 +324,14 @@ impl<'a> IntrospectionExecutor<'a> {
     /// Execute SHOW CREATE TABLE statement
     ///
     /// Returns a result set with columns: Table, Create Table
-    pub fn execute_show_create_table(&self, stmt: &ShowCreateTableStmt) -> Result<SelectResult, ExecutorError> {
-        let table = self.db.catalog.get_table(&stmt.table_name)
+    pub fn execute_show_create_table(
+        &self,
+        stmt: &ShowCreateTableStmt,
+    ) -> Result<SelectResult, ExecutorError> {
+        let table = self
+            .db
+            .catalog
+            .get_table(&stmt.table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Build the CREATE TABLE statement
@@ -372,15 +389,10 @@ impl<'a> IntrospectionExecutor<'a> {
         sql.push_str(&definitions.join(",\n"));
         sql.push_str("\n)");
 
-        let rows = vec![Row::new(vec![
-            SqlValue::Varchar(table.name.clone()),
-            SqlValue::Varchar(sql),
-        ])];
+        let rows =
+            vec![Row::new(vec![SqlValue::Varchar(table.name.clone()), SqlValue::Varchar(sql)])];
 
-        Ok(SelectResult {
-            columns: vec!["Table".to_string(), "Create Table".to_string()],
-            rows,
-        })
+        Ok(SelectResult { columns: vec!["Table".to_string(), "Create Table".to_string()], rows })
     }
 }
 
@@ -405,8 +417,8 @@ fn like_match_impl(pattern: &[char], text: &[char]) -> bool {
         (Some('%'), _) => {
             // % matches zero or more characters
             // Try matching 0 characters (skip %) or matching 1 character
-            like_match_impl(&pattern[1..], text) ||
-            (!text.is_empty() && like_match_impl(pattern, &text[1..]))
+            like_match_impl(&pattern[1..], text)
+                || (!text.is_empty() && like_match_impl(pattern, &text[1..]))
         }
         (Some('_'), Some(_)) => {
             // _ matches exactly one character
@@ -421,9 +433,7 @@ fn like_match_impl(pattern: &[char], text: &[char]) -> bool {
                 false
             }
         }
-        (Some(p), Some(t)) if *p == *t => {
-            like_match_impl(&pattern[1..], &text[1..])
-        }
+        (Some(p), Some(t)) if *p == *t => like_match_impl(&pattern[1..], &text[1..]),
         _ => false,
     }
 }
@@ -519,21 +529,30 @@ mod tests {
         // Create a users table
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
-            ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
+            ColumnSchema::new(
+                "email".to_string(),
+                DataType::Varchar { max_length: Some(255) },
+                false,
+            ),
         ];
-        let schema = TableSchema::with_primary_key(
-            "users".to_string(),
-            columns,
-            vec!["id".to_string()],
-        );
+        let schema =
+            TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
         db.create_table(schema).unwrap();
 
         // Create an orders table
         let order_columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
             ColumnSchema::new("user_id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("total".to_string(), DataType::Decimal { precision: 10, scale: 2 }, true),
+            ColumnSchema::new(
+                "total".to_string(),
+                DataType::Decimal { precision: 10, scale: 2 },
+                true,
+            ),
         ];
         let order_schema = TableSchema::with_primary_key(
             "orders".to_string(),
@@ -550,11 +569,7 @@ mod tests {
         let db = create_test_db();
         let executor = IntrospectionExecutor::new(&db);
 
-        let stmt = ShowTablesStmt {
-            database: None,
-            like_pattern: None,
-            where_clause: None,
-        };
+        let stmt = ShowTablesStmt { database: None, like_pattern: None, where_clause: None };
 
         let result = executor.execute_show_tables(&stmt).unwrap();
         assert_eq!(result.columns.len(), 1);
@@ -564,7 +579,9 @@ mod tests {
         assert_eq!(result.rows.len(), 2);
 
         // Extract table names
-        let table_names: Vec<&str> = result.rows.iter()
+        let table_names: Vec<&str> = result
+            .rows
+            .iter()
             .filter_map(|r| match &r.values[0] {
                 SqlValue::Varchar(s) => Some(s.as_str()),
                 _ => None,
@@ -596,10 +613,7 @@ mod tests {
         let db = create_test_db();
         let executor = IntrospectionExecutor::new(&db);
 
-        let stmt = ShowDatabasesStmt {
-            like_pattern: None,
-            where_clause: None,
-        };
+        let stmt = ShowDatabasesStmt { like_pattern: None, where_clause: None };
 
         let result = executor.execute_show_databases(&stmt).unwrap();
         assert_eq!(result.columns, vec!["Database"]);
@@ -607,7 +621,9 @@ mod tests {
         // Should have at least the 'public' schema
         assert!(!result.rows.is_empty());
 
-        let schema_names: Vec<&str> = result.rows.iter()
+        let schema_names: Vec<&str> = result
+            .rows
+            .iter()
             .filter_map(|r| match &r.values[0] {
                 SqlValue::Varchar(s) => Some(s.as_str()),
                 _ => None,
@@ -659,10 +675,7 @@ mod tests {
         let db = create_test_db();
         let executor = IntrospectionExecutor::new(&db);
 
-        let stmt = DescribeStmt {
-            table_name: "users".to_string(),
-            column_pattern: None,
-        };
+        let stmt = DescribeStmt { table_name: "users".to_string(), column_pattern: None };
 
         let result = executor.execute_describe(&stmt).unwrap();
         assert_eq!(result.columns, vec!["Field", "Type", "Null", "Key", "Default", "Extra"]);
@@ -674,10 +687,7 @@ mod tests {
         let db = create_test_db();
         let executor = IntrospectionExecutor::new(&db);
 
-        let stmt = ShowIndexStmt {
-            table_name: "users".to_string(),
-            database: None,
-        };
+        let stmt = ShowIndexStmt { table_name: "users".to_string(), database: None };
 
         let result = executor.execute_show_index(&stmt).unwrap();
 
@@ -686,7 +696,8 @@ mod tests {
 
         // Check that PRIMARY KEY index is present
         let has_primary = result.rows.iter().any(|r| {
-            match &r.values[2] { // Key_name column
+            match &r.values[2] {
+                // Key_name column
                 SqlValue::Varchar(s) => s == "PRIMARY",
                 _ => false,
             }
@@ -699,9 +710,7 @@ mod tests {
         let db = create_test_db();
         let executor = IntrospectionExecutor::new(&db);
 
-        let stmt = ShowCreateTableStmt {
-            table_name: "users".to_string(),
-        };
+        let stmt = ShowCreateTableStmt { table_name: "users".to_string() };
 
         let result = executor.execute_show_create_table(&stmt).unwrap();
         assert_eq!(result.columns, vec!["Table", "Create Table"]);

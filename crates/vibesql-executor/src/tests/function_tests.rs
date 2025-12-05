@@ -37,9 +37,7 @@ fn test_create_function_simple() {
         "get_answer",
         vec![],
         DataType::Integer,
-        vec![ProceduralStatement::Return(Box::new(Expression::Literal(
-            SqlValue::Integer(42),
-        )))],
+        vec![ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Integer(42))))],
     );
 
     let result = advanced_objects::execute_create_function(&func, &mut db);
@@ -57,18 +55,13 @@ fn test_drop_function_simple() {
         "test_func",
         vec![],
         DataType::Integer,
-        vec![ProceduralStatement::Return(Box::new(Expression::Literal(
-            SqlValue::Integer(0),
-        )))],
+        vec![ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Integer(0))))],
     );
 
     advanced_objects::execute_create_function(&create_func, &mut db).unwrap();
     assert!(db.catalog.function_exists("test_func"));
 
-    let drop_func = DropFunctionStmt {
-        function_name: "test_func".to_string(),
-        if_exists: false,
-    };
+    let drop_func = DropFunctionStmt { function_name: "test_func".to_string(), if_exists: false };
 
     let result = advanced_objects::execute_drop_function(&drop_func, &mut db);
     assert!(result.is_ok());
@@ -91,9 +84,7 @@ fn test_function_empty_body_with_return() {
         "get_zero",
         vec![],
         DataType::Integer,
-        vec![ProceduralStatement::Return(Box::new(Expression::Literal(
-            SqlValue::Integer(0),
-        )))],
+        vec![ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Integer(0))))],
     );
 
     let result = advanced_objects::execute_create_function(&func, &mut db);
@@ -112,9 +103,7 @@ fn test_function_return_null() {
         "get_null",
         vec![],
         DataType::Integer,
-        vec![ProceduralStatement::Return(Box::new(Expression::Literal(
-            SqlValue::Null,
-        )))],
+        vec![ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Null)))],
     );
 
     let result = advanced_objects::execute_create_function(&func, &mut db);
@@ -133,10 +122,7 @@ fn test_function_with_parameter() {
     // END;
     let func = create_simple_function(
         "double_value",
-        vec![FunctionParameter {
-            name: "x".to_string(),
-            data_type: DataType::Integer,
-        }],
+        vec![FunctionParameter { name: "x".to_string(), data_type: DataType::Integer }],
         DataType::Integer,
         vec![
             ProceduralStatement::Declare {
@@ -147,10 +133,7 @@ fn test_function_with_parameter() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "x".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
@@ -177,10 +160,7 @@ fn test_function_parameter_shadowing() {
     // END;
     let func = create_simple_function(
         "shadow_test",
-        vec![FunctionParameter {
-            name: "x".to_string(),
-            data_type: DataType::Integer,
-        }],
+        vec![FunctionParameter { name: "x".to_string(), data_type: DataType::Integer }],
         DataType::Integer,
         vec![
             ProceduralStatement::Declare {
@@ -211,9 +191,7 @@ fn test_function_with_special_chars() {
         "func-with-dash",
         vec![],
         DataType::Integer,
-        vec![ProceduralStatement::Return(Box::new(Expression::Literal(
-            SqlValue::Integer(42),
-        )))],
+        vec![ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Integer(42))))],
     );
 
     let result = advanced_objects::execute_create_function(&func, &mut db);
@@ -232,9 +210,7 @@ fn test_function_with_spaces_in_name() {
         "func with spaces",
         vec![],
         DataType::Integer,
-        vec![ProceduralStatement::Return(Box::new(Expression::Literal(
-            SqlValue::Integer(42),
-        )))],
+        vec![ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Integer(42))))],
     );
 
     let result = advanced_objects::execute_create_function(&func, &mut db);
@@ -255,18 +231,9 @@ fn test_function_multiple_parameters() {
     let func = create_simple_function(
         "add_three",
         vec![
-            FunctionParameter {
-                name: "a".to_string(),
-                data_type: DataType::Integer,
-            },
-            FunctionParameter {
-                name: "b".to_string(),
-                data_type: DataType::Integer,
-            },
-            FunctionParameter {
-                name: "c".to_string(),
-                data_type: DataType::Integer,
-            },
+            FunctionParameter { name: "a".to_string(), data_type: DataType::Integer },
+            FunctionParameter { name: "b".to_string(), data_type: DataType::Integer },
+            FunctionParameter { name: "c".to_string(), data_type: DataType::Integer },
         ],
         DataType::Integer,
         vec![
@@ -278,15 +245,9 @@ fn test_function_multiple_parameters() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "a".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "b".to_string(),
-                    }),
+                    right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
                 }),
             },
             ProceduralStatement::Set {
@@ -297,10 +258,7 @@ fn test_function_multiple_parameters() {
                         column: "result".to_string(),
                     }),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef {
-                        table: None,
-                        column: "c".to_string(),
-                    }),
+                    right: Box::new(Expression::ColumnRef { table: None, column: "c".to_string() }),
                 }),
             },
             ProceduralStatement::Return(Box::new(Expression::ColumnRef {
@@ -328,19 +286,13 @@ fn test_function_varchar_return_type() {
         "get_greeting",
         vec![FunctionParameter {
             name: "name".to_string(),
-            data_type: DataType::Varchar {
-                max_length: Some(50),
-            },
+            data_type: DataType::Varchar { max_length: Some(50) },
         }],
-        DataType::Varchar {
-            max_length: Some(100),
-        },
+        DataType::Varchar { max_length: Some(100) },
         vec![
             ProceduralStatement::Declare {
                 name: "greeting".to_string(),
-                data_type: DataType::Varchar {
-                    max_length: Some(100),
-                },
+                data_type: DataType::Varchar { max_length: Some(100) },
                 default_value: None,
             },
             ProceduralStatement::Set {
@@ -349,10 +301,7 @@ fn test_function_varchar_return_type() {
                     name: "CONCAT".to_string(),
                     args: vec![
                         Expression::Literal(SqlValue::Varchar("Hello, ".to_string())),
-                        Expression::ColumnRef {
-                            table: None,
-                            column: "name".to_string(),
-                        },
+                        Expression::ColumnRef { table: None, column: "name".to_string() },
                     ],
                     character_unit: None,
                 }),
@@ -389,12 +338,10 @@ fn test_function_long_body() {
         });
     }
 
-    statements.push(ProceduralStatement::Return(Box::new(
-        Expression::ColumnRef {
-            table: None,
-            column: "counter".to_string(),
-        },
-    )));
+    statements.push(ProceduralStatement::Return(Box::new(Expression::ColumnRef {
+        table: None,
+        column: "counter".to_string(),
+    })));
 
     let func = create_simple_function("long_function", vec![], DataType::Integer, statements);
 
@@ -416,26 +363,18 @@ fn test_function_with_control_flow() {
     // END;
     let func = create_simple_function(
         "conditional_return",
-        vec![FunctionParameter {
-            name: "x".to_string(),
-            data_type: DataType::Integer,
-        }],
+        vec![FunctionParameter { name: "x".to_string(), data_type: DataType::Integer }],
         DataType::Integer,
         vec![ProceduralStatement::If {
             condition: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "x".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(0))),
             }),
-            then_statements: vec![ProceduralStatement::Return(Box::new(
-                Expression::ColumnRef {
-                    table: None,
-                    column: "x".to_string(),
-                },
-            ))],
+            then_statements: vec![ProceduralStatement::Return(Box::new(Expression::ColumnRef {
+                table: None,
+                column: "x".to_string(),
+            }))],
             else_statements: Some(vec![ProceduralStatement::Return(Box::new(
                 Expression::Literal(SqlValue::Integer(0)),
             ))]),
@@ -451,9 +390,8 @@ fn test_function_with_deeply_nested_if() {
     let mut db = Database::new();
 
     // Create a function with nested IF statements
-    let innermost_return = ProceduralStatement::Return(Box::new(Expression::Literal(
-        SqlValue::Integer(5),
-    )));
+    let innermost_return =
+        ProceduralStatement::Return(Box::new(Expression::Literal(SqlValue::Integer(5))));
 
     let mut nested_if = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),

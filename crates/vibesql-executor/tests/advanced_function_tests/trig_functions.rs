@@ -149,7 +149,9 @@ fn test_degrees_function() {
     // π radians = 180 degrees
     let expr = vibesql_ast::Expression::Function {
         name: "DEGREES".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(std::f64::consts::PI))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(
+            std::f64::consts::PI,
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();

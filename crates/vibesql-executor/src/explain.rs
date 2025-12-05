@@ -128,8 +128,7 @@ fn format_node_json(node: &PlanNode) -> String {
     }
 
     if !node.children.is_empty() {
-        let children: Vec<String> =
-            node.children.iter().map(format_node_json).collect();
+        let children: Vec<String> = node.children.iter().map(format_node_json).collect();
         parts.push(format!("\"children\": [{}]", children.join(", ")));
     }
 
@@ -141,7 +140,10 @@ pub struct ExplainExecutor;
 
 impl ExplainExecutor {
     /// Execute an EXPLAIN statement
-    pub fn execute(stmt: &ExplainStmt, database: &Database) -> Result<ExplainResult, ExecutorError> {
+    pub fn execute(
+        stmt: &ExplainStmt,
+        database: &Database,
+    ) -> Result<ExplainResult, ExecutorError> {
         let plan = match stmt.statement.as_ref() {
             Statement::Select(select_stmt) => Self::explain_select(select_stmt, database)?,
             Statement::Insert(_) => {
@@ -167,8 +169,12 @@ impl ExplainExecutor {
 
         // Analyze FROM clause
         if let Some(ref from_clause) = stmt.from {
-            let scan_node =
-                Self::explain_from_clause(from_clause, &stmt.where_clause, &stmt.order_by, database)?;
+            let scan_node = Self::explain_from_clause(
+                from_clause,
+                &stmt.where_clause,
+                &stmt.order_by,
+                database,
+            )?;
             root.add_child(scan_node);
         }
 

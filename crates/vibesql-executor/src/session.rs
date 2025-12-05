@@ -141,18 +141,12 @@ impl<'a> Session<'a> {
     ///
     /// Uses a default cache size of 1000 prepared statements.
     pub fn new(db: &'a Database) -> Self {
-        Self {
-            db,
-            cache: Arc::new(PreparedStatementCache::default_cache()),
-        }
+        Self { db, cache: Arc::new(PreparedStatementCache::default_cache()) }
     }
 
     /// Create a new session with a custom cache size
     pub fn with_cache_size(db: &'a Database, cache_size: usize) -> Self {
-        Self {
-            db,
-            cache: Arc::new(PreparedStatementCache::new(cache_size)),
-        }
+        Self { db, cache: Arc::new(PreparedStatementCache::new(cache_size)) }
     }
 
     /// Create a new session with a shared cache
@@ -323,7 +317,8 @@ impl<'a> Session<'a> {
         let (columns, result_rows) = match &plan.projection {
             ProjectionPlan::Wildcard => {
                 // Return all columns
-                let columns: Vec<String> = table.schema.columns.iter().map(|c| c.name.clone()).collect();
+                let columns: Vec<String> =
+                    table.schema.columns.iter().map(|c| c.name.clone()).collect();
                 (columns, rows)
             }
             ProjectionPlan::Columns(projections) => {
@@ -341,7 +336,9 @@ impl<'a> Session<'a> {
                     match idx {
                         Some(i) => {
                             col_indices.push(i);
-                            column_names.push(proj.alias.clone().unwrap_or_else(|| proj.column_name.clone()));
+                            column_names.push(
+                                proj.alias.clone().unwrap_or_else(|| proj.column_name.clone()),
+                            );
                         }
                         None => return Ok(None), // Column not found - fall back
                     }
@@ -361,10 +358,7 @@ impl<'a> Session<'a> {
             }
         };
 
-        Ok(Some(PreparedExecutionResult::Select(SelectResult {
-            columns,
-            rows: result_rows,
-        })))
+        Ok(Some(PreparedExecutionResult::Select(SelectResult { columns, rows: result_rows })))
     }
 
     /// Execute a bound statement (internal helper)
@@ -394,18 +388,12 @@ pub struct SessionMut<'a> {
 impl<'a> SessionMut<'a> {
     /// Create a new mutable session with a reference to the database
     pub fn new(db: &'a mut Database) -> Self {
-        Self {
-            db,
-            cache: Arc::new(PreparedStatementCache::default_cache()),
-        }
+        Self { db, cache: Arc::new(PreparedStatementCache::default_cache()) }
     }
 
     /// Create a new mutable session with a custom cache size
     pub fn with_cache_size(db: &'a mut Database, cache_size: usize) -> Self {
-        Self {
-            db,
-            cache: Arc::new(PreparedStatementCache::new(cache_size)),
-        }
+        Self { db, cache: Arc::new(PreparedStatementCache::new(cache_size)) }
     }
 
     /// Create a new mutable session with a shared cache
@@ -537,13 +525,14 @@ mod tests {
         // Create users table
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
         ];
-        let schema = TableSchema::with_primary_key(
-            "users".to_string(),
-            columns,
-            vec!["id".to_string()],
-        );
+        let schema =
+            TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
         db.create_table(schema).unwrap();
 
         // Insert test data
@@ -575,17 +564,12 @@ mod tests {
         let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
 
         // Execute with id = 1
-        let result = session
-            .execute_prepared(&stmt, &[SqlValue::Integer(1)])
-            .unwrap();
+        let result = session.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
 
         if let PreparedExecutionResult::Select(select_result) = result {
             assert_eq!(select_result.rows.len(), 1);
             assert_eq!(select_result.rows[0].values[0], SqlValue::Integer(1));
-            assert_eq!(
-                select_result.rows[0].values[1],
-                SqlValue::Varchar("Alice".into())
-            );
+            assert_eq!(select_result.rows[0].values[1], SqlValue::Varchar("Alice".into()));
         } else {
             panic!("Expected Select result");
         }
@@ -599,29 +583,14 @@ mod tests {
         let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
 
         // Execute multiple times with different parameters
-        let result1 = session
-            .execute_prepared(&stmt, &[SqlValue::Integer(1)])
-            .unwrap();
-        let result2 = session
-            .execute_prepared(&stmt, &[SqlValue::Integer(2)])
-            .unwrap();
-        let result3 = session
-            .execute_prepared(&stmt, &[SqlValue::Integer(3)])
-            .unwrap();
+        let result1 = session.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
+        let result2 = session.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
+        let result3 = session.execute_prepared(&stmt, &[SqlValue::Integer(3)]).unwrap();
 
         // Verify each returned the correct row
-        assert_eq!(
-            result1.rows().unwrap()[0].values[1],
-            SqlValue::Varchar("Alice".into())
-        );
-        assert_eq!(
-            result2.rows().unwrap()[0].values[1],
-            SqlValue::Varchar("Bob".into())
-        );
-        assert_eq!(
-            result3.rows().unwrap()[0].values[1],
-            SqlValue::Varchar("Charlie".into())
-        );
+        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar("Alice".into()));
+        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar("Bob".into()));
+        assert_eq!(result3.rows().unwrap()[0].values[1], SqlValue::Varchar("Charlie".into()));
 
         // Verify cache was used (should have 1 miss, then hits)
         let stats = session.cache().stats();
@@ -650,30 +619,21 @@ mod tests {
         let mut db = create_test_db();
         let mut session = SessionMut::new(&mut db);
 
-        let stmt = session
-            .prepare("INSERT INTO users (id, name) VALUES (?, ?)")
-            .unwrap();
+        let stmt = session.prepare("INSERT INTO users (id, name) VALUES (?, ?)").unwrap();
 
         let result = session
-            .execute_prepared_mut(
-                &stmt,
-                &[SqlValue::Integer(4), SqlValue::Varchar("David".into())],
-            )
+            .execute_prepared_mut(&stmt, &[SqlValue::Integer(4), SqlValue::Varchar("David".into())])
             .unwrap();
 
         assert_eq!(result.rows_affected(), Some(1));
 
         // Verify the row was inserted
         let select_stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-        let select_result = session
-            .execute_prepared(&select_stmt, &[SqlValue::Integer(4)])
-            .unwrap();
+        let select_result =
+            session.execute_prepared(&select_stmt, &[SqlValue::Integer(4)]).unwrap();
 
         assert_eq!(select_result.rows().unwrap().len(), 1);
-        assert_eq!(
-            select_result.rows().unwrap()[0].values[1],
-            SqlValue::Varchar("David".into())
-        );
+        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar("David".into()));
     }
 
     #[test]
@@ -681,9 +641,7 @@ mod tests {
         let mut db = create_test_db();
         let mut session = SessionMut::new(&mut db);
 
-        let stmt = session
-            .prepare("UPDATE users SET name = ? WHERE id = ?")
-            .unwrap();
+        let stmt = session.prepare("UPDATE users SET name = ? WHERE id = ?").unwrap();
 
         let result = session
             .execute_prepared_mut(
@@ -696,14 +654,10 @@ mod tests {
 
         // Verify the row was updated
         let select_stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-        let select_result = session
-            .execute_prepared(&select_stmt, &[SqlValue::Integer(1)])
-            .unwrap();
+        let select_result =
+            session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
 
-        assert_eq!(
-            select_result.rows().unwrap()[0].values[1],
-            SqlValue::Varchar("Alicia".into())
-        );
+        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar("Alicia".into()));
     }
 
     #[test]
@@ -713,17 +667,14 @@ mod tests {
 
         let stmt = session.prepare("DELETE FROM users WHERE id = ?").unwrap();
 
-        let result = session
-            .execute_prepared_mut(&stmt, &[SqlValue::Integer(1)])
-            .unwrap();
+        let result = session.execute_prepared_mut(&stmt, &[SqlValue::Integer(1)]).unwrap();
 
         assert_eq!(result.rows_affected(), Some(1));
 
         // Verify the row was deleted
         let select_stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-        let select_result = session
-            .execute_prepared(&select_stmt, &[SqlValue::Integer(1)])
-            .unwrap();
+        let select_result =
+            session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
 
         assert_eq!(select_result.rows().unwrap().len(), 0);
     }
@@ -734,9 +685,7 @@ mod tests {
 
         // Create first session and prepare a statement
         let session1 = Session::new(&db);
-        let stmt = session1
-            .prepare("SELECT * FROM users WHERE id = ?")
-            .unwrap();
+        let stmt = session1.prepare("SELECT * FROM users WHERE id = ?").unwrap();
 
         // Get the shared cache
         let shared_cache = session1.shared_cache();
@@ -746,29 +695,17 @@ mod tests {
         let session2 = Session::with_shared_cache(&db, shared_cache);
 
         // Prepare the same statement - should hit cache
-        let _stmt2 = session2
-            .prepare("SELECT * FROM users WHERE id = ?")
-            .unwrap();
+        let _stmt2 = session2.prepare("SELECT * FROM users WHERE id = ?").unwrap();
 
         // Verify cache was shared (no additional miss)
         assert_eq!(session2.cache().stats().misses, initial_misses);
 
         // Execute on both sessions
-        let result1 = session1
-            .execute_prepared(&stmt, &[SqlValue::Integer(1)])
-            .unwrap();
-        let result2 = session2
-            .execute_prepared(&stmt, &[SqlValue::Integer(2)])
-            .unwrap();
+        let result1 = session1.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
+        let result2 = session2.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
 
-        assert_eq!(
-            result1.rows().unwrap()[0].values[1],
-            SqlValue::Varchar("Alice".into())
-        );
-        assert_eq!(
-            result2.rows().unwrap()[0].values[1],
-            SqlValue::Varchar("Bob".into())
-        );
+        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar("Alice".into()));
+        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar("Bob".into()));
     }
 
     #[test]
@@ -788,14 +725,11 @@ mod tests {
         let db = create_test_db();
         let session = Session::new(&db);
 
-        let stmt = session
-            .prepare("SELECT * FROM users WHERE id >= ? AND id <= ?")
-            .unwrap();
+        let stmt = session.prepare("SELECT * FROM users WHERE id >= ? AND id <= ?").unwrap();
         assert_eq!(stmt.param_count(), 2);
 
-        let result = session
-            .execute_prepared(&stmt, &[SqlValue::Integer(1), SqlValue::Integer(2)])
-            .unwrap();
+        let result =
+            session.execute_prepared(&stmt, &[SqlValue::Integer(1), SqlValue::Integer(2)]).unwrap();
 
         assert_eq!(result.rows().unwrap().len(), 2);
     }
@@ -806,18 +740,14 @@ mod tests {
         let session = Session::new(&db);
 
         // Test prepare_arena for SELECT statement
-        let stmt = session
-            .prepare_arena("SELECT * FROM users WHERE id = ?")
-            .unwrap();
+        let stmt = session.prepare_arena("SELECT * FROM users WHERE id = ?").unwrap();
         assert_eq!(stmt.param_count(), 1);
 
         // Verify tables were extracted (arena parser uses uppercase)
         assert!(stmt.tables().contains("USERS"));
 
         // Test caching - second call should hit cache
-        let stmt2 = session
-            .prepare_arena("SELECT * FROM users WHERE id = ?")
-            .unwrap();
+        let stmt2 = session.prepare_arena("SELECT * FROM users WHERE id = ?").unwrap();
         assert_eq!(stmt2.param_count(), 1);
 
         // Verify it's the same cached statement
@@ -829,9 +759,7 @@ mod tests {
         let db = create_test_db();
         let session = Session::new(&db);
 
-        let stmt = session
-            .prepare_arena("SELECT * FROM users")
-            .unwrap();
+        let stmt = session.prepare_arena("SELECT * FROM users").unwrap();
         assert_eq!(stmt.param_count(), 0);
     }
 
@@ -872,9 +800,7 @@ mod tests {
         let session = SessionMut::new(&mut db);
 
         // Test prepare_arena for SELECT statement
-        let stmt = session
-            .prepare_arena("SELECT * FROM users WHERE id = ?")
-            .unwrap();
+        let stmt = session.prepare_arena("SELECT * FROM users WHERE id = ?").unwrap();
         assert_eq!(stmt.param_count(), 1);
     }
 }

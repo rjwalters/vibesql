@@ -67,7 +67,9 @@ impl IndexData {
                         let start_bound: Bound<&[SqlValue]> = Bound::Included(start_key.as_slice());
 
                         // Iterate from start_key to end of map, stopping when first column changes
-                        for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, Bound::Unbounded)) {
+                        for (key_values, row_indices) in
+                            data.range::<[SqlValue], _>((start_bound, Bound::Unbounded))
+                        {
                             // Check if first column still matches target
                             if key_values.is_empty() || &key_values[0] != start_val {
                                 break; // Stop iteration when prefix no longer matches
@@ -140,7 +142,8 @@ impl IndexData {
                             if inclusive_end {
                                 // For inclusive: try to increment the value to get next prefix
                                 // If successful, use as Excluded bound; otherwise use Unbounded
-                                try_increment_sqlvalue(v).map(|incremented| (vec![incremented], false))
+                                try_increment_sqlvalue(v)
+                                    .map(|incremented| (vec![incremented], false))
                             } else {
                                 // For exclusive: use end_val itself as Excluded bound
                                 Some((vec![v.clone()], false))
@@ -156,7 +159,9 @@ impl IndexData {
                         // This can happen with multi-column indexes when start == end and both exclusive
                         // Example: col > 5 AND col < 5 would create Excluded([5]) .. Excluded([5]) → panic
                         // BTreeMap::range() panics on this case, so we return empty result instead
-                        if let (Bound::Excluded(start_slice), Bound::Excluded(end_slice)) = (&start_bound, &end_bound) {
+                        if let (Bound::Excluded(start_slice), Bound::Excluded(end_slice)) =
+                            (&start_bound, &end_bound)
+                        {
                             if start_slice == end_slice {
                                 // Invalid range: no values can satisfy this condition
                                 return Vec::new();
@@ -164,7 +169,9 @@ impl IndexData {
                         }
 
                         // Iterate through BTreeMap with proper bounds - no manual checking needed!
-                        for (_key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                        for (_key_values, row_indices) in
+                            data.range::<[SqlValue], _>((start_bound, end_bound))
+                        {
                             matching_row_indices.extend(row_indices);
                         }
                         return matching_row_indices;
@@ -194,7 +201,9 @@ impl IndexData {
                 // Edge case: Check for invalid range (both bounds excluded at same value)
                 // Example: col > 5 AND col < 5 would create Excluded([5]) .. Excluded([5]) → panic
                 // BTreeMap::range() panics on this case, so we return empty result instead
-                if let (Bound::Excluded(start_slice), Bound::Excluded(end_slice)) = (&start_bound, &end_bound) {
+                if let (Bound::Excluded(start_slice), Bound::Excluded(end_slice)) =
+                    (&start_bound, &end_bound)
+                {
                     if start_slice == end_slice {
                         // Invalid range: no values can satisfy this condition
                         return Vec::new();
@@ -204,7 +213,9 @@ impl IndexData {
                 // Use BTreeMap's efficient range() method instead of full iteration
                 // This is O(log n + k) instead of O(n) where n = total keys, k = matching keys
                 // Explicit type parameter needed due to Borrow trait ambiguity
-                for (_key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                for (_key_values, row_indices) in
+                    data.range::<[SqlValue], _>((start_bound, end_bound))
+                {
                     matching_row_indices.extend(row_indices);
                 }
 
@@ -231,7 +242,9 @@ impl IndexData {
                 // Special handling for prefix matching (multi-column IN clauses) - same as InMemory
                 // When start == end with inclusive bounds, we're doing an equality check on the
                 // first column of a multi-column index.
-                let is_prefix_match = if let (Some(start_val), Some(end_val)) = (&normalized_start, &normalized_end) {
+                let is_prefix_match = if let (Some(start_val), Some(end_val)) =
+                    (&normalized_start, &normalized_end)
+                {
                     start_val == end_val && inclusive_start && inclusive_end
                 } else {
                     false
@@ -262,8 +275,8 @@ impl IndexData {
                             .range_scan(
                                 Some(&start_key),
                                 end_key.as_ref(), // Bounded end (or unbounded if can't increment)
-                                true,  // Inclusive start
-                                false, // Exclusive end
+                                true,             // Inclusive start
+                                false,            // Exclusive end
                             )
                             .unwrap_or_else(|_| vec![]),
                         Err(e) => {
@@ -278,19 +291,20 @@ impl IndexData {
 
                     // For exclusive start bounds with multi-column indexes, we need to increment the value
                     // to avoid missing rows. Apply smart_increment_value to choose the right strategy.
-                    let (start_key, final_inclusive_start) = if let Some(start_val) = normalized_start.as_ref() {
-                        if inclusive_start {
-                            (Some(vec![start_val.clone()]), true)
-                        } else {
-                            // Apply smart increment for exclusive start bounds
-                            match smart_increment_value(start_val) {
-                                Some(incremented) => (Some(vec![incremented]), true),
-                                None => (Some(vec![start_val.clone()]), false),
+                    let (start_key, final_inclusive_start) =
+                        if let Some(start_val) = normalized_start.as_ref() {
+                            if inclusive_start {
+                                (Some(vec![start_val.clone()]), true)
+                            } else {
+                                // Apply smart increment for exclusive start bounds
+                                match smart_increment_value(start_val) {
+                                    Some(incremented) => (Some(vec![incremented]), true),
+                                    None => (Some(vec![start_val.clone()]), false),
+                                }
                             }
-                        }
-                    } else {
-                        (None, inclusive_start)
-                    };
+                        } else {
+                            (None, inclusive_start)
+                        };
 
                     let end_key = normalized_end.as_ref().map(|v| vec![v.clone()]);
 

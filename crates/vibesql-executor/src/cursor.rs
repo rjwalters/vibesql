@@ -106,7 +106,10 @@ impl CursorStore {
     pub fn open(&mut self, stmt: &OpenCursorStmt, db: &Database) -> Result<(), ExecutorError> {
         let name = stmt.cursor_name.to_uppercase();
 
-        let cursor = self.cursors.get_mut(&name).ok_or_else(|| ExecutorError::CursorNotFound(name.clone()))?;
+        let cursor = self
+            .cursors
+            .get_mut(&name)
+            .ok_or_else(|| ExecutorError::CursorNotFound(name.clone()))?;
 
         if cursor.result.is_some() {
             return Err(ExecutorError::CursorAlreadyOpen(name));
@@ -116,10 +119,8 @@ impl CursorStore {
         let executor = SelectExecutor::new(db);
         let select_result = executor.execute_with_columns(&cursor.query)?;
 
-        cursor.result = Some(CursorResult {
-            columns: select_result.columns,
-            rows: select_result.rows,
-        });
+        cursor.result =
+            Some(CursorResult { columns: select_result.columns, rows: select_result.rows });
         cursor.position = 0; // Before first row
 
         Ok(())
@@ -129,9 +130,13 @@ impl CursorStore {
     pub fn fetch(&mut self, stmt: &FetchStmt) -> Result<FetchResult, ExecutorError> {
         let name = stmt.cursor_name.to_uppercase();
 
-        let cursor = self.cursors.get_mut(&name).ok_or_else(|| ExecutorError::CursorNotFound(name.clone()))?;
+        let cursor = self
+            .cursors
+            .get_mut(&name)
+            .ok_or_else(|| ExecutorError::CursorNotFound(name.clone()))?;
 
-        let result = cursor.result.as_ref().ok_or_else(|| ExecutorError::CursorNotOpen(name.clone()))?;
+        let result =
+            cursor.result.as_ref().ok_or_else(|| ExecutorError::CursorNotOpen(name.clone()))?;
 
         let row_count = result.rows.len();
 
@@ -183,10 +188,7 @@ impl CursorStore {
 
         // Return row at position (1-indexed, 0 = before first)
         if new_position > 0 && new_position <= row_count {
-            Ok(FetchResult::single(
-                result.columns.clone(),
-                result.rows[new_position - 1].clone(),
-            ))
+            Ok(FetchResult::single(result.columns.clone(), result.rows[new_position - 1].clone()))
         } else {
             // No row at this position
             Ok(FetchResult::empty(result.columns.clone()))
@@ -240,7 +242,11 @@ impl CursorExecutor {
     }
 
     /// Execute OPEN CURSOR statement
-    pub fn open(store: &mut CursorStore, stmt: &OpenCursorStmt, db: &Database) -> Result<(), ExecutorError> {
+    pub fn open(
+        store: &mut CursorStore,
+        stmt: &OpenCursorStmt,
+        db: &Database,
+    ) -> Result<(), ExecutorError> {
         store.open(stmt, db)
     }
 
@@ -259,8 +265,8 @@ impl CursorExecutor {
 mod tests {
     use super::*;
     use vibesql_ast::{
-        DeclareCursorStmt, OpenCursorStmt, FetchStmt, FetchOrientation, CloseCursorStmt,
-        SelectStmt, SelectItem, FromClause, CursorUpdatability,
+        CloseCursorStmt, CursorUpdatability, DeclareCursorStmt, FetchOrientation, FetchStmt,
+        FromClause, OpenCursorStmt, SelectItem, SelectStmt,
     };
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
@@ -272,32 +278,45 @@ mod tests {
         // Create employees table
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
             ColumnSchema::new("salary".to_string(), DataType::Integer, true),
         ];
-        let schema = TableSchema::with_primary_key(
-            "employees".to_string(),
-            columns,
-            vec!["id".to_string()],
-        );
+        let schema =
+            TableSchema::with_primary_key("employees".to_string(), columns, vec!["id".to_string()]);
         db.create_table(schema).unwrap();
 
         // Insert test data
-        db.insert_row("employees", Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".into()),
-            SqlValue::Integer(50000),
-        ])).unwrap();
-        db.insert_row("employees", Row::new(vec![
-            SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".into()),
-            SqlValue::Integer(60000),
-        ])).unwrap();
-        db.insert_row("employees", Row::new(vec![
-            SqlValue::Integer(3),
-            SqlValue::Varchar("Carol".into()),
-            SqlValue::Integer(55000),
-        ])).unwrap();
+        db.insert_row(
+            "employees",
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".into()),
+                SqlValue::Integer(50000),
+            ]),
+        )
+        .unwrap();
+        db.insert_row(
+            "employees",
+            Row::new(vec![
+                SqlValue::Integer(2),
+                SqlValue::Varchar("Bob".into()),
+                SqlValue::Integer(60000),
+            ]),
+        )
+        .unwrap();
+        db.insert_row(
+            "employees",
+            Row::new(vec![
+                SqlValue::Integer(3),
+                SqlValue::Varchar("Carol".into()),
+                SqlValue::Integer(55000),
+            ]),
+        )
+        .unwrap();
 
         db
     }
@@ -375,9 +394,7 @@ mod tests {
         };
         store.declare(&declare_stmt).unwrap();
 
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "emp_cursor".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "emp_cursor".to_string() };
         assert!(store.open(&open_stmt, &db).is_ok());
         assert!(store.is_open("emp_cursor"));
     }
@@ -387,9 +404,7 @@ mod tests {
         let db = create_test_db();
         let mut store = CursorStore::new();
 
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "nonexistent".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "nonexistent".to_string() };
         let result = store.open(&open_stmt, &db);
         assert!(matches!(result, Err(ExecutorError::CursorNotFound(_))));
     }
@@ -409,9 +424,7 @@ mod tests {
         };
         store.declare(&declare_stmt).unwrap();
 
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "emp_cursor".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "emp_cursor".to_string() };
         store.open(&open_stmt, &db).unwrap();
 
         let result = store.open(&open_stmt, &db);
@@ -433,9 +446,7 @@ mod tests {
         };
         store.declare(&declare_stmt).unwrap();
 
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "emp_cursor".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "emp_cursor".to_string() };
         store.open(&open_stmt, &db).unwrap();
 
         // Fetch first row
@@ -501,9 +512,7 @@ mod tests {
         };
         store.declare(&declare_stmt).unwrap();
 
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "emp_cursor".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "emp_cursor".to_string() };
         store.open(&open_stmt, &db).unwrap();
 
         // Move to first row
@@ -539,9 +548,7 @@ mod tests {
         };
         store.declare(&declare_stmt).unwrap();
 
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "scroll_cursor".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "scroll_cursor".to_string() };
         store.open(&open_stmt, &db).unwrap();
 
         // Fetch LAST
@@ -590,14 +597,10 @@ mod tests {
         };
         store.declare(&declare_stmt).unwrap();
 
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "emp_cursor".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "emp_cursor".to_string() };
         store.open(&open_stmt, &db).unwrap();
 
-        let close_stmt = CloseCursorStmt {
-            cursor_name: "emp_cursor".to_string(),
-        };
+        let close_stmt = CloseCursorStmt { cursor_name: "emp_cursor".to_string() };
         assert!(store.close(&close_stmt).is_ok());
         assert!(!store.exists("emp_cursor"));
     }
@@ -606,9 +609,7 @@ mod tests {
     fn test_close_nonexistent_cursor() {
         let mut store = CursorStore::new();
 
-        let close_stmt = CloseCursorStmt {
-            cursor_name: "nonexistent".to_string(),
-        };
+        let close_stmt = CloseCursorStmt { cursor_name: "nonexistent".to_string() };
         let result = store.close(&close_stmt);
         assert!(matches!(result, Err(ExecutorError::CursorNotFound(_))));
     }
@@ -629,15 +630,11 @@ mod tests {
         store.declare(&declare_stmt).unwrap();
 
         // Open with different case
-        let open_stmt = OpenCursorStmt {
-            cursor_name: "MY_CURSOR".to_string(),
-        };
+        let open_stmt = OpenCursorStmt { cursor_name: "MY_CURSOR".to_string() };
         assert!(store.open(&open_stmt, &db).is_ok());
 
         // Close with different case
-        let close_stmt = CloseCursorStmt {
-            cursor_name: "my_cursor".to_string(),
-        };
+        let close_stmt = CloseCursorStmt { cursor_name: "my_cursor".to_string() };
         assert!(store.close(&close_stmt).is_ok());
     }
 

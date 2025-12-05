@@ -53,14 +53,9 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
 
     // Check if we're filtering to specific files (for parallel workers)
     // Supports both exact file paths and glob patterns (e.g., "index/*/10/*.test")
-    let filter_patterns: Option<Vec<String>> = env::var("SQLLOGICTEST_FILES")
-        .ok()
-        .map(|files_str| {
-            files_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
+    let filter_patterns: Option<Vec<String>> =
+        env::var("SQLLOGICTEST_FILES").ok().map(|files_str| {
+            files_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
         });
 
     // Helper function to check if a pattern contains glob characters
@@ -72,9 +67,7 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
     fn matches_pattern(path: &str, pattern: &str) -> bool {
         if is_glob_pattern(pattern) {
             // Use glob pattern matching
-            glob::Pattern::new(pattern)
-                .map(|p| p.matches(path))
-                .unwrap_or(false)
+            glob::Pattern::new(pattern).map(|p| p.matches(path)).unwrap_or(false)
         } else {
             // Exact match
             path == pattern
@@ -88,11 +81,8 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
 
     // Filter out blocklisted files (exact matches and patterns)
     all_test_files.retain(|test_file| {
-        let relative_path = test_file
-            .strip_prefix(&test_dir)
-            .unwrap_or(test_file)
-            .to_string_lossy()
-            .to_string();
+        let relative_path =
+            test_file.strip_prefix(&test_dir).unwrap_or(test_file).to_string_lossy().to_string();
 
         // Check exact blocklist
         if blocklist.contains(&relative_path) {
@@ -160,11 +150,8 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
         files_tested += 1;
 
         // Get relative path from test_dir
-        let relative_path = test_file
-            .strip_prefix(&test_dir)
-            .unwrap_or(&test_file)
-            .to_string_lossy()
-            .to_string();
+        let relative_path =
+            test_file.strip_prefix(&test_dir).unwrap_or(&test_file).to_string_lossy().to_string();
 
         // Determine category from path
         let category = if relative_path.starts_with("select") {
@@ -226,10 +213,7 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
         }
     }
 
-    println!(
-        "\n✅ All {} test files completed!",
-        total_available_files
-    );
+    println!("\n✅ All {} test files completed!", total_available_files);
     println!("Total time: {:.1} seconds", start_time.elapsed().as_secs_f64());
     println!("Files tested: {}\n", files_tested);
 
@@ -340,11 +324,8 @@ fn main() {
     let ds = &grand_total.dialect_stats;
     let mysql_total = ds.mysql_total();
     let sqlite_total = ds.sqlite_total();
-    let mysql_pass_rate = if mysql_total > 0 {
-        (ds.mysql_passed as f64 / mysql_total as f64) * 100.0
-    } else {
-        0.0
-    };
+    let mysql_pass_rate =
+        if mysql_total > 0 { (ds.mysql_passed as f64 / mysql_total as f64) * 100.0 } else { 0.0 };
     let sqlite_pass_rate = if sqlite_total > 0 {
         (ds.sqlite_passed as f64 / sqlite_total as f64) * 100.0
     } else {
@@ -357,19 +338,11 @@ fn main() {
     println!("{}", "-".repeat(70));
     println!(
         "{:<20} {:>12} {:>12} {:>12} {:>9.1}%",
-        "MySQL mode",
-        mysql_total,
-        ds.mysql_passed,
-        ds.mysql_failed,
-        mysql_pass_rate
+        "MySQL mode", mysql_total, ds.mysql_passed, ds.mysql_failed, mysql_pass_rate
     );
     println!(
         "{:<20} {:>12} {:>12} {:>12} {:>9.1}%",
-        "SQLite mode",
-        sqlite_total,
-        ds.sqlite_passed,
-        ds.sqlite_failed,
-        sqlite_pass_rate
+        "SQLite mode", sqlite_total, ds.sqlite_passed, ds.sqlite_failed, sqlite_pass_rate
     );
     println!("{}", "-".repeat(70));
     println!(
@@ -396,10 +369,8 @@ fn main() {
     }
 
     // Collect all timed out files
-    let all_timed_out_files: Vec<String> = results.values()
-        .flat_map(|s| &s.timed_out_files)
-        .cloned()
-        .collect();
+    let all_timed_out_files: Vec<String> =
+        results.values().flat_map(|s| &s.timed_out_files).cloned().collect();
 
     let results_json = serde_json::json!({
         "summary": {

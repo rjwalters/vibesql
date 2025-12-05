@@ -94,7 +94,14 @@ impl std::fmt::Debug for PageManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state = lock!(self.state);
         f.debug_struct("PageManager")
-            .field("state", &format!("next_page_id: {}, free_pages: {}", state.next_page_id, state.free_pages.len()))
+            .field(
+                "state",
+                &format!(
+                    "next_page_id: {}, free_pages: {}",
+                    state.next_page_id,
+                    state.free_pages.len()
+                ),
+            )
             .finish()
     }
 }
@@ -309,8 +316,8 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    use crate::NativeStorage;
     use super::*;
+    use crate::NativeStorage;
 
     #[test]
     fn test_page_creation() {

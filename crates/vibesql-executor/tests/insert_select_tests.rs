@@ -1,7 +1,7 @@
 mod common;
 
-use vibesql_executor::{ExecutorError, InsertExecutor};
 use common::setup_users_table as setup_test_table;
+use vibesql_executor::{ExecutorError, InsertExecutor};
 
 #[test]
 fn test_insert_from_select_basic() {
@@ -25,7 +25,11 @@ fn test_insert_from_select_basic() {
     let schema = vibesql_catalog::TableSchema::new(
         "users_backup".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -42,7 +46,11 @@ fn test_insert_from_select_basic() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "users".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -79,11 +87,15 @@ fn test_insert_from_select_with_where() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Alice".to_string(),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Bob".to_string())),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    "Bob".to_string(),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -95,7 +107,11 @@ fn test_insert_from_select_with_where() {
     let schema = vibesql_catalog::TableSchema::new(
         "active_users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -112,9 +128,16 @@ fn test_insert_from_select_with_where() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "users".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "id".to_string(),
+            }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         }),
@@ -163,13 +186,21 @@ fn test_insert_from_select_column_mismatch() {
     let schema = vibesql_catalog::TableSchema::new(
         "wrong_table".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
                 true,
             ),
-            vibesql_catalog::ColumnSchema::new("extra".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "extra".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -181,7 +212,11 @@ fn test_insert_from_select_column_mismatch() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "users".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -212,8 +247,16 @@ fn test_insert_from_select_with_aggregates() {
     let schema = vibesql_catalog::TableSchema::new(
         "sales".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("amount".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "amount".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -241,8 +284,16 @@ fn test_insert_from_select_with_aggregates() {
     let summary_schema = vibesql_catalog::TableSchema::new(
         "summary".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("total".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("count".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "total".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "count".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(summary_schema).unwrap();
@@ -274,7 +325,11 @@ fn test_insert_from_select_with_aggregates() {
         ],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "sales".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

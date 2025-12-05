@@ -14,25 +14,42 @@ fn test_scalar_subquery_error_multiple_rows() {
     // Create employees table
     let schema = vibesql_catalog::TableSchema::new(
         "employees".to_string(),
-        vec![vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "id".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema).unwrap();
 
     // Insert multiple rows
-    db.insert_row("employees", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)])).unwrap();
-    db.insert_row("employees", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)])).unwrap();
+    db.insert_row(
+        "employees",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]),
+    )
+    .unwrap();
+    db.insert_row(
+        "employees",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]),
+    )
+    .unwrap();
 
     // Build subquery that returns multiple rows: SELECT id FROM employees
     let subquery = Box::new(vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "employees".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -44,14 +61,19 @@ fn test_scalar_subquery_error_multiple_rows() {
     // Build main query: SELECT (subquery) FROM employees
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "employees".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -83,7 +105,11 @@ fn test_scalar_subquery_error_multiple_columns() {
     let schema = vibesql_catalog::TableSchema::new(
         "employees".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(100) },
@@ -106,7 +132,8 @@ fn test_scalar_subquery_error_multiple_columns() {
     // Build subquery that returns multiple columns: SELECT id, name FROM employees
     let subquery = Box::new(vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
@@ -115,11 +142,18 @@ fn test_scalar_subquery_error_multiple_columns() {
                 alias: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "name".to_string(),
+                },
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "employees".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -131,14 +165,19 @@ fn test_scalar_subquery_error_multiple_columns() {
     // Build main query: SELECT (subquery) FROM employees
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "employees".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

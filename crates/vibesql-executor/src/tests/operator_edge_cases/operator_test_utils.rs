@@ -16,7 +16,10 @@ pub fn create_select_stmt(expr: vibesql_ast::Expression, alias: &str) -> vibesql
         with_clause: None,
         set_operation: None,
         distinct: false,
-        select_list: vec![vibesql_ast::SelectItem::Expression { expr, alias: Some(alias.to_string()) }],
+        select_list: vec![vibesql_ast::SelectItem::Expression {
+            expr,
+            alias: Some(alias.to_string()),
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -25,7 +28,8 @@ pub fn create_select_stmt(expr: vibesql_ast::Expression, alias: &str) -> vibesql
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    }
+        into_variables: None,
+    }
 }
 
 /// Executes an expression and returns the result

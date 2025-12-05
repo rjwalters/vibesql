@@ -6,9 +6,9 @@
 #[path = "../sqllogictest/mod.rs"]
 mod sqllogictest;
 
+use sqllogictest::execution::run_test_file_with_details;
 use std::fs;
 use std::path::Path;
-use sqllogictest::execution::run_test_file_with_details;
 
 /// Helper function to run a test file and check for success
 fn run_dialect_test(test_name: &str) {

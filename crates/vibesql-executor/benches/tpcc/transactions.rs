@@ -113,13 +113,7 @@ pub fn generate_new_order_input(rng: &mut TPCCRng, num_warehouses: i32) -> NewOr
         });
     }
 
-    NewOrderInput {
-        w_id,
-        d_id,
-        c_id,
-        ol_cnt,
-        items,
-    }
+    NewOrderInput { w_id, d_id, c_id, ol_cnt, items }
 }
 
 /// Generate random Payment transaction input
@@ -168,12 +162,7 @@ pub fn generate_order_status_input(rng: &mut TPCCRng, num_warehouses: i32) -> Or
         (None, Some(TPCCRng::last_name(rng.nurand(255, 0, 999))))
     };
 
-    OrderStatusInput {
-        w_id,
-        d_id,
-        c_id,
-        c_last,
-    }
+    OrderStatusInput { w_id, d_id, c_id, c_last }
 }
 
 /// Generate random Delivery transaction input
@@ -356,10 +345,7 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         // Step 2: Get district info using direct composite PK lookup
         // District PK: (d_w_id, d_id)
         // Schema: d_id(0), d_w_id(1), d_name(2), ..., d_tax(8), d_ytd(9), d_next_o_id(10)
-        let d_pk = vec![
-            SqlValue::Integer(input.w_id as i64),
-            SqlValue::Integer(input.d_id as i64),
-        ];
+        let d_pk = vec![SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)];
         match self.db.get_row_by_composite_pk("district", &d_pk) {
             Ok(Some(_row)) => {
                 // d_tax is column 8, d_next_o_id is column 10
@@ -516,10 +502,7 @@ impl<'a> VibesqlTransactionExecutor<'a> {
 
         // Step 2: Get district info using direct composite PK lookup
         // District PK: (d_w_id, d_id)
-        let d_pk = vec![
-            SqlValue::Integer(input.w_id as i64),
-            SqlValue::Integer(input.d_id as i64),
-        ];
+        let d_pk = vec![SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)];
         match self.db.get_row_by_composite_pk("district", &d_pk) {
             Ok(Some(_row)) => {
                 // Row found
@@ -699,10 +682,7 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         // PK index is ordered (no_w_id, no_d_id, no_o_id), so prefix_scan_first
         // on [no_w_id, no_d_id] returns the row with minimum no_o_id
         for d_id in 1..=10 {
-            let prefix = vec![
-                SqlValue::Integer(input.w_id as i64),
-                SqlValue::Integer(d_id as i64),
-            ];
+            let prefix = vec![SqlValue::Integer(input.w_id as i64), SqlValue::Integer(d_id as i64)];
 
             // prefix_scan_first returns the first matching row (minimum no_o_id)
             // Some districts may have no new orders - that's OK, just skip
@@ -777,7 +757,11 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         };
         let q1_exec_time = start.elapsed();
         if debug {
-            eprintln!("[STOCK_LEVEL] Q1 parse: {:?}, exec: {:?}", q1_parse_time, q1_exec_time - q1_parse_time);
+            eprintln!(
+                "[STOCK_LEVEL] Q1 parse: {:?}, exec: {:?}",
+                q1_parse_time,
+                q1_exec_time - q1_parse_time
+            );
         }
 
         let d_next_o_id = match result1.first() {
@@ -831,10 +815,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
             Ok(_rows) => {
                 let q2_exec_time = start.elapsed();
                 if debug {
-                    eprintln!("[STOCK_LEVEL] Q2 parse: {:?}, exec: {:?}, total: {:?}",
+                    eprintln!(
+                        "[STOCK_LEVEL] Q2 parse: {:?}, exec: {:?}, total: {:?}",
                         q2_parse_time - q1_exec_time,
                         q2_exec_time - q2_parse_time,
-                        q2_exec_time);
+                        q2_exec_time
+                    );
                 }
                 // Success - we don't need to return the count, just verify execution worked
                 TransactionResult {
@@ -946,10 +932,9 @@ impl<'a> SqliteTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse tax rate
-        let _ = self.conn.execute(
-            &format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id),
-            [],
-        );
+        let _ = self
+            .conn
+            .execute(&format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id), []);
 
         // Get district info
         let _ = self.conn.execute(
@@ -973,10 +958,7 @@ impl<'a> SqliteTransactionExecutor<'a> {
         for item in &input.items {
             // Get item info
             let _ = self.conn.execute(
-                &format!(
-                    "SELECT i_price, i_name, i_data FROM item WHERE i_id = {}",
-                    item.ol_i_id
-                ),
+                &format!("SELECT i_price, i_name, i_data FROM item WHERE i_id = {}", item.ol_i_id),
                 [],
             );
 
@@ -1109,14 +1091,17 @@ impl<'a> SqliteTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get district next order ID
-        let d_next_o_id: i32 = self.conn.query_row(
-            &format!(
-                "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
-                input.w_id, input.d_id
-            ),
-            [],
-            |row| row.get(0),
-        ).unwrap_or(3001); // Default to 3001 if query fails
+        let d_next_o_id: i32 = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+                    input.w_id, input.d_id
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(3001); // Default to 3001 if query fails
 
         // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
         // Use subquery approach for better optimization
@@ -1179,10 +1164,9 @@ impl<'a> DuckdbTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse tax rate
-        let _ = self.conn.execute(
-            &format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id),
-            [],
-        );
+        let _ = self
+            .conn
+            .execute(&format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id), []);
 
         // Get district info
         let _ = self.conn.execute(
@@ -1206,10 +1190,7 @@ impl<'a> DuckdbTransactionExecutor<'a> {
         for item in &input.items {
             // Get item info
             let _ = self.conn.execute(
-                &format!(
-                    "SELECT i_price, i_name, i_data FROM item WHERE i_id = {}",
-                    item.ol_i_id
-                ),
+                &format!("SELECT i_price, i_name, i_data FROM item WHERE i_id = {}", item.ol_i_id),
                 [],
             );
 
@@ -1342,14 +1323,17 @@ impl<'a> DuckdbTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get district next order ID
-        let d_next_o_id: i32 = self.conn.query_row(
-            &format!(
-                "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
-                input.w_id, input.d_id
-            ),
-            [],
-            |row| row.get(0),
-        ).unwrap_or(3001); // Default to 3001 if query fails
+        let d_next_o_id: i32 = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+                    input.w_id, input.d_id
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(3001); // Default to 3001 if query fails
 
         // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
         // Use subquery approach for better optimization
@@ -1413,10 +1397,9 @@ impl<'a> MysqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse tax rate
-        if let Err(e) = self.conn.exec_drop(
-            "SELECT w_tax FROM warehouse WHERE w_id = ?",
-            (input.w_id,),
-        ) {
+        if let Err(e) =
+            self.conn.exec_drop("SELECT w_tax FROM warehouse WHERE w_id = ?", (input.w_id,))
+        {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -1721,10 +1704,7 @@ pub struct TPCCWorkload {
 
 impl TPCCWorkload {
     pub fn new(seed: u64, num_warehouses: i32) -> Self {
-        Self {
-            rng: TPCCRng::new(seed),
-            num_warehouses,
-        }
+        Self { rng: TPCCRng::new(seed), num_warehouses }
     }
 
     /// Generate next transaction according to TPC-C mix

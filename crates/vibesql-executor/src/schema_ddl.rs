@@ -165,10 +165,8 @@ impl SchemaExecutor {
         let empty_row = vibesql_storage::Row::new(vec![]);
 
         // Create an expression evaluator with database context
-        let evaluator = crate::evaluator::ExpressionEvaluator::with_database(
-            &empty_schema,
-            database,
-        );
+        let evaluator =
+            crate::evaluator::ExpressionEvaluator::with_database(&empty_schema, database);
 
         // Evaluate the value expression
         let value = evaluator.eval(&stmt.value, &empty_row)?;
@@ -177,14 +175,15 @@ impl SchemaExecutor {
         if stmt.variable.eq_ignore_ascii_case("sql_mode") {
             // Extract the mode string from the value
             let mode_str = match &value {
-                vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => s.clone(),
+                vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                    s.clone()
+                }
                 other => other.to_string(),
             };
 
             // Parse the mode string into SqlMode
-            let mode: vibesql_types::SqlMode = mode_str.parse().map_err(|e: String| {
-                ExecutorError::StorageError(e)
-            })?;
+            let mode: vibesql_types::SqlMode =
+                mode_str.parse().map_err(|e: String| ExecutorError::StorageError(e))?;
 
             // Set the SQL mode (this also updates the @@sql_mode session variable)
             database.set_sql_mode(mode.clone());

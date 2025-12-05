@@ -38,15 +38,26 @@ fn sum_i64_indexed(values: &[i64], indices: &[usize], nulls: Option<&[bool]>) ->
     if let Some(null_mask) = nulls {
         for i in 0..chunks {
             let off = i * 4;
-            let (i0, i1, i2, i3) = (indices[off], indices[off + 1], indices[off + 2], indices[off + 3]);
-            if !null_mask[i0] { s0 = s0.wrapping_add(values[i0]); }
-            if !null_mask[i1] { s1 = s1.wrapping_add(values[i1]); }
-            if !null_mask[i2] { s2 = s2.wrapping_add(values[i2]); }
-            if !null_mask[i3] { s3 = s3.wrapping_add(values[i3]); }
+            let (i0, i1, i2, i3) =
+                (indices[off], indices[off + 1], indices[off + 2], indices[off + 3]);
+            if !null_mask[i0] {
+                s0 = s0.wrapping_add(values[i0]);
+            }
+            if !null_mask[i1] {
+                s1 = s1.wrapping_add(values[i1]);
+            }
+            if !null_mask[i2] {
+                s2 = s2.wrapping_add(values[i2]);
+            }
+            if !null_mask[i3] {
+                s3 = s3.wrapping_add(values[i3]);
+            }
         }
         let mut sum = s0.wrapping_add(s1).wrapping_add(s2).wrapping_add(s3);
         for &idx in &indices[chunks * 4..] {
-            if !null_mask[idx] { sum = sum.wrapping_add(values[idx]); }
+            if !null_mask[idx] {
+                sum = sum.wrapping_add(values[idx]);
+            }
         }
         sum
     } else {
@@ -74,15 +85,26 @@ fn sum_f64_indexed(values: &[f64], indices: &[usize], nulls: Option<&[bool]>) ->
     if let Some(null_mask) = nulls {
         for i in 0..chunks {
             let off = i * 4;
-            let (i0, i1, i2, i3) = (indices[off], indices[off + 1], indices[off + 2], indices[off + 3]);
-            if !null_mask[i0] { s0 += values[i0]; }
-            if !null_mask[i1] { s1 += values[i1]; }
-            if !null_mask[i2] { s2 += values[i2]; }
-            if !null_mask[i3] { s3 += values[i3]; }
+            let (i0, i1, i2, i3) =
+                (indices[off], indices[off + 1], indices[off + 2], indices[off + 3]);
+            if !null_mask[i0] {
+                s0 += values[i0];
+            }
+            if !null_mask[i1] {
+                s1 += values[i1];
+            }
+            if !null_mask[i2] {
+                s2 += values[i2];
+            }
+            if !null_mask[i3] {
+                s3 += values[i3];
+            }
         }
         let mut sum = s0 + s1 + s2 + s3;
         for &idx in &indices[chunks * 4..] {
-            if !null_mask[idx] { sum += values[idx]; }
+            if !null_mask[idx] {
+                sum += values[idx];
+            }
         }
         sum
     } else {
@@ -129,7 +151,11 @@ fn min_i64_indexed(values: &[i64], indices: &[usize], nulls: Option<&[bool]>) ->
             found = true;
         }
     }
-    if found { Some(result) } else { None }
+    if found {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 /// Max i64 value at specific indices
@@ -150,7 +176,11 @@ fn max_i64_indexed(values: &[i64], indices: &[usize], nulls: Option<&[bool]>) ->
             found = true;
         }
     }
-    if found { Some(result) } else { None }
+    if found {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 /// Min f64 value at specific indices
@@ -171,7 +201,11 @@ fn min_f64_indexed(values: &[f64], indices: &[usize], nulls: Option<&[bool]>) ->
             found = true;
         }
     }
-    if found { Some(result) } else { None }
+    if found {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 /// Max f64 value at specific indices
@@ -192,7 +226,11 @@ fn max_f64_indexed(values: &[f64], indices: &[usize], nulls: Option<&[bool]>) ->
             found = true;
         }
     }
-    if found { Some(result) } else { None }
+    if found {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 /// Compute aggregate using indices (O(group_size) instead of O(total_rows))
@@ -202,11 +240,9 @@ fn compute_group_aggregate_indexed(
     op: AggregateOp,
     indices: &[usize],
 ) -> Result<SqlValue, ExecutorError> {
-    let column = batch.column(col_idx).ok_or_else(|| {
-        ExecutorError::ColumnarColumnNotFound {
-            column_index: col_idx,
-            batch_columns: batch.column_count(),
-        }
+    let column = batch.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: col_idx,
+        batch_columns: batch.column_count(),
     })?;
 
     match column {
@@ -221,7 +257,9 @@ fn compute_group_aggregate_indexed(
             }
 
             match op {
-                AggregateOp::Sum => Ok(SqlValue::Integer(sum_i64_indexed(values, indices, null_slice))),
+                AggregateOp::Sum => {
+                    Ok(SqlValue::Integer(sum_i64_indexed(values, indices, null_slice)))
+                }
                 AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
                 AggregateOp::Avg => {
                     let sum = sum_i64_indexed(values, indices, null_slice);
@@ -253,7 +291,9 @@ fn compute_group_aggregate_indexed(
             }
 
             match op {
-                AggregateOp::Sum => Ok(SqlValue::Double(sum_f64_indexed(values, indices, null_slice))),
+                AggregateOp::Sum => {
+                    Ok(SqlValue::Double(sum_f64_indexed(values, indices, null_slice)))
+                }
                 AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
                 AggregateOp::Avg => {
                     let sum = sum_f64_indexed(values, indices, null_slice);
@@ -349,9 +389,10 @@ fn compute_group_aggregate_indexed(
         }
 
         // For String/Boolean columns, aggregate operations are not supported
-        _ => Err(ExecutorError::UnsupportedExpression(
-            format!("GROUP BY aggregate not supported for column type: {:?}", column.data_type())
-        ))
+        _ => Err(ExecutorError::UnsupportedExpression(format!(
+            "GROUP BY aggregate not supported for column type: {:?}",
+            column.data_type()
+        ))),
     }
 }
 
@@ -428,9 +469,8 @@ pub fn columnar_group_by(
         // Extract group key values for this row
         let mut group_key = Vec::with_capacity(group_cols.len());
         for &col_idx in group_cols {
-            let value = scan.row(row_idx)
-                .and_then(|row| row.get(col_idx))
-                .unwrap_or(&SqlValue::Null);
+            let value =
+                scan.row(row_idx).and_then(|row| row.get(col_idx)).unwrap_or(&SqlValue::Null);
             group_key.push(value.clone());
         }
 
@@ -459,7 +499,8 @@ pub fn columnar_group_by(
 
         // Then, compute each aggregate
         for (col_idx, agg_op) in agg_cols {
-            let agg_result = compute_columnar_aggregate_impl(&scan, *col_idx, *agg_op, Some(&group_bitmap))?;
+            let agg_result =
+                compute_columnar_aggregate_impl(&scan, *col_idx, *agg_op, Some(&group_bitmap))?;
             result_values.push(agg_result);
         }
 
@@ -546,12 +587,8 @@ pub fn columnar_group_by_batch(
 
         // Compute each aggregate using direct index access (no bitmap scans)
         for (col_idx, agg_op) in agg_cols {
-            let agg_result = compute_group_aggregate_indexed(
-                batch,
-                *col_idx,
-                *agg_op,
-                &row_indices,
-            )?;
+            let agg_result =
+                compute_group_aggregate_indexed(batch, *col_idx, *agg_op, &row_indices)?;
             result_values.push(agg_result);
         }
 
@@ -634,10 +671,7 @@ mod batch_tests {
     fn test_columnar_group_by_batch_min_max() {
         let batch = make_test_batch();
         let group_cols = vec![0];
-        let agg_cols = vec![
-            (1, AggregateOp::Min),
-            (1, AggregateOp::Max),
-        ];
+        let agg_cols = vec![(1, AggregateOp::Min), (1, AggregateOp::Max)];
 
         let result = columnar_group_by_batch(&batch, &group_cols, &agg_cols).unwrap();
 

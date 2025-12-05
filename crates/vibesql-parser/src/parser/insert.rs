@@ -140,7 +140,9 @@ impl Parser {
     }
 
     /// Parse REPLACE statement (alias for INSERT OR REPLACE)
-    pub(super) fn parse_replace_statement(&mut self) -> Result<vibesql_ast::InsertStmt, ParseError> {
+    pub(super) fn parse_replace_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::InsertStmt, ParseError> {
         self.expect_keyword(Keyword::Replace)?;
         self.expect_keyword(Keyword::Into)?;
 

@@ -1,9 +1,9 @@
 //! Basic SQLLogicTest verification - runs a small subset to verify integration works.
 
 use async_trait::async_trait;
+use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType, Runner};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType, Runner};
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
@@ -45,18 +45,21 @@ impl VibeSqlDB {
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::Insert(insert_stmt) => {
-                let rows_affected = vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(rows_affected as u64))
             }
             vibesql_ast::Statement::Update(update_stmt) => {
-                let rows_affected = vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(rows_affected as u64))
             }
             vibesql_ast::Statement::Delete(delete_stmt) => {
-                let rows_affected = vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(rows_affected as u64))
             }
             vibesql_ast::Statement::DropTable(drop_stmt) => {

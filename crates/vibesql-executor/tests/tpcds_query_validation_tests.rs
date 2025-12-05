@@ -305,17 +305,10 @@ fn test_tpcds_queries_parse() {
         for (name, error) in &failed {
             eprintln!("Query {}: {}", name, error);
         }
-        panic!(
-            "{} queries failed to parse out of {} total",
-            failed.len(),
-            passed + failed.len()
-        );
+        panic!("{} queries failed to parse out of {} total", failed.len(), passed + failed.len());
     }
 
-    eprintln!(
-        "\nAll {} TPC-DS queries parsed successfully!",
-        passed
-    );
+    eprintln!("\nAll {} TPC-DS queries parsed successfully!", passed);
 }
 
 /// Test TPC-DS Q1 parse (CTE, correlated subquery, multi-table join)

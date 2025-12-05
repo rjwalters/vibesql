@@ -23,9 +23,9 @@ fn test_trim_both_default() {
             expr: vibesql_ast::Expression::Trim {
                 position: None,     // Defaults to Both
                 removal_char: None, // Defaults to space
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "  hello  ".to_string(),
-                ))),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("  hello  ".to_string()),
+                )),
             },
             alias: Some("result".to_string()),
         }],
@@ -37,7 +37,8 @@ fn test_trim_both_default() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -58,9 +59,9 @@ fn test_trim_leading() {
             expr: vibesql_ast::Expression::Trim {
                 position: Some(vibesql_ast::TrimPosition::Leading),
                 removal_char: None,
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "  hello  ".to_string(),
-                ))),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("  hello  ".to_string()),
+                )),
             },
             alias: Some("result".to_string()),
         }],
@@ -72,7 +73,8 @@ fn test_trim_leading() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -93,9 +95,9 @@ fn test_trim_trailing() {
             expr: vibesql_ast::Expression::Trim {
                 position: Some(vibesql_ast::TrimPosition::Trailing),
                 removal_char: None,
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "  hello  ".to_string(),
-                ))),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("  hello  ".to_string()),
+                )),
             },
             alias: Some("result".to_string()),
         }],
@@ -107,7 +109,8 @@ fn test_trim_trailing() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -127,12 +130,12 @@ fn test_trim_custom_char() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
                 position: None,
-                removal_char: Some(Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "x".to_string(),
-                )))),
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "xxxhelloxxx".to_string(),
+                removal_char: Some(Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("x".to_string()),
                 ))),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("xxxhelloxxx".to_string()),
+                )),
             },
             alias: Some("result".to_string()),
         }],
@@ -144,7 +147,8 @@ fn test_trim_custom_char() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -177,7 +181,8 @@ fn test_trim_null_string() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -197,10 +202,12 @@ fn test_trim_null_removal_char() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
                 position: None,
-                removal_char: Some(Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null))),
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "hello".to_string(),
+                removal_char: Some(Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Null,
                 ))),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("hello".to_string()),
+                )),
             },
             alias: Some("result".to_string()),
         }],
@@ -212,7 +219,8 @@ fn test_trim_null_removal_char() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);

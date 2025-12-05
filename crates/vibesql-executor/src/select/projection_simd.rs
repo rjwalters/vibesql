@@ -4,9 +4,7 @@
 //! Currently returns None to fall back to row-by-row projection.
 
 use crate::{
-    errors::ExecutorError,
-    evaluator::CombinedExpressionEvaluator,
-    schema::CombinedSchema,
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
 };
 use std::collections::HashMap;
 use vibesql_ast::SelectItem;
@@ -45,7 +43,8 @@ mod tests {
         let columns = vec![ColumnSchema::new("a".to_string(), DataType::Bigint, false)];
         let table_schema = TableSchema::new("test".to_string(), columns);
 
-        let schema = Box::leak(Box::new(CombinedSchema::from_table("test".to_string(), table_schema)));
+        let schema =
+            Box::leak(Box::new(CombinedSchema::from_table("test".to_string(), table_schema)));
         CombinedExpressionEvaluator::new(schema)
     }
 
@@ -60,9 +59,7 @@ mod tests {
 
     #[test]
     fn test_try_batch_project_simd_returns_none() {
-        let rows: Vec<Row> = (0..100)
-            .map(|i| Row::new(vec![SqlValue::Bigint(i as i64)]))
-            .collect();
+        let rows: Vec<Row> = (0..100).map(|i| Row::new(vec![SqlValue::Bigint(i as i64)])).collect();
 
         let columns = vec![SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(SqlValue::Integer(42)),
@@ -73,14 +70,8 @@ mod tests {
         let schema = create_test_schema();
         let buffer_pool = QueryBufferPool::new();
 
-        let result = try_batch_project_simd(
-            &rows,
-            &columns,
-            &evaluator,
-            &schema,
-            &None,
-            &buffer_pool,
-        );
+        let result =
+            try_batch_project_simd(&rows, &columns, &evaluator, &schema, &None, &buffer_pool);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);

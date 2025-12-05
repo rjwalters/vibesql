@@ -16,10 +16,12 @@ const SIMPLE_SELECT: &str = "SELECT a FROM t";
 const POINT_LOOKUP: &str = "SELECT * FROM users WHERE id = 1";
 
 /// SELECT with multiple columns and conditions
-const MULTI_COLUMN: &str = "SELECT id, name, email, created_at FROM users WHERE status = 'active' AND user_role = 'admin'";
+const MULTI_COLUMN: &str =
+    "SELECT id, name, email, created_at FROM users WHERE status = 'active' AND user_role = 'admin'";
 
 /// INSERT with values
-const INSERT_SINGLE: &str = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')";
+const INSERT_SINGLE: &str =
+    "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')";
 
 /// INSERT with multiple rows
 const INSERT_MULTI: &str = r#"INSERT INTO users (id, name, email) VALUES
@@ -169,9 +171,7 @@ fn bench_parser(c: &mut Criterion) {
     for (name, sql) in queries {
         group.throughput(Throughput::Bytes(sql.len() as u64));
         group.bench_with_input(BenchmarkId::new("parse", name), sql, |b, sql| {
-            b.iter(|| {
-                black_box(Parser::parse_sql(black_box(sql)).unwrap())
-            });
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
         });
     }
 
@@ -192,9 +192,7 @@ fn bench_keywords(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(keyword_heavy.len() as u64));
     group.bench_function("keyword_heavy", |b| {
-        b.iter(|| {
-            black_box(Parser::parse_sql(black_box(keyword_heavy)).unwrap())
-        });
+        b.iter(|| black_box(Parser::parse_sql(black_box(keyword_heavy)).unwrap()));
     });
 
     group.finish();
@@ -218,9 +216,7 @@ fn bench_identifiers(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(ident_heavy.len() as u64));
     group.bench_function("identifier_heavy", |b| {
-        b.iter(|| {
-            black_box(Parser::parse_sql(black_box(ident_heavy)).unwrap())
-        });
+        b.iter(|| black_box(Parser::parse_sql(black_box(ident_heavy)).unwrap()));
     });
 
     group.finish();
@@ -281,9 +277,7 @@ fn bench_parser_comparison(c: &mut Criterion) {
 
         // Standard parser
         group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
-            b.iter(|| {
-                black_box(Parser::parse_sql(black_box(sql)).unwrap())
-            });
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
         });
 
         // Arena parser (fresh arena each time)
@@ -329,17 +323,13 @@ fn bench_arena_with_conversion(c: &mut Criterion) {
 
         // Standard parser (baseline)
         group.bench_with_input(BenchmarkId::new("standard", name), sql, |b, sql| {
-            b.iter(|| {
-                black_box(Parser::parse_sql(black_box(sql)).unwrap())
-            });
+            b.iter(|| black_box(Parser::parse_sql(black_box(sql)).unwrap()));
         });
 
         // Arena parser with conversion to owned
         // This is the recommended approach for Phase 3 integration
         group.bench_with_input(BenchmarkId::new("arena_to_owned", name), sql, |b, sql| {
-            b.iter(|| {
-                black_box(parse_select_to_owned(black_box(sql)).unwrap())
-            });
+            b.iter(|| black_box(parse_select_to_owned(black_box(sql)).unwrap()));
         });
     }
 
@@ -419,10 +409,8 @@ fn bench_dml_comparison(c: &mut Criterion) {
     }
 
     // DELETE statement variations
-    let delete_queries = [
-        ("delete_simple", DELETE_SIMPLE),
-        ("delete_complex_where", DELETE_COMPLEX),
-    ];
+    let delete_queries =
+        [("delete_simple", DELETE_SIMPLE), ("delete_complex_where", DELETE_COMPLEX)];
 
     for (name, sql) in delete_queries {
         group.throughput(Throughput::Bytes(sql.len() as u64));

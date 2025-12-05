@@ -50,10 +50,7 @@ impl ChangeRouter {
     ///
     /// When changes occur to this table, the subscription will be notified.
     pub fn register_subscription(&mut self, table: String, subscription_id: SubscriptionId) {
-        self.table_subscriptions
-            .entry(table)
-            .or_default()
-            .push(subscription_id);
+        self.table_subscriptions.entry(table).or_default().push(subscription_id);
     }
 
     /// Unregister a subscription
@@ -143,10 +140,7 @@ impl ChangeRouter {
 
     /// Get the number of subscriptions registered for a table
     pub fn subscription_count_for_table(&self, table: &str) -> usize {
-        self.table_subscriptions
-            .get(table)
-            .map(|subs| subs.len())
-            .unwrap_or(0)
+        self.table_subscriptions.get(table).map(|subs| subs.len()).unwrap_or(0)
     }
 
     /// Get total number of registered subscriptions
@@ -255,10 +249,7 @@ mod tests {
         router.register_session("session1".to_string(), tx);
 
         // Send a change event
-        let event = ChangeEvent::Insert {
-            table_name: "users".to_string(),
-            row_index: 0,
-        };
+        let event = ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 };
         sender.send(event);
 
         // Process the change

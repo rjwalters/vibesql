@@ -34,10 +34,7 @@ fn test_command_mode_persistence() {
     assert!(output.status.success(), "INSERT should succeed");
 
     // Verify the file was created
-    assert!(
-        std::path::Path::new(test_db).exists(),
-        "Database file should exist"
-    );
+    assert!(std::path::Path::new(test_db).exists(), "Database file should exist");
 
     // Verify the file contains the expected SQL (note: identifiers are uppercased)
     let content = fs::read_to_string(test_db).expect("Should be able to read database file");
@@ -45,10 +42,7 @@ fn test_command_mode_persistence() {
         content.to_uppercase().contains("CREATE TABLE TEST_USERS"),
         "Database should contain CREATE TABLE statement"
     );
-    assert!(
-        content.contains("Alice"),
-        "Database should contain inserted data"
-    );
+    assert!(content.contains("Alice"), "Database should contain inserted data");
 
     // Query the data in a new session
     let output = Command::new(vibesql_binary())
@@ -58,10 +52,7 @@ fn test_command_mode_persistence() {
 
     assert!(output.status.success(), "SELECT should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("Alice"),
-        "Query should return inserted data"
-    );
+    assert!(stdout.contains("Alice"), "Query should return inserted data");
 
     // Clean up
     let _ = fs::remove_file(test_db);
@@ -89,12 +80,7 @@ fn test_multiple_sessions_persistence() {
 
     // Session 2: Insert first row
     let output = Command::new(vibesql_binary())
-        .args([
-            "--database",
-            test_db,
-            "-c",
-            "INSERT INTO products VALUES (1, 'Widget', 9.99)",
-        ])
+        .args(["--database", test_db, "-c", "INSERT INTO products VALUES (1, 'Widget', 9.99)"])
         .output()
         .expect("Failed to execute command");
 
@@ -102,12 +88,7 @@ fn test_multiple_sessions_persistence() {
 
     // Session 3: Insert second row
     let output = Command::new(vibesql_binary())
-        .args([
-            "--database",
-            test_db,
-            "-c",
-            "INSERT INTO products VALUES (2, 'Gadget', 19.99)",
-        ])
+        .args(["--database", test_db, "-c", "INSERT INTO products VALUES (2, 'Gadget', 19.99)"])
         .output()
         .expect("Failed to execute command");
 
@@ -169,16 +150,10 @@ fn test_new_database_file_creation() {
         .output()
         .expect("Failed to execute command");
 
-    assert!(
-        output.status.success(),
-        "Should succeed creating new database file"
-    );
+    assert!(output.status.success(), "Should succeed creating new database file");
 
     // Verify the file was created
-    assert!(
-        std::path::Path::new(test_db).exists(),
-        "Database file should be created"
-    );
+    assert!(std::path::Path::new(test_db).exists(), "Database file should be created");
 
     // Verify it contains the table (note: identifiers are uppercased)
     let content = fs::read_to_string(test_db).expect("Should be able to read database file");

@@ -15,10 +15,10 @@ use vibesql_ast::{
 use vibesql_catalog::{
     ColumnSchema, ForeignKeyConstraint, ReferentialAction, TableSchema, TriggerDefinition,
 };
+use vibesql_executor::errors::ExecutorError;
 use vibesql_executor::{CreateTableExecutor, TruncateTableExecutor};
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
-use vibesql_executor::errors::ExecutorError;
 
 // Helper function to create a simple table
 fn create_test_table(db: &mut Database, table_name: &str) {
@@ -77,7 +77,11 @@ fn test_truncate_basic() {
     assert_eq!(db.get_table("test_table").unwrap().row_count(), 3);
 
     // Execute truncate
-    let stmt = TruncateTableStmt { table_names: vec!["test_table".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["test_table".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_ok());
@@ -94,7 +98,11 @@ fn test_truncate_empty_table() {
     assert_eq!(db.get_table("empty_table").unwrap().row_count(), 0);
 
     // Execute truncate on empty table
-    let stmt = TruncateTableStmt { table_names: vec!["empty_table".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["empty_table".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_ok());
@@ -107,8 +115,11 @@ fn test_truncate_if_exists_nonexistent() {
     let mut db = Database::new();
 
     // Truncate nonexistent table with IF EXISTS
-    let stmt =
-        TruncateTableStmt { table_names: vec!["nonexistent".to_string()], if_exists: true, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["nonexistent".to_string()],
+        if_exists: true,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_ok());
@@ -128,8 +139,11 @@ fn test_truncate_if_exists_existing() {
     .unwrap();
 
     // Truncate with IF EXISTS
-    let stmt =
-        TruncateTableStmt { table_names: vec!["existing_table".to_string()], if_exists: true, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["existing_table".to_string()],
+        if_exists: true,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_ok());
@@ -142,8 +156,11 @@ fn test_truncate_missing_table() {
     let mut db = Database::new();
 
     // Truncate nonexistent table WITHOUT IF EXISTS
-    let stmt =
-        TruncateTableStmt { table_names: vec!["missing_table".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["missing_table".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_err());
@@ -192,8 +209,11 @@ fn test_truncate_blocked_by_delete_triggers() {
     .unwrap();
 
     // Attempt truncate - should be blocked by DELETE trigger
-    let stmt =
-        TruncateTableStmt { table_names: vec!["triggered_table".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["triggered_table".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_err());
@@ -240,7 +260,11 @@ fn test_truncate_blocked_by_after_delete_trigger() {
     .unwrap();
 
     // Attempt truncate - should be blocked
-    let stmt = TruncateTableStmt { table_names: vec!["audit_table".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["audit_table".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_err());
@@ -286,8 +310,11 @@ fn test_truncate_allowed_with_insert_trigger() {
     }
 
     // Truncate should succeed because only INSERT trigger exists
-    let stmt =
-        TruncateTableStmt { table_names: vec!["insert_triggered".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["insert_triggered".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_ok());
@@ -331,8 +358,11 @@ fn test_truncate_allowed_with_update_trigger() {
     .unwrap();
 
     // Truncate should succeed
-    let stmt =
-        TruncateTableStmt { table_names: vec!["update_triggered".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["update_triggered".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_ok());
@@ -391,7 +421,11 @@ fn test_truncate_blocked_by_fk_references() {
     .unwrap();
 
     // Attempt to truncate parent - should be blocked because child table references it
-    let stmt = TruncateTableStmt { table_names: vec!["parent".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["parent".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_err());
@@ -424,16 +458,17 @@ fn test_truncate_allowed_no_fk_references() {
     for i in 0..100 {
         db.insert_row(
             "standalone",
-            Row::new(vec![
-                SqlValue::Integer(i),
-                SqlValue::Varchar(format!("data{}", i)),
-            ]),
+            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("data{}", i))]),
         )
         .unwrap();
     }
 
     // Truncate should succeed
-    let stmt = TruncateTableStmt { table_names: vec!["standalone".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["standalone".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let result = TruncateTableExecutor::execute(&stmt, &mut db);
 
     assert!(result.is_ok());
@@ -499,8 +534,11 @@ fn test_truncate_preserves_table_structure() {
     let original_columns = original_schema.columns.clone();
 
     // Truncate
-    let stmt =
-        TruncateTableStmt { table_names: vec!["structured_table".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["structured_table".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     TruncateTableExecutor::execute(&stmt, &mut db).unwrap();
 
     // Verify table structure is intact
@@ -531,10 +569,7 @@ fn test_truncate_clears_all_data() {
     for i in 0..1000 {
         db.insert_row(
             "large_table",
-            Row::new(vec![
-                SqlValue::Integer(i),
-                SqlValue::Varchar(format!("data_{}", i)),
-            ]),
+            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("data_{}", i))]),
         )
         .unwrap();
     }
@@ -542,7 +577,11 @@ fn test_truncate_clears_all_data() {
     assert_eq!(db.get_table("large_table").unwrap().row_count(), 1000);
 
     // Truncate
-    let stmt = TruncateTableStmt { table_names: vec!["large_table".to_string()], if_exists: false, cascade: None };
+    let stmt = TruncateTableStmt {
+        table_names: vec!["large_table".to_string()],
+        if_exists: false,
+        cascade: None,
+    };
     let deleted = TruncateTableExecutor::execute(&stmt, &mut db).unwrap();
 
     assert_eq!(deleted, 1000);
@@ -572,17 +611,17 @@ fn test_truncate_returns_correct_row_count() {
         for i in 0..count {
             db.insert_row(
                 "count_test",
-                Row::new(vec![
-                    SqlValue::Integer(i),
-                    SqlValue::Varchar(format!("row_{}", i)),
-                ]),
+                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("row_{}", i))]),
             )
             .unwrap();
         }
 
         // Truncate and verify count
-        let stmt =
-            TruncateTableStmt { table_names: vec!["count_test".to_string()], if_exists: false, cascade: None };
+        let stmt = TruncateTableStmt {
+            table_names: vec!["count_test".to_string()],
+            if_exists: false,
+            cascade: None,
+        };
         let deleted = TruncateTableExecutor::execute(&stmt, &mut db).unwrap();
 
         assert_eq!(deleted, count as usize, "Failed for count {}", count);

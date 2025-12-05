@@ -33,9 +33,7 @@ pub struct PredicatePlan {
 impl PredicatePlan {
     /// Create an empty predicate plan (for queries without WHERE clause)
     pub fn empty() -> Self {
-        Self {
-            decomposition: PredicateDecomposition::empty(),
-        }
+        Self { decomposition: PredicateDecomposition::empty() }
     }
 
     /// Create a predicate plan from a WHERE clause expression
@@ -109,9 +107,7 @@ impl PredicatePlan {
     /// Get all equijoin conditions
     ///
     /// Returns (left_table, left_column, right_table, right_column, expression) tuples.
-    pub fn get_equijoin_conditions(
-        &self,
-    ) -> &[(String, String, String, String, Expression)] {
+    pub fn get_equijoin_conditions(&self) -> &[(String, String, String, String, Expression)] {
         &self.decomposition.equijoin_conditions
     }
 

@@ -31,12 +31,11 @@
 //! - Compute aggregates (SUM, COUNT, AVG, MIN, MAX)
 //! - Don't use window functions or complex subqueries
 
-
-pub mod batch;
-mod scan;
-pub mod filter;
 mod aggregate;
+pub mod batch;
 mod executor;
+pub mod filter;
+mod scan;
 mod string_ops;
 
 // Auto-vectorized SIMD operations - replaces the `wide` crate dependency
@@ -47,15 +46,19 @@ mod simd_aggregate;
 pub mod simd_filter;
 mod simd_join;
 
-pub use batch::{ColumnarBatch, ColumnArray};
-pub use scan::ColumnarScan;
+pub use aggregate::{
+    columnar_group_by, columnar_group_by_batch, compute_multiple_aggregates,
+    evaluate_expression_to_column, evaluate_expression_with_cached_column, extract_aggregates,
+    AggregateOp, AggregateSource, AggregateSpec,
+};
+pub use batch::{ColumnArray, ColumnarBatch};
 pub use executor::execute_columnar_batch;
 pub use filter::{
     apply_columnar_filter, apply_columnar_filter_simd_streaming, create_filter_bitmap,
     create_filter_bitmap_tree, evaluate_predicate_tree, extract_column_predicates,
     extract_predicate_tree, ColumnPredicate, PredicateTree,
 };
-pub use aggregate::{columnar_group_by, columnar_group_by_batch, compute_multiple_aggregates, extract_aggregates, evaluate_expression_to_column, evaluate_expression_with_cached_column, AggregateOp, AggregateSpec, AggregateSource};
+pub use scan::ColumnarScan;
 
 pub use aggregate::compute_aggregates_from_batch;
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
@@ -65,9 +68,9 @@ pub use simd_ops::PackedMask;
 
 use crate::errors::ExecutorError;
 use crate::schema::CombinedSchema;
+use log;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
-use log;
 
 /// Execute a columnar aggregate query with filtering
 ///
@@ -139,17 +142,18 @@ pub fn execute_columnar_aggregate(
     #[cfg(feature = "profile-q6")]
     let filter_start = std::time::Instant::now();
 
-    let filtered_batch = if predicates.is_empty() {
-        batch.clone()
-    } else {
-        simd_filter_batch(&batch, predicates)?
-    };
+    let filtered_batch =
+        if predicates.is_empty() { batch.clone() } else { simd_filter_batch(&batch, predicates)? };
 
     #[cfg(feature = "profile-q6")]
     {
         let filter_time = filter_start.elapsed();
-        eprintln!("[PROFILE-Q6]   Phase 2 - SIMD filter: {:?} ({}/{} rows passed)",
-            filter_time, filtered_batch.row_count(), rows.len());
+        eprintln!(
+            "[PROFILE-Q6]   Phase 2 - SIMD filter: {:?} ({}/{} rows passed)",
+            filter_time,
+            filtered_batch.row_count(),
+            rows.len()
+        );
     }
 
     // Phase 3: Compute aggregates directly on batch (no row conversion!)
@@ -162,8 +166,11 @@ pub fn execute_columnar_aggregate(
     #[cfg(feature = "profile-q6")]
     {
         let agg_time = agg_start.elapsed();
-        eprintln!("[PROFILE-Q6]   Phase 3 - Batch-native aggregate: {:?} ({} aggregates)",
-            agg_time, aggregates.len());
+        eprintln!(
+            "[PROFILE-Q6]   Phase 3 - Batch-native aggregate: {:?} ({} aggregates)",
+            agg_time,
+            aggregates.len()
+        );
     }
 
     // Return as single row
@@ -264,8 +271,10 @@ pub fn fast_aggregate_on_rows(
                                     acc.sum_f64 += *v as f64;
                                     acc.min_i64 = Some(acc.min_i64.map_or(*v, |m| m.min(*v)));
                                     acc.max_i64 = Some(acc.max_i64.map_or(*v, |m| m.max(*v)));
-                                    acc.min_f64 = Some(acc.min_f64.map_or(*v as f64, |m| m.min(*v as f64)));
-                                    acc.max_f64 = Some(acc.max_f64.map_or(*v as f64, |m| m.max(*v as f64)));
+                                    acc.min_f64 =
+                                        Some(acc.min_f64.map_or(*v as f64, |m| m.min(*v as f64)));
+                                    acc.max_f64 =
+                                        Some(acc.max_f64.map_or(*v as f64, |m| m.max(*v as f64)));
                                 }
                                 SqlValue::Double(v) => {
                                     acc.is_integer = false;
@@ -276,16 +285,20 @@ pub fn fast_aggregate_on_rows(
                                 SqlValue::Float(v) => {
                                     acc.is_integer = false;
                                     acc.sum_f64 += *v as f64;
-                                    acc.min_f64 = Some(acc.min_f64.map_or(*v as f64, |m| m.min(*v as f64)));
-                                    acc.max_f64 = Some(acc.max_f64.map_or(*v as f64, |m| m.max(*v as f64)));
+                                    acc.min_f64 =
+                                        Some(acc.min_f64.map_or(*v as f64, |m| m.min(*v as f64)));
+                                    acc.max_f64 =
+                                        Some(acc.max_f64.map_or(*v as f64, |m| m.max(*v as f64)));
                                 }
                                 SqlValue::Bigint(v) => {
                                     acc.sum_i64 += v;
                                     acc.sum_f64 += *v as f64;
                                     acc.min_i64 = Some(acc.min_i64.map_or(*v, |m| m.min(*v)));
                                     acc.max_i64 = Some(acc.max_i64.map_or(*v, |m| m.max(*v)));
-                                    acc.min_f64 = Some(acc.min_f64.map_or(*v as f64, |m| m.min(*v as f64)));
-                                    acc.max_f64 = Some(acc.max_f64.map_or(*v as f64, |m| m.max(*v as f64)));
+                                    acc.min_f64 =
+                                        Some(acc.min_f64.map_or(*v as f64, |m| m.min(*v as f64)));
+                                    acc.max_f64 =
+                                        Some(acc.max_f64.map_or(*v as f64, |m| m.max(*v as f64)));
                                 }
                                 SqlValue::Numeric(v) => {
                                     acc.is_integer = false;
@@ -317,38 +330,36 @@ pub fn fast_aggregate_on_rows(
     let values: Vec<SqlValue> = aggregates
         .iter()
         .zip(accumulators.iter())
-        .map(|(spec, acc)| {
-            match spec.op {
-                AggregateOp::Count => SqlValue::Integer(acc.count),
-                AggregateOp::Sum => {
-                    if acc.count == 0 {
-                        SqlValue::Null
-                    } else if acc.is_integer {
-                        SqlValue::Integer(acc.sum_i64)
-                    } else {
-                        SqlValue::Double(acc.sum_f64)
-                    }
+        .map(|(spec, acc)| match spec.op {
+            AggregateOp::Count => SqlValue::Integer(acc.count),
+            AggregateOp::Sum => {
+                if acc.count == 0 {
+                    SqlValue::Null
+                } else if acc.is_integer {
+                    SqlValue::Integer(acc.sum_i64)
+                } else {
+                    SqlValue::Double(acc.sum_f64)
                 }
-                AggregateOp::Avg => {
-                    if acc.count == 0 {
-                        SqlValue::Null
-                    } else {
-                        SqlValue::Double(acc.sum_f64 / acc.count as f64)
-                    }
+            }
+            AggregateOp::Avg => {
+                if acc.count == 0 {
+                    SqlValue::Null
+                } else {
+                    SqlValue::Double(acc.sum_f64 / acc.count as f64)
                 }
-                AggregateOp::Min => {
-                    if acc.is_integer {
-                        acc.min_i64.map(SqlValue::Integer).unwrap_or(SqlValue::Null)
-                    } else {
-                        acc.min_f64.map(SqlValue::Double).unwrap_or(SqlValue::Null)
-                    }
+            }
+            AggregateOp::Min => {
+                if acc.is_integer {
+                    acc.min_i64.map(SqlValue::Integer).unwrap_or(SqlValue::Null)
+                } else {
+                    acc.min_f64.map(SqlValue::Double).unwrap_or(SqlValue::Null)
                 }
-                AggregateOp::Max => {
-                    if acc.is_integer {
-                        acc.max_i64.map(SqlValue::Integer).unwrap_or(SqlValue::Null)
-                    } else {
-                        acc.max_f64.map(SqlValue::Double).unwrap_or(SqlValue::Null)
-                    }
+            }
+            AggregateOp::Max => {
+                if acc.is_integer {
+                    acc.max_i64.map(SqlValue::Integer).unwrap_or(SqlValue::Null)
+                } else {
+                    acc.max_f64.map(SqlValue::Double).unwrap_or(SqlValue::Null)
                 }
             }
         })
@@ -360,53 +371,49 @@ pub fn fast_aggregate_on_rows(
 /// Evaluate a column predicate against a row
 fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
     match predicate {
-        ColumnPredicate::LessThan { column_idx, value } => {
-            row.get(*column_idx)
-                .map(|v| compare_values(v, value) == std::cmp::Ordering::Less)
-                .unwrap_or(false)
-        }
-        ColumnPredicate::LessThanOrEqual { column_idx, value } => {
-            row.get(*column_idx)
-                .map(|v| compare_values(v, value) != std::cmp::Ordering::Greater)
-                .unwrap_or(false)
-        }
-        ColumnPredicate::GreaterThan { column_idx, value } => {
-            row.get(*column_idx)
-                .map(|v| compare_values(v, value) == std::cmp::Ordering::Greater)
-                .unwrap_or(false)
-        }
-        ColumnPredicate::GreaterThanOrEqual { column_idx, value } => {
-            row.get(*column_idx)
-                .map(|v| compare_values(v, value) != std::cmp::Ordering::Less)
-                .unwrap_or(false)
-        }
-        ColumnPredicate::Equal { column_idx, value } => {
-            row.get(*column_idx)
-                .map(|v| compare_values(v, value) == std::cmp::Ordering::Equal)
-                .unwrap_or(false)
-        }
-        ColumnPredicate::NotEqual { column_idx, value } => {
-            row.get(*column_idx)
-                .map(|v| compare_values(v, value) != std::cmp::Ordering::Equal)
-                .unwrap_or(false)
-        }
-        ColumnPredicate::Between { column_idx, low, high } => {
-            row.get(*column_idx)
-                .map(|v| {
-                    compare_values(v, low) != std::cmp::Ordering::Less
-                        && compare_values(v, high) != std::cmp::Ordering::Greater
-                })
-                .unwrap_or(false)
-        }
+        ColumnPredicate::LessThan { column_idx, value } => row
+            .get(*column_idx)
+            .map(|v| compare_values(v, value) == std::cmp::Ordering::Less)
+            .unwrap_or(false),
+        ColumnPredicate::LessThanOrEqual { column_idx, value } => row
+            .get(*column_idx)
+            .map(|v| compare_values(v, value) != std::cmp::Ordering::Greater)
+            .unwrap_or(false),
+        ColumnPredicate::GreaterThan { column_idx, value } => row
+            .get(*column_idx)
+            .map(|v| compare_values(v, value) == std::cmp::Ordering::Greater)
+            .unwrap_or(false),
+        ColumnPredicate::GreaterThanOrEqual { column_idx, value } => row
+            .get(*column_idx)
+            .map(|v| compare_values(v, value) != std::cmp::Ordering::Less)
+            .unwrap_or(false),
+        ColumnPredicate::Equal { column_idx, value } => row
+            .get(*column_idx)
+            .map(|v| compare_values(v, value) == std::cmp::Ordering::Equal)
+            .unwrap_or(false),
+        ColumnPredicate::NotEqual { column_idx, value } => row
+            .get(*column_idx)
+            .map(|v| compare_values(v, value) != std::cmp::Ordering::Equal)
+            .unwrap_or(false),
+        ColumnPredicate::Between { column_idx, low, high } => row
+            .get(*column_idx)
+            .map(|v| {
+                compare_values(v, low) != std::cmp::Ordering::Less
+                    && compare_values(v, high) != std::cmp::Ordering::Greater
+            })
+            .unwrap_or(false),
         ColumnPredicate::Like { column_idx, pattern, negated } => {
             // Simple LIKE pattern matching for row-based fast path
-            let matches = row.get(*column_idx)
+            let matches = row
+                .get(*column_idx)
                 .map(|v| {
                     if let SqlValue::Varchar(s) = v {
                         // Convert SQL LIKE pattern to simple check
                         // This is a simplified version - full LIKE support is in simd_filter
                         let pattern_str = pattern.as_str();
-                        if let Some(inner) = pattern_str.strip_prefix('%').and_then(|s| s.strip_suffix('%')) {
+                        if let Some(inner) =
+                            pattern_str.strip_prefix('%').and_then(|s| s.strip_suffix('%'))
+                        {
                             s.contains(inner)
                         } else if let Some(suffix) = pattern_str.strip_prefix('%') {
                             s.ends_with(suffix)
@@ -420,14 +427,27 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
                     }
                 })
                 .unwrap_or(false);
-            if *negated { !matches } else { matches }
+            if *negated {
+                !matches
+            } else {
+                matches
+            }
         }
         ColumnPredicate::InList { column_idx, values, negated } => {
             // Check if column value matches any value in the list
-            let matches = row.get(*column_idx)
-                .map(|v| values.iter().any(|list_val| compare_values(v, list_val) == std::cmp::Ordering::Equal))
+            let matches = row
+                .get(*column_idx)
+                .map(|v| {
+                    values
+                        .iter()
+                        .any(|list_val| compare_values(v, list_val) == std::cmp::Ordering::Equal)
+                })
                 .unwrap_or(false);
-            if *negated { !matches } else { matches }
+            if *negated {
+                !matches
+            } else {
+                matches
+            }
         }
     }
 }
@@ -442,8 +462,12 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
         (SqlValue::Double(a), SqlValue::Double(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (SqlValue::Float(a), SqlValue::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         // Cross-type comparisons
-        (SqlValue::Integer(a), SqlValue::Double(b)) => (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal),
-        (SqlValue::Double(a), SqlValue::Integer(b)) => a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal),
+        (SqlValue::Integer(a), SqlValue::Double(b)) => {
+            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Double(a), SqlValue::Integer(b)) => {
+            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
         (SqlValue::Integer(a), SqlValue::Bigint(b)) => (*a).cmp(b),
         (SqlValue::Bigint(a), SqlValue::Integer(b)) => a.cmp(&{ *b }),
         // String comparisons
@@ -461,7 +485,7 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
         }
         // NULL handling
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ordering::Equal, // NULL comparisons are undefined
-        _ => Ordering::Equal, // Incompatible types
+        _ => Ordering::Equal,                                         // Incompatible types
     }
 }
 
@@ -492,16 +516,14 @@ fn eval_simple_expression(row: &Row, expr: &vibesql_ast::Expression) -> Option<f
             );
             None
         }
-        Expression::Literal(val) => {
-            match val {
-                SqlValue::Integer(v) => Some(*v as f64),
-                SqlValue::Double(v) => Some(*v),
-                SqlValue::Float(v) => Some(*v as f64),
-                SqlValue::Bigint(v) => Some(*v as f64),
-                SqlValue::Numeric(v) => Some(*v),
-                _ => None,
-            }
-        }
+        Expression::Literal(val) => match val {
+            SqlValue::Integer(v) => Some(*v as f64),
+            SqlValue::Double(v) => Some(*v),
+            SqlValue::Float(v) => Some(*v as f64),
+            SqlValue::Bigint(v) => Some(*v as f64),
+            SqlValue::Numeric(v) => Some(*v),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -565,7 +587,9 @@ pub fn execute_columnar(
     };
 
     // Call the simplified interface, passing schema if any aggregates use expressions
-    let needs_schema = agg_specs.iter().any(|spec| matches!(spec.source, aggregate::AggregateSource::Expression(_)));
+    let needs_schema = agg_specs
+        .iter()
+        .any(|spec| matches!(spec.source, aggregate::AggregateSource::Expression(_)));
     let schema_ref = if needs_schema { Some(schema) } else { None };
 
     log::debug!("    Executing SIMD-accelerated columnar aggregation");
@@ -589,9 +613,9 @@ mod tests {
 
         let rows = vec![
             Row::new(vec![
-                SqlValue::Integer(10), // quantity
+                SqlValue::Integer(10),   // quantity
                 SqlValue::Double(100.0), // extendedprice
-                SqlValue::Double(0.06), // discount
+                SqlValue::Double(0.06),  // discount
                 SqlValue::Date(Date::new(1994, 6, 1).unwrap()),
             ]),
             Row::new(vec![
@@ -616,10 +640,7 @@ mod tests {
 
         // Predicates: quantity < 24 AND discount BETWEEN 0.05 AND 0.07
         let predicates = vec![
-            ColumnPredicate::LessThan {
-                column_idx: 0,
-                value: SqlValue::Integer(24),
-            },
+            ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(24) },
             ColumnPredicate::Between {
                 column_idx: 2,
                 low: SqlValue::Double(0.05),
@@ -640,7 +661,9 @@ mod tests {
 
         // Only rows 0 and 2 pass the filter (quantity < 24 AND discount in range)
         // SUM(extendedprice) = 100.0 + 150.0 = 250.0
-        assert!(matches!(result_row.get(0), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001));
+        assert!(
+            matches!(result_row.get(0), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
+        );
         // COUNT(*) = 2
         assert_eq!(result_row.get(1), Some(&SqlValue::Integer(2)));
     }
@@ -669,7 +692,9 @@ mod tests {
         // SUM(col0) = 60 (preserves integer type per #2545)
         assert_eq!(result_row.get(0), Some(&SqlValue::Integer(60)));
         // AVG(col1) = 2.5
-        assert!(matches!(result_row.get(1), Some(&SqlValue::Double(avg)) if (avg - 2.5).abs() < 0.001));
+        assert!(
+            matches!(result_row.get(1), Some(&SqlValue::Double(avg)) if (avg - 2.5).abs() < 0.001)
+        );
         // MAX(col0) = 30
         assert_eq!(result_row.get(2), Some(&SqlValue::Integer(30)));
     }
@@ -677,16 +702,12 @@ mod tests {
     /// Test columnar execution with empty result set
     #[test]
     fn test_columnar_pipeline_empty_result() {
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(100)]),
-            Row::new(vec![SqlValue::Integer(200)]),
-        ];
+        let rows =
+            vec![Row::new(vec![SqlValue::Integer(100)]), Row::new(vec![SqlValue::Integer(200)])];
 
         // Filter that matches nothing
-        let predicates = vec![ColumnPredicate::LessThan {
-            column_idx: 0,
-            value: SqlValue::Integer(50),
-        }];
+        let predicates =
+            vec![ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(50) }];
 
         let aggregates = vec![
             AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(0) },
@@ -740,10 +761,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }],
+            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
         }];
 
         let result = execute_columnar(&rows, None, &aggregates, &schema);
@@ -771,10 +789,7 @@ mod tests {
 
         // SELECT SUM(price) FROM test WHERE quantity < 25
         let filter = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "quantity".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(25))),
         };
@@ -782,10 +797,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }],
+            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
         }];
 
         let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);
@@ -816,10 +828,7 @@ mod tests {
             Expression::AggregateFunction {
                 name: "SUM".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef {
-                    table: None,
-                    column: "price".to_string(),
-                }],
+                args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
             },
             Expression::AggregateFunction {
                 name: "COUNT".to_string(),
@@ -829,10 +838,7 @@ mod tests {
             Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef {
-                    table: None,
-                    column: "quantity".to_string(),
-                }],
+                args: vec![Expression::ColumnRef { table: None, column: "quantity".to_string() }],
             },
         ];
 
@@ -873,10 +879,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: true,
-            args: vec![Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }],
+            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
         }];
 
         let result = execute_columnar(&rows, None, &aggregates, &schema);
@@ -908,10 +911,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef {
-                table: None,
-                column: "price".to_string(),
-            }],
+            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
         }];
 
         let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);

@@ -5,7 +5,10 @@
 
 mod common;
 
-use common::{parse_backend_messages, start_test_server, start_test_server_with_config, test_config_with_password, TestClient};
+use common::{
+    parse_backend_messages, start_test_server, start_test_server_with_config,
+    test_config_with_password, TestClient,
+};
 use std::io::Write;
 use tempfile::NamedTempFile;
 use vibesql_server::auth::password::hash_password_argon2;
@@ -196,7 +199,8 @@ async fn test_md5_auth() {
     let salt = md5_request.unwrap().get_md5_salt().expect("Should have salt");
 
     // Compute MD5 response using the salt
-    let md5_response = vibesql_server::auth::password::compute_md5_password("secret", "testuser", &salt);
+    let md5_response =
+        vibesql_server::auth::password::compute_md5_password("secret", "testuser", &salt);
 
     // Send MD5 password (with md5 prefix as per protocol)
     client.send_password(&format!("md5{}", md5_response)).await.expect("Failed to send password");
@@ -205,10 +209,7 @@ async fn test_md5_auth() {
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
 
-    assert!(
-        messages.iter().any(|m| m.is_auth_ok()),
-        "MD5 auth should succeed"
-    );
+    assert!(messages.iter().any(|m| m.is_auth_ok()), "MD5 auth should succeed");
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();
@@ -275,7 +276,10 @@ async fn test_password_file_with_comments() {
     client.send_password("mypassword").await.expect("Failed to send password");
     let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
     let messages = parse_backend_messages(&data);
-    assert!(messages.iter().any(|m| m.is_auth_ok()), "Should authenticate despite comments in file");
+    assert!(
+        messages.iter().any(|m| m.is_auth_ok()),
+        "Should authenticate despite comments in file"
+    );
 
     client.send_terminate().await.expect("Failed to terminate");
     server.shutdown();

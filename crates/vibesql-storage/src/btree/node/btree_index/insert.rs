@@ -14,7 +14,10 @@ impl BTreeIndex {
     ///
     /// Returns (leaf_node, path) where path is Vec<(PageId, child_index)>
     /// The path tracks which child was taken at each internal node level
-    pub(super) fn find_leaf_path(&self, key: &Key) -> Result<(LeafNode, Vec<(PageId, usize)>), StorageError> {
+    pub(super) fn find_leaf_path(
+        &self,
+        key: &Key,
+    ) -> Result<(LeafNode, Vec<(PageId, usize)>), StorageError> {
         let mut path = Vec::new();
         let mut current_page_id = self.root_page_id;
 

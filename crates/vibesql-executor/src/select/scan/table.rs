@@ -14,11 +14,16 @@ use std::collections::HashMap;
 
 use super::predicates::{apply_table_local_predicates, apply_table_local_predicates_ref};
 use crate::{
-    errors::ExecutorError, evaluator::CombinedExpressionEvaluator,
-    information_schema::{execute_information_schema_query, get_information_schema_table_schema, parse_qualified_name},
+    errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
+    information_schema::{
+        execute_information_schema_query, get_information_schema_table_schema, parse_qualified_name,
+    },
     optimizer::PredicatePlan,
-    privilege_checker::PrivilegeChecker, schema::CombinedSchema, select::cte::CteResult,
-    select::columnar::{ColumnarBatch, ColumnPredicate, simd_filter_batch},
+    privilege_checker::PrivilegeChecker,
+    schema::CombinedSchema,
+    select::columnar::{simd_filter_batch, ColumnPredicate, ColumnarBatch},
+    select::cte::CteResult,
 };
 
 #[cfg(feature = "parallel")]
@@ -82,9 +87,9 @@ pub(crate) fn execute_table_scan(
                 &predicate_plan,
                 &effective_name,
                 database,
-                None,  // No outer context for non-correlated predicate pushdown
+                None, // No outer context for non-correlated predicate pushdown
                 None,
-                Some(cte_results),  // CTE context for IN subqueries referencing CTEs
+                Some(cte_results), // CTE context for IN subqueries referencing CTEs
             )?;
             return Ok(super::FromResult::from_rows(schema, rows));
         }
@@ -183,9 +188,9 @@ pub(crate) fn execute_table_scan(
                 &predicate_plan,
                 &effective_name,
                 database,
-                None,  // No outer context for non-correlated predicate pushdown
+                None, // No outer context for non-correlated predicate pushdown
                 None,
-                Some(cte_results),  // CTE context for IN subqueries referencing CTEs
+                Some(cte_results), // CTE context for IN subqueries referencing CTEs
             )?;
         }
 
@@ -198,26 +203,41 @@ pub(crate) fn execute_table_scan(
     // First, try primary key point lookup for O(1) access (TPC-C optimization #3221)
     // This handles queries like: SELECT ... FROM stock WHERE s_w_id = 1 AND s_i_id = 123
     // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
-    if let Some(result) = try_primary_key_lookup(table_name, alias, where_clause, database, cte_results)? {
+    if let Some(result) =
+        try_primary_key_lookup(table_name, alias, where_clause, database, cte_results)?
+    {
         return Ok(result);
     }
 
     // Check if we should use an index scan (with cost-based selection)
-    if let Some((index_name, sorted_columns)) = super::index_scan::cost_based_index_selection(table_name, where_clause, order_by, database) {
+    if let Some((index_name, sorted_columns)) =
+        super::index_scan::cost_based_index_selection(table_name, where_clause, order_by, database)
+    {
         // Use index scan for potentially better performance
         if std::env::var("TABLE_SCAN_DEBUG").is_ok() {
             eprintln!("[TABLE_SCAN] Using index scan: table={}, index={}", table_name, index_name);
         }
         // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
         // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
-        return super::index_scan::execute_index_scan(table_name, &index_name, alias, where_clause, sorted_columns, limit, database, cte_results);
+        return super::index_scan::execute_index_scan(
+            table_name,
+            &index_name,
+            alias,
+            where_clause,
+            sorted_columns,
+            limit,
+            database,
+            cte_results,
+        );
     }
 
     // Debug: Log when table scan is used instead of index
     if std::env::var("TABLE_SCAN_DEBUG").is_ok() && where_clause.is_some() {
         let indexes = database.list_indexes_for_table(table_name);
-        eprintln!("[TABLE_SCAN] Falling back to table scan: table={}, available_indexes={:?}, where={:?}",
-            table_name, indexes, where_clause);
+        eprintln!(
+            "[TABLE_SCAN] Falling back to table scan: table={}, available_indexes={:?}, where={:?}",
+            table_name, indexes, where_clause
+        );
     }
 
     // Use database table (fall back to table scan)
@@ -243,7 +263,10 @@ pub(crate) fn execute_table_scan(
             // Filtering will happen later with full outer row context
             let rows = row_slice.to_vec();
             use crate::select::from_iterator::FromIterator;
-            return Ok(super::FromResult::from_iterator(schema, FromIterator::from_table_scan(rows)));
+            return Ok(super::FromResult::from_iterator(
+                schema,
+                FromIterator::from_table_scan(rows),
+            ));
         }
 
         // Build predicate plan once for this table
@@ -271,23 +294,32 @@ pub(crate) fn execute_table_scan(
         if has_filters {
             // Try columnar filter optimization for simple predicates
             // Extract predicates once and choose the best execution path (#2972)
-            if let Some(column_predicates) = crate::select::columnar::extract_column_predicates(where_expr, &schema) {
+            if let Some(column_predicates) =
+                crate::select::columnar::extract_column_predicates(where_expr, &schema)
+            {
                 if std::env::var("COLUMNAR_DEBUG").is_ok() {
-                    eprintln!("[COLUMNAR_DEBUG] {} table: extracted {} predicates for {} rows",
-                        table_name, column_predicates.len(), row_slice.len());
+                    eprintln!(
+                        "[COLUMNAR_DEBUG] {} table: extracted {} predicates for {} rows",
+                        table_name,
+                        column_predicates.len(),
+                        row_slice.len()
+                    );
                 }
                 // For native columnar tables, use SIMD filtering on typed columns
                 // This avoids SqlValue overhead by working directly on i64/f64/String arrays
                 if table.is_native_columnar() && row_slice.len() >= SIMD_COLUMNAR_THRESHOLD {
-                    if let Ok(filtered_rows) = filter_with_simd_columnar(table, &column_predicates) {
+                    if let Ok(filtered_rows) = filter_with_simd_columnar(table, &column_predicates)
+                    {
                         return Ok(super::FromResult::from_rows(schema, filtered_rows));
                     }
                     // Fall through to row-based path if SIMD fails
                 }
 
                 // For row-oriented tables, use bitmap-based filtering
-                let indices = crate::select::columnar::apply_columnar_filter(row_slice, &column_predicates)?;
-                let filtered_rows: Vec<_> = indices.into_iter().filter_map(|idx| row_slice.get(idx).cloned()).collect();
+                let indices =
+                    crate::select::columnar::apply_columnar_filter(row_slice, &column_predicates)?;
+                let filtered_rows: Vec<_> =
+                    indices.into_iter().filter_map(|idx| row_slice.get(idx).cloned()).collect();
                 return Ok(super::FromResult::from_rows(schema, filtered_rows));
             }
 
@@ -305,9 +337,9 @@ pub(crate) fn execute_table_scan(
                 &predicate_plan,
                 &effective_name,
                 database,
-                None,  // No outer context for predicate pushdown
+                None, // No outer context for predicate pushdown
                 None,
-                Some(cte_results),  // CTE context for IN subqueries referencing CTEs
+                Some(cte_results), // CTE context for IN subqueries referencing CTEs
             )?;
             return Ok(super::FromResult::from_rows(schema, filtered_rows));
         }
@@ -347,8 +379,8 @@ fn filter_with_simd_columnar(
     predicates: &[ColumnPredicate],
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // Step 1: Get columnar data from table (uses cache if available)
-    let columnar_table = table.scan_columnar()
-        .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+    let columnar_table =
+        table.scan_columnar().map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
     // Step 2: Convert to ColumnarBatch for SIMD operations
     // This is zero-copy for Arc-wrapped data (just bumps reference count)
@@ -408,10 +440,8 @@ fn try_primary_key_lookup(
     };
 
     // Get primary key column names
-    let pk_column_names: Vec<&str> = pk_indices
-        .iter()
-        .map(|&idx| table.schema.columns[idx].name.as_str())
-        .collect();
+    let pk_column_names: Vec<&str> =
+        pk_indices.iter().map(|&idx| table.schema.columns[idx].name.as_str()).collect();
 
     // Try to extract equality predicates for all primary key columns
     let pk_values = match extract_primary_key_values(where_expr, &pk_column_names) {
@@ -445,7 +475,11 @@ fn try_primary_key_lookup(
                 let evaluator = if cte_results.is_empty() {
                     CombinedExpressionEvaluator::with_database(&schema, database)
                 } else {
-                    CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_results)
+                    CombinedExpressionEvaluator::with_database_and_cte(
+                        &schema,
+                        database,
+                        cte_results,
+                    )
                 };
                 match evaluator.eval(where_expr, row) {
                     Ok(vibesql_types::SqlValue::Boolean(true)) => vec![row.clone()],
@@ -503,11 +537,7 @@ fn collect_equality_predicates_recursive(
 
     match expr {
         // Handle equality: col = value or value = col
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::Equal,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal
             if let Expression::ColumnRef { column, .. } = left.as_ref() {
                 if let Expression::Literal(value) = right.as_ref() {
@@ -526,11 +556,7 @@ fn collect_equality_predicates_recursive(
             }
         }
         // Handle AND: recurse into both sides
-        Expression::BinaryOp {
-            left,
-            op: BinaryOperator::And,
-            right,
-        } => {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             collect_equality_predicates_recursive(left, predicates);
             collect_equality_predicates_recursive(right, predicates);
         }

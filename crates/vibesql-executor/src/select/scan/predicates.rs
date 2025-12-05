@@ -10,9 +10,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    errors::ExecutorError, evaluator::CombinedExpressionEvaluator,
-    optimizer::PredicatePlan, schema::CombinedSchema,
-    select::cte::CteResult,
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::PredicatePlan,
+    schema::CombinedSchema, select::cte::CteResult,
 };
 
 #[cfg(feature = "parallel")]
@@ -44,9 +43,7 @@ pub(crate) fn apply_table_local_predicates_ref(
     cte_context: Option<&HashMap<String, CteResult>>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // Get table statistics for selectivity-based ordering
-    let table_stats = database
-        .get_table(table_name)
-        .and_then(|table| table.get_statistics());
+    let table_stats = database.get_table(table_name).and_then(|table| table.get_statistics());
 
     // Get predicates ordered by selectivity (most selective first)
     let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, table_stats);
@@ -71,9 +68,10 @@ pub(crate) fn apply_table_local_predicates_ref(
 
             if let Some(predicate_tree) = extract_predicate_tree(&combined_where, &schema) {
                 // Use columnar filtering
-                let bitmap = create_filter_bitmap_tree(rows.len(), &predicate_tree, |row_idx, col_idx| {
-                    rows.get(row_idx).and_then(|row| row.get(col_idx))
-                })?;
+                let bitmap =
+                    create_filter_bitmap_tree(rows.len(), &predicate_tree, |row_idx, col_idx| {
+                        rows.get(row_idx).and_then(|row| row.get(col_idx))
+                    })?;
 
                 // Clone only rows that pass the filter
                 let filtered_rows: Vec<_> = rows
@@ -92,17 +90,25 @@ pub(crate) fn apply_table_local_predicates_ref(
         let evaluator = match (outer_row, outer_schema, cte_context) {
             (Some(outer_row), Some(outer_schema), Some(cte_ctx)) => {
                 CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
-                    &schema, database, outer_row, outer_schema, cte_ctx)
+                    &schema,
+                    database,
+                    outer_row,
+                    outer_schema,
+                    cte_ctx,
+                )
             }
             (Some(outer_row), Some(outer_schema), None) => {
-                CombinedExpressionEvaluator::with_database_and_outer_context(&schema, database, outer_row, outer_schema)
+                CombinedExpressionEvaluator::with_database_and_outer_context(
+                    &schema,
+                    database,
+                    outer_row,
+                    outer_schema,
+                )
             }
             (None, None, Some(cte_ctx)) => {
                 CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_ctx)
             }
-            _ => {
-                CombinedExpressionEvaluator::with_database(&schema, database)
-            }
+            _ => CombinedExpressionEvaluator::with_database(&schema, database),
         };
 
         // Filter rows, only cloning those that pass
@@ -170,9 +176,7 @@ pub(crate) fn apply_table_local_predicates(
     cte_context: Option<&HashMap<String, CteResult>>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // Get table statistics for selectivity-based ordering
-    let table_stats = database
-        .get_table(table_name)
-        .and_then(|table| table.get_statistics());
+    let table_stats = database.get_table(table_name).and_then(|table| table.get_statistics());
 
     // Get predicates ordered by selectivity (most selective first)
     // Falls back to parse order if statistics unavailable
@@ -190,9 +194,10 @@ pub(crate) fn apply_table_local_predicates(
 
             if let Some(predicate_tree) = extract_predicate_tree(&combined_where, &schema) {
                 // Use columnar filtering
-                let bitmap = create_filter_bitmap_tree(rows.len(), &predicate_tree, |row_idx, col_idx| {
-                    rows.get(row_idx).and_then(|row| row.get(col_idx))
-                })?;
+                let bitmap =
+                    create_filter_bitmap_tree(rows.len(), &predicate_tree, |row_idx, col_idx| {
+                        rows.get(row_idx).and_then(|row| row.get(col_idx))
+                    })?;
 
                 // Keep only rows that pass the filter
                 let filtered_rows: Vec<_> = rows
@@ -210,17 +215,25 @@ pub(crate) fn apply_table_local_predicates(
         let evaluator = match (outer_row, outer_schema, cte_context) {
             (Some(outer_row), Some(outer_schema), Some(cte_ctx)) => {
                 CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
-                    &schema, database, outer_row, outer_schema, cte_ctx)
+                    &schema,
+                    database,
+                    outer_row,
+                    outer_schema,
+                    cte_ctx,
+                )
             }
             (Some(outer_row), Some(outer_schema), None) => {
-                CombinedExpressionEvaluator::with_database_and_outer_context(&schema, database, outer_row, outer_schema)
+                CombinedExpressionEvaluator::with_database_and_outer_context(
+                    &schema,
+                    database,
+                    outer_row,
+                    outer_schema,
+                )
             }
             (None, None, Some(cte_ctx)) => {
                 CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_ctx)
             }
-            _ => {
-                CombinedExpressionEvaluator::with_database(&schema, database)
-            }
+            _ => CombinedExpressionEvaluator::with_database(&schema, database),
         };
 
         // Check if we should use parallel filtering
@@ -342,7 +355,9 @@ fn apply_predicates_parallel(
 }
 
 /// Helper function to combine predicates with AND operator
-pub(crate) fn combine_predicates_with_and(mut predicates: Vec<vibesql_ast::Expression>) -> vibesql_ast::Expression {
+pub(crate) fn combine_predicates_with_and(
+    mut predicates: Vec<vibesql_ast::Expression>,
+) -> vibesql_ast::Expression {
     if predicates.is_empty() {
         // This shouldn't happen, but default to TRUE
         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))

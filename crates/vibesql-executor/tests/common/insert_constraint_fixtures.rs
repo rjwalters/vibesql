@@ -12,7 +12,11 @@ pub fn create_not_null_table(db: &mut vibesql_storage::Database, table_name: &st
     let schema = vibesql_catalog::TableSchema::new(
         table_name.to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -30,7 +34,11 @@ pub fn create_single_pk_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::with_primary_key(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -49,9 +57,21 @@ pub fn create_composite_pk_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::with_primary_key(
         "order_items".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("order_id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("item_id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("qty".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "order_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "item_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "qty".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
         ],
         vec!["order_id".to_string(), "item_id".to_string()],
     );
@@ -65,7 +85,11 @@ pub fn create_unique_email_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::with_all_constraints(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "email".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -85,9 +109,21 @@ pub fn create_composite_unique_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::with_unique_constraints(
         "enrollments".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("student_id".to_string(), vibesql_types::DataType::Integer, true),
-            vibesql_catalog::ColumnSchema::new("course_id".to_string(), vibesql_types::DataType::Integer, true),
-            vibesql_catalog::ColumnSchema::new("grade".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "student_id".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "course_id".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "grade".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
         ],
         vec![vec!["student_id".to_string(), "course_id".to_string()]],
     );
@@ -101,7 +137,11 @@ pub fn create_multi_unique_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::with_all_constraints(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "email".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -125,7 +165,11 @@ pub fn create_check_price_table(db: &mut vibesql_storage::Database, nullable_pri
     let schema = vibesql_catalog::TableSchema::with_all_constraint_types(
         "products".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "price".to_string(),
                 vibesql_types::DataType::Integer,
@@ -142,7 +186,9 @@ pub fn create_check_price_table(db: &mut vibesql_storage::Database, nullable_pri
                     column: "price".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(0),
+                )),
             },
         )],
         Vec::new(),
@@ -156,9 +202,21 @@ pub fn create_multi_check_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::with_all_constraint_types(
         "products".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("price".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("quantity".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "price".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "quantity".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
         None,
         Vec::new(),
@@ -171,7 +229,9 @@ pub fn create_multi_check_table(db: &mut vibesql_storage::Database) {
                         column: "price".to_string(),
                     }),
                     op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
-                    right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(0),
+                    )),
                 },
             ),
             (
@@ -182,7 +242,9 @@ pub fn create_multi_check_table(db: &mut vibesql_storage::Database) {
                         column: "quantity".to_string(),
                     }),
                     op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
-                    right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(0),
+                    )),
                 },
             ),
         ],
@@ -197,9 +259,21 @@ pub fn create_check_comparison_table(db: &mut vibesql_storage::Database) {
     let schema = vibesql_catalog::TableSchema::with_all_constraint_types(
         "employees".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("salary".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("bonus".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "salary".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "bonus".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
         None,
         Vec::new(),
@@ -224,7 +298,10 @@ pub fn create_check_comparison_table(db: &mut vibesql_storage::Database) {
 
 /// Builds an insert statement with all columns
 #[allow(dead_code)]
-pub fn build_insert_values(table_name: &str, values: Vec<vibesql_types::SqlValue>) -> vibesql_ast::InsertStmt {
+pub fn build_insert_values(
+    table_name: &str,
+    values: Vec<vibesql_types::SqlValue>,
+) -> vibesql_ast::InsertStmt {
     vibesql_ast::InsertStmt {
         table_name: table_name.to_string(),
         columns: vec![],

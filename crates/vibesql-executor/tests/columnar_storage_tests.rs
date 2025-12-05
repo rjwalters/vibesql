@@ -22,21 +22,14 @@ fn create_columnar_table(db: &mut Database, sql: &str) -> Result<String, String>
 
 /// Helper to create a columnar table directly (bypasses executor schema handling)
 fn create_columnar_table_direct(db: &mut Database, name: &str, columns: Vec<ColumnSchema>) {
-    let schema = TableSchema::with_storage_format(
-        name.to_string(),
-        columns,
-        StorageFormat::Columnar,
-    );
+    let schema =
+        TableSchema::with_storage_format(name.to_string(), columns, StorageFormat::Columnar);
     db.create_table(schema).unwrap();
 }
 
 /// Helper to create a row table directly
 fn create_row_table_direct(db: &mut Database, name: &str, columns: Vec<ColumnSchema>) {
-    let schema = TableSchema::with_storage_format(
-        name.to_string(),
-        columns,
-        StorageFormat::Row,
-    );
+    let schema = TableSchema::with_storage_format(name.to_string(), columns, StorageFormat::Row);
     db.create_table(schema).unwrap();
 }
 
@@ -79,10 +72,8 @@ fn test_create_row_table_explicit() {
 fn test_create_table_default_is_row() {
     let mut db = Database::new();
 
-    let result = create_columnar_table(
-        &mut db,
-        "CREATE TABLE default_table (id INT, name VARCHAR(50))",
-    );
+    let result =
+        create_columnar_table(&mut db, "CREATE TABLE default_table (id INT, name VARCHAR(50))");
     assert!(result.is_ok(), "Should create table with default storage");
 
     let table = db.get_table("default_table").expect("Table should exist");
@@ -196,8 +187,14 @@ fn test_columnar_table_is_native_columnar() {
     let col_table = db.get_table("col_table").unwrap();
     let row_table = db.get_table("row_table").unwrap();
 
-    assert!(col_table.is_native_columnar(), "Columnar table should return true for is_native_columnar()");
-    assert!(!row_table.is_native_columnar(), "Row table should return false for is_native_columnar()");
+    assert!(
+        col_table.is_native_columnar(),
+        "Columnar table should return true for is_native_columnar()"
+    );
+    assert!(
+        !row_table.is_native_columnar(),
+        "Row table should return false for is_native_columnar()"
+    );
 }
 
 // ============================================================================
@@ -214,7 +211,11 @@ fn test_columnar_table_with_multiple_types() {
         "typed_data",
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                false,
+            ),
             ColumnSchema::new("price".to_string(), DataType::DoublePrecision, false),
             ColumnSchema::new("quantity".to_string(), DataType::Bigint, false),
             ColumnSchema::new("rate".to_string(), DataType::DoublePrecision, false),

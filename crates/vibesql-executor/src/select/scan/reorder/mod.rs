@@ -17,8 +17,4 @@ mod utils;
 
 // Re-export public API
 pub(crate) use optimizer::execute_with_join_reordering;
-pub(crate) use utils::{
-    all_joins_are_cross,
-    count_tables_in_from,
-    should_apply_join_reordering,
-};
+pub(crate) use utils::{all_joins_are_cross, count_tables_in_from, should_apply_join_reordering};

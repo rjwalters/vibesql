@@ -247,8 +247,8 @@ impl BufferPool {
 mod tests {
     use tempfile::TempDir;
 
-    use crate::NativeStorage;
     use super::*;
+    use crate::NativeStorage;
 
     #[test]
     fn test_buffer_pool_creation() {

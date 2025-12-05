@@ -87,7 +87,11 @@ fn test_grant_on_qualified_table() {
 
     // Verify the privilege was stored
     assert!(
-        db.catalog.has_privilege("clerk", "myschema.products", &vibesql_ast::PrivilegeType::Select(None)),
+        db.catalog.has_privilege(
+            "clerk",
+            "myschema.products",
+            &vibesql_ast::PrivilegeType::Select(None)
+        ),
         "Privilege was not stored in catalog"
     );
 }
@@ -230,7 +234,10 @@ fn test_grant_matrix_multiple_privileges_and_grantees() {
     // Grant multiple privileges to multiple grantees
     // This should create 2 privileges × 2 grantees = 4 grant records
     let grant_stmt = vibesql_ast::GrantStmt {
-        privileges: vec![vibesql_ast::PrivilegeType::Select(None), vibesql_ast::PrivilegeType::Insert(None)],
+        privileges: vec![
+            vibesql_ast::PrivilegeType::Select(None),
+            vibesql_ast::PrivilegeType::Insert(None),
+        ],
         object_type: vibesql_ast::ObjectType::Table,
         object_name: "products".to_string(),
         for_type_name: None,
@@ -418,7 +425,11 @@ fn test_grant_all_privileges_to_multiple_grantees() {
         "Manager should have DELETE"
     );
     assert!(
-        db.catalog.has_privilege("manager", "orders", &vibesql_ast::PrivilegeType::References(None)),
+        db.catalog.has_privilege(
+            "manager",
+            "orders",
+            &vibesql_ast::PrivilegeType::References(None)
+        ),
         "Manager should have REFERENCES"
     );
 

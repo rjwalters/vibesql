@@ -1,7 +1,10 @@
 use super::{combine_rows, FromResult};
 use crate::{
-    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, limits::MAX_MEMORY_BYTES,
-    schema::CombinedSchema, timeout::{TimeoutContext, CHECK_INTERVAL},
+    errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
+    limits::MAX_MEMORY_BYTES,
+    schema::CombinedSchema,
+    timeout::{TimeoutContext, CHECK_INTERVAL},
 };
 
 /// Maximum number of rows allowed in a join result to prevent memory exhaustion
@@ -10,10 +13,7 @@ const MAX_JOIN_RESULT_ROWS: usize = 100_000_000;
 
 /// Check if a CROSS JOIN would exceed memory limits
 /// Only used for true CROSS JOINs (no join condition)
-fn check_cross_join_size_limit(
-    left_count: usize,
-    right_count: usize,
-) -> Result<(), ExecutorError> {
+fn check_cross_join_size_limit(left_count: usize, right_count: usize) -> Result<(), ExecutorError> {
     // CROSS JOIN creates Cartesian product
     let estimated_result_rows = left_count.saturating_mul(right_count);
 
@@ -62,7 +62,9 @@ fn analyze_join_condition(
     }
 
     // Check if condition is an AND with at least one simple equijoin
-    if let vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::And, left, right } = condition {
+    if let vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::And, left, right } =
+        condition
+    {
         // Try left side
         if let Some(equi_info) = join_analyzer::analyze_equi_join(left, schema, left_col_count) {
             return EquijoinEvalStrategy::Simple {
@@ -133,16 +135,19 @@ fn execute_optimized_equijoin(
                 // Clear CSE cache before evaluation
                 evaluator.as_ref().unwrap().clear_cse_cache();
 
-                let matches = match evaluator.as_ref().unwrap().eval(remaining_cond, &combined_row)? {
-                    vibesql_types::SqlValue::Boolean(true) => true,
-                    vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
-                    other => {
-                        return Err(ExecutorError::InvalidWhereClause(format!(
-                            "JOIN condition must evaluate to boolean, got: {:?}",
-                            other
-                        )))
-                    }
-                };
+                let matches =
+                    match evaluator.as_ref().unwrap().eval(remaining_cond, &combined_row)? {
+                        vibesql_types::SqlValue::Boolean(true) => true,
+                        vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => {
+                            false
+                        }
+                        other => {
+                            return Err(ExecutorError::InvalidWhereClause(format!(
+                                "JOIN condition must evaluate to boolean, got: {:?}",
+                                other
+                            )))
+                        }
+                    };
 
                 if matches {
                     result_rows.push(combined_row);
@@ -334,7 +339,14 @@ pub(super) fn nested_loop_inner_join(
         }
         EquijoinEvalStrategy::Complex => {
             // SLOW PATH: Use existing algorithm (allocate then evaluate)
-            execute_nested_loop_classic(left_slice, right_slice, condition, &combined_schema, database, timeout_ctx)?
+            execute_nested_loop_classic(
+                left_slice,
+                right_slice,
+                condition,
+                &combined_schema,
+                database,
+                timeout_ctx,
+            )?
         }
     };
 
@@ -372,7 +384,8 @@ pub(super) fn nested_loop_left_outer_join(
     let right_column_count = right_schema.columns.len();
 
     // Combine schemas
-    let combined_schema = CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    let combined_schema =
+        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
     // Use as_slice() for zero-cost access without triggering row materialization
@@ -460,7 +473,8 @@ pub(super) fn nested_loop_right_outer_join(
         .len();
 
     // Do LEFT OUTER JOIN with swapped sides
-    let swapped_result = nested_loop_left_outer_join(right, left, condition, database, timeout_ctx)?;
+    let swapped_result =
+        nested_loop_left_outer_join(right, left, condition, database, timeout_ctx)?;
 
     // Now we need to reorder the columns in the result
     // The swapped result has right columns first, then left columns
@@ -524,7 +538,8 @@ pub(super) fn nested_loop_full_outer_join(
     let right_column_count = right_schema.columns.len();
 
     // Combine schemas
-    let combined_schema = CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    let combined_schema =
+        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
     // Use as_slice() for zero-cost access without triggering row materialization
@@ -643,7 +658,8 @@ pub(super) fn nested_loop_cross_join(
         .clone();
 
     // Combine schemas
-    let combined_schema = CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    let combined_schema =
+        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
 
     // CROSS JOIN = Cartesian product (every row from left × every row from right)
     let mut result_rows = Vec::new();
@@ -728,10 +744,12 @@ pub(super) fn nested_loop_semi_join(
                     match value {
                         vibesql_types::SqlValue::Boolean(b) => b,
                         vibesql_types::SqlValue::Null => false,
-                        _ => return Err(ExecutorError::InvalidWhereClause(format!(
-                            "Join condition must evaluate to boolean, got: {:?}",
-                            value
-                        ))),
+                        _ => {
+                            return Err(ExecutorError::InvalidWhereClause(format!(
+                                "Join condition must evaluate to boolean, got: {:?}",
+                                value
+                            )))
+                        }
                     }
                 }
             };
@@ -816,10 +834,12 @@ pub(super) fn nested_loop_anti_join(
                     match value {
                         vibesql_types::SqlValue::Boolean(b) => b,
                         vibesql_types::SqlValue::Null => false,
-                        _ => return Err(ExecutorError::InvalidWhereClause(format!(
-                            "Join condition must evaluate to boolean, got: {:?}",
-                            value
-                        ))),
+                        _ => {
+                            return Err(ExecutorError::InvalidWhereClause(format!(
+                                "Join condition must evaluate to boolean, got: {:?}",
+                                value
+                            )))
+                        }
                     }
                 }
             };

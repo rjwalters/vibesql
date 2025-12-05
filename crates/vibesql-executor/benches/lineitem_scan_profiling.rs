@@ -31,12 +31,10 @@ const LINEITEM_FULL_SCAN: &str = "SELECT * FROM lineitem";
 const LINEITEM_COUNT: &str = "SELECT COUNT(*) FROM lineitem";
 
 /// Date predicate only (same as Q1)
-const LINEITEM_DATE_FILTER: &str =
-    "SELECT * FROM lineitem WHERE l_shipdate <= '1998-09-01'";
+const LINEITEM_DATE_FILTER: &str = "SELECT * FROM lineitem WHERE l_shipdate <= '1998-09-01'";
 
 /// Date predicate with COUNT
-const LINEITEM_DATE_COUNT: &str =
-    "SELECT COUNT(*) FROM lineitem WHERE l_shipdate <= '1998-09-01'";
+const LINEITEM_DATE_COUNT: &str = "SELECT COUNT(*) FROM lineitem WHERE l_shipdate <= '1998-09-01'";
 
 /// Single column projection
 const LINEITEM_SINGLE_COLUMN: &str = "SELECT l_orderkey FROM lineitem";

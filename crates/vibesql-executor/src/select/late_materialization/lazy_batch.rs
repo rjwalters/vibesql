@@ -39,12 +39,11 @@ impl SourceData {
     /// Get a value at a specific position
     pub fn get_value(&self, row_idx: usize, col_idx: usize) -> Result<SqlValue, ExecutorError> {
         match self {
-            SourceData::Rows(rows) => {
-                rows.get(row_idx)
-                    .and_then(|row| row.get(col_idx))
-                    .cloned()
-                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_idx })
-            }
+            SourceData::Rows(rows) => rows
+                .get(row_idx)
+                .and_then(|row| row.get(col_idx))
+                .cloned()
+                .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_idx }),
             SourceData::Columnar(batch) => batch.get_value(row_idx, col_idx),
         }
     }
@@ -52,11 +51,10 @@ impl SourceData {
     /// Get a row at a specific index (materializes if columnar)
     pub fn get_row(&self, row_idx: usize) -> Result<Row, ExecutorError> {
         match self {
-            SourceData::Rows(rows) => {
-                rows.get(row_idx)
-                    .cloned()
-                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: row_idx })
-            }
+            SourceData::Rows(rows) => rows
+                .get(row_idx)
+                .cloned()
+                .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: row_idx }),
             SourceData::Columnar(batch) => {
                 let mut values = Vec::with_capacity(batch.column_count());
                 for col_idx in 0..batch.column_count() {
@@ -111,20 +109,12 @@ impl LazyMaterializedBatch {
     /// Create a new lazy batch from source data (selects all rows)
     pub fn new(source: SourceData) -> Self {
         let row_count = source.row_count();
-        Self {
-            source,
-            selection: SelectionVector::all(row_count),
-            column_names: None,
-        }
+        Self { source, selection: SelectionVector::all(row_count), column_names: None }
     }
 
     /// Create a new lazy batch with a specific selection
     pub fn with_selection(source: SourceData, selection: SelectionVector) -> Self {
-        Self {
-            source,
-            selection,
-            column_names: None,
-        }
+        Self { source, selection, column_names: None }
     }
 
     /// Create from row-based data
@@ -199,11 +189,8 @@ impl LazyMaterializedBatch {
     where
         F: Fn(usize) -> bool,
     {
-        let new_indices: Vec<u32> = self
-            .selection
-            .iter()
-            .filter(|&idx| predicate(idx as usize))
-            .collect();
+        let new_indices: Vec<u32> =
+            self.selection.iter().filter(|&idx| predicate(idx as usize)).collect();
 
         Self {
             source: self.source.clone(),
@@ -284,7 +271,9 @@ impl LazyMaterializedBatch {
         selection_idx: usize,
         column_idx: usize,
     ) -> Result<SqlValue, ExecutorError> {
-        let row_idx = self.selection.get(selection_idx)
+        let row_idx = self
+            .selection
+            .get(selection_idx)
             .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: selection_idx })?;
 
         self.source.get_value(row_idx as usize, column_idx)
@@ -363,12 +352,7 @@ pub struct JoinedLazyBatchBuilder {
 impl JoinedLazyBatchBuilder {
     /// Create a new builder for joining two sources
     pub fn new(left_source: SourceData, right_source: SourceData) -> Self {
-        Self {
-            left_source,
-            right_source,
-            left_indices: Vec::new(),
-            right_indices: Vec::new(),
-        }
+        Self { left_source, right_source, left_indices: Vec::new(), right_indices: Vec::new() }
     }
 
     /// Add a matched pair of indices
@@ -558,10 +542,8 @@ mod lazy_batch_tests {
     fn test_lazy_batch_with_selection() {
         let rows = sample_rows();
         let selection = SelectionVector::from_indices(vec![0, 2, 4]); // Alice, Carol, Eve
-        let batch = LazyMaterializedBatch::with_selection(
-            SourceData::Rows(Arc::new(rows)),
-            selection,
-        );
+        let batch =
+            LazyMaterializedBatch::with_selection(SourceData::Rows(Arc::new(rows)), selection);
 
         assert_eq!(batch.len(), 3);
 
@@ -616,10 +598,8 @@ mod lazy_batch_tests {
     fn test_selectivity() {
         let rows = sample_rows();
         let selection = SelectionVector::from_indices(vec![0, 2]); // 2 out of 5
-        let batch = LazyMaterializedBatch::with_selection(
-            SourceData::Rows(Arc::new(rows)),
-            selection,
-        );
+        let batch =
+            LazyMaterializedBatch::with_selection(SourceData::Rows(Arc::new(rows)), selection);
 
         assert!((batch.selectivity() - 0.4).abs() < 0.001);
     }

@@ -53,10 +53,6 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::TruncateTableStmt {
-            table_names,
-            if_exists,
-            cascade,
-        })
+        Ok(vibesql_ast::TruncateTableStmt { table_names, if_exists, cascade })
     }
 }

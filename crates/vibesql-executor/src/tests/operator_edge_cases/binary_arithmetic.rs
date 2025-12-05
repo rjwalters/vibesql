@@ -23,18 +23,28 @@ fn test_nested_arithmetic() {
             expr: vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::BinaryOp {
-                        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))),
+                        left: Box::new(vibesql_ast::Expression::Literal(
+                            vibesql_types::SqlValue::Integer(5),
+                        )),
                         op: vibesql_ast::BinaryOperator::Plus,
-                        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3))),
+                        right: Box::new(vibesql_ast::Expression::Literal(
+                            vibesql_types::SqlValue::Integer(3),
+                        )),
                     }),
                     op: vibesql_ast::BinaryOperator::Multiply,
-                    right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(2),
+                    )),
                 }),
                 op: vibesql_ast::BinaryOperator::Minus,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
+                    left: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(10),
+                    )),
                     op: vibesql_ast::BinaryOperator::Divide,
-                    right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(2),
+                    )),
                 }),
             },
             alias: Some("result".to_string()),
@@ -47,7 +57,8 @@ fn test_nested_arithmetic() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -71,9 +82,13 @@ fn test_integer_division_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(81))),
+                left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                    81,
+                ))),
                 op: vibesql_ast::BinaryOperator::IntegerDivide,
-                right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(31))),
+                right: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Integer(31),
+                )),
             },
             alias: Some("result".to_string()),
         }],
@@ -85,7 +100,8 @@ fn test_integer_division_basic() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);

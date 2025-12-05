@@ -89,9 +89,7 @@ impl QueryArena {
     /// Arena will grow automatically if needed.
     #[inline]
     pub fn with_capacity(bytes: usize) -> Self {
-        Self {
-            bump: Bump::with_capacity(bytes),
-        }
+        Self { bump: Bump::with_capacity(bytes) }
     }
 
     /// Allocate a boolean bitmap with specified length

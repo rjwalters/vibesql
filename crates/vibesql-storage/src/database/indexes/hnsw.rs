@@ -76,10 +76,7 @@ impl PartialOrd for Candidate {
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
         // For min-heap (smallest distance first)
-        other
-            .distance
-            .partial_cmp(&self.distance)
-            .unwrap_or(Ordering::Equal)
+        other.distance.partial_cmp(&self.distance).unwrap_or(Ordering::Equal)
     }
 }
 
@@ -107,9 +104,7 @@ impl PartialOrd for MaxCandidate {
 impl Ord for MaxCandidate {
     fn cmp(&self, other: &Self) -> Ordering {
         // For max-heap (largest distance first)
-        self.distance
-            .partial_cmp(&other.distance)
-            .unwrap_or(Ordering::Equal)
+        self.distance.partial_cmp(&other.distance).unwrap_or(Ordering::Equal)
     }
 }
 
@@ -139,7 +134,7 @@ impl HnswIndex {
             m,
             m_max0: m * 2, // Layer 0 can have more connections
             ef_construction: ef_construction as usize,
-            ef_search: 40, // Default ef_search
+            ef_search: 40,             // Default ef_search
             ml: 1.0 / (m as f64).ln(), // Level multiplier
         }
     }
@@ -374,14 +369,8 @@ impl HnswIndex {
         let ep_dist = self.compute_distance(query, ep_vec);
 
         visited.insert(entry_point);
-        candidates.push(Candidate {
-            node_id: entry_point,
-            distance: ep_dist,
-        });
-        results.push(MaxCandidate {
-            node_id: entry_point,
-            distance: ep_dist,
-        });
+        candidates.push(Candidate { node_id: entry_point, distance: ep_dist });
+        results.push(MaxCandidate { node_id: entry_point, distance: ep_dist });
 
         while let Some(current) = candidates.pop() {
             // Get worst distance in results
@@ -413,14 +402,8 @@ impl HnswIndex {
                 let worst_dist = results.peek().map(|c| c.distance).unwrap_or(f64::INFINITY);
 
                 if results.len() < ef || neighbor_dist < worst_dist {
-                    candidates.push(Candidate {
-                        node_id: neighbor_id,
-                        distance: neighbor_dist,
-                    });
-                    results.push(MaxCandidate {
-                        node_id: neighbor_id,
-                        distance: neighbor_dist,
-                    });
+                    candidates.push(Candidate { node_id: neighbor_id, distance: neighbor_dist });
+                    results.push(MaxCandidate { node_id: neighbor_id, distance: neighbor_dist });
 
                     // Keep only ef results
                     while results.len() > ef {
@@ -431,32 +414,21 @@ impl HnswIndex {
         }
 
         // Convert max-heap to sorted results (smallest distance first)
-        let mut result_vec: Vec<(usize, f64)> = results
-            .into_iter()
-            .map(|c| (c.node_id, c.distance))
-            .collect();
+        let mut result_vec: Vec<(usize, f64)> =
+            results.into_iter().map(|c| (c.node_id, c.distance)).collect();
         result_vec.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
 
         result_vec
     }
 
     /// Select neighbors from candidates (simple heuristic)
-    fn select_neighbors(
-        &self,
-        candidates: &[(usize, f64)],
-        m: usize,
-    ) -> Vec<(usize, f64)> {
+    fn select_neighbors(&self, candidates: &[(usize, f64)], m: usize) -> Vec<(usize, f64)> {
         // Simple: take the m closest
         candidates.iter().take(m).cloned().collect()
     }
 
     /// Prune neighbors list to maintain max connections
-    fn prune_neighbors(
-        &self,
-        node_id: usize,
-        neighbors: &[usize],
-        _level: usize,
-    ) -> Vec<usize> {
+    fn prune_neighbors(&self, node_id: usize, neighbors: &[usize], _level: usize) -> Vec<usize> {
         let node_vec = match self.vectors.get(&node_id) {
             Some(v) => v,
             None => return neighbors.to_vec(),
@@ -467,21 +439,13 @@ impl HnswIndex {
         // Compute distances and sort
         let mut with_dist: Vec<(usize, f64)> = neighbors
             .iter()
-            .filter_map(|&n| {
-                self.vectors
-                    .get(&n)
-                    .map(|v| (n, self.compute_distance(node_vec, v)))
-            })
+            .filter_map(|&n| self.vectors.get(&n).map(|v| (n, self.compute_distance(node_vec, v))))
             .collect();
 
         with_dist.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
 
         // Keep only m_max closest
-        with_dist
-            .into_iter()
-            .take(m_max)
-            .map(|(id, _)| id)
-            .collect()
+        with_dist.into_iter().take(m_max).map(|(id, _)| id).collect()
     }
 
     /// Generate random level for new node using exponential distribution
@@ -505,11 +469,7 @@ impl HnswIndex {
     /// Compute L2 (Euclidean) distance
     #[inline]
     fn l2_distance(&self, a: &[f64], b: &[f64]) -> f64 {
-        a.iter()
-            .zip(b.iter())
-            .map(|(x, y)| (x - y).powi(2))
-            .sum::<f64>()
-            .sqrt()
+        a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f64>().sqrt()
     }
 
     /// Compute cosine distance (1 - cosine similarity)

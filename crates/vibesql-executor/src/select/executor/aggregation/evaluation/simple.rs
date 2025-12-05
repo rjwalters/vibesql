@@ -1,7 +1,10 @@
 //! Simple expression evaluation in aggregate context (literals, column refs, etc.)
 
 use super::super::super::builder::SelectExecutor;
-use crate::{errors::ExecutorError, evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator}};
+use crate::{
+    errors::ExecutorError,
+    evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
+};
 
 /// Import pattern matching function for LIKE evaluation
 use crate::evaluator::pattern;
@@ -27,7 +30,8 @@ pub(super) fn evaluate(
         // Example: CAST(MIN(74) AS SIGNED) or CAST(-MIN(74) AS SIGNED)
         vibesql_ast::Expression::Cast { expr: inner_expr, data_type } => {
             // Recursively evaluate the inner expression with aggregate support
-            let inner_value = executor.evaluate_with_aggregates(inner_expr, group_rows, group_key, evaluator)?;
+            let inner_value =
+                executor.evaluate_with_aggregates(inner_expr, group_rows, group_key, evaluator)?;
 
             // Cast the result to the target type using the casting module
             let sql_mode = executor.database.sql_mode();
@@ -37,9 +41,12 @@ pub(super) fn evaluate(
         // BETWEEN: expr BETWEEN low AND high
         // All three sub-expressions may contain aggregates
         vibesql_ast::Expression::Between { expr: test_expr, low, high, negated, symmetric } => {
-            let test_val = executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
-            let mut low_val = executor.evaluate_with_aggregates(low, group_rows, group_key, evaluator)?;
-            let mut high_val = executor.evaluate_with_aggregates(high, group_rows, group_key, evaluator)?;
+            let test_val =
+                executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
+            let mut low_val =
+                executor.evaluate_with_aggregates(low, group_rows, group_key, evaluator)?;
+            let mut high_val =
+                executor.evaluate_with_aggregates(high, group_rows, group_key, evaluator)?;
 
             // For SYMMETRIC: swap bounds if low > high
             if *symmetric {
@@ -111,7 +118,8 @@ pub(super) fn evaluate(
                 return Ok(vibesql_types::SqlValue::Boolean(*negated));
             }
 
-            let test_val = executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
+            let test_val =
+                executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
 
             // SQL standard behavior for NULL IN (list):
             // - NULL IN (empty list) → FALSE (already handled above)
@@ -125,7 +133,10 @@ pub(super) fn evaluate(
             // Evaluate all values in the list
             let mut list_values = Vec::new();
             for value_expr in values {
-                list_values.push(executor.evaluate_with_aggregates(value_expr, group_rows, group_key, evaluator)?);
+                list_values.push(
+                    executor
+                        .evaluate_with_aggregates(value_expr, group_rows, group_key, evaluator)?,
+                );
             }
 
             // Check if test_val is in the list
@@ -166,12 +177,15 @@ pub(super) fn evaluate(
 
         // LIKE: expr LIKE pattern
         vibesql_ast::Expression::Like { expr: test_expr, pattern, negated } => {
-            let test_val = executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
-            let pattern_val = executor.evaluate_with_aggregates(pattern, group_rows, group_key, evaluator)?;
+            let test_val =
+                executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
+            let pattern_val =
+                executor.evaluate_with_aggregates(pattern, group_rows, group_key, evaluator)?;
 
             // Extract string values
             let text = match test_val {
-                vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => s.clone(),
+                vibesql_types::SqlValue::Varchar(ref s)
+                | vibesql_types::SqlValue::Character(ref s) => s.clone(),
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
@@ -183,7 +197,8 @@ pub(super) fn evaluate(
             };
 
             let pattern_str = match pattern_val {
-                vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => s.clone(),
+                vibesql_types::SqlValue::Varchar(ref s)
+                | vibesql_types::SqlValue::Character(ref s) => s.clone(),
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
@@ -205,7 +220,8 @@ pub(super) fn evaluate(
 
         // IS NULL / IS NOT NULL
         vibesql_ast::Expression::IsNull { expr: test_expr, negated } => {
-            let value = executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
+            let value =
+                executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
             let is_null = matches!(value, vibesql_types::SqlValue::Null);
             let result = if *negated { !is_null } else { is_null };
             Ok(vibesql_types::SqlValue::Boolean(result))
@@ -213,8 +229,10 @@ pub(super) fn evaluate(
 
         // POSITION: find position of substring in string
         vibesql_ast::Expression::Position { substring, string, .. } => {
-            let substring_val = executor.evaluate_with_aggregates(substring, group_rows, group_key, evaluator)?;
-            let string_val = executor.evaluate_with_aggregates(string, group_rows, group_key, evaluator)?;
+            let substring_val =
+                executor.evaluate_with_aggregates(substring, group_rows, group_key, evaluator)?;
+            let string_val =
+                executor.evaluate_with_aggregates(string, group_rows, group_key, evaluator)?;
 
             // Evaluate position (1-indexed, 0 if not found)
             match (&substring_val, &string_val) {
@@ -239,7 +257,8 @@ pub(super) fn evaluate(
 
         // TRIM: remove characters from string
         vibesql_ast::Expression::Trim { position, removal_char, string } => {
-            let string_val = executor.evaluate_with_aggregates(string, group_rows, group_key, evaluator)?;
+            let string_val =
+                executor.evaluate_with_aggregates(string, group_rows, group_key, evaluator)?;
             let removal_val = if let Some(rc) = removal_char {
                 executor.evaluate_with_aggregates(rc, group_rows, group_key, evaluator)?
             } else {
@@ -275,7 +294,8 @@ pub(super) fn evaluate(
 
         // INTERVAL: evaluate the value expression and delegate to evaluator
         vibesql_ast::Expression::Interval { value, .. } => {
-            let value_result = executor.evaluate_with_aggregates(value, group_rows, group_key, evaluator)?;
+            let value_result =
+                executor.evaluate_with_aggregates(value, group_rows, group_key, evaluator)?;
 
             // For now, delegate full interval evaluation to the standard evaluator
             // This requires creating a new Interval expression with the evaluated value as a literal
@@ -286,11 +306,15 @@ pub(super) fn evaluate(
                     _ => unreachable!(),
                 },
                 leading_precision: match expr {
-                    vibesql_ast::Expression::Interval { leading_precision, .. } => *leading_precision,
+                    vibesql_ast::Expression::Interval { leading_precision, .. } => {
+                        *leading_precision
+                    }
                     _ => unreachable!(),
                 },
                 fractional_precision: match expr {
-                    vibesql_ast::Expression::Interval { fractional_precision, .. } => *fractional_precision,
+                    vibesql_ast::Expression::Interval { fractional_precision, .. } => {
+                        *fractional_precision
+                    }
                     _ => unreachable!(),
                 },
             };
@@ -307,14 +331,20 @@ pub(super) fn evaluate(
         vibesql_ast::Expression::Conjunction(children) => {
             let mut result = vibesql_types::SqlValue::Boolean(true);
             for child in children {
-                let val = executor.evaluate_with_aggregates(child, group_rows, group_key, evaluator)?;
+                let val =
+                    executor.evaluate_with_aggregates(child, group_rows, group_key, evaluator)?;
                 match val {
-                    vibesql_types::SqlValue::Boolean(false) => return Ok(vibesql_types::SqlValue::Boolean(false)),
+                    vibesql_types::SqlValue::Boolean(false) => {
+                        return Ok(vibesql_types::SqlValue::Boolean(false))
+                    }
                     vibesql_types::SqlValue::Null => result = vibesql_types::SqlValue::Null,
                     vibesql_types::SqlValue::Boolean(true) => {}
-                    _ => return Err(ExecutorError::TypeError(
-                        format!("Conjunction requires boolean operands, got {:?}", val)
-                    )),
+                    _ => {
+                        return Err(ExecutorError::TypeError(format!(
+                            "Conjunction requires boolean operands, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(result)
@@ -324,14 +354,20 @@ pub(super) fn evaluate(
         vibesql_ast::Expression::Disjunction(children) => {
             let mut result = vibesql_types::SqlValue::Boolean(false);
             for child in children {
-                let val = executor.evaluate_with_aggregates(child, group_rows, group_key, evaluator)?;
+                let val =
+                    executor.evaluate_with_aggregates(child, group_rows, group_key, evaluator)?;
                 match val {
-                    vibesql_types::SqlValue::Boolean(true) => return Ok(vibesql_types::SqlValue::Boolean(true)),
+                    vibesql_types::SqlValue::Boolean(true) => {
+                        return Ok(vibesql_types::SqlValue::Boolean(true))
+                    }
                     vibesql_types::SqlValue::Null => result = vibesql_types::SqlValue::Null,
                     vibesql_types::SqlValue::Boolean(false) => {}
-                    _ => return Err(ExecutorError::TypeError(
-                        format!("Disjunction requires boolean operands, got {:?}", val)
-                    )),
+                    _ => {
+                        return Err(ExecutorError::TypeError(format!(
+                            "Disjunction requires boolean operands, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(result)

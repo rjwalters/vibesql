@@ -19,34 +19,22 @@ async fn test_basic_connection() {
     client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
 
     // Read response - should get authentication ok and ready for query
-    let data = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     let messages = parse_backend_messages(&data);
 
     // Should have AuthenticationOk
-    assert!(
-        messages.iter().any(|m| m.is_auth_ok()),
-        "Expected AuthenticationOk message"
-    );
+    assert!(messages.iter().any(|m| m.is_auth_ok()), "Expected AuthenticationOk message");
 
     // Should have ReadyForQuery
-    assert!(
-        messages.iter().any(|m| m.is_ready_for_query()),
-        "Expected ReadyForQuery message"
-    );
+    assert!(messages.iter().any(|m| m.is_ready_for_query()), "Expected ReadyForQuery message");
 
     // Should have ParameterStatus messages (server_version, etc.)
     let param_count = messages.iter().filter(|m| m.is_parameter_status()).count();
     assert!(param_count >= 3, "Expected at least 3 ParameterStatus messages, got {}", param_count);
 
     // Should have BackendKeyData
-    assert!(
-        messages.iter().any(|m| m.is_backend_key_data()),
-        "Expected BackendKeyData message"
-    );
+    assert!(messages.iter().any(|m| m.is_backend_key_data()), "Expected BackendKeyData message");
 
     // Clean disconnect
     client.send_terminate().await.expect("Failed to send terminate");
@@ -70,10 +58,7 @@ async fn test_ssl_request_rejected() {
     client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
 
     // Should complete successfully
-    let data = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     let messages = parse_backend_messages(&data);
     assert!(
@@ -102,7 +87,8 @@ async fn test_graceful_disconnect() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Server should still be running (accepting new connections)
-    let mut client2 = TestClient::connect(server.addr()).await.expect("Server should still accept connections");
+    let mut client2 =
+        TestClient::connect(server.addr()).await.expect("Server should still accept connections");
     client2.send_startup("testuser2", "testdb").await.expect("Failed to send startup");
     let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read response");
     client2.send_terminate().await.expect("Failed to send terminate");
@@ -126,7 +112,9 @@ async fn test_connection_drop_without_terminate() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Server should still be running
-    let mut client2 = TestClient::connect(server.addr()).await.expect("Server should still accept connections after client drop");
+    let mut client2 = TestClient::connect(server.addr())
+        .await
+        .expect("Server should still accept connections after client drop");
     client2.send_startup("testuser2", "testdb").await.expect("Failed to send startup");
     let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read response");
     client2.send_terminate().await.expect("Failed to send terminate");
@@ -149,10 +137,8 @@ async fn test_multiple_concurrent_connections() {
                     .send_startup(&format!("user{}", i), "testdb")
                     .await
                     .expect("Failed to send startup");
-                let data = client
-                    .read_until_message_type(b'Z')
-                    .await
-                    .expect("Failed to read response");
+                let data =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
                 let messages = parse_backend_messages(&data);
                 assert!(messages.iter().any(|m| m.is_ready_for_query()));
                 client.send_terminate().await.expect("Failed to send terminate");
@@ -177,10 +163,7 @@ async fn test_connection_default_database() {
     // Send startup with just user, database should default to user
     client.send_startup("myuser", "myuser").await.expect("Failed to send startup");
 
-    let data = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read response");
+    let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     let messages = parse_backend_messages(&data);
     assert!(
@@ -235,7 +218,8 @@ async fn test_partial_startup_timeout() {
 
     // Try to connect another client while first one is idle
     let result = timeout(Duration::from_secs(2), async {
-        let mut client2 = TestClient::connect(server.addr()).await.expect("Failed to connect second client");
+        let mut client2 =
+            TestClient::connect(server.addr()).await.expect("Failed to connect second client");
         client2.send_startup("testuser", "testdb").await.expect("Failed to send startup");
         let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read response");
         client2.send_terminate().await.expect("Failed to send terminate");
@@ -259,22 +243,12 @@ async fn test_many_sequential_connections() {
             .await
             .unwrap_or_else(|_| panic!("Failed to connect on iteration {}", i));
 
-        client
-            .send_startup(&format!("user{}", i), "testdb")
-            .await
-            .expect("Failed to send startup");
+        client.send_startup(&format!("user{}", i), "testdb").await.expect("Failed to send startup");
 
-        let data = client
-            .read_until_message_type(b'Z')
-            .await
-            .expect("Failed to read response");
+        let data = client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
         let messages = parse_backend_messages(&data);
-        assert!(
-            messages.iter().any(|m| m.is_ready_for_query()),
-            "Connection {} should succeed",
-            i
-        );
+        assert!(messages.iter().any(|m| m.is_ready_for_query()), "Connection {} should succeed", i);
 
         client.send_terminate().await.expect("Failed to terminate");
     }
@@ -293,11 +267,18 @@ async fn test_connection_after_heavy_load() {
         .map(|i| {
             tokio::spawn(async move {
                 let mut client = TestClient::connect(addr).await.expect("Failed to connect");
-                client.send_startup(&format!("user{}", i), "testdb").await.expect("Failed to send startup");
-                let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                client
+                    .send_startup(&format!("user{}", i), "testdb")
+                    .await
+                    .expect("Failed to send startup");
+                let _ =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
                 // Execute a query
                 client.send_query("SELECT 1").await.expect("Failed to send query");
-                let _ = client.read_until_message_type(b'Z').await.expect("Failed to read query response");
+                let _ = client
+                    .read_until_message_type(b'Z')
+                    .await
+                    .expect("Failed to read query response");
                 client.send_terminate().await.expect("Failed to terminate");
             })
         })

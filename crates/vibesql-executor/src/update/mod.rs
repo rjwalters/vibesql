@@ -24,12 +24,12 @@ mod foreign_keys;
 mod row_selector;
 mod value_updater;
 
-use vibesql_ast::{BinaryOperator, Expression, UpdateStmt};
 use constraints::ConstraintValidator;
 use foreign_keys::ForeignKeyValidator;
 use row_selector::RowSelector;
-use vibesql_storage::Database;
 use value_updater::ValueUpdater;
+use vibesql_ast::{BinaryOperator, Expression, UpdateStmt};
+use vibesql_storage::Database;
 
 use crate::{
     errors::ExecutorError, evaluator::ExpressionEvaluator, privilege_checker::PrivilegeChecker,
@@ -165,7 +165,10 @@ impl UpdateExecutor {
         let has_triggers = trigger_context.is_none()
             && database
                 .catalog
-                .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Update(None)))
+                .get_triggers_for_table(
+                    &stmt.table_name,
+                    Some(vibesql_ast::TriggerEvent::Update(None)),
+                )
                 .next()
                 .is_some();
 
@@ -403,10 +406,7 @@ impl UpdateExecutor {
         // Check if we're updating PK columns - if so, check for CASCADE requirements
         if let Some(ref pk_idx) = schema.get_primary_key_indices() {
             let updates_pk = stmt.assignments.iter().any(|a| {
-                schema
-                    .get_column_index(&a.column)
-                    .map(|idx| pk_idx.contains(&idx))
-                    .unwrap_or(false)
+                schema.get_column_index(&a.column).map(|idx| pk_idx.contains(&idx)).unwrap_or(false)
             });
             if updates_pk {
                 // Check if ANY table in database has foreign keys (might need CASCADE)

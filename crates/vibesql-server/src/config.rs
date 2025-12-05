@@ -115,17 +115,11 @@ pub enum HttpAuthMethod {
 }
 
 /// API key configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ApiKeyConfig {
     /// List of valid API keys
     #[serde(default)]
     pub keys: Vec<String>,
-}
-
-impl Default for ApiKeyConfig {
-    fn default() -> Self {
-        Self { keys: vec![] }
-    }
 }
 
 /// JWT configuration
@@ -171,14 +165,8 @@ impl Default for Config {
                 ssl_cert: None,
                 ssl_key: None,
             },
-            auth: AuthConfig {
-                method: "trust".to_string(),
-                password_file: None,
-            },
-            logging: LoggingConfig {
-                level: "info".to_string(),
-                file: None,
-            },
+            auth: AuthConfig { method: "trust".to_string(), password_file: None },
+            logging: LoggingConfig { level: "info".to_string(), file: None },
             http: HttpConfig::default(),
             observability: ObservabilityConfig::default(),
             subscriptions: SubscriptionConfig::default(),

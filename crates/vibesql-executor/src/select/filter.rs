@@ -225,7 +225,7 @@ pub(super) fn apply_where_filter_basic<'a>(
         let include_row = is_truthy_basic(&value)?;
 
         if include_row {
-            filtered_rows.push(row);  // Move row, no clone needed
+            filtered_rows.push(row); // Move row, no clone needed
         }
         // Row is dropped if filtered out
     }
@@ -241,7 +241,6 @@ pub(super) fn apply_where_filter_basic<'a>(
     executor.query_buffer_pool().return_row_buffer(filtered_rows);
     Ok(result)
 }
-
 
 /// Parallel version of apply_where_filter_combined
 /// Uses rayon to evaluate WHERE predicates across multiple threads

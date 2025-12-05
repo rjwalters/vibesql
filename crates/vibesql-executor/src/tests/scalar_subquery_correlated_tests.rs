@@ -17,7 +17,11 @@ fn test_correlated_subquery_basic() {
     let schema = vibesql_catalog::TableSchema::new(
         "employees".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(100) },
@@ -28,7 +32,11 @@ fn test_correlated_subquery_basic() {
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
                 false,
             ),
-            vibesql_catalog::ColumnSchema::new("salary".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "salary".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -80,7 +88,8 @@ fn test_correlated_subquery_basic() {
     // Build correlated subquery: SELECT AVG(salary) FROM employees WHERE department = e.department
     let subquery = Box::new(vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -94,7 +103,11 @@ fn test_correlated_subquery_basic() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "employees".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,
@@ -116,20 +129,31 @@ fn test_correlated_subquery_basic() {
     // Build main query: SELECT name, salary FROM employees e WHERE salary > (correlated subquery)
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "name".to_string(),
+                },
                 alias: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "salary".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "salary".to_string(),
+                },
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "employees".to_string(), alias: Some("e".to_string()), column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "employees".to_string(),
+            alias: Some("e".to_string()),
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: None,

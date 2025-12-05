@@ -5,7 +5,10 @@
 
 use vibesql_ast::Expression;
 use vibesql_catalog::TableSchema;
-use vibesql_storage::{Database, statistics::{CostEstimator, AccessMethod}};
+use vibesql_storage::{
+    statistics::{AccessMethod, CostEstimator},
+    Database,
+};
 
 /// Check if any ORDER BY column is nullable
 ///
@@ -63,7 +66,12 @@ pub(crate) fn should_use_index_scan(
 
     // Find the best index (most pinned columns = better filtering)
     // We evaluate all applicable indexes and pick the one that covers the most WHERE columns
-    let mut best_index: Option<(String, usize, bool, Option<Vec<(String, vibesql_ast::OrderDirection)>>)> = None;
+    let mut best_index: Option<(
+        String,
+        usize,
+        bool,
+        Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+    )> = None;
     // (index_name, pinned_count, can_use_for_order, sorted_columns)
 
     for index_name in &indexes {
@@ -113,7 +121,9 @@ pub(crate) fn should_use_index_scan(
                         .map(|item| {
                             let col_name = match &item.expr {
                                 Expression::ColumnRef { column, .. } => column.clone(),
-                                _ => unreachable!("can_use_index_for_order_by ensures simple column refs"),
+                                _ => unreachable!(
+                                    "can_use_index_for_order_by ensures simple column refs"
+                                ),
                             };
                             (col_name, item.direction.clone())
                         })
@@ -141,7 +151,8 @@ pub(crate) fn should_use_index_scan(
             };
 
             if is_better {
-                best_index = Some((index_name.clone(), pinned_columns, can_use_for_order, sorted_columns));
+                best_index =
+                    Some((index_name.clone(), pinned_columns, can_use_for_order, sorted_columns));
             }
         }
     }
@@ -244,10 +255,7 @@ fn get_column_stats_ignore_case<'a>(
         return Some(stats);
     }
     // Fall back to case-insensitive search
-    columns
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(column_name))
-        .map(|(_, stats)| stats)
+    columns.iter().find(|(key, _)| key.eq_ignore_ascii_case(column_name)).map(|(_, stats)| stats)
 }
 
 /// Check if an index can be used to satisfy an ORDER BY clause
@@ -355,9 +363,8 @@ pub(crate) fn count_pinned_index_columns(
     let mut count = 0;
     for index_col in index_columns {
         // Check if this index column is pinned (case-insensitive match)
-        let is_pinned = pinned_columns
-            .iter()
-            .any(|c| c.eq_ignore_ascii_case(&index_col.column_name));
+        let is_pinned =
+            pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(&index_col.column_name));
         if is_pinned {
             count += 1;
         } else {
@@ -440,7 +447,12 @@ pub(crate) fn cost_based_index_selection(
 
     // Try each index and find the one with best score (pinned columns + cost)
     #[allow(clippy::type_complexity)]
-    let mut best_index: Option<(String, AccessMethod, usize, Option<Vec<(String, vibesql_ast::OrderDirection)>>)> = None;
+    let mut best_index: Option<(
+        String,
+        AccessMethod,
+        usize,
+        Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+    )> = None;
     // (index_name, access_method, pinned_count, sorted_columns)
     let mut has_applicable_index_without_stats = false;
 
@@ -459,8 +471,10 @@ pub(crate) fn cost_based_index_selection(
 
             // Debug: trace index selection
             if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                eprintln!("[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}",
-                    table_name, index_name, column_name, can_use_for_where);
+                eprintln!(
+                    "[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}",
+                    table_name, index_name, column_name, can_use_for_where
+                );
             }
 
             let can_use_for_order = if let Some(order_items) = order_by {
@@ -486,14 +500,20 @@ pub(crate) fn cost_based_index_selection(
             // Skip this index if it can't help with WHERE or ORDER BY
             if !can_use_for_where && !can_use_for_order {
                 if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                    eprintln!("[INDEX_SELECT] skipping {} - can't use for where or order", index_name);
+                    eprintln!(
+                        "[INDEX_SELECT] skipping {} - can't use for where or order",
+                        index_name
+                    );
                 }
                 continue;
             }
 
             // Debug: continue trace
             if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                eprintln!("[INDEX_SELECT] {} passed where/order check, checking stats...", index_name);
+                eprintln!(
+                    "[INDEX_SELECT] {} passed where/order check, checking stats...",
+                    index_name
+                );
             }
 
             // Get column statistics for the indexed column (case-insensitive lookup)
@@ -502,7 +522,10 @@ pub(crate) fn cost_based_index_selection(
                 // Track that we found an applicable index without column stats
                 // We'll fall back to rule-based selection if cost-based fails
                 if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                    eprintln!("[INDEX_SELECT] {} no column stats for {}, will fallback", index_name, column_name);
+                    eprintln!(
+                        "[INDEX_SELECT] {} no column stats for {}, will fallback",
+                        index_name, column_name
+                    );
                 }
                 has_applicable_index_without_stats = true;
                 continue; // No stats for this column, try next index
@@ -521,15 +544,17 @@ pub(crate) fn cost_based_index_selection(
             };
 
             // Use cost estimator to decide
-            let access_method = cost_estimator.choose_access_method(
-                table_stats,
-                Some(col_stats),
-                selectivity,
-            );
+            let access_method =
+                cost_estimator.choose_access_method(table_stats, Some(col_stats), selectivity);
 
             if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                eprintln!("[INDEX_SELECT] {} selectivity={:.4}, access_method={:?}, is_index_scan={}",
-                    index_name, selectivity, access_method, access_method.is_index_scan());
+                eprintln!(
+                    "[INDEX_SELECT] {} selectivity={:.4}, access_method={:?}, is_index_scan={}",
+                    index_name,
+                    selectivity,
+                    access_method,
+                    access_method.is_index_scan()
+                );
             }
 
             // Build sorted_columns metadata if ORDER BY can be satisfied
@@ -541,7 +566,9 @@ pub(crate) fn cost_based_index_selection(
                         .map(|item| {
                             let col_name = match &item.expr {
                                 Expression::ColumnRef { column, .. } => column.clone(),
-                                _ => unreachable!("can_use_index_for_order_by ensures simple column refs"),
+                                _ => unreachable!(
+                                    "can_use_index_for_order_by ensures simple column refs"
+                                ),
                             };
                             (col_name, item.direction.clone())
                         })
@@ -570,7 +597,8 @@ pub(crate) fn cost_based_index_selection(
                 };
 
                 if is_better {
-                    best_index = Some((index_name.clone(), access_method, pinned_columns, sorted_columns));
+                    best_index =
+                        Some((index_name.clone(), access_method, pinned_columns, sorted_columns));
                 }
             } else if selectivity < 0.40 && can_use_for_where {
                 // Cost-based chose table scan, but selectivity is good enough for index
@@ -578,8 +606,10 @@ pub(crate) fn cost_based_index_selection(
                 // Common fallback values: 0.33 (single predicate), 0.1089 (two predicates)
                 // Fall back to rule-based selection for selective queries
                 if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                    eprintln!("[INDEX_SELECT] {} selectivity={:.4} good, falling back to rule-based",
-                        index_name, selectivity);
+                    eprintln!(
+                        "[INDEX_SELECT] {} selectivity={:.4} good, falling back to rule-based",
+                        index_name, selectivity
+                    );
                 }
                 return should_use_index_scan(table_name, where_clause, order_by, database);
             }
@@ -625,12 +655,16 @@ pub(crate) fn estimate_selectivity(
                 vibesql_ast::BinaryOperator::Equal => {
                     // Check if this is a predicate on our column (case-insensitive)
                     // For literal values, use actual statistics
-                    if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) = (&**left, &**right) {
+                    if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                        (&**left, &**right)
+                    {
                         if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
                         }
                     }
-                    if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) = (&**left, &**right) {
+                    if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                        (&**left, &**right)
+                    {
                         if column.eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
                         }
@@ -642,8 +676,7 @@ pub(crate) fn estimate_selectivity(
                     let left_is_lit = is_literal(left);
                     let right_is_lit = is_literal(right);
 
-                    if (left_is_col && right_is_lit) || (left_is_lit && right_is_col)
-                    {
+                    if (left_is_col && right_is_lit) || (left_is_lit && right_is_col) {
                         // Use 1/n_distinct as selectivity estimate for equality with parameter
                         if col_stats.n_distinct > 0 {
                             return 1.0 / col_stats.n_distinct as f64;
@@ -656,7 +689,9 @@ pub(crate) fn estimate_selectivity(
                 | vibesql_ast::BinaryOperator::LessThan
                 | vibesql_ast::BinaryOperator::LessThanOrEqual => {
                     // Range predicates (case-insensitive column comparison)
-                    if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) = (&**left, &**right) {
+                    if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                        (&**left, &**right)
+                    {
                         if column.eq_ignore_ascii_case(column_name) {
                             let op_str = match op {
                                 vibesql_ast::BinaryOperator::GreaterThan => ">",
@@ -696,7 +731,9 @@ pub(crate) fn estimate_selectivity(
             if let Expression::ColumnRef { column, .. } = &**expr {
                 if column.eq_ignore_ascii_case(column_name) {
                     // Estimate BETWEEN as: P(col >= low AND col <= high)
-                    if let (Expression::Literal(low_val), Expression::Literal(high_val)) = (&**low, &**high) {
+                    if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
+                        (&**low, &**high)
+                    {
                         let low_sel = col_stats.estimate_range_selectivity(low_val, ">=");
                         let high_sel = col_stats.estimate_range_selectivity(high_val, "<=");
                         return low_sel * high_sel; // Assuming independence
@@ -719,10 +756,7 @@ mod tests {
     fn test_expression_filters_column_simple() {
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "age".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(25))),
         };
 
@@ -736,18 +770,12 @@ mod tests {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "age".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "city".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "city".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Varchar("Boston".to_string()))),
             }),
         };
@@ -759,10 +787,7 @@ mod tests {
 
     #[test]
     fn test_is_column_reference() {
-        let expr = Expression::ColumnRef {
-            table: None,
-            column: "age".to_string(),
-        };
+        let expr = Expression::ColumnRef { table: None, column: "age".to_string() };
 
         assert!(is_column_reference(&expr, "age"));
         assert!(!is_column_reference(&expr, "name"));
@@ -778,9 +803,9 @@ mod tests {
         };
 
         // Should match regardless of case
-        assert!(is_column_reference(&expr, "i_id"));  // lowercase
-        assert!(is_column_reference(&expr, "I_ID"));  // exact match
-        assert!(is_column_reference(&expr, "I_id"));  // mixed case
+        assert!(is_column_reference(&expr, "i_id")); // lowercase
+        assert!(is_column_reference(&expr, "I_ID")); // exact match
+        assert!(is_column_reference(&expr, "I_id")); // mixed case
         assert!(!is_column_reference(&expr, "other_column"));
     }
 
@@ -789,10 +814,7 @@ mod tests {
         // WHERE I_ID = 42 (uppercase from parser)
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "I_ID".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "I_ID".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
 

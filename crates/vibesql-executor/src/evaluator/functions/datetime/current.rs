@@ -19,8 +19,10 @@ pub fn current_date(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     let now = Local::now();
     use chrono::Datelike;
-    let date = vibesql_types::Date::new(now.year(), now.month() as u8, now.day() as u8)
-        .map_err(|e| ExecutorError::UnsupportedFeature(format!("Failed to create current date: {}", e)))?;
+    let date =
+        vibesql_types::Date::new(now.year(), now.month() as u8, now.day() as u8).map_err(|e| {
+            ExecutorError::UnsupportedFeature(format!("Failed to create current date: {}", e))
+        })?;
     Ok(SqlValue::Date(date))
 }
 
@@ -70,7 +72,10 @@ pub fn current_time(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         time_naive.minute() as u8,
         time_naive.second() as u8,
         nanosecond,
-    ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Failed to create current time: {}", e)))?;
+    )
+    .map_err(|e| {
+        ExecutorError::UnsupportedFeature(format!("Failed to create current time: {}", e))
+    })?;
 
     Ok(SqlValue::Time(time))
 }
@@ -124,7 +129,8 @@ pub fn current_timestamp(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         time_naive.minute() as u8,
         time_naive.second() as u8,
         nanosecond,
-    ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e)))?;
+    )
+    .map_err(|e| ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e)))?;
 
     Ok(SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)))
 }
@@ -175,14 +181,19 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 let now = Local::now();
                 use chrono::Datelike;
                 let date = vibesql_types::Date::new(now.year(), now.month() as u8, now.day() as u8)
-                    .map_err(|e| ExecutorError::UnsupportedFeature(format!("Failed to create date: {}", e)))?;
+                    .map_err(|e| {
+                        ExecutorError::UnsupportedFeature(format!("Failed to create date: {}", e))
+                    })?;
                 let time_naive = now.time();
                 let time = vibesql_types::Time::new(
                     time_naive.hour() as u8,
                     time_naive.minute() as u8,
                     time_naive.second() as u8,
                     0, // No fractional seconds for basic DATETIME
-                ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e)))?;
+                )
+                .map_err(|e| {
+                    ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e))
+                })?;
                 Ok(SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)))
             } else {
                 // Parse the timestring - try various common formats
@@ -191,34 +202,33 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
         SqlValue::Date(d) => {
             // Convert Date to Timestamp with time 00:00:00
-            let time = vibesql_types::Time::new(0, 0, 0, 0)
-                .map_err(|e| ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e)))?;
+            let time = vibesql_types::Time::new(0, 0, 0, 0).map_err(|e| {
+                ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e))
+            })?;
             Ok(SqlValue::Timestamp(vibesql_types::Timestamp::new(*d, time)))
         }
         SqlValue::Timestamp(ts) => {
             // Already a timestamp, return as-is
             Ok(SqlValue::Timestamp(*ts))
         }
-        _ => Err(ExecutorError::UnsupportedFeature(
-            format!("DATETIME requires string, date, or timestamp argument, got {:?}", args[0])
-        )),
+        _ => Err(ExecutorError::UnsupportedFeature(format!(
+            "DATETIME requires string, date, or timestamp argument, got {:?}",
+            args[0]
+        ))),
     }
 }
 
 /// Helper to parse datetime strings in various formats
 fn parse_datetime_string(s: &str) -> Result<SqlValue, ExecutorError> {
-    use chrono::{NaiveDateTime, NaiveDate, Datelike, Timelike};
+    use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 
     // Try parsing as full timestamp: "YYYY-MM-DD HH:MM:SS"
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
         let date = vibesql_types::Date::new(dt.year(), dt.month() as u8, dt.day() as u8)
             .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
-        let time = vibesql_types::Time::new(
-            dt.hour() as u8,
-            dt.minute() as u8,
-            dt.second() as u8,
-            0,
-        ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid time: {}", e)))?;
+        let time =
+            vibesql_types::Time::new(dt.hour() as u8, dt.minute() as u8, dt.second() as u8, 0)
+                .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid time: {}", e)))?;
         return Ok(SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)));
     }
 
@@ -235,12 +245,9 @@ fn parse_datetime_string(s: &str) -> Result<SqlValue, ExecutorError> {
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
         let date = vibesql_types::Date::new(dt.year(), dt.month() as u8, dt.day() as u8)
             .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
-        let time = vibesql_types::Time::new(
-            dt.hour() as u8,
-            dt.minute() as u8,
-            dt.second() as u8,
-            0,
-        ).map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid time: {}", e)))?;
+        let time =
+            vibesql_types::Time::new(dt.hour() as u8, dt.minute() as u8, dt.second() as u8, 0)
+                .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid time: {}", e)))?;
         return Ok(SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)));
     }
 

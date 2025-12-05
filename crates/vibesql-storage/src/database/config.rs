@@ -49,11 +49,11 @@ impl DatabaseConfig {
     /// - 64MB columnar cache (modest for browser memory constraints)
     pub fn browser_default() -> Self {
         DatabaseConfig {
-            memory_budget: 512 * 1024 * 1024,  // 512MB
-            disk_budget: 2 * 1024 * 1024 * 1024,  // 2GB
+            memory_budget: 512 * 1024 * 1024,    // 512MB
+            disk_budget: 2 * 1024 * 1024 * 1024, // 2GB
             spill_policy: SpillPolicy::SpillToDisk,
             sql_mode: vibesql_types::SqlMode::default(),
-            columnar_cache_budget: 64 * 1024 * 1024,  // 64MB
+            columnar_cache_budget: 64 * 1024 * 1024, // 64MB
         }
     }
 
@@ -65,11 +65,11 @@ impl DatabaseConfig {
     /// - 256MB columnar cache (can cache all TPC-H tables at SF 1.0)
     pub fn server_default() -> Self {
         DatabaseConfig {
-            memory_budget: (16u64 * 1024 * 1024 * 1024) as usize,  // 16GB
-            disk_budget: (1024u64 * 1024 * 1024 * 1024) as usize,  // 1TB
+            memory_budget: (16u64 * 1024 * 1024 * 1024) as usize, // 16GB
+            disk_budget: (1024u64 * 1024 * 1024 * 1024) as usize, // 1TB
             spill_policy: SpillPolicy::BestEffort,
             sql_mode: vibesql_types::SqlMode::default(),
-            columnar_cache_budget: 256 * 1024 * 1024,  // 256MB
+            columnar_cache_budget: 256 * 1024 * 1024, // 256MB
         }
     }
 
@@ -81,11 +81,11 @@ impl DatabaseConfig {
     /// - 1MB columnar cache (tiny for testing eviction)
     pub fn test_default() -> Self {
         DatabaseConfig {
-            memory_budget: 10 * 1024 * 1024,  // 10MB
+            memory_budget: 10 * 1024 * 1024, // 10MB
             disk_budget: 100 * 1024 * 1024,  // 100MB
             spill_policy: SpillPolicy::SpillToDisk,
             sql_mode: vibesql_types::SqlMode::default(),
-            columnar_cache_budget: 1 * 1024 * 1024,  // 1MB
+            columnar_cache_budget: 1 * 1024 * 1024, // 1MB
         }
     }
 }

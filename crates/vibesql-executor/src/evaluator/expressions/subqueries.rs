@@ -1,7 +1,7 @@
 //! Subquery evaluation methods
 
-use super::super::core::ExpressionEvaluator;
 use super::super::caching::compute_subquery_hash;
+use super::super::core::ExpressionEvaluator;
 use crate::errors::ExecutorError;
 
 impl ExpressionEvaluator<'_> {
@@ -53,7 +53,8 @@ impl ExpressionEvaluator<'_> {
             } else {
                 // Cache miss - execute and cache
                 // IMPORTANT: Propagate depth to prevent bypassing MAX_EXPRESSION_DEPTH
-                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let select_executor =
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
                 let rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -95,8 +96,9 @@ impl ExpressionEvaluator<'_> {
 
             // For non-empty sets, check if subquery contains NULL
             for subquery_row in &rows {
-                let subquery_val =
-                    subquery_row.get(0).ok_or(ExecutorError::ColumnIndexOutOfBounds { index: 0 })?;
+                let subquery_val = subquery_row
+                    .get(0)
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: 0 })?;
 
                 if matches!(subquery_val, vibesql_types::SqlValue::Null) {
                     // NULL IN (set with NULL) → NULL
@@ -173,7 +175,8 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
-                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let select_executor =
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
                 let executed_rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -242,7 +245,8 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
-                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let select_executor =
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
                 let executed_rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -316,7 +320,8 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
-                let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                let select_executor =
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
                 let executed_rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -344,7 +349,9 @@ impl ExpressionEvaluator<'_> {
             &rows,
             op,
             quantifier,
-            |left, op, right| Self::eval_binary_op_static(left, op, right, vibesql_types::SqlMode::default()),
+            |left, op, right| {
+                Self::eval_binary_op_static(left, op, right, vibesql_types::SqlMode::default())
+            },
         )
     }
 }

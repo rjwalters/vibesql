@@ -34,11 +34,7 @@ impl Location {
 
     /// Creates a new location.
     pub(crate) fn new(file: impl Into<Arc<str>>, line: u32) -> Self {
-        Self {
-            file: file.into(),
-            line,
-            upper: None,
-        }
+        Self { file: file.into(), line, upper: None }
     }
 
     /// Returns the location of next line.
@@ -50,10 +46,6 @@ impl Location {
 
     /// Returns the location of next level file.
     pub(crate) fn include(&self, file: &str) -> Self {
-        Self {
-            file: file.into(),
-            line: 0,
-            upper: Some(Arc::new(self.clone())),
-        }
+        Self { file: file.into(), line: 0, upper: Some(Arc::new(self.clone())) }
     }
 }

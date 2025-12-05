@@ -43,10 +43,10 @@ impl IndexData {
             // The range_scan() implementation automatically handles multi-column indexes
             // by iterating through all keys where the first column matches 'value'
             let range_indices = self.range_scan(
-                Some(value),  // start
-                Some(value),  // end (same as start for equality/prefix matching)
-                true,         // inclusive_start
-                true,         // inclusive_end
+                Some(value), // start
+                Some(value), // end (same as start for equality/prefix matching)
+                true,        // inclusive_start
+                true,        // inclusive_end
             );
 
             matching_row_indices.extend(range_indices);
@@ -89,7 +89,8 @@ impl IndexData {
         }
 
         // Normalize prefix values for consistent comparison
-        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_prefix: Vec<SqlValue> =
+            prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
             IndexData::InMemory { data } => {
@@ -105,7 +106,9 @@ impl IndexData {
 
                 let mut matching_row_indices = Vec::new();
 
-                for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                for (key_values, row_indices) in
+                    data.range::<[SqlValue], _>((start_bound, end_bound))
+                {
                     // Double-check prefix match (needed for Unbounded end bound case)
                     if key_values.len() >= normalized_prefix.len()
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
@@ -175,7 +178,8 @@ impl IndexData {
         }
 
         // Normalize prefix values for consistent comparison
-        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_prefix: Vec<SqlValue> =
+            prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
             IndexData::InMemory { data } => {
@@ -189,7 +193,9 @@ impl IndexData {
                 };
 
                 // Get just the first matching entry
-                for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                for (key_values, row_indices) in
+                    data.range::<[SqlValue], _>((start_bound, end_bound))
+                {
                     // Verify prefix match (needed for Unbounded end bound case)
                     if key_values.len() >= normalized_prefix.len()
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
@@ -215,7 +221,10 @@ impl IndexData {
                         )
                         .unwrap_or(None),
                     Err(e) => {
-                        log::warn!("BTreeIndex lock acquisition failed in prefix_scan_first: {}", e);
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in prefix_scan_first: {}",
+                            e
+                        );
                         None
                     }
                 }
@@ -271,7 +280,8 @@ impl IndexData {
         }
 
         // Normalize values for consistent comparison
-        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_prefix: Vec<SqlValue> =
+            prefix.iter().map(normalize_for_comparison).collect();
         let normalized_bound = normalize_for_comparison(upper_bound);
 
         match self {
@@ -333,7 +343,10 @@ impl IndexData {
                         )
                         .unwrap_or_else(|_| vec![]),
                     Err(e) => {
-                        log::warn!("BTreeIndex lock acquisition failed in prefix_bounded_scan: {}", e);
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in prefix_bounded_scan: {}",
+                            e
+                        );
                         vec![]
                     }
                 }
@@ -407,7 +420,8 @@ impl IndexData {
         }
 
         // Normalize values for consistent comparison
-        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_prefix: Vec<SqlValue> =
+            prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
             IndexData::InMemory { data } => {
@@ -504,7 +518,10 @@ impl IndexData {
                         )
                         .unwrap_or_else(|_| vec![]),
                     Err(e) => {
-                        log::warn!("BTreeIndex lock acquisition failed in prefix_range_scan: {}", e);
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in prefix_range_scan: {}",
+                            e
+                        );
                         vec![]
                     }
                 }
@@ -545,7 +562,12 @@ impl IndexData {
     /// let prefix = vec![SqlValue::Integer(w_id), SqlValue::Integer(d_id), SqlValue::Integer(c_id)];
     /// let rows = index_data.prefix_scan_limit(&prefix, Some(1), true);
     /// ```
-    pub fn prefix_scan_limit(&self, prefix: &[SqlValue], limit: Option<usize>, reverse: bool) -> Vec<usize> {
+    pub fn prefix_scan_limit(
+        &self,
+        prefix: &[SqlValue],
+        limit: Option<usize>,
+        reverse: bool,
+    ) -> Vec<usize> {
         // If no limit and not reverse, use the regular prefix_scan
         if limit.is_none() && !reverse {
             return self.prefix_scan(prefix);
@@ -563,7 +585,8 @@ impl IndexData {
         }
 
         // Normalize prefix values for consistent comparison
-        let normalized_prefix: Vec<SqlValue> = prefix.iter().map(normalize_for_comparison).collect();
+        let normalized_prefix: Vec<SqlValue> =
+            prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
             IndexData::InMemory { data } => {
@@ -604,7 +627,9 @@ impl IndexData {
                     }
                 } else {
                     // Forward iteration with early termination
-                    for (key_values, row_indices) in data.range::<[SqlValue], _>((start_bound, end_bound)) {
+                    for (key_values, row_indices) in
+                        data.range::<[SqlValue], _>((start_bound, end_bound))
+                    {
                         // Double-check prefix match (needed for Unbounded end bound case)
                         if key_values.len() >= normalized_prefix.len()
                             && key_values[..normalized_prefix.len()] == normalized_prefix[..]
@@ -628,15 +653,13 @@ impl IndexData {
 
                 let all_indices = match acquire_btree_lock(btree) {
                     Ok(guard) => guard
-                        .range_scan(
-                            Some(&normalized_prefix),
-                            end_key.as_ref(),
-                            true,
-                            false,
-                        )
+                        .range_scan(Some(&normalized_prefix), end_key.as_ref(), true, false)
                         .unwrap_or_else(|_| vec![]),
                     Err(e) => {
-                        log::warn!("BTreeIndex lock acquisition failed in prefix_scan_limit: {}", e);
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in prefix_scan_limit: {}",
+                            e
+                        );
                         vec![]
                     }
                 };
@@ -762,46 +785,11 @@ mod tests {
     fn test_prefix_scan_two_column_prefix() {
         // Index on (a, b, c) - look for rows where a=1 AND b=5
         let index = create_test_index_data(vec![
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(5),
-                    SqlValue::Integer(100),
-                ],
-                vec![0],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(5),
-                    SqlValue::Integer(200),
-                ],
-                vec![1],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(5),
-                    SqlValue::Integer(300),
-                ],
-                vec![2],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(6),
-                    SqlValue::Integer(100),
-                ],
-                vec![3],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(2),
-                    SqlValue::Integer(5),
-                    SqlValue::Integer(100),
-                ],
-                vec![4],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(100)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(200)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(5), SqlValue::Integer(300)], vec![2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(6), SqlValue::Integer(100)], vec![3]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(5), SqlValue::Integer(100)], vec![4]),
         ]);
 
         // Prefix [1, 5] should match rows 0, 1, 2
@@ -849,14 +837,8 @@ mod tests {
     fn test_prefix_scan_multiple_rows_per_key() {
         // Non-unique index: multiple row indices per key
         let index = create_test_index_data(vec![
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(10)],
-                vec![0, 5, 10],
-            ),
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(20)],
-                vec![1, 6],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0, 5, 10]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![1, 6]),
         ]);
 
         let results = index.prefix_scan(&[SqlValue::Integer(1)]);
@@ -884,9 +866,10 @@ mod tests {
     #[test]
     fn test_prefix_scan_prefix_longer_than_key() {
         // Index has 2-column keys, but we search with 3-column prefix
-        let index = create_test_index_data(vec![
-            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
-        ]);
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(10)],
+            vec![0],
+        )]);
 
         // Prefix longer than key cannot match
         let results = index.prefix_scan(&[
@@ -908,27 +891,9 @@ mod tests {
     #[test]
     fn test_prefix_scan_with_string_keys() {
         let index = create_test_index_data(vec![
-            (
-                vec![
-                    SqlValue::Varchar("a".to_string()),
-                    SqlValue::Integer(1),
-                ],
-                vec![0],
-            ),
-            (
-                vec![
-                    SqlValue::Varchar("a".to_string()),
-                    SqlValue::Integer(2),
-                ],
-                vec![1],
-            ),
-            (
-                vec![
-                    SqlValue::Varchar("b".to_string()),
-                    SqlValue::Integer(1),
-                ],
-                vec![2],
-            ),
+            (vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(1)], vec![0]),
+            (vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(2)], vec![1]),
+            (vec![SqlValue::Varchar("b".to_string()), SqlValue::Integer(1)], vec![2]),
         ]);
 
         let results = index.prefix_scan(&[SqlValue::Varchar("a".to_string())]);
@@ -966,10 +931,8 @@ mod tests {
         ]);
 
         // Match on [1, "x"] - order depends on BTreeMap key ordering (false < true)
-        let results = index.prefix_scan(&[
-            SqlValue::Integer(1),
-            SqlValue::Varchar("x".to_string()),
-        ]);
+        let results =
+            index.prefix_scan(&[SqlValue::Integer(1), SqlValue::Varchar("x".to_string())]);
         assert_eq!(results.len(), 2);
         assert!(results.contains(&0));
         assert!(results.contains(&1));
@@ -998,46 +961,11 @@ mod tests {
     fn test_prefix_scan_batch_basic() {
         // Index on (w_id, d_id, o_id) - like TPC-C NEW_ORDER table
         let index = create_test_index_data(vec![
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(100),
-                ],
-                vec![0],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(101),
-                ],
-                vec![1],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(2),
-                    SqlValue::Integer(100),
-                ],
-                vec![2],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(2),
-                    SqlValue::Integer(101),
-                ],
-                vec![3],
-            ),
-            (
-                vec![
-                    SqlValue::Integer(1),
-                    SqlValue::Integer(3),
-                    SqlValue::Integer(100),
-                ],
-                vec![4],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(101)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(100)], vec![2]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(101)], vec![3]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(3), SqlValue::Integer(100)], vec![4]),
         ]);
 
         // Batch lookup for districts 1 and 2
@@ -1057,14 +985,8 @@ mod tests {
     #[test]
     fn test_prefix_scan_batch_some_empty() {
         let index = create_test_index_data(vec![
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(1)],
-                vec![0],
-            ),
-            (
-                vec![SqlValue::Integer(1), SqlValue::Integer(3)],
-                vec![2],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(1)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(3)], vec![2]),
         ]);
 
         // Batch lookup - prefix at index 1 has no matches
@@ -1120,11 +1042,8 @@ mod tests {
         for d_id in 1..=10 {
             for o_id in 1..=(d_id * 2) {
                 // District 1 has 2 orders, district 2 has 4, etc.
-                let key = vec![
-                    SqlValue::Integer(w_id),
-                    SqlValue::Integer(d_id),
-                    SqlValue::Integer(o_id),
-                ];
+                let key =
+                    vec![SqlValue::Integer(w_id), SqlValue::Integer(d_id), SqlValue::Integer(o_id)];
                 entries.push((key, vec![((d_id - 1) * 10 + o_id - 1) as usize]));
             }
         }
@@ -1132,9 +1051,8 @@ mod tests {
         let index = create_test_index_data(entries);
 
         // Batch prefix lookup for all 10 districts
-        let prefixes: Vec<Vec<SqlValue>> = (1..=10)
-            .map(|d| vec![SqlValue::Integer(w_id), SqlValue::Integer(d)])
-            .collect();
+        let prefixes: Vec<Vec<SqlValue>> =
+            (1..=10).map(|d| vec![SqlValue::Integer(w_id), SqlValue::Integer(d)]).collect();
 
         let results = index.prefix_scan_batch(&prefixes);
 
@@ -1145,7 +1063,13 @@ mod tests {
         for (idx, rows) in &results {
             let d_id = *idx as i64 + 1;
             let expected_count = (d_id * 2) as usize;
-            assert_eq!(rows.len(), expected_count, "District {} should have {} orders", d_id, expected_count);
+            assert_eq!(
+                rows.len(),
+                expected_count,
+                "District {} should have {} orders",
+                d_id,
+                expected_count
+            );
         }
     }
 
@@ -1214,9 +1138,10 @@ mod tests {
 
     #[test]
     fn test_prefix_scan_first_no_match() {
-        let index = create_test_index_data(vec![
-            (vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)], vec![0]),
-        ]);
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)],
+            vec![0],
+        )]);
 
         // Prefix [2, 1] should return None (no match)
         let result = index.prefix_scan_first(&[SqlValue::Integer(2), SqlValue::Integer(1)]);
@@ -1323,11 +1248,7 @@ mod tests {
             (vec![SqlValue::Integer(2), SqlValue::Integer(10)], vec![2]),
         ]);
 
-        let results = index.prefix_scan_limit(
-            &[SqlValue::Integer(1)],
-            None,
-            false,
-        );
+        let results = index.prefix_scan_limit(&[SqlValue::Integer(1)], None, false);
         assert_eq!(results, vec![0, 1]);
     }
 
@@ -1367,16 +1288,13 @@ mod tests {
 
     #[test]
     fn test_prefix_scan_limit_empty_result() {
-        let index = create_test_index_data(vec![
-            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
-        ]);
+        let index = create_test_index_data(vec![(
+            vec![SqlValue::Integer(1), SqlValue::Integer(10)],
+            vec![0],
+        )]);
 
         // No match
-        let results = index.prefix_scan_limit(
-            &[SqlValue::Integer(2)],
-            Some(5),
-            true,
-        );
+        let results = index.prefix_scan_limit(&[SqlValue::Integer(2)], Some(5), true);
         assert!(results.is_empty());
     }
 
@@ -1389,11 +1307,7 @@ mod tests {
         ]);
 
         // LIMIT 10 but only 2 rows match
-        let results = index.prefix_scan_limit(
-            &[SqlValue::Integer(1)],
-            Some(10),
-            false,
-        );
+        let results = index.prefix_scan_limit(&[SqlValue::Integer(1)], Some(10), false);
         assert_eq!(results, vec![0, 1]); // All matching rows
     }
 }

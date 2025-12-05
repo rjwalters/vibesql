@@ -32,22 +32,17 @@ impl BlobId {
     }
 
     /// Convert to storage path
-    /// 
+    ///
     /// Uses hierarchical directory structure to avoid too many files in one directory:
     /// - First 2 chars: directory 1
     /// - Next 2 chars: directory 2
     /// - Rest: filename
-    /// 
+    ///
     /// Example: `abc1-2b3c-... → ab/c1/2b3c...`
     pub fn to_path(&self) -> String {
         let uuid_str = self.0.to_string().replace("-", "");
         if uuid_str.len() >= 4 {
-            format!(
-                "{}/{}/{}",
-                &uuid_str[0..2],
-                &uuid_str[2..4],
-                &uuid_str[4..]
-            )
+            format!("{}/{}/{}", &uuid_str[0..2], &uuid_str[2..4], &uuid_str[4..])
         } else {
             uuid_str
         }

@@ -6,13 +6,13 @@
 
 #![cfg(feature = "spatial")]
 
-use vibesql_types::SqlValue;
-use crate::errors::ExecutorError;
 use super::{sql_value_to_geometry, Geometry};
-use geo::Contains;
-use geo::algorithm::Intersects;
-use geo::{Distance, Euclidean, Haversine};
+use crate::errors::ExecutorError;
 use geo::algorithm::relate::Relate;
+use geo::algorithm::Intersects;
+use geo::Contains;
+use geo::{Distance, Euclidean, Haversine};
+use vibesql_types::SqlValue;
 
 /// Helper function to convert WKT string to geo::Geometry
 fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {
@@ -27,14 +27,10 @@ fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {
 /// Convert internal Geometry to geo::Geometry for spatial operations
 fn to_geo_geometry(geom: &Geometry) -> Result<geo::Geometry<f64>, ExecutorError> {
     match geom {
-        Geometry::Point { x, y } => {
-            Ok(geo::Geometry::Point(geo::Point::new(*x, *y)))
-        }
+        Geometry::Point { x, y } => Ok(geo::Geometry::Point(geo::Point::new(*x, *y))),
         Geometry::LineString { points } => {
-            let coords: Vec<geo::Coord<f64>> = points
-                .iter()
-                .map(|(x, y)| geo::Coord { x: *x, y: *y })
-                .collect();
+            let coords: Vec<geo::Coord<f64>> =
+                points.iter().map(|(x, y)| geo::Coord { x: *x, y: *y }).collect();
             Ok(geo::Geometry::LineString(geo::LineString(coords)))
         }
         Geometry::Polygon { rings } => {
@@ -45,19 +41,15 @@ fn to_geo_geometry(geom: &Geometry) -> Result<geo::Geometry<f64>, ExecutorError>
                 });
             }
 
-            let exterior: Vec<geo::Coord<f64>> = rings[0]
-                .iter()
-                .map(|(x, y)| geo::Coord { x: *x, y: *y })
-                .collect();
+            let exterior: Vec<geo::Coord<f64>> =
+                rings[0].iter().map(|(x, y)| geo::Coord { x: *x, y: *y }).collect();
             let exterior_ring = geo::LineString(exterior);
 
             let interiors: Vec<geo::LineString<f64>> = rings[1..]
                 .iter()
                 .map(|ring| {
-                    let coords: Vec<geo::Coord<f64>> = ring
-                        .iter()
-                        .map(|(x, y)| geo::Coord { x: *x, y: *y })
-                        .collect();
+                    let coords: Vec<geo::Coord<f64>> =
+                        ring.iter().map(|(x, y)| geo::Coord { x: *x, y: *y }).collect();
                     geo::LineString(coords)
                 })
                 .collect();
@@ -71,7 +63,6 @@ fn to_geo_geometry(geom: &Geometry) -> Result<geo::Geometry<f64>, ExecutorError>
     }
 }
 
-
 /// ST_Contains(geom1, geom2) - Does geom1 completely contain geom2?
 pub fn st_contains(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
@@ -84,8 +75,10 @@ pub fn st_contains(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -112,8 +105,10 @@ pub fn st_within(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -140,8 +135,10 @@ pub fn st_intersects(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -168,8 +165,10 @@ pub fn st_disjoint(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -197,8 +196,10 @@ pub fn st_equals(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -228,8 +229,10 @@ pub fn st_touches(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -264,8 +267,10 @@ pub fn st_crosses(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -301,8 +306,10 @@ pub fn st_overlaps(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -332,8 +339,10 @@ pub fn st_covers(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             // Covers is similar to Contains but includes boundaries
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
@@ -362,8 +371,10 @@ pub fn st_coveredby(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -407,11 +418,13 @@ pub fn st_dwithin(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Integer(i) => *i as f64,
         SqlValue::Float(f) => *f as f64,
         SqlValue::Null => return Ok(SqlValue::Null),
-        _ => return Err(ExecutorError::SpatialArgumentError {
-            function_name: "ST_DWithin".to_string(),
-            expected: "numeric distance".to_string(),
-            actual: format!("{:?}", args[2].type_name()),
-        }),
+        _ => {
+            return Err(ExecutorError::SpatialArgumentError {
+                function_name: "ST_DWithin".to_string(),
+                expected: "numeric distance".to_string(),
+                actual: format!("{:?}", args[2].type_name()),
+            })
+        }
     };
 
     // Reject negative distances
@@ -421,8 +434,10 @@ pub fn st_dwithin(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -444,7 +459,12 @@ pub fn st_dwithin(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         _ => Err(ExecutorError::SpatialArgumentError {
             function_name: "ST_DWithin".to_string(),
             expected: "(VARCHAR, VARCHAR, NUMERIC) arguments".to_string(),
-            actual: format!("{:?}, {:?}, {:?}", args[0].type_name(), args[1].type_name(), args[2].type_name()),
+            actual: format!(
+                "{:?}, {:?}, {:?}",
+                args[0].type_name(),
+                args[1].type_name(),
+                args[2].type_name()
+            ),
         }),
     }
 }
@@ -464,8 +484,10 @@ pub fn st_relate(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     match (&args[0], &args[1]) {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-        (SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
-         SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2)) => {
+        (
+            SqlValue::Varchar(wkt1) | SqlValue::Character(wkt1),
+            SqlValue::Varchar(wkt2) | SqlValue::Character(wkt2),
+        ) => {
             let geom1 = wkt_to_geo(wkt1)?;
             let geom2 = wkt_to_geo(wkt2)?;
 
@@ -493,7 +515,8 @@ pub fn st_relate(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 // ST_Relate(geom1, geom2, pattern) - test against pattern
                 // This requires full DE-9IM computation which is deferred to Phase 4
                 Err(ExecutorError::UnsupportedFeature(
-                    "ST_Relate with pattern matching requires full DE-9IM implementation (Phase 4)".to_string(),
+                    "ST_Relate with pattern matching requires full DE-9IM implementation (Phase 4)"
+                        .to_string(),
                 ))
             }
         }

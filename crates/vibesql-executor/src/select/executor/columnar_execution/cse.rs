@@ -71,12 +71,7 @@ pub(super) fn find_cached_subexpression(
     expr_cache: &std::collections::HashMap<u64, usize>,
 ) -> Option<(usize, Expression)> {
     // Only handle binary multiply operations for now (most common pattern)
-    if let Expression::BinaryOp {
-        left,
-        op: BinaryOperator::Multiply,
-        right,
-    } = expr
-    {
+    if let Expression::BinaryOp { left, op: BinaryOperator::Multiply, right } = expr {
         // Check if left operand is a cached expression
         let left_hash = hash_expression(left);
         if let Some(&cached_col) = expr_cache.get(&left_hash) {

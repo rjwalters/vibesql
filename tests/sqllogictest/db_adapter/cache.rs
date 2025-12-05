@@ -22,12 +22,7 @@ pub struct CacheManager {
 impl CacheManager {
     /// Create a new cache manager.
     pub fn new(enabled: bool, cache_size: usize) -> Self {
-        Self {
-            enabled,
-            cache: Arc::new(QueryResultCache::new(cache_size)),
-            hits: 0,
-            misses: 0,
-        }
+        Self { enabled, cache: Arc::new(QueryResultCache::new(cache_size)), hits: 0, misses: 0 }
     }
 
     /// Record a cache hit.
@@ -80,10 +75,6 @@ impl CacheManager {
         eprintln!("  Cache hits: {}", self.hits);
         eprintln!("  Cache misses: {}", self.misses);
         eprintln!("  Hit rate: {:.2}%", hit_rate);
-        eprintln!(
-            "  Cache size: {} / {} entries",
-            self.cache.stats().size,
-            self.cache.max_size()
-        );
+        eprintln!("  Cache size: {} / {} entries", self.cache.stats().size, self.cache.max_size());
     }
 }

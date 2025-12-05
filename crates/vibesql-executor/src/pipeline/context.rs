@@ -7,9 +7,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    evaluator::CombinedExpressionEvaluator,
-    procedural,
-    schema::CombinedSchema,
+    evaluator::CombinedExpressionEvaluator, procedural, schema::CombinedSchema,
     select::cte::CteResult,
 };
 
@@ -84,10 +82,7 @@ impl<'a> ExecutionContext<'a> {
     /// # Arguments
     /// * `proc_ctx` - The procedural execution context
     #[must_use]
-    pub fn with_procedural_context(
-        mut self,
-        proc_ctx: &'a procedural::ExecutionContext,
-    ) -> Self {
+    pub fn with_procedural_context(mut self, proc_ctx: &'a procedural::ExecutionContext) -> Self {
         self.procedural_context = Some(proc_ctx);
         self
     }
@@ -333,9 +328,8 @@ mod tests {
         let database = vibesql_storage::Database::new();
         let cte_results: HashMap<String, CteResult> = HashMap::new();
 
-        let ctx = ExecutionContextBuilder::new(&schema, &database)
-            .cte_from_query(&cte_results)
-            .build();
+        let ctx =
+            ExecutionContextBuilder::new(&schema, &database).cte_from_query(&cte_results).build();
 
         // Empty CTE map should not set context
         assert!(!ctx.has_cte_context());

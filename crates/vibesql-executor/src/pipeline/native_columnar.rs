@@ -56,18 +56,14 @@ impl NativeColumnarPipeline {
     /// Create a new native columnar pipeline.
     #[inline]
     pub fn new() -> Self {
-        Self {
-            has_columnar_storage: true,
-        }
+        Self { has_columnar_storage: true }
     }
 
     /// Create a native columnar pipeline with explicit columnar storage availability.
     #[inline]
     #[allow(dead_code)]
     pub fn with_storage(has_columnar_storage: bool) -> Self {
-        Self {
-            has_columnar_storage,
-        }
+        Self { has_columnar_storage }
     }
 }
 
@@ -80,7 +76,10 @@ impl Default for NativeColumnarPipeline {
 impl ExecutionPipeline for NativeColumnarPipeline {
     /// Create an evaluator with context for native columnar execution.
     #[inline]
-    fn create_evaluator<'a>(&self, ctx: &'a ExecutionContext<'a>) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
+    fn create_evaluator<'a>(
+        &self,
+        ctx: &'a ExecutionContext<'a>,
+    ) -> crate::evaluator::CombinedExpressionEvaluator<'a> {
         ctx.create_evaluator()
     }
 
@@ -97,11 +96,7 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         ctx: &ExecutionContext<'_>,
     ) -> Result<PipelineOutput, ExecutorError> {
         // Handle native columnar input specially
-        if let PipelineInput::NativeColumnar {
-            table_name,
-            column_indices: _,
-        } = &input
-        {
+        if let PipelineInput::NativeColumnar { table_name, column_indices: _ } = &input {
             // Get columnar data directly from storage
             let columnar_table = match ctx.database.get_columnar(table_name) {
                 Ok(Some(ct)) => ct,
@@ -138,11 +133,8 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             };
 
             // Apply SIMD-accelerated filtering
-            let filtered_batch = if predicates.is_empty() {
-                batch
-            } else {
-                simd_filter_batch(&batch, &predicates)?
-            };
+            let filtered_batch =
+                if predicates.is_empty() { batch } else { simd_filter_batch(&batch, &predicates)? };
 
             // Return batch directly - avoid row conversion overhead
             // The batch will stay in columnar format through the pipeline
@@ -174,11 +166,8 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         let batch = ColumnarBatch::from_rows(&rows)?;
 
         // Apply SIMD filtering
-        let filtered_batch = if predicates.is_empty() {
-            batch
-        } else {
-            simd_filter_batch(&batch, &predicates)?
-        };
+        let filtered_batch =
+            if predicates.is_empty() { batch } else { simd_filter_batch(&batch, &predicates)? };
 
         // Return batch directly - keep data in columnar format
         Ok(PipelineOutput::from_batch(filtered_batch))
@@ -330,9 +319,10 @@ impl ExecutionPipeline for NativeColumnarPipeline {
                 let columnar_table = match ctx.database.get_columnar(&table_name) {
                     Ok(Some(ct)) => ct,
                     Ok(None) | Err(_) => {
-                        return Err(ExecutorError::Other(
-                            format!("Table '{}' not found for columnar aggregation", table_name)
-                        ));
+                        return Err(ExecutorError::Other(format!(
+                            "Table '{}' not found for columnar aggregation",
+                            table_name
+                        )));
                     }
                 };
                 ColumnarBatch::from_storage_columnar(&columnar_table)?
@@ -359,9 +349,8 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         }
 
         // Simple aggregation without GROUP BY
-        let needs_schema = agg_specs
-            .iter()
-            .any(|spec| matches!(spec.source, AggregateSource::Expression(_)));
+        let needs_schema =
+            agg_specs.iter().any(|spec| matches!(spec.source, AggregateSource::Expression(_)));
         let schema_ref = if needs_schema { Some(ctx.schema) } else { None };
 
         let results =
@@ -444,8 +433,7 @@ impl NativeColumnarPipeline {
 
         if group_cols.len() != group_exprs.len() {
             return Err(ExecutorError::UnsupportedFeature(
-                "GROUP BY with non-column expressions not supported in native columnar"
-                    .to_string(),
+                "GROUP BY with non-column expressions not supported in native columnar".to_string(),
             ));
         }
 
@@ -466,7 +454,8 @@ impl NativeColumnarPipeline {
         }
 
         // Execute SIMD-accelerated hash-based GROUP BY directly on batch
-        let result = crate::select::columnar::columnar_group_by_batch(batch, &group_cols, &agg_cols)?;
+        let result =
+            crate::select::columnar::columnar_group_by_batch(batch, &group_cols, &agg_cols)?;
 
         Ok(PipelineOutput::from_rows(result))
     }

@@ -30,10 +30,7 @@ pub(super) fn has_arithmetic_expressions(query: &SelectStmt) -> bool {
     });
 
     // Check WHERE clause for arithmetic
-    let where_has_arithmetic = query
-        .where_clause
-        .as_ref()
-        .is_some_and(contains_arithmetic);
+    let where_has_arithmetic = query.where_clause.as_ref().is_some_and(contains_arithmetic);
 
     select_has_arithmetic || where_has_arithmetic
 }
@@ -53,19 +50,13 @@ pub(super) fn has_selective_projection(query: &SelectStmt) -> bool {
         .select_list
         .iter()
         .filter(|item| {
-            !matches!(
-                item,
-                SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. }
-            )
+            !matches!(item, SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. })
         })
         .count();
 
     // If there are any wildcards, projection is NOT selective
     let has_wildcard = query.select_list.iter().any(|item| {
-        matches!(
-            item,
-            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. }
-        )
+        matches!(item, SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. })
     });
 
     if has_wildcard {

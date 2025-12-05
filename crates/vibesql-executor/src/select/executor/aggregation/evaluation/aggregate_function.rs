@@ -2,10 +2,8 @@
 
 use super::super::super::builder::SelectExecutor;
 use crate::{
-    errors::ExecutorError,
-    evaluator::compiled_case::CompiledCaseExpression,
-    evaluator::CombinedExpressionEvaluator,
-    select::grouping::AggregateAccumulator,
+    errors::ExecutorError, evaluator::compiled_case::CompiledCaseExpression,
+    evaluator::CombinedExpressionEvaluator, select::grouping::AggregateAccumulator,
 };
 
 /// Evaluate aggregate function expressions (COUNT, SUM, AVG, MIN, MAX)
@@ -18,7 +16,9 @@ pub(super) fn evaluate(
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     // Extract name, distinct, and args from AggregateFunction
     let (name, distinct, args) = match expr {
-        vibesql_ast::Expression::AggregateFunction { name, distinct, args } => (name, *distinct, args),
+        vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
+            (name, *distinct, args)
+        }
         _ => unreachable!("evaluate called with non-aggregate expression"),
     };
 

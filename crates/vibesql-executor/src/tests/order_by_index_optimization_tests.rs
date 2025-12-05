@@ -130,16 +130,11 @@ fn create_nullable_db() -> Database {
     db.create_table(schema).unwrap();
 
     // Insert data with NULLs
-    db.insert_row("items", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]))
-        .unwrap();
-    db.insert_row("items", Row::new(vec![SqlValue::Integer(2), SqlValue::Null]))
-        .unwrap();
-    db.insert_row("items", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(5)]))
-        .unwrap();
-    db.insert_row("items", Row::new(vec![SqlValue::Integer(4), SqlValue::Null]))
-        .unwrap();
-    db.insert_row("items", Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(15)]))
-        .unwrap();
+    db.insert_row("items", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)])).unwrap();
+    db.insert_row("items", Row::new(vec![SqlValue::Integer(2), SqlValue::Null])).unwrap();
+    db.insert_row("items", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(5)])).unwrap();
+    db.insert_row("items", Row::new(vec![SqlValue::Integer(4), SqlValue::Null])).unwrap();
+    db.insert_row("items", Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(15)])).unwrap();
 
     db
 }
@@ -155,7 +150,7 @@ fn test_order_by_single_column_asc_with_index() {
         false,
         vec![IndexColumn {
             column_name: "price".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -193,7 +188,7 @@ fn test_order_by_single_column_desc_with_index() {
         false,
         vec![IndexColumn {
             column_name: "price".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -288,7 +283,7 @@ fn test_order_by_with_where_clause() {
         false,
         vec![IndexColumn {
             column_name: "price".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -477,7 +472,7 @@ fn test_order_by_positional_reference() {
         false,
         vec![IndexColumn {
             column_name: "price".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -512,7 +507,7 @@ fn test_order_by_alias() {
         false,
         vec![IndexColumn {
             column_name: "price".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -547,7 +542,7 @@ fn test_order_by_with_nulls_asc() {
         false,
         vec![IndexColumn {
             column_name: "value".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -595,7 +590,7 @@ fn test_order_by_with_nulls_desc() {
         false,
         vec![IndexColumn {
             column_name: "value".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -699,7 +694,7 @@ fn test_order_by_limit_with_index() {
         false,
         vec![IndexColumn {
             column_name: "price".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )

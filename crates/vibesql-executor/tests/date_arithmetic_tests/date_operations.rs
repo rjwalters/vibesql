@@ -11,8 +11,12 @@ fn test_datediff_basic() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATEDIFF".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-10".parse().unwrap())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-05".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-10".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-05".parse().unwrap(),
+            )),
         ],
         character_unit: None,
     };
@@ -27,8 +31,12 @@ fn test_datediff_negative() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATEDIFF".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-05".parse().unwrap())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-10".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-05".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-10".parse().unwrap(),
+            )),
         ],
         character_unit: None,
     };
@@ -43,8 +51,12 @@ fn test_datediff_same_date() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATEDIFF".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
         ],
         character_unit: None,
     };
@@ -61,7 +73,9 @@ fn test_date_add_days() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_ADD".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(7)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("DAY".to_string())),
         ],
@@ -78,7 +92,9 @@ fn test_date_add_months() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_ADD".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("MONTH".to_string())),
         ],
@@ -95,7 +111,9 @@ fn test_date_add_years() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_ADD".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("YEAR".to_string())),
         ],
@@ -112,7 +130,9 @@ fn test_date_add_negative() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_ADD".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-5)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("DAY".to_string())),
         ],
@@ -129,7 +149,9 @@ fn test_adddate_alias() {
     let expr = vibesql_ast::Expression::Function {
         name: "ADDDATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("DAY".to_string())),
         ],
@@ -148,7 +170,9 @@ fn test_date_sub_days() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_SUB".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(7)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("DAY".to_string())),
         ],
@@ -165,7 +189,9 @@ fn test_date_sub_months() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_SUB".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-04-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-04-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("MONTH".to_string())),
         ],
@@ -182,7 +208,9 @@ fn test_subdate_alias() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBDATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date("2024-01-15".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
+                "2024-01-15".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("DAY".to_string())),
         ],

@@ -16,7 +16,9 @@ pub(super) fn evaluate(
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     let (name, args, character_unit) = match expr {
-        vibesql_ast::Expression::Function { name, args, character_unit } => (name, args, character_unit),
+        vibesql_ast::Expression::Function { name, args, character_unit } => {
+            (name, args, character_unit)
+        }
         _ => unreachable!("evaluate called with non-function expression"),
     };
 

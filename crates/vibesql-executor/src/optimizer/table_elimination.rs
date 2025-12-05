@@ -12,9 +12,7 @@
 //! interactions with derived tables from EXISTS/IN transformations.
 
 use std::collections::{HashMap, HashSet};
-use vibesql_ast::{
-    BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt,
-};
+use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
 /// Apply table elimination optimization to a SELECT statement
 ///
@@ -67,10 +65,8 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
     }
 
     // Build table name set
-    let table_names: HashSet<String> = tables
-        .iter()
-        .map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase())
-        .collect();
+    let table_names: HashSet<String> =
+        tables.iter().map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase()).collect();
 
     // Don't apply when query has global aggregates (like COUNT(*)) without GROUP BY.
     // Such aggregates operate over the entire Cartesian product, so eliminating tables
@@ -159,11 +155,7 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
     let mut kept_tables = Vec::new();
 
     for table in tables {
-        let table_key = table
-            .alias
-            .as_ref()
-            .unwrap_or(&table.name)
-            .to_lowercase();
+        let table_key = table.alias.as_ref().unwrap_or(&table.name).to_lowercase();
 
         // Check if table is referenced by qualified columns in SELECT
         let in_select_qualified = select_tables.contains(&table_key);
@@ -174,9 +166,8 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         let in_select_unqualified = if !unqualified_columns.is_empty() {
             if let Some(prefix) = table_column_prefixes.get(&table_key) {
                 // We know this table's column prefix - check for matches
-                let matches_prefix = unqualified_columns
-                    .iter()
-                    .any(|col| col.to_lowercase().starts_with(prefix));
+                let matches_prefix =
+                    unqualified_columns.iter().any(|col| col.to_lowercase().starts_with(prefix));
                 if verbose && matches_prefix {
                     eprintln!(
                         "[TABLE_ELIM_OPT] Table '{}' might be referenced by unqualified cols (prefix '{}')",
@@ -240,16 +231,12 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
     let exists_checks = build_exists_checks(&eliminated);
 
     // Build eliminated table names set
-    let eliminated_names: HashSet<String> = eliminated
-        .iter()
-        .map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase())
-        .collect();
+    let eliminated_names: HashSet<String> =
+        eliminated.iter().map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase()).collect();
 
     // Build prefixes for eliminated tables
-    let eliminated_prefixes: HashSet<String> = eliminated_names
-        .iter()
-        .filter_map(|t| table_column_prefixes.get(t).cloned())
-        .collect();
+    let eliminated_prefixes: HashSet<String> =
+        eliminated_names.iter().filter_map(|t| table_column_prefixes.get(t).cloned()).collect();
 
     // Remove eliminated table predicates from WHERE
     let filtered_where = if let Some(where_expr) = &stmt.where_clause {
@@ -302,10 +289,7 @@ struct EliminatedTable {
 fn flatten_from_clause(from: &FromClause, tables: &mut Vec<TableInfo>) {
     match from {
         FromClause::Table { name, alias, .. } => {
-            tables.push(TableInfo {
-                name: name.clone(),
-                alias: alias.clone(),
-            });
+            tables.push(TableInfo { name: name.clone(), alias: alias.clone() });
         }
         FromClause::Join { left, right, .. } => {
             flatten_from_clause(left, tables);
@@ -366,7 +350,7 @@ fn has_global_aggregates(select_list: &[SelectItem], table_names: &HashSet<Strin
 }
 
 /// Recursively check if an expression contains a global aggregate
-fn expr_has_global_aggregate(expr: &Expression, table_names: &HashSet<String>) -> bool {
+fn expr_has_global_aggregate(expr: &Expression, _table_names: &HashSet<String>) -> bool {
     match expr {
         Expression::AggregateFunction { args, .. } => {
             // Check if this aggregate references any table columns
@@ -386,26 +370,20 @@ fn expr_has_global_aggregate(expr: &Expression, table_names: &HashSet<String>) -
             referenced_tables.is_empty() && !has_column_ref
         }
         Expression::BinaryOp { left, right, .. } => {
-            expr_has_global_aggregate(left, table_names)
-                || expr_has_global_aggregate(right, table_names)
+            expr_has_global_aggregate(left, _table_names)
+                || expr_has_global_aggregate(right, _table_names)
         }
-        Expression::UnaryOp { expr, .. } => expr_has_global_aggregate(expr, table_names),
+        Expression::UnaryOp { expr, .. } => expr_has_global_aggregate(expr, _table_names),
         Expression::Function { args, .. } => {
-            args.iter().any(|a| expr_has_global_aggregate(a, table_names))
+            args.iter().any(|a| expr_has_global_aggregate(a, _table_names))
         }
         Expression::Case { operand, when_clauses, else_result } => {
-            operand
-                .as_ref()
-                .is_some_and(|o| expr_has_global_aggregate(o, table_names))
+            operand.as_ref().is_some_and(|o| expr_has_global_aggregate(o, _table_names))
                 || when_clauses.iter().any(|c| {
-                    c.conditions
-                        .iter()
-                        .any(|cond| expr_has_global_aggregate(cond, table_names))
-                        || expr_has_global_aggregate(&c.result, table_names)
+                    c.conditions.iter().any(|cond| expr_has_global_aggregate(cond, _table_names))
+                        || expr_has_global_aggregate(&c.result, _table_names)
                 })
-                || else_result
-                    .as_ref()
-                    .is_some_and(|e| expr_has_global_aggregate(e, table_names))
+                || else_result.as_ref().is_some_and(|e| expr_has_global_aggregate(e, _table_names))
         }
         _ => false,
     }
@@ -645,10 +623,7 @@ fn extract_local_predicates(
     collect_local_predicates(expr, &mut predicates, table_names, table_prefixes);
 
     // Combine predicates for each table
-    predicates
-        .into_iter()
-        .map(|(table, preds)| (table, combine_predicates(preds)))
-        .collect()
+    predicates.into_iter().map(|(table, preds)| (table, combine_predicates(preds))).collect()
 }
 
 fn collect_local_predicates(
@@ -803,10 +778,7 @@ fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Expression> {
                 set_operation: None,
             };
 
-            Expression::Exists {
-                subquery: Box::new(subquery),
-                negated: false,
-            }
+            Expression::Exists { subquery: Box::new(subquery), negated: false }
         })
         .collect()
 }
@@ -853,21 +825,20 @@ fn remove_eliminated_predicates(
         collect_unqualified_columns_from_expr(&pred, &mut unqualified_cols);
 
         // Check if all qualified refs are to eliminated tables
-        let qualified_all_eliminated =
-            qualified_refs.is_empty() || qualified_refs.iter().all(|t| eliminated_tables.contains(t));
+        let qualified_all_eliminated = qualified_refs.is_empty()
+            || qualified_refs.iter().all(|t| eliminated_tables.contains(t));
 
         // Check if all unqualified columns match eliminated table prefixes
         let unqualified_all_eliminated = unqualified_cols.is_empty()
             || unqualified_cols.iter().all(|col| {
                 let col_lower = col.to_lowercase();
-                eliminated_prefixes
-                    .iter()
-                    .any(|prefix| col_lower.starts_with(prefix))
+                eliminated_prefixes.iter().any(|prefix| col_lower.starts_with(prefix))
             });
 
         // A predicate should be removed if ALL its column references
         // (both qualified and unqualified) belong to eliminated tables
-        let should_remove = qualified_all_eliminated && unqualified_all_eliminated
+        let should_remove = qualified_all_eliminated
+            && unqualified_all_eliminated
             && (!qualified_refs.is_empty() || !unqualified_cols.is_empty());
 
         if !should_remove {
@@ -953,7 +924,10 @@ fn collect_unqualified_columns_from_expr(expr: &Expression, columns: &mut HashSe
 ///
 /// For tables with no qualified refs, we derive a potential prefix from the table name
 /// (e.g., `date_dim` → `d_`, `customer` → `c_`) for TPC-DS style naming conventions.
-fn build_column_prefix_map(stmt: &SelectStmt, table_names: &HashSet<String>) -> HashMap<String, String> {
+fn build_column_prefix_map(
+    stmt: &SelectStmt,
+    table_names: &HashSet<String>,
+) -> HashMap<String, String> {
     let mut table_columns: HashMap<String, Vec<String>> = HashMap::new();
 
     // Collect qualified columns from entire statement
@@ -1070,10 +1044,7 @@ fn collect_qualified_columns_from_expr(
 ) {
     match expr {
         Expression::ColumnRef { table: Some(t), column } => {
-            table_columns
-                .entry(t.to_lowercase())
-                .or_default()
-                .push(column.to_lowercase());
+            table_columns.entry(t.to_lowercase()).or_default().push(column.to_lowercase());
         }
         Expression::BinaryOp { left, right, .. } => {
             collect_qualified_columns_from_expr(left, table_columns);
@@ -1568,10 +1539,7 @@ mod tests {
         fn collect_unqualified_columns_finds_refs() {
             let select_list = vec![
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef {
-                        table: None,
-                        column: "col1".to_string(),
-                    },
+                    expr: Expression::ColumnRef { table: None, column: "col1".to_string() },
                     alias: None,
                 },
                 SelectItem::Expression {
@@ -1589,16 +1557,11 @@ mod tests {
 
         #[test]
         fn has_unqualified_column_ref_detects_unqualified() {
-            let qualified = Expression::ColumnRef {
-                table: Some("t1".to_string()),
-                column: "col1".to_string(),
-            };
+            let qualified =
+                Expression::ColumnRef { table: Some("t1".to_string()), column: "col1".to_string() };
             assert!(!has_unqualified_column_ref(&qualified));
 
-            let unqualified = Expression::ColumnRef {
-                table: None,
-                column: "col1".to_string(),
-            };
+            let unqualified = Expression::ColumnRef { table: None, column: "col1".to_string() };
             assert!(has_unqualified_column_ref(&unqualified));
         }
     }

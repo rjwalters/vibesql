@@ -22,12 +22,16 @@ fn test_parse_position_basic() {
                         // Check substring
                         assert_eq!(
                             **substring,
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("lo".to_string()))
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                                "lo".to_string()
+                            ))
                         );
                         // Check string
                         assert_eq!(
                             **string,
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                                "hello".to_string()
+                            ))
                         );
                     }
                     _ => panic!("Expected Position expression, got {:?}", expr),
@@ -54,7 +58,9 @@ fn test_parse_position_substring_found() {
                     vibesql_ast::Expression::Position { substring, string, character_unit: _ } => {
                         assert_eq!(
                             **substring,
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("world".to_string()))
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                                "world".to_string()
+                            ))
                         );
                         assert_eq!(
                             **string,
@@ -88,11 +94,16 @@ fn test_parse_position_with_column() {
                     vibesql_ast::Expression::Position { substring, string, character_unit: _ } => {
                         assert_eq!(
                             **substring,
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("x".to_string()))
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                                "x".to_string()
+                            ))
                         );
                         assert_eq!(
                             **string,
-                            vibesql_ast::Expression::ColumnRef { table: None, column: "NAME".to_string() }
+                            vibesql_ast::Expression::ColumnRef {
+                                table: None,
+                                column: "NAME".to_string()
+                            }
                         );
                     }
                     _ => panic!("Expected Position expression"),
@@ -158,7 +169,9 @@ fn test_parse_position_with_function() {
                     vibesql_ast::Expression::Position { substring, string, character_unit: _ } => {
                         assert_eq!(
                             **substring,
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("a".to_string()))
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                                "a".to_string()
+                            ))
                         );
                         // Check that string is a Function expression
                         match &**string {

@@ -10,9 +10,9 @@
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_types::SqlValue;
 
-use crate::{BinaryOperator, UnaryOperator};
 use super::interner::Symbol;
 use super::SelectStmt;
+use crate::{BinaryOperator, UnaryOperator};
 
 /// Reference to an arena-allocated Expression.
 pub type ExprRef<'arena> = &'arena Expression<'arena>;
@@ -32,7 +32,6 @@ pub type ExprRef<'arena> = &'arena Expression<'arena>;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'arena> {
     // === Inline variants (common, hot path) ===
-
     /// Literal value (42, 'hello', TRUE, NULL)
     /// Most common leaf node in expressions.
     Literal(SqlValue),
@@ -89,14 +88,17 @@ pub enum Expression<'arena> {
 
     /// Current date/time functions (no arguments)
     CurrentDate,
-    CurrentTime { precision: Option<u32> },
-    CurrentTimestamp { precision: Option<u32> },
+    CurrentTime {
+        precision: Option<u32>,
+    },
+    CurrentTimestamp {
+        precision: Option<u32>,
+    },
 
     /// DEFAULT keyword
     Default,
 
     // === Extended variants (rare, cold path) ===
-
     /// Extended expression variants (arena-allocated separately).
     /// Access via pattern matching or helper methods.
     Extended(&'arena ExtendedExpr<'arena>),
@@ -119,11 +121,7 @@ pub enum ExtendedExpr<'arena> {
     },
 
     /// Aggregate function call (COUNT, SUM, AVG, MIN, MAX)
-    AggregateFunction {
-        name: Symbol,
-        distinct: bool,
-        args: BumpVec<'arena, Expression<'arena>>,
-    },
+    AggregateFunction { name: Symbol, distinct: bool, args: BumpVec<'arena, Expression<'arena>> },
 
     /// CASE expression
     Case {
@@ -136,18 +134,10 @@ pub enum ExtendedExpr<'arena> {
     ScalarSubquery(&'arena SelectStmt<'arena>),
 
     /// IN operator with subquery
-    In {
-        expr: ExprRef<'arena>,
-        subquery: &'arena SelectStmt<'arena>,
-        negated: bool,
-    },
+    In { expr: ExprRef<'arena>, subquery: &'arena SelectStmt<'arena>, negated: bool },
 
     /// IN operator with value list
-    InList {
-        expr: ExprRef<'arena>,
-        values: BumpVec<'arena, Expression<'arena>>,
-        negated: bool,
-    },
+    InList { expr: ExprRef<'arena>, values: BumpVec<'arena, Expression<'arena>>, negated: bool },
 
     /// BETWEEN predicate
     Between {
@@ -159,10 +149,7 @@ pub enum ExtendedExpr<'arena> {
     },
 
     /// CAST expression
-    Cast {
-        expr: ExprRef<'arena>,
-        data_type: vibesql_types::DataType,
-    },
+    Cast { expr: ExprRef<'arena>, data_type: vibesql_types::DataType },
 
     /// POSITION expression
     Position {
@@ -179,23 +166,13 @@ pub enum ExtendedExpr<'arena> {
     },
 
     /// EXTRACT expression
-    Extract {
-        field: IntervalUnit,
-        expr: ExprRef<'arena>,
-    },
+    Extract { field: IntervalUnit, expr: ExprRef<'arena> },
 
     /// LIKE pattern matching
-    Like {
-        expr: ExprRef<'arena>,
-        pattern: ExprRef<'arena>,
-        negated: bool,
-    },
+    Like { expr: ExprRef<'arena>, pattern: ExprRef<'arena>, negated: bool },
 
     /// EXISTS predicate
-    Exists {
-        subquery: &'arena SelectStmt<'arena>,
-        negated: bool,
-    },
+    Exists { subquery: &'arena SelectStmt<'arena>, negated: bool },
 
     /// Quantified comparison (ALL, ANY, SOME)
     QuantifiedComparison {
@@ -217,10 +194,7 @@ pub enum ExtendedExpr<'arena> {
     DuplicateKeyValue { column: Symbol },
 
     /// Window function with OVER clause
-    WindowFunction {
-        function: WindowFunctionSpec<'arena>,
-        over: WindowSpec<'arena>,
-    },
+    WindowFunction { function: WindowFunctionSpec<'arena>, over: WindowSpec<'arena> },
 
     /// NEXT VALUE FOR sequence expression
     NextValue { sequence_name: Symbol },
@@ -233,10 +207,7 @@ pub enum ExtendedExpr<'arena> {
     },
 
     /// Pseudo-variable reference (OLD/NEW in triggers)
-    PseudoVariable {
-        pseudo_table: PseudoTable,
-        column: Symbol,
-    },
+    PseudoVariable { pseudo_table: PseudoTable, column: Symbol },
 
     /// Session/system variable reference
     SessionVariable { name: Symbol },
@@ -275,18 +246,9 @@ pub enum Quantifier {
 /// Window function specification
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowFunctionSpec<'arena> {
-    Aggregate {
-        name: Symbol,
-        args: BumpVec<'arena, Expression<'arena>>,
-    },
-    Ranking {
-        name: Symbol,
-        args: BumpVec<'arena, Expression<'arena>>,
-    },
-    Value {
-        name: Symbol,
-        args: BumpVec<'arena, Expression<'arena>>,
-    },
+    Aggregate { name: Symbol, args: BumpVec<'arena, Expression<'arena>> },
+    Ranking { name: Symbol, args: BumpVec<'arena, Expression<'arena>> },
+    Value { name: Symbol, args: BumpVec<'arena, Expression<'arena>> },
 }
 
 /// Window specification (OVER clause)

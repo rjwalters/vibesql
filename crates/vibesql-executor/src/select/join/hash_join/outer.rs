@@ -1,5 +1,5 @@
-use super::{combine_rows, FromResult};
 use super::build::build_hash_table_parallel;
+use super::{combine_rows, FromResult};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Create a row with all NULL values

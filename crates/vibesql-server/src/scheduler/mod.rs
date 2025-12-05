@@ -13,4 +13,4 @@ pub mod storage;
 
 pub use executor::{ScheduleExecutor, ScheduleExecutorConfig};
 pub use manager::{SchedulerManager, SchedulerManagerConfig};
-pub use storage::{ScheduleRecord, ScheduleStatus, CronRecord};
+pub use storage::{CronRecord, ScheduleRecord, ScheduleStatus};

@@ -14,7 +14,9 @@ impl Parser {
                 } else {
                     // Parse as f64 for Numeric type
                     match num_str.parse::<f64>() {
-                        Ok(f) => Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(f)))),
+                        Ok(f) => Ok(Some(vibesql_ast::Expression::Literal(
+                            vibesql_types::SqlValue::Numeric(f),
+                        ))),
                         Err(_) => Err(ParseError {
                             message: format!("Invalid numeric literal: {}", num_str),
                         }),
@@ -24,7 +26,9 @@ impl Parser {
             Token::String(s) => {
                 let string_val = s.clone();
                 self.advance();
-                Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(string_val))))
+                Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    string_val,
+                ))))
             }
             Token::Keyword(Keyword::True) => {
                 self.advance();
@@ -49,10 +53,12 @@ impl Parser {
 
                         // Parse the date string into a Date type
                         match date_str.parse::<vibesql_types::Date>() {
-                            Ok(date) => Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(date)))),
-                            Err(e) => Err(ParseError {
-                                message: format!("Invalid DATE literal: {}", e),
-                            }),
+                            Ok(date) => Ok(Some(vibesql_ast::Expression::Literal(
+                                vibesql_types::SqlValue::Date(date),
+                            ))),
+                            Err(e) => {
+                                Err(ParseError { message: format!("Invalid DATE literal: {}", e) })
+                            }
                         }
                     }
                     _ => {
@@ -73,10 +79,12 @@ impl Parser {
 
                         // Parse the time string into a Time type
                         match time_str.parse::<vibesql_types::Time>() {
-                            Ok(time) => Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Time(time)))),
-                            Err(e) => Err(ParseError {
-                                message: format!("Invalid TIME literal: {}", e),
-                            }),
+                            Ok(time) => Ok(Some(vibesql_ast::Expression::Literal(
+                                vibesql_types::SqlValue::Time(time),
+                            ))),
+                            Err(e) => {
+                                Err(ParseError { message: format!("Invalid TIME literal: {}", e) })
+                            }
                         }
                     }
                     _ => {
@@ -97,7 +105,9 @@ impl Parser {
 
                         // Parse the timestamp string into a Timestamp type
                         match timestamp_str.parse::<vibesql_types::Timestamp>() {
-                            Ok(timestamp) => Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(timestamp)))),
+                            Ok(timestamp) => Ok(Some(vibesql_ast::Expression::Literal(
+                                vibesql_types::SqlValue::Timestamp(timestamp),
+                            ))),
                             Err(e) => Err(ParseError {
                                 message: format!("Invalid TIMESTAMP literal: {}", e),
                             }),
@@ -183,7 +193,9 @@ impl Parser {
 
                         // Parse the interval string into an Interval type
                         match interval_spec.parse::<vibesql_types::Interval>() {
-                            Ok(interval) => Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Interval(interval)))),
+                            Ok(interval) => Ok(Some(vibesql_ast::Expression::Literal(
+                                vibesql_types::SqlValue::Interval(interval),
+                            ))),
                             Err(e) => Err(ParseError {
                                 message: format!("Invalid INTERVAL literal: {}", e),
                             }),

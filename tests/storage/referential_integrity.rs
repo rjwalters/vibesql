@@ -10,8 +10,8 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use vibesql_catalog::{ColumnSchema, ReferentialAction, TableSchema};
 use common::referential_integrity_fixtures::*;
+use vibesql_catalog::{ColumnSchema, ReferentialAction, TableSchema};
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
@@ -328,11 +328,7 @@ fn test_on_update_set_null() {
     let child_table = db.get_table("CHILD").unwrap();
     assert_eq!(child_table.row_count(), 2);
     for child_row in child_table.scan() {
-        assert_eq!(
-            child_row.values[1],
-            SqlValue::Null,
-            "Child FK should be NULL"
-        );
+        assert_eq!(child_row.values[1], SqlValue::Null, "Child FK should be NULL");
     }
 }
 
@@ -409,11 +405,7 @@ fn test_on_update_no_action() {
     let child_table = db.get_table("CHILD").unwrap();
     assert_eq!(child_table.row_count(), 1);
     let child_row = &child_table.scan()[0];
-    assert_eq!(
-        child_row.values[1],
-        SqlValue::Integer(1),
-        "Child FK should remain 1"
-    );
+    assert_eq!(child_row.values[1], SqlValue::Integer(1), "Child FK should remain 1");
 }
 
 #[test]
@@ -448,11 +440,7 @@ fn test_on_update_restrict() {
     let child_table = db.get_table("CHILD").unwrap();
     assert_eq!(child_table.row_count(), 1);
     let child_row = &child_table.scan()[0];
-    assert_eq!(
-        child_row.values[1],
-        SqlValue::Integer(1),
-        "Child FK should remain 1"
-    );
+    assert_eq!(child_row.values[1], SqlValue::Integer(1), "Child FK should remain 1");
 }
 
 // ========================================================================
@@ -725,10 +713,7 @@ fn test_circular_foreign_keys() {
 
     // This MUST fail - creating cycle T1→T3→T2→T1
     let result = db3.create_table(schema_t1_cyclic);
-    assert!(
-        result.is_err(),
-        "Creating circular FK dependency T1→T3→T2→T1 should be rejected"
-    );
+    assert!(result.is_err(), "Creating circular FK dependency T1→T3→T2→T1 should be rejected");
 
     // Verify it's the correct error type
     match result {

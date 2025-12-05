@@ -294,17 +294,11 @@ pub enum ProceduralStatement {
         else_statements: Option<Vec<ProceduralStatement>>,
     },
     /// WHILE loop: WHILE condition DO ... END WHILE
-    While {
-        condition: Box<Expression>,
-        statements: Vec<ProceduralStatement>,
-    },
+    While { condition: Box<Expression>, statements: Vec<ProceduralStatement> },
     /// LOOP statement: LOOP ... END LOOP (infinite loop with LEAVE to break)
     Loop { statements: Vec<ProceduralStatement> },
     /// REPEAT UNTIL: REPEAT ... UNTIL condition END REPEAT
-    Repeat {
-        statements: Vec<ProceduralStatement>,
-        condition: Box<Expression>,
-    },
+    Repeat { statements: Vec<ProceduralStatement>, condition: Box<Expression> },
     /// RETURN statement (for functions)
     Return(Box<Expression>),
     /// LEAVE statement (break out of loops)

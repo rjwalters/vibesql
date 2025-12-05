@@ -98,7 +98,11 @@ fn test_grant_all_privileges_on_schema_expands_correctly() {
 
     // Verify only schema-specific privileges were granted (not table privileges)
     assert!(
-        !db.catalog.has_privilege("developer", "myschema", &vibesql_ast::PrivilegeType::Select(None)),
+        !db.catalog.has_privilege(
+            "developer",
+            "myschema",
+            &vibesql_ast::PrivilegeType::Select(None)
+        ),
         "developer should NOT have SELECT privilege (table-only)"
     );
 }

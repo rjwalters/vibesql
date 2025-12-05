@@ -43,8 +43,7 @@ pub(super) fn combine_rows(
     left_row: &vibesql_storage::Row,
     right_row: &vibesql_storage::Row,
 ) -> vibesql_storage::Row {
-    let mut combined_values =
-        Vec::with_capacity(left_row.values.len() + right_row.values.len());
+    let mut combined_values = Vec::with_capacity(left_row.values.len() + right_row.values.len());
     combined_values.extend_from_slice(&left_row.values);
     combined_values.extend_from_slice(&right_row.values);
     vibesql_storage::Row::new(combined_values)

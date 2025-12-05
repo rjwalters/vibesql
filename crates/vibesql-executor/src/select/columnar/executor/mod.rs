@@ -25,12 +25,12 @@
 //! - `aggregate` - Standard aggregation functions
 //! - `expression` - Expression evaluation helpers
 
-mod fused;
 mod aggregate;
 mod expression;
+mod fused;
 
-use super::batch::ColumnarBatch;
 use super::aggregate::{AggregateOp, AggregateSpec};
+use super::batch::ColumnarBatch;
 use super::filter::ColumnPredicate;
 use super::simd_filter::simd_filter_batch;
 use crate::errors::ExecutorError;
@@ -38,8 +38,8 @@ use crate::schema::CombinedSchema;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use fused::{can_use_fused_aggregation, execute_fused_filter_aggregate};
 use aggregate::compute_batch_aggregates;
+use fused::{can_use_fused_aggregation, execute_fused_filter_aggregate};
 
 /// Execute a columnar query end-to-end on a ColumnarBatch
 ///
@@ -91,11 +91,8 @@ pub fn execute_columnar_batch(
     #[cfg(feature = "profile-q6")]
     let filter_start = std::time::Instant::now();
 
-    let filtered_batch = if predicates.is_empty() {
-        batch.clone()
-    } else {
-        simd_filter_batch(batch, predicates)?
-    };
+    let filtered_batch =
+        if predicates.is_empty() { batch.clone() } else { simd_filter_batch(batch, predicates)? };
 
     #[cfg(feature = "profile-q6")]
     {
@@ -130,9 +127,9 @@ pub fn execute_columnar_batch(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::aggregate::AggregateSource;
     use super::super::batch::ColumnarBatch;
+    use super::*;
 
     fn make_test_batch() -> ColumnarBatch {
         let rows = vec![
@@ -147,12 +144,8 @@ mod tests {
     #[test]
     fn test_execute_columnar_batch_sum() {
         let batch = make_test_batch();
-        let aggregates = vec![
-            AggregateSpec {
-                op: AggregateOp::Sum,
-                source: AggregateSource::Column(0),
-            },
-        ];
+        let aggregates =
+            vec![AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(0) }];
 
         let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
         assert_eq!(result.len(), 1);
@@ -162,18 +155,10 @@ mod tests {
     #[test]
     fn test_execute_columnar_batch_with_filter() {
         let batch = make_test_batch();
-        let predicates = vec![
-            ColumnPredicate::LessThan {
-                column_idx: 0,
-                value: SqlValue::Integer(25),
-            },
-        ];
-        let aggregates = vec![
-            AggregateSpec {
-                op: AggregateOp::Sum,
-                source: AggregateSource::Column(0),
-            },
-        ];
+        let predicates =
+            vec![ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(25) }];
+        let aggregates =
+            vec![AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(0) }];
 
         let result = execute_columnar_batch(&batch, &predicates, &aggregates, None).unwrap();
         assert_eq!(result.len(), 1);
@@ -185,18 +170,9 @@ mod tests {
     fn test_execute_columnar_batch_multiple_aggregates() {
         let batch = make_test_batch();
         let aggregates = vec![
-            AggregateSpec {
-                op: AggregateOp::Sum,
-                source: AggregateSource::Column(0),
-            },
-            AggregateSpec {
-                op: AggregateOp::Avg,
-                source: AggregateSource::Column(1),
-            },
-            AggregateSpec {
-                op: AggregateOp::Count,
-                source: AggregateSource::CountStar,
-            },
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(0) },
+            AggregateSpec { op: AggregateOp::Avg, source: AggregateSource::Column(1) },
+            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::CountStar },
         ];
 
         let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
@@ -221,14 +197,8 @@ mod tests {
     fn test_execute_columnar_batch_empty() {
         let batch = ColumnarBatch::new(2);
         let aggregates = vec![
-            AggregateSpec {
-                op: AggregateOp::Sum,
-                source: AggregateSource::Column(0),
-            },
-            AggregateSpec {
-                op: AggregateOp::Count,
-                source: AggregateSource::CountStar,
-            },
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(0) },
+            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::CountStar },
         ];
 
         let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
@@ -244,25 +214,16 @@ mod tests {
         // Create batch with some NULL values
         let rows = vec![
             Row::new(vec![SqlValue::Integer(10), SqlValue::Double(1.5)]),
-            Row::new(vec![SqlValue::Null, SqlValue::Double(2.5)]),       // NULL in first column
-            Row::new(vec![SqlValue::Integer(30), SqlValue::Null]),       // NULL in second column
+            Row::new(vec![SqlValue::Null, SqlValue::Double(2.5)]), // NULL in first column
+            Row::new(vec![SqlValue::Integer(30), SqlValue::Null]), // NULL in second column
             Row::new(vec![SqlValue::Integer(40), SqlValue::Double(4.5)]),
         ];
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
 
         let aggregates = vec![
-            AggregateSpec {
-                op: AggregateOp::Sum,
-                source: AggregateSource::Column(0),
-            },
-            AggregateSpec {
-                op: AggregateOp::Sum,
-                source: AggregateSource::Column(1),
-            },
-            AggregateSpec {
-                op: AggregateOp::Count,
-                source: AggregateSource::CountStar,
-            },
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(0) },
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
+            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::CountStar },
         ];
 
         let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
@@ -288,26 +249,18 @@ mod tests {
     fn test_execute_columnar_batch_with_nulls_and_filter() {
         let rows = vec![
             Row::new(vec![SqlValue::Integer(10), SqlValue::Double(1.0)]),
-            Row::new(vec![SqlValue::Integer(20), SqlValue::Null]),       // NULL - should be excluded from sum
+            Row::new(vec![SqlValue::Integer(20), SqlValue::Null]), // NULL - should be excluded from sum
             Row::new(vec![SqlValue::Integer(30), SqlValue::Double(3.0)]),
             Row::new(vec![SqlValue::Integer(40), SqlValue::Double(4.0)]),
         ];
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
 
         // Filter: col0 < 35 (includes rows 0, 1, 2)
-        let predicates = vec![
-            ColumnPredicate::LessThan {
-                column_idx: 0,
-                value: SqlValue::Integer(35),
-            },
-        ];
+        let predicates =
+            vec![ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(35) }];
 
-        let aggregates = vec![
-            AggregateSpec {
-                op: AggregateOp::Sum,
-                source: AggregateSource::Column(1),
-            },
-        ];
+        let aggregates =
+            vec![AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) }];
 
         let result = execute_columnar_batch(&batch, &predicates, &aggregates, None).unwrap();
         assert_eq!(result.len(), 1);

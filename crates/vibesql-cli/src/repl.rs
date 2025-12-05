@@ -198,10 +198,7 @@ impl Repl {
     fn track_error(&mut self, error_msg: String) {
         const MAX_ERROR_HISTORY: usize = 50;
 
-        self.error_history.push(ErrorEntry {
-            timestamp: SystemTime::now(),
-            message: error_msg,
-        });
+        self.error_history.push(ErrorEntry { timestamp: SystemTime::now(), message: error_msg });
 
         // Keep only the last MAX_ERROR_HISTORY errors
         if self.error_history.len() > MAX_ERROR_HISTORY {
@@ -217,16 +214,11 @@ impl Repl {
 
         println!("Recent errors:");
         for (idx, entry) in self.error_history.iter().enumerate() {
-            let duration = entry.timestamp
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default();
+            let duration =
+                entry.timestamp.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let secs = duration.as_secs();
-            let time_str = format!(
-                "{:02}:{:02}:{:02}",
-                (secs / 3600) % 24,
-                (secs / 60) % 60,
-                secs % 60
-            );
+            let time_str =
+                format!("{:02}:{:02}:{:02}", (secs / 3600) % 24, (secs / 60) % 60, secs % 60);
             println!("{}. [{}] {}", idx + 1, time_str, entry.message);
         }
     }

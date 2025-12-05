@@ -96,21 +96,37 @@ mod tests {
 
         // NULL + anything = NULL
         assert!(matches!(
-            OperatorRegistry::eval_binary_op(&SqlValue::Null, &Plus, &SqlValue::Integer(1), vibesql_types::SqlMode::default())
-                .unwrap(),
+            OperatorRegistry::eval_binary_op(
+                &SqlValue::Null,
+                &Plus,
+                &SqlValue::Integer(1),
+                vibesql_types::SqlMode::default()
+            )
+            .unwrap(),
             SqlValue::Null
         ));
 
         // anything + NULL = NULL
         assert!(matches!(
-            OperatorRegistry::eval_binary_op(&SqlValue::Integer(1), &Plus, &SqlValue::Null, vibesql_types::SqlMode::default())
-                .unwrap(),
+            OperatorRegistry::eval_binary_op(
+                &SqlValue::Integer(1),
+                &Plus,
+                &SqlValue::Null,
+                vibesql_types::SqlMode::default()
+            )
+            .unwrap(),
             SqlValue::Null
         ));
 
         // NULL comparison NULL = NULL
         assert!(matches!(
-            OperatorRegistry::eval_binary_op(&SqlValue::Null, &Equal, &SqlValue::Null, vibesql_types::SqlMode::default()).unwrap(),
+            OperatorRegistry::eval_binary_op(
+                &SqlValue::Null,
+                &Equal,
+                &SqlValue::Null,
+                vibesql_types::SqlMode::default()
+            )
+            .unwrap(),
             SqlValue::Null
         ));
     }

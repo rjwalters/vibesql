@@ -148,10 +148,7 @@ mod tests {
         );
 
         // NULL AND NULL = NULL
-        assert_eq!(
-            LogicalOps::and(&SqlValue::Null, &SqlValue::Null).unwrap(),
-            SqlValue::Null
-        );
+        assert_eq!(LogicalOps::and(&SqlValue::Null, &SqlValue::Null).unwrap(), SqlValue::Null);
     }
 
     #[test]
@@ -177,9 +174,6 @@ mod tests {
         );
 
         // NULL OR NULL = NULL
-        assert_eq!(
-            LogicalOps::or(&SqlValue::Null, &SqlValue::Null).unwrap(),
-            SqlValue::Null
-        );
+        assert_eq!(LogicalOps::or(&SqlValue::Null, &SqlValue::Null).unwrap(), SqlValue::Null);
     }
 }

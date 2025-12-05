@@ -192,11 +192,11 @@ impl Table {
         // For columnar tables, initialize empty native columnar storage
         let native_columnar = if is_columnar {
             // Create empty columnar table with column names from schema
-            let column_names: Vec<String> = schema.columns.iter()
-                .map(|c| c.name.clone())
-                .collect();
-            Some(crate::ColumnarTable::from_rows(&[], &column_names)
-                .expect("Creating empty columnar table should never fail"))
+            let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
+            Some(
+                crate::ColumnarTable::from_rows(&[], &column_names)
+                    .expect("Creating empty columnar table should never fail"),
+            )
         } else {
             None
         };
@@ -265,9 +265,8 @@ impl Table {
 
     /// Rebuild native columnar storage from rows
     fn rebuild_native_columnar(&mut self) -> Result<(), StorageError> {
-        let column_names: Vec<String> = self.schema.columns.iter()
-            .map(|c| c.name.clone())
-            .collect();
+        let column_names: Vec<String> =
+            self.schema.columns.iter().map(|c| c.name.clone()).collect();
 
         let columnar = crate::ColumnarTable::from_rows(&self.rows, &column_names)
             .map_err(|e| StorageError::Other(format!("Columnar rebuild failed: {}", e)))?;
@@ -493,9 +492,8 @@ impl Table {
         }
 
         // Get column names from schema
-        let column_names: Vec<String> = self.schema.columns.iter()
-            .map(|c| c.name.clone())
-            .collect();
+        let column_names: Vec<String> =
+            self.schema.columns.iter().map(|c| c.name.clone()).collect();
 
         // Convert rows to columnar format
         let columnar = crate::ColumnarTable::from_rows(&self.rows, &column_names)
@@ -517,9 +515,7 @@ impl Table {
     /// Statistics are computed lazily on first access and cached.
     /// They are marked stale after significant data changes (> 10% of rows).
     pub fn statistics(&mut self) -> &crate::statistics::TableStatistics {
-        if self.statistics.is_none()
-            || self.statistics.as_ref().unwrap().needs_refresh()
-        {
+        if self.statistics.is_none() || self.statistics.as_ref().unwrap().needs_refresh() {
             self.statistics =
                 Some(crate::statistics::TableStatistics::compute(&self.rows, &self.schema));
             self.modifications_since_stats = 0;
@@ -558,11 +554,12 @@ impl Table {
         self.append_tracker.reset();
         // Clear native columnar if present, or invalidate cache for row tables
         if self.native_columnar.is_some() {
-            let column_names: Vec<String> = self.schema.columns.iter()
-                .map(|c| c.name.clone())
-                .collect();
-            self.native_columnar = Some(crate::ColumnarTable::from_rows(&[], &column_names)
-                .expect("Creating empty columnar table should never fail"));
+            let column_names: Vec<String> =
+                self.schema.columns.iter().map(|c| c.name.clone()).collect();
+            self.native_columnar = Some(
+                crate::ColumnarTable::from_rows(&[], &column_names)
+                    .expect("Creating empty columnar table should never fail"),
+            );
         } else {
             *self.columnar_cache.write().unwrap() = None;
         }
@@ -907,7 +904,7 @@ mod tests {
         // Verify NULL handling
         let value_col = columnar.get_column("value").expect("value column should exist");
         assert!(!value_col.is_null(0)); // 100
-        assert!(value_col.is_null(1));  // NULL
+        assert!(value_col.is_null(1)); // NULL
         assert!(!value_col.is_null(2)); // 300
     }
 
@@ -919,11 +916,7 @@ mod tests {
     fn test_insert_batch_basic() {
         let mut table = create_test_table();
 
-        let rows = vec![
-            create_row(1, "Alice"),
-            create_row(2, "Bob"),
-            create_row(3, "Charlie"),
-        ];
+        let rows = vec![create_row(1, "Alice"), create_row(2, "Bob"), create_row(3, "Charlie")];
 
         let count = table.insert_batch(rows).unwrap();
 
@@ -951,11 +944,7 @@ mod tests {
     fn test_insert_batch_preserves_indexes() {
         let mut table = create_test_table();
 
-        let rows = vec![
-            create_row(1, "Alice"),
-            create_row(2, "Bob"),
-            create_row(3, "Charlie"),
-        ];
+        let rows = vec![create_row(1, "Alice"), create_row(2, "Bob"), create_row(3, "Charlie")];
 
         table.insert_batch(rows).unwrap();
 
@@ -1012,9 +1001,7 @@ mod tests {
         let mut table = create_test_table();
 
         // Insert 10000 rows in a batch
-        let rows: Vec<Row> = (0..10_000)
-            .map(|i| create_row(i, &format!("User{}", i)))
-            .collect();
+        let rows: Vec<Row> = (0..10_000).map(|i| create_row(i, &format!("User{}", i))).collect();
 
         let count = table.insert_batch(rows).unwrap();
 

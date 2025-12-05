@@ -88,12 +88,9 @@ impl Database {
     /// ```
     fn save(&self, path: &str) -> PyResult<()> {
         // Use binary format to preserve sequences and column defaults (for AUTOINCREMENT)
-        self.db
-            .lock()
-            .save(path)
-            .map_err(|e| {
-                pyo3::exceptions::PyIOError::new_err(format!("Failed to save database: {}", e))
-            })
+        self.db.lock().save(path).map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(format!("Failed to save database: {}", e))
+        })
     }
 
     /// Load database from binary file
@@ -128,8 +125,6 @@ impl Database {
         let db = vibesql_storage::Database::load(path).map_err(|e| {
             pyo3::exceptions::PyIOError::new_err(format!("Failed to load database: {}", e))
         })?;
-        Ok(Database {
-            db: Arc::new(Mutex::new(db)),
-        })
+        Ok(Database { db: Arc::new(Mutex::new(db)) })
     }
 }

@@ -59,11 +59,17 @@ pub(super) fn is_type_conversion_safe(from: &DataType, to: &DataType) -> bool {
         (DataType::Integer, DataType::Numeric { .. }) => true,
         (DataType::Smallint, DataType::Numeric { .. }) => true,
         (DataType::Bigint, DataType::Numeric { .. }) => true,
-        (DataType::Numeric { precision: p1, scale: s1 }, DataType::Numeric { precision: p2, scale: s2 }) => p2 >= p1 && s2 >= s1,
+        (
+            DataType::Numeric { precision: p1, scale: s1 },
+            DataType::Numeric { precision: p2, scale: s2 },
+        ) => p2 >= p1 && s2 >= s1,
 
         // String widenings
         (DataType::Character { length: n1 }, DataType::Character { length: n2 }) => n2 >= n1,
-        (DataType::Varchar { max_length: Some(n1) }, DataType::Varchar { max_length: Some(n2) }) => n2 >= n1,
+        (
+            DataType::Varchar { max_length: Some(n1) },
+            DataType::Varchar { max_length: Some(n2) },
+        ) => n2 >= n1,
         (DataType::Varchar { max_length: Some(_) }, DataType::Varchar { max_length: None }) => true,
         (DataType::Character { .. }, DataType::Varchar { .. }) => true,
         (DataType::Character { .. }, DataType::CharacterLargeObject) => true,
@@ -82,7 +88,10 @@ pub(super) fn is_type_conversion_safe(from: &DataType, to: &DataType) -> bool {
 }
 
 /// Convert a value to a new type
-pub(super) fn convert_value(value: SqlValue, target_type: &DataType) -> Result<SqlValue, ExecutorError> {
+pub(super) fn convert_value(
+    value: SqlValue,
+    target_type: &DataType,
+) -> Result<SqlValue, ExecutorError> {
     // NULL stays NULL
     if matches!(value, SqlValue::Null) {
         return Ok(SqlValue::Null);
@@ -93,14 +102,13 @@ pub(super) fn convert_value(value: SqlValue, target_type: &DataType) -> Result<S
             SqlValue::Integer(i) => Ok(SqlValue::Integer(*i)),
             SqlValue::Smallint(s) => Ok(SqlValue::Integer(*s as i64)),
             SqlValue::Bigint(b) => Ok(SqlValue::Integer(*b)), // May truncate
-            SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                s.parse::<i64>()
-                    .map(SqlValue::Integer)
-                    .map_err(|_| ExecutorError::TypeConversionError {
-                        from: format!("{:?}", value),
-                        to: "INTEGER".to_string(),
-                    })
-            }
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s
+                .parse::<i64>()
+                .map(SqlValue::Integer)
+                .map_err(|_| ExecutorError::TypeConversionError {
+                    from: format!("{:?}", value),
+                    to: "INTEGER".to_string(),
+                }),
             _ => Err(ExecutorError::TypeConversionError {
                 from: format!("{:?}", value),
                 to: "INTEGER".to_string(),
@@ -136,9 +144,7 @@ pub(super) fn convert_value(value: SqlValue, target_type: &DataType) -> Result<S
         DataType::Varchar { .. } | DataType::Character { .. } | DataType::CharacterLargeObject => {
             // Convert anything to string
             match value {
-                SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                    Ok(SqlValue::Varchar(s))
-                }
+                SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(SqlValue::Varchar(s)),
                 SqlValue::Integer(i) => Ok(SqlValue::Varchar(i.to_string())),
                 SqlValue::Bigint(b) => Ok(SqlValue::Varchar(b.to_string())),
                 SqlValue::Smallint(s) => Ok(SqlValue::Varchar(s.to_string())),

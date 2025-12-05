@@ -22,7 +22,8 @@ fn test_execute_transactions() {
     let stmt = vibesql_parser::Parser::parse_sql(commit_sql).expect("Parse failed");
     match stmt {
         vibesql_ast::Statement::Commit(commit_stmt) => {
-            vibesql_executor::CommitExecutor::execute(&commit_stmt, &mut db).expect("Commit failed");
+            vibesql_executor::CommitExecutor::execute(&commit_stmt, &mut db)
+                .expect("Commit failed");
         }
         _ => panic!("Expected Commit statement"),
     }

@@ -24,13 +24,12 @@ pub fn evaluate_predicate_i64_simd(
             } else if let Some(threshold) = value_to_timestamp_i64(value) {
                 simd_ops::lt_i64(values, threshold)
             } else {
-                let threshold = value_to_f64(value).ok_or_else(|| {
-                    ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
-                    }
-                })?;
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_ops::lt_f64(&f64_values, threshold)
             }
@@ -42,13 +41,12 @@ pub fn evaluate_predicate_i64_simd(
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::gt_i64(values, *threshold)
             } else {
-                let threshold = value_to_f64(value).ok_or_else(|| {
-                    ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
-                    }
-                })?;
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_ops::gt_f64(&f64_values, threshold)
             }
@@ -60,13 +58,12 @@ pub fn evaluate_predicate_i64_simd(
             } else if let SqlValue::Bigint(target) = value {
                 simd_ops::eq_i64(values, *target)
             } else {
-                let target = value_to_f64(value).ok_or_else(|| {
-                    ExecutorError::ColumnarTypeMismatch {
+                let target =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
-                    }
-                })?;
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_ops::eq_f64(&f64_values, target)
             }
@@ -104,13 +101,12 @@ pub fn evaluate_predicate_i64_simd(
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::ge_i64(values, *threshold)
             } else {
-                let threshold = value_to_f64(value).ok_or_else(|| {
-                    ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
-                    }
-                })?;
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_ops::ge_f64(&f64_values, threshold)
             }
@@ -122,13 +118,12 @@ pub fn evaluate_predicate_i64_simd(
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::le_i64(values, *threshold)
             } else {
-                let threshold = value_to_f64(value).ok_or_else(|| {
-                    ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
-                    }
-                })?;
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_ops::le_f64(&f64_values, threshold)
             }
@@ -140,13 +135,12 @@ pub fn evaluate_predicate_i64_simd(
             } else if let SqlValue::Bigint(target) = value {
                 simd_ops::ne_i64(values, *target)
             } else {
-                let target = value_to_f64(value).ok_or_else(|| {
-                    ExecutorError::ColumnarTypeMismatch {
+                let target =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
-                    }
-                })?;
+                    })?;
                 let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
                 simd_ops::ne_f64(&f64_values, target)
             }
@@ -201,86 +195,78 @@ pub fn evaluate_predicate_i32_simd(
 ) -> Result<Vec<bool>, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
-            let threshold = value_to_date_i32(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
-                }
-            })?;
+                })?;
             simd_ops::lt_i32(values, threshold)
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
-            let threshold = value_to_date_i32(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
-                }
-            })?;
+                })?;
             simd_ops::gt_i32(values, threshold)
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
-            let threshold = value_to_date_i32(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
-                }
-            })?;
+                })?;
             simd_ops::ge_i32(values, threshold)
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
-            let threshold = value_to_date_i32(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
-                }
-            })?;
+                })?;
             simd_ops::le_i32(values, threshold)
         }
 
         ColumnPredicate::Equal { value, .. } => {
-            let target = value_to_date_i32(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
-                }
-            })?;
+                })?;
             simd_ops::eq_i32(values, target)
         }
 
         ColumnPredicate::Between { low, high, .. } => {
-            let low_i32 = value_to_date_i32(low).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let low_i32 =
+                value_to_date_i32(low).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "BETWEEN".to_string(),
                     left_type: "Date".to_string(),
                     right_type: Some(format!("{:?}", low)),
-                }
-            })?;
-            let high_i32 = value_to_date_i32(high).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+                })?;
+            let high_i32 =
+                value_to_date_i32(high).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "BETWEEN".to_string(),
                     left_type: "Date".to_string(),
                     right_type: Some(format!("{:?}", high)),
-                }
-            })?;
+                })?;
             simd_ops::between_i32(values, low_i32, high_i32)
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
-            let target = value_to_date_i32(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
-                }
-            })?;
+                })?;
             simd_ops::ne_i32(values, target)
         }
 
@@ -330,57 +316,52 @@ pub fn evaluate_predicate_f64_simd(
 ) -> Result<Vec<bool>, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
-            let threshold = value_to_f64(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
-                }
-            })?;
+                })?;
             simd_ops::lt_f64(values, threshold)
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
-            let threshold = value_to_f64(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
-                }
-            })?;
+                })?;
             simd_ops::gt_f64(values, threshold)
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
-            let threshold = value_to_f64(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
-                }
-            })?;
+                })?;
             simd_ops::ge_f64(values, threshold)
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
-            let threshold = value_to_f64(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
-                }
-            })?;
+                })?;
             simd_ops::le_f64(values, threshold)
         }
 
         ColumnPredicate::Equal { value, .. } => {
-            let target = value_to_f64(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
-                }
-            })?;
+                })?;
             simd_ops::eq_f64(values, target)
         }
 
@@ -400,13 +381,12 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
-            let target = value_to_f64(value).ok_or_else(|| {
-                ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
-                }
-            })?;
+                })?;
             simd_ops::ne_f64(values, target)
         }
 
@@ -467,8 +447,8 @@ pub fn evaluate_predicate_i64_packed(
             } else if let Some(threshold) = value_to_timestamp_i64(value) {
                 simd_ops::lt_i64_packed(values, threshold)
             } else {
-                let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
@@ -484,8 +464,8 @@ pub fn evaluate_predicate_i64_packed(
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::gt_i64_packed(values, *threshold)
             } else {
-                let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
@@ -501,8 +481,8 @@ pub fn evaluate_predicate_i64_packed(
             } else if let SqlValue::Bigint(target) = value {
                 simd_ops::eq_i64_packed(values, *target)
             } else {
-                let target = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                let target =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
@@ -544,8 +524,8 @@ pub fn evaluate_predicate_i64_packed(
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::ge_i64_packed(values, *threshold)
             } else {
-                let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
@@ -561,8 +541,8 @@ pub fn evaluate_predicate_i64_packed(
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::le_i64_packed(values, *threshold)
             } else {
-                let threshold = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                let threshold =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
@@ -578,8 +558,8 @@ pub fn evaluate_predicate_i64_packed(
             } else if let SqlValue::Bigint(target) = value {
                 simd_ops::ne_i64_packed(values, *target)
             } else {
-                let target = value_to_f64(value)
-                    .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                let target =
+                    value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "comparison".to_string(),
                         left_type: "Int64".to_string(),
                         right_type: Some(format!("{:?}", value)),
@@ -636,8 +616,8 @@ pub fn evaluate_predicate_i32_packed(
 ) -> Result<PackedMask, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
-            let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
@@ -646,8 +626,8 @@ pub fn evaluate_predicate_i32_packed(
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
-            let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
@@ -656,8 +636,8 @@ pub fn evaluate_predicate_i32_packed(
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
-            let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
@@ -666,8 +646,8 @@ pub fn evaluate_predicate_i32_packed(
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
-            let threshold = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
@@ -676,8 +656,8 @@ pub fn evaluate_predicate_i32_packed(
         }
 
         ColumnPredicate::Equal { value, .. } => {
-            let target = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
@@ -686,14 +666,14 @@ pub fn evaluate_predicate_i32_packed(
         }
 
         ColumnPredicate::Between { low, high, .. } => {
-            let low_i32 = value_to_date_i32(low)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let low_i32 =
+                value_to_date_i32(low).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "BETWEEN".to_string(),
                     left_type: "Date".to_string(),
                     right_type: Some(format!("{:?}", low)),
                 })?;
-            let high_i32 = value_to_date_i32(high)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let high_i32 =
+                value_to_date_i32(high).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "BETWEEN".to_string(),
                     left_type: "Date".to_string(),
                     right_type: Some(format!("{:?}", high)),
@@ -702,8 +682,8 @@ pub fn evaluate_predicate_i32_packed(
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
-            let target = value_to_date_i32(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_date_i32(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "date comparison".to_string(),
                     left_type: "Date".to_string(),
                     right_type: None,
@@ -755,8 +735,8 @@ pub fn evaluate_predicate_f64_packed(
 ) -> Result<PackedMask, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
-            let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
@@ -765,8 +745,8 @@ pub fn evaluate_predicate_f64_packed(
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
-            let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
@@ -775,8 +755,8 @@ pub fn evaluate_predicate_f64_packed(
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
-            let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
@@ -785,8 +765,8 @@ pub fn evaluate_predicate_f64_packed(
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
-            let threshold = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let threshold =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
@@ -795,8 +775,8 @@ pub fn evaluate_predicate_f64_packed(
         }
 
         ColumnPredicate::Equal { value, .. } => {
-            let target = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),
@@ -805,14 +785,13 @@ pub fn evaluate_predicate_f64_packed(
         }
 
         ColumnPredicate::Between { low, high, .. } => {
-            let low_f64 = value_to_f64(low)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
-                    operation: "BETWEEN".to_string(),
-                    left_type: "Float64".to_string(),
-                    right_type: Some(format!("{:?}", low)),
-                })?;
-            let high_f64 = value_to_f64(high)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let low_f64 = value_to_f64(low).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                operation: "BETWEEN".to_string(),
+                left_type: "Float64".to_string(),
+                right_type: Some(format!("{:?}", low)),
+            })?;
+            let high_f64 =
+                value_to_f64(high).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "BETWEEN".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", high)),
@@ -821,8 +800,8 @@ pub fn evaluate_predicate_f64_packed(
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
-            let target = value_to_f64(value)
-                .ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+            let target =
+                value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
                     left_type: "Float64".to_string(),
                     right_type: Some(format!("{:?}", value)),

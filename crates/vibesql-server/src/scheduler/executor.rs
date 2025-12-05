@@ -143,11 +143,7 @@ impl ScheduleExecutor {
     }
 
     /// Execute a single SQL statement via the session
-    async fn execute_statement(
-        &self,
-        sql: &str,
-        session: &Arc<Mutex<Session>>,
-    ) -> Result<usize> {
+    async fn execute_statement(&self, sql: &str, session: &Arc<Mutex<Session>>) -> Result<usize> {
         let mut session_guard = session.lock().await;
         let result = session_guard.execute(sql)?;
         Ok(result.rows_affected() as usize)

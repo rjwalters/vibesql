@@ -4,10 +4,10 @@
 //
 // Handles serialization of window functions, specs, frames, and bounds.
 
+use super::super::io::*;
+use crate::StorageError;
 use std::io::{Read, Write};
 use vibesql_ast::{FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec};
-use crate::StorageError;
-use super::super::io::*;
 
 pub(super) fn write_window_function_spec<W: Write>(
     writer: &mut W,
@@ -80,10 +80,9 @@ pub(super) fn read_window_function_spec<R: Read>(
             }
             Ok(WindowFunctionSpec::Value { name, args })
         }
-        _ => Err(StorageError::NotImplemented(format!(
-            "Unknown window function spec tag: {}",
-            tag
-        ))),
+        _ => {
+            Err(StorageError::NotImplemented(format!("Unknown window function spec tag: {}", tag)))
+        }
     }
 }
 
@@ -137,17 +136,9 @@ pub(super) fn read_window_spec<R: Read>(reader: &mut R) -> Result<WindowSpec, St
 
     // Read frame
     let has_frame = read_bool(reader)?;
-    let frame = if has_frame {
-        Some(read_window_frame(reader)?)
-    } else {
-        None
-    };
+    let frame = if has_frame { Some(read_window_frame(reader)?) } else { None };
 
-    Ok(WindowSpec {
-        partition_by,
-        order_by: None,
-        frame,
-    })
+    Ok(WindowSpec { partition_by, order_by: None, frame })
 }
 
 fn write_window_frame<W: Write>(writer: &mut W, frame: &WindowFrame) -> Result<(), StorageError> {
@@ -191,11 +182,7 @@ fn read_window_frame<R: Read>(reader: &mut R) -> Result<WindowFrame, StorageErro
 
     // Read end bound
     let has_end = read_bool(reader)?;
-    let end = if has_end {
-        Some(read_frame_bound(reader)?)
-    } else {
-        None
-    };
+    let end = if has_end { Some(read_frame_bound(reader)?) } else { None };
 
     Ok(WindowFrame { unit, start, end })
 }
@@ -247,9 +234,6 @@ fn read_frame_bound<R: Read>(reader: &mut R) -> Result<FrameBound, StorageError>
             Ok(FrameBound::Following(expr))
         }
         4 => Ok(FrameBound::UnboundedFollowing),
-        _ => Err(StorageError::NotImplemented(format!(
-            "Unknown frame bound tag: {}",
-            tag
-        ))),
+        _ => Err(StorageError::NotImplemented(format!("Unknown frame bound tag: {}", tag))),
     }
 }

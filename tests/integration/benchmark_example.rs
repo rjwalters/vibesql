@@ -9,10 +9,7 @@ use std::time::Duration;
 #[path = "../sqllogictest/mod.rs"]
 mod sqllogictest;
 
-use sqllogictest::{
-    metrics::BenchmarkMetrics,
-    report::ComparisonReport,
-};
+use sqllogictest::{metrics::BenchmarkMetrics, report::ComparisonReport};
 
 #[test]
 fn example_benchmark_metrics() {

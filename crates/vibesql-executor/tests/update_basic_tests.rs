@@ -1,7 +1,7 @@
 mod common;
 
-use vibesql_ast::{Assignment, BinaryOperator, Expression, UpdateStmt};
 use common::setup_test_table;
+use vibesql_ast::{Assignment, BinaryOperator, Expression, UpdateStmt};
 use vibesql_executor::{ExecutorError, UpdateExecutor};
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;

@@ -3,10 +3,15 @@
 //! This module provides the CombinedExpressionEvaluator for evaluating expressions
 //! in the context of combined schemas (e.g., JOINs with multiple tables).
 
-use std::{cell::RefCell, collections::HashMap, hash::{Hash, Hasher}, rc::Rc};
+use crate::{errors::ExecutorError, schema::CombinedSchema, select::WindowFunctionKey};
 use ahash::AHasher;
 use lru::LruCache;
-use crate::{errors::ExecutorError, schema::CombinedSchema, select::WindowFunctionKey};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    rc::Rc,
+};
 
 /// Evaluates expressions with combined schema (for JOINs)
 pub struct CombinedExpressionEvaluator<'a> {
@@ -359,7 +364,9 @@ impl<'a> CombinedExpressionEvaluator<'a> {
         outer_row: Option<&'a vibesql_storage::Row>,
         outer_schema: Option<&'a CombinedSchema>,
         window_mapping: Option<&'a HashMap<WindowFunctionKey, usize>>,
-        cte_context: Option<&'a std::collections::HashMap<String, super::super::select::cte::CteResult>>,
+        cte_context: Option<
+            &'a std::collections::HashMap<String, super::super::select::cte::CteResult>,
+        >,
         enable_cse: bool,
     ) -> Self {
         CombinedExpressionEvaluator {

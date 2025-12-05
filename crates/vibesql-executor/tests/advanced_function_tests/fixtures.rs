@@ -9,7 +9,10 @@ pub const EULER_NUMBER: f64 = 2.718281828;
 pub const PI_APPROX: f64 = 3.14159265;
 
 /// Helper to create a function expression with given name and arguments
-pub fn create_function_expr(name: &str, args: Vec<vibesql_ast::Expression>) -> vibesql_ast::Expression {
+pub fn create_function_expr(
+    name: &str,
+    args: Vec<vibesql_ast::Expression>,
+) -> vibesql_ast::Expression {
     vibesql_ast::Expression::Function { name: name.to_string(), args, character_unit: None }
 }
 

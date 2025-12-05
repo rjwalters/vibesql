@@ -3,8 +3,8 @@
 //! Tests for filtering aggregate results with HAVING.
 
 use super::super::*;
-use vibesql_parser::Parser;
 use vibesql_ast::Statement;
+use vibesql_parser::Parser;
 
 #[test]
 fn test_having_with_count_star_simple() {
@@ -81,9 +81,21 @@ fn test_having_clause() {
     let schema = vibesql_catalog::TableSchema::new(
         "sales".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("dept".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("amount".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "dept".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "amount".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -118,12 +130,16 @@ fn test_having_clause() {
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "dept".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "dept".to_string(),
+                },
                 alias: None,
             },
             vibesql_ast::SelectItem::Expression {
@@ -138,12 +154,15 @@ fn test_having_clause() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "sales".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "sales".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
-        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![vibesql_ast::Expression::ColumnRef {
-            table: None,
-            column: "dept".to_string(),
-        }])),
+        group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
+            vibesql_ast::Expression::ColumnRef { table: None, column: "dept".to_string() },
+        ])),
         having: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),
@@ -154,7 +173,9 @@ fn test_having_clause() {
                 character_unit: None,
             }),
             op: vibesql_ast::BinaryOperator::GreaterThan,
-            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(150))),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                150,
+            ))),
         }),
         order_by: None,
         limit: None,

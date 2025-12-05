@@ -17,7 +17,11 @@ pub fn validate_table_name(db: &Database, table_name: &str) -> anyhow::Result<()
 
 /// Validate CSV column names against table schema to prevent SQL injection
 /// Returns an error if columns don't match the table schema
-pub fn validate_csv_columns(db: &Database, file_path: &str, table_name: &str) -> anyhow::Result<()> {
+pub fn validate_csv_columns(
+    db: &Database,
+    file_path: &str,
+    table_name: &str,
+) -> anyhow::Result<()> {
     // Get table schema
     let table = db
         .get_table(table_name)
@@ -69,11 +73,16 @@ pub fn validate_csv_columns(db: &Database, file_path: &str, table_name: &str) ->
 
 /// Validate JSON column names against table schema to prevent SQL injection
 /// Returns an error if columns don't match the table schema
-pub fn validate_json_columns(db: &Database, file_path: &str, table_name: &str) -> anyhow::Result<()> {
+pub fn validate_json_columns(
+    db: &Database,
+    file_path: &str,
+    table_name: &str,
+) -> anyhow::Result<()> {
     use std::fs;
 
     // Get table schema
-    let table = db.get_table(table_name)
+    let table = db
+        .get_table(table_name)
         .ok_or_else(|| anyhow::anyhow!("Table '{}' does not exist", table_name))?;
 
     // Read JSON file
@@ -96,8 +105,12 @@ pub fn validate_json_columns(db: &Database, file_path: &str, table_name: &str) -
     // Validate each column name
     for col_name in &json_columns {
         // Check for SQL injection characters
-        if col_name.contains(';') || col_name.contains('\'') || col_name.contains('"')
-            || col_name.contains('(') || col_name.contains(')') {
+        if col_name.contains(';')
+            || col_name.contains('\'')
+            || col_name.contains('"')
+            || col_name.contains('(')
+            || col_name.contains(')')
+        {
             return Err(anyhow::anyhow!(
                 "Invalid column name '{}': contains forbidden characters",
                 col_name
@@ -105,8 +118,8 @@ pub fn validate_json_columns(db: &Database, file_path: &str, table_name: &str) -
         }
 
         // Check if column exists in table schema
-        let column_exists = table.schema.columns.iter()
-            .any(|c| c.name.eq_ignore_ascii_case(col_name));
+        let column_exists =
+            table.schema.columns.iter().any(|c| c.name.eq_ignore_ascii_case(col_name));
 
         if !column_exists {
             return Err(anyhow::anyhow!(

@@ -64,11 +64,11 @@ pub mod runner;
 pub mod substitution;
 
 // Re-export parser sub-modules
-pub use self::parser::location;
-pub use self::parser::error_parser;
-pub use self::parser::retry_parser;
 pub use self::parser::directive_parser;
+pub use self::parser::error_parser;
+pub use self::parser::location;
 pub use self::parser::record_parser;
+pub use self::parser::retry_parser;
 
 pub use self::column_type::*;
 pub use self::connection::*;

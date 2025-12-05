@@ -21,10 +21,9 @@ pub fn eval_simple_expr(
 ) -> Result<SqlValue, ExecutorError> {
     match expr {
         Expression::ColumnRef { table, column } => {
-            let col_idx = schema.get_column_index(table.as_deref(), column)
-                .ok_or_else(|| ExecutorError::UnsupportedExpression(
-                    format!("Column not found: {}", column)
-                ))?;
+            let col_idx = schema.get_column_index(table.as_deref(), column).ok_or_else(|| {
+                ExecutorError::UnsupportedExpression(format!("Column not found: {}", column))
+            })?;
             Ok(row.get(col_idx).cloned().unwrap_or(SqlValue::Null))
         }
         Expression::Literal(val) => Ok(val.clone()),
@@ -34,10 +33,15 @@ pub fn eval_simple_expr(
 
             // Use the evaluator's operators module
             use crate::evaluator::operators::OperatorRegistry;
-            OperatorRegistry::eval_binary_op(&left_val, op, &right_val, vibesql_types::SqlMode::default())
+            OperatorRegistry::eval_binary_op(
+                &left_val,
+                op,
+                &right_val,
+                vibesql_types::SqlMode::default(),
+            )
         }
         _ => Err(ExecutorError::UnsupportedExpression(
-            "Complex expressions not supported in columnar aggregates".to_string()
+            "Complex expressions not supported in columnar aggregates".to_string(),
         )),
     }
 }

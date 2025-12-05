@@ -23,10 +23,10 @@
 use super::builder;
 
 // Internal modules
-mod validation;
-mod simd;
 mod iterator;
 mod materialized;
+mod simd;
+mod validation;
 mod without_from;
 
 // Re-export the public interface

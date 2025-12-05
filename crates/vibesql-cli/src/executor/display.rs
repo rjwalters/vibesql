@@ -8,7 +8,9 @@ impl SqlExecutor {
         let normalized_name = table_name.to_uppercase();
 
         // 2. Validate table exists
-        let table = self.db.get_table(&normalized_name)
+        let table = self
+            .db
+            .get_table(&normalized_name)
             .ok_or_else(|| anyhow::anyhow!("Table '{}' does not exist", table_name))?;
 
         // 2. Get schema name
@@ -18,22 +20,21 @@ impl SqlExecutor {
         println!("                Table \"{}.{}\"", schema_name, table_name);
 
         // 4. Print column information
-        println!(" {:<20} | {:<25} | {:<8} | {:<10}",
-                 "Column", "Type", "Nullable", "Default");
+        println!(" {:<20} | {:<25} | {:<8} | {:<10}", "Column", "Type", "Nullable", "Default");
         println!("{}", "-".repeat(70));
 
         for column in &table.schema.columns {
             let nullable = if column.nullable { "" } else { "not null" };
-            let default_val = column.default_value
-                .as_ref()
-                .map(|v| format!("{:?}", v))
-                .unwrap_or_default();
+            let default_val =
+                column.default_value.as_ref().map(|v| format!("{:?}", v)).unwrap_or_default();
 
-            println!(" {:<20} | {:<25} | {:<8} | {:<10}",
-                     column.name,
-                     format_data_type(&column.data_type),
-                     nullable,
-                     truncate_for_display(&default_val, 10));
+            println!(
+                " {:<20} | {:<25} | {:<8} | {:<10}",
+                column.name,
+                format_data_type(&column.data_type),
+                nullable,
+                truncate_for_display(&default_val, 10)
+            );
         }
 
         // 5. Print constraints
@@ -147,18 +148,20 @@ pub fn format_data_type(data_type: &vibesql_types::DataType) -> String {
         vibesql_types::DataType::Smallint => "smallint".to_string(),
         vibesql_types::DataType::Bigint => "bigint".to_string(),
         vibesql_types::DataType::Unsigned => "unsigned bigint".to_string(),
-        vibesql_types::DataType::Numeric { precision, scale } => format!("numeric({}, {})", precision, scale),
-        vibesql_types::DataType::Decimal { precision, scale } => format!("numeric({}, {})", precision, scale),
+        vibesql_types::DataType::Numeric { precision, scale } => {
+            format!("numeric({}, {})", precision, scale)
+        }
+        vibesql_types::DataType::Decimal { precision, scale } => {
+            format!("numeric({}, {})", precision, scale)
+        }
         vibesql_types::DataType::Float { precision } => format!("float({})", precision),
         vibesql_types::DataType::Real => "real".to_string(),
         vibesql_types::DataType::DoublePrecision => "double precision".to_string(),
         vibesql_types::DataType::Character { length } => format!("character({})", length),
-        vibesql_types::DataType::Varchar { max_length } => {
-            match max_length {
-                Some(len) => format!("character varying({})", len),
-                None => "character varying".to_string(),
-            }
-        }
+        vibesql_types::DataType::Varchar { max_length } => match max_length {
+            Some(len) => format!("character varying({})", len),
+            None => "character varying".to_string(),
+        },
         vibesql_types::DataType::CharacterLargeObject => "text".to_string(),
         vibesql_types::DataType::Name => "name".to_string(),
         vibesql_types::DataType::Boolean => "boolean".to_string(),
@@ -179,12 +182,10 @@ pub fn format_data_type(data_type: &vibesql_types::DataType) -> String {
         }
         vibesql_types::DataType::Interval { .. } => "interval".to_string(),
         vibesql_types::DataType::BinaryLargeObject => "bytea".to_string(),
-        vibesql_types::DataType::Bit { length } => {
-            match length {
-                Some(len) => format!("bit({})", len),
-                None => "bit".to_string(),
-            }
-        }
+        vibesql_types::DataType::Bit { length } => match length {
+            Some(len) => format!("bit({})", len),
+            None => "bit".to_string(),
+        },
         vibesql_types::DataType::UserDefined { type_name } => type_name.clone(),
         vibesql_types::DataType::Vector { dimensions } => format!("vector({})", dimensions),
         vibesql_types::DataType::Null => "null".to_string(),
@@ -201,9 +202,7 @@ fn print_constraints(schema: &vibesql_catalog::TableSchema) -> anyhow::Result<()
             println!("\nConstraints:");
             has_constraints = true;
         }
-        println!("    \"{}_pkey\" PRIMARY KEY, btree ({})",
-                 schema.name,
-                 pk_cols.join(", "));
+        println!("    \"{}_pkey\" PRIMARY KEY, btree ({})", schema.name, pk_cols.join(", "));
     }
 
     // Print unique constraints
@@ -212,10 +211,12 @@ fn print_constraints(schema: &vibesql_catalog::TableSchema) -> anyhow::Result<()
             println!("\nConstraints:");
             has_constraints = true;
         }
-        println!("    \"{}_{}_key\" UNIQUE CONSTRAINT, btree ({})",
-                 schema.name,
-                 idx + 1,
-                 unique_cols.join(", "));
+        println!(
+            "    \"{}_{}_key\" UNIQUE CONSTRAINT, btree ({})",
+            schema.name,
+            idx + 1,
+            unique_cols.join(", ")
+        );
     }
 
     // Print foreign key constraints
@@ -224,12 +225,14 @@ fn print_constraints(schema: &vibesql_catalog::TableSchema) -> anyhow::Result<()
             println!("\nConstraints:");
             has_constraints = true;
         }
-        println!("    \"{}_{}_fkey\" FOREIGN KEY ({}) REFERENCES {}({})",
-                 schema.name,
-                 idx + 1,
-                 fk.column_names.join(", "),
-                 fk.parent_table,
-                 fk.parent_column_names.join(", "));
+        println!(
+            "    \"{}_{}_fkey\" FOREIGN KEY ({}) REFERENCES {}({})",
+            schema.name,
+            idx + 1,
+            fk.column_names.join(", "),
+            fk.parent_table,
+            fk.parent_column_names.join(", ")
+        );
     }
 
     // Print check constraints
@@ -264,15 +267,10 @@ fn print_indexes(db: &Database, table_name: &str) -> anyhow::Result<()> {
         println!("\nIndexes:");
         for index in indexes {
             let idx_type = if index.unique { "UNIQUE, btree" } else { "btree" };
-            let columns = index.columns.iter()
-                .map(|c| c.column_name.clone())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let columns =
+                index.columns.iter().map(|c| c.column_name.clone()).collect::<Vec<_>>().join(", ");
 
-            println!("    \"{}\" {}, ({})",
-                     index.index_name,
-                     idx_type,
-                     columns);
+            println!("    \"{}\" {}, ({})", index.index_name, idx_type, columns);
         }
     }
 

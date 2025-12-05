@@ -229,18 +229,10 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             let increment_by = read_i64(reader)?;
             // Read min_value (optional)
             let has_min = read_bool(reader)?;
-            let min_value = if has_min {
-                Some(read_i64(reader)?)
-            } else {
-                None
-            };
+            let min_value = if has_min { Some(read_i64(reader)?) } else { None };
             // Read max_value (optional)
             let has_max = read_bool(reader)?;
-            let max_value = if has_max {
-                Some(read_i64(reader)?)
-            } else {
-                None
-            };
+            let max_value = if has_max { Some(read_i64(reader)?) } else { None };
             let cycle = read_bool(reader)?;
             let current_value = read_i64(reader)?;
             let exhausted = read_bool(reader)?;

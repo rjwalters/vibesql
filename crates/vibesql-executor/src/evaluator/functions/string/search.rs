@@ -19,10 +19,13 @@ pub(in crate::evaluator::functions) fn position(
     }
 
     match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => Ok(vibesql_types::SqlValue::Null),
+        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
+            Ok(vibesql_types::SqlValue::Null)
+        }
         (
             vibesql_types::SqlValue::Varchar(needle) | vibesql_types::SqlValue::Character(needle),
-            vibesql_types::SqlValue::Varchar(haystack) | vibesql_types::SqlValue::Character(haystack),
+            vibesql_types::SqlValue::Varchar(haystack)
+            | vibesql_types::SqlValue::Character(haystack),
         ) => {
             // Find returns 0-indexed position, SQL needs 1-indexed
             match haystack.find(needle.as_str()) {
@@ -50,9 +53,12 @@ pub(in crate::evaluator::functions) fn instr(
     }
 
     match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => Ok(vibesql_types::SqlValue::Null),
+        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
+            Ok(vibesql_types::SqlValue::Null)
+        }
         (
-            vibesql_types::SqlValue::Varchar(haystack) | vibesql_types::SqlValue::Character(haystack),
+            vibesql_types::SqlValue::Varchar(haystack)
+            | vibesql_types::SqlValue::Character(haystack),
             vibesql_types::SqlValue::Varchar(needle) | vibesql_types::SqlValue::Character(needle),
         ) => {
             // Find returns 0-indexed position, convert to 1-indexed
@@ -80,10 +86,13 @@ pub(in crate::evaluator::functions) fn locate(
     }
 
     match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => Ok(vibesql_types::SqlValue::Null),
+        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
+            Ok(vibesql_types::SqlValue::Null)
+        }
         (
             vibesql_types::SqlValue::Varchar(needle) | vibesql_types::SqlValue::Character(needle),
-            vibesql_types::SqlValue::Varchar(haystack) | vibesql_types::SqlValue::Character(haystack),
+            vibesql_types::SqlValue::Varchar(haystack)
+            | vibesql_types::SqlValue::Character(haystack),
         ) => {
             // Optional start position (1-indexed, default to 1)
             let start_pos = if args.len() == 3 {

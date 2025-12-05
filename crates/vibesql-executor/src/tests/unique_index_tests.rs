@@ -66,7 +66,7 @@ fn test_unique_index_basic_insert_enforcement() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -118,7 +118,7 @@ fn test_unique_index_null_values_allowed() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -317,7 +317,7 @@ fn test_unique_index_update_enforcement() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -349,7 +349,8 @@ fn test_unique_index_update_enforcement() {
     .unwrap();
 
     // Try to UPDATE bob's email to alice's email - should fail
-    let parsed = Parser::parse_sql("UPDATE users SET email = 'alice@example.com' WHERE id = 2").unwrap();
+    let parsed =
+        Parser::parse_sql("UPDATE users SET email = 'alice@example.com' WHERE id = 2").unwrap();
     let stmt = match parsed {
         vibesql_ast::Statement::Update(stmt) => stmt,
         _ => panic!("Expected UPDATE statement"),
@@ -362,7 +363,11 @@ fn test_unique_index_update_enforcement() {
         ExecutorError::ConstraintViolation(msg) => {
             eprintln!("Error message: {}", msg);
             assert!(msg.contains("UNIQUE constraint"), "Message: {}", msg);
-            assert!(msg.contains("IDX_USERS_EMAIL") || msg.contains("idx_users_email"), "Message: {}", msg); // Index names should be normalized to uppercase
+            assert!(
+                msg.contains("IDX_USERS_EMAIL") || msg.contains("idx_users_email"),
+                "Message: {}",
+                msg
+            ); // Index names should be normalized to uppercase
         }
         e => panic!("Expected ConstraintViolation, got {:?}", e),
     }
@@ -379,7 +384,7 @@ fn test_unique_index_update_same_value_allowed() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -401,7 +406,8 @@ fn test_unique_index_update_same_value_allowed() {
     // UPDATE with same email value should succeed
     let parsed = Parser::parse_sql(
         "UPDATE users SET email = 'alice@example.com', first_name = 'Alicia' WHERE id = 1",
-    ).unwrap();
+    )
+    .unwrap();
     let stmt = match parsed {
         vibesql_ast::Statement::Update(stmt) => stmt,
         _ => panic!("Expected UPDATE statement"),
@@ -423,7 +429,7 @@ fn test_unique_index_update_to_different_value() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -443,7 +449,8 @@ fn test_unique_index_update_to_different_value() {
     .unwrap();
 
     // UPDATE to different email value should succeed
-    let parsed = Parser::parse_sql("UPDATE users SET email = 'newemail@example.com' WHERE id = 1").unwrap();
+    let parsed =
+        Parser::parse_sql("UPDATE users SET email = 'newemail@example.com' WHERE id = 1").unwrap();
     let stmt = match parsed {
         vibesql_ast::Statement::Update(stmt) => stmt,
         _ => panic!("Expected UPDATE statement"),
@@ -456,10 +463,7 @@ fn test_unique_index_update_to_different_value() {
     // Verify the email was actually updated
     let table = db.get_table("users").unwrap();
     let row = &table.scan()[0];
-    assert_eq!(
-        row.values[1],
-        SqlValue::Varchar("newemail@example.com".to_string())
-    );
+    assert_eq!(row.values[1], SqlValue::Varchar("newemail@example.com".to_string()));
 }
 
 #[test]
@@ -473,7 +477,7 @@ fn test_unique_index_update_to_null() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -520,7 +524,7 @@ fn test_unique_index_multiple_indexes_on_table() {
         true, // unique
         vec![IndexColumn {
             column_name: "email".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )
@@ -532,7 +536,7 @@ fn test_unique_index_multiple_indexes_on_table() {
         true, // unique
         vec![IndexColumn {
             column_name: "phone".to_string(),
-                prefix_length: None,
+            prefix_length: None,
             direction: OrderDirection::Asc,
         }],
     )

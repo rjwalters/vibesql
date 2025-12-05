@@ -30,9 +30,21 @@ fn create_customer_db() -> Database {
             ColumnSchema::new("c_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("c_w_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("c_d_id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("c_last".to_string(), DataType::Varchar { max_length: Some(16) }, false),
-            ColumnSchema::new("c_first".to_string(), DataType::Varchar { max_length: Some(16) }, false),
-            ColumnSchema::new("c_balance".to_string(), DataType::Numeric { precision: 12, scale: 2 }, false),
+            ColumnSchema::new(
+                "c_last".to_string(),
+                DataType::Varchar { max_length: Some(16) },
+                false,
+            ),
+            ColumnSchema::new(
+                "c_first".to_string(),
+                DataType::Varchar { max_length: Some(16) },
+                false,
+            ),
+            ColumnSchema::new(
+                "c_balance".to_string(),
+                DataType::Numeric { precision: 12, scale: 2 },
+                false,
+            ),
         ],
     );
 
@@ -98,7 +110,8 @@ fn test_secondary_index_single_column_lookup() {
         // Should return all SMITH customers (ids 1, 2, 4, 5)
         assert_eq!(result.len(), 4);
 
-        let ids: Vec<i64> = result.iter()
+        let ids: Vec<i64> = result
+            .iter()
             .filter_map(|r| if let SqlValue::Integer(id) = r.values[0] { Some(id) } else { None })
             .collect();
         assert!(ids.contains(&1));
@@ -151,7 +164,8 @@ fn test_secondary_index_composite_lookup() {
         // Should return SMITH customers in warehouse 1, district 1 (ids 1, 2)
         assert_eq!(result.len(), 2);
 
-        let ids: Vec<i64> = result.iter()
+        let ids: Vec<i64> = result
+            .iter()
             .filter_map(|r| if let SqlValue::Integer(id) = r.values[0] { Some(id) } else { None })
             .collect();
         assert!(ids.contains(&1));
@@ -238,7 +252,8 @@ fn test_secondary_index_select_star() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].values[0], SqlValue::Integer(6)); // c_id
         assert_eq!(result[0].values[3], SqlValue::Varchar("BROWN".to_string())); // c_last
-        assert_eq!(result[0].values[4], SqlValue::Varchar("Frank".to_string())); // c_first
+        assert_eq!(result[0].values[4], SqlValue::Varchar("Frank".to_string()));
+    // c_first
     } else {
         panic!("Expected SELECT statement");
     }
@@ -297,7 +312,8 @@ fn test_secondary_index_with_limit() {
     let executor = SelectExecutor::new(&db);
 
     // Query with LIMIT
-    let query = "SELECT c_id, c_first FROM customer WHERE c_last = 'SMITH' ORDER BY c_first LIMIT 2";
+    let query =
+        "SELECT c_id, c_first FROM customer WHERE c_last = 'SMITH' ORDER BY c_first LIMIT 2";
     let stmt = Parser::parse_sql(query).unwrap();
 
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
@@ -354,11 +370,7 @@ fn test_secondary_index_residual_predicate_filter() {
     // Note: col0=20123 does NOT satisfy col0 < 1013
     db.insert_row(
         "tab1",
-        Row::new(vec![
-            SqlValue::Integer(881),
-            SqlValue::Integer(20123),
-            SqlValue::Integer(81814),
-        ]),
+        Row::new(vec![SqlValue::Integer(881), SqlValue::Integer(20123), SqlValue::Integer(81814)]),
     )
     .unwrap();
 
@@ -414,21 +426,13 @@ fn test_secondary_index_residual_predicate_match() {
     // Row 882: col0=500 (DOES satisfy col0 < 1013)
     db.insert_row(
         "tab1",
-        Row::new(vec![
-            SqlValue::Integer(881),
-            SqlValue::Integer(20123),
-            SqlValue::Integer(81814),
-        ]),
+        Row::new(vec![SqlValue::Integer(881), SqlValue::Integer(20123), SqlValue::Integer(81814)]),
     )
     .unwrap();
 
     db.insert_row(
         "tab1",
-        Row::new(vec![
-            SqlValue::Integer(882),
-            SqlValue::Integer(500),
-            SqlValue::Integer(81814),
-        ]),
+        Row::new(vec![SqlValue::Integer(882), SqlValue::Integer(500), SqlValue::Integer(81814)]),
     )
     .unwrap();
 

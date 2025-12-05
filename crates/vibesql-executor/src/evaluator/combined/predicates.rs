@@ -93,10 +93,20 @@ impl CombinedExpressionEvaluator<'_> {
                 &high_val,
                 sql_mode.clone(),
             )?;
-            ExpressionEvaluator::eval_binary_op_static(&lt_low, &vibesql_ast::BinaryOperator::Or, &gt_high, sql_mode)
+            ExpressionEvaluator::eval_binary_op_static(
+                &lt_low,
+                &vibesql_ast::BinaryOperator::Or,
+                &gt_high,
+                sql_mode,
+            )
         } else {
             // BETWEEN: expr >= low AND expr <= high
-            ExpressionEvaluator::eval_binary_op_static(&ge_low, &vibesql_ast::BinaryOperator::And, &le_high, sql_mode)
+            ExpressionEvaluator::eval_binary_op_static(
+                &ge_low,
+                &vibesql_ast::BinaryOperator::And,
+                &le_high,
+                sql_mode,
+            )
         }
     }
 
@@ -114,7 +124,9 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Extract string values
         let text = match expr_val {
-            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => s.clone(),
+            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                s.clone()
+            }
             vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
             _ => {
                 return Err(ExecutorError::TypeMismatch {
@@ -126,7 +138,9 @@ impl CombinedExpressionEvaluator<'_> {
         };
 
         let pattern_str = match pattern_val {
-            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => s.clone(),
+            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                s.clone()
+            }
             vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
             _ => {
                 return Err(ExecutorError::TypeMismatch {
@@ -163,7 +177,9 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Extract the string value
         let s = match &string_val {
-            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => s.as_str(),
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                s.as_str()
+            }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: string_val.clone(),
@@ -370,10 +386,14 @@ impl CombinedExpressionEvaluator<'_> {
         let string_val = self.eval(string, row)?;
 
         match (&substring_val, &string_val) {
-            (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => Ok(vibesql_types::SqlValue::Null),
+            (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
+                Ok(vibesql_types::SqlValue::Null)
+            }
             (
-                vibesql_types::SqlValue::Varchar(needle) | vibesql_types::SqlValue::Character(needle),
-                vibesql_types::SqlValue::Varchar(haystack) | vibesql_types::SqlValue::Character(haystack),
+                vibesql_types::SqlValue::Varchar(needle)
+                | vibesql_types::SqlValue::Character(needle),
+                vibesql_types::SqlValue::Varchar(haystack)
+                | vibesql_types::SqlValue::Character(haystack),
             ) => match haystack.find(needle.as_str()) {
                 Some(pos) => Ok(vibesql_types::SqlValue::Integer((pos + 1) as i64)),
                 None => Ok(vibesql_types::SqlValue::Integer(0)),
@@ -413,8 +433,11 @@ impl CombinedExpressionEvaluator<'_> {
                     IntervalUnit::Quarter => ((d.month - 1) / 3 + 1) as i64,
                     IntervalUnit::Week => {
                         // Calculate ISO week number using chrono
-                        let chrono_date = chrono::NaiveDate::from_ymd_opt(d.year, d.month as u32, d.day as u32)
-                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+                        let chrono_date =
+                            chrono::NaiveDate::from_ymd_opt(d.year, d.month as u32, d.day as u32)
+                                .unwrap_or_else(|| {
+                                    chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
+                                });
                         chrono_date.iso_week().week() as i64
                     }
                     _ => {
@@ -455,8 +478,12 @@ impl CombinedExpressionEvaluator<'_> {
                     IntervalUnit::Quarter => ((ts.date.month - 1) / 3 + 1) as i64,
                     IntervalUnit::Week => {
                         // Calculate ISO week number using chrono
-                        let chrono_date = chrono::NaiveDate::from_ymd_opt(ts.date.year, ts.date.month as u32, ts.date.day as u32)
-                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+                        let chrono_date = chrono::NaiveDate::from_ymd_opt(
+                            ts.date.year,
+                            ts.date.month as u32,
+                            ts.date.day as u32,
+                        )
+                        .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
                         chrono_date.iso_week().week() as i64
                     }
                     _ => {

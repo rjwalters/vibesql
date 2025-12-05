@@ -5,8 +5,8 @@ use vibesql_catalog::ColumnSchema;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
 use super::validation::{convert_value, evaluate_simple_default, is_type_conversion_safe};
+use crate::errors::ExecutorError;
 
 /// Execute ADD COLUMN
 pub(super) fn execute_add_column(
@@ -72,9 +72,7 @@ pub(super) fn execute_drop_column(
 
     // Check if column is part of constraints
     if table.schema.is_column_in_primary_key(&stmt.column_name) {
-        return Err(ExecutorError::CannotDropColumn(
-            "Column is part of PRIMARY KEY".to_string(),
-        ));
+        return Err(ExecutorError::CannotDropColumn("Column is part of PRIMARY KEY".to_string()));
     }
 
     // Check if this is the last column in the table
@@ -157,10 +155,7 @@ pub(super) fn execute_alter_column(
             // Drop the default value from the schema
             table.schema_mut().drop_column_default(col_index)?;
 
-            Ok(format!(
-                "Default dropped for column '{}' in table '{}'",
-                column_name, table_name
-            ))
+            Ok(format!("Default dropped for column '{}' in table '{}'", column_name, table_name))
         }
         AlterColumnStmt::SetNotNull { table_name, column_name } => {
             let table = database
@@ -227,8 +222,6 @@ pub(super) fn execute_modify_column(
     stmt: &ModifyColumnStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
-
-
     let table = database
         .get_table_mut(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
@@ -281,8 +274,6 @@ pub(super) fn execute_change_column(
     stmt: &ChangeColumnStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
-
-
     let table = database
         .get_table_mut(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;

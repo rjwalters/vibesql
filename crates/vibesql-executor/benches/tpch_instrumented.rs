@@ -35,11 +35,7 @@ fn profile_query(
     sql: &str,
     iterations: u32,
 ) -> TimingBreakdown {
-    eprintln!("\n{} {} Profiling {}",
-        "=".repeat(20),
-        name,
-        "=".repeat(20)
-    );
+    eprintln!("\n{} {} Profiling {}", "=".repeat(20), name, "=".repeat(20));
 
     // Parse phase
     let parse_start = Instant::now();
@@ -57,7 +53,17 @@ fn profile_query(
     let parse_time = parse_start.elapsed();
 
     eprintln!("\n1. QUERY INFO:");
-    eprintln!("   SQL: {}", sql.trim().lines().take(2).collect::<Vec<_>>().join(" ").chars().take(70).collect::<String>());
+    eprintln!(
+        "   SQL: {}",
+        sql.trim()
+            .lines()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(70)
+            .collect::<String>()
+    );
     eprintln!("   Parse time: {:?}", parse_time);
 
     // Warm-up run
@@ -139,39 +145,25 @@ fn profile_query(
     eprintln!("   Throughput: {:.0} rows/sec", rows_per_sec);
 
     // DuckDB comparison (from known benchmarks)
-    let duckdb_times: &[(&str, f64)] = &[
-        ("Q1", 4.47),
-        ("Q3", 2.05),
-        ("Q6", 0.54),
-    ];
+    let duckdb_times: &[(&str, f64)] = &[("Q1", 4.47), ("Q3", 2.05), ("Q6", 0.54)];
     if let Some((_, duckdb_ms)) = duckdb_times.iter().find(|(q, _)| *q == name) {
         let gap = avg.as_secs_f64() * 1000.0 / duckdb_ms;
         eprintln!("   DuckDB reference: {:.2}ms", duckdb_ms);
         eprintln!("   Performance gap: {:.1}x slower", gap);
     }
 
-    TimingBreakdown {
-        parse_time,
-        executor_creation: Duration::ZERO,
-        total_execution: avg,
-    }
+    TimingBreakdown { parse_time, executor_creation: Duration::ZERO, total_execution: avg }
 }
 
 fn main() {
     eprintln!("=== TPC-H Instrumented Profiling ===");
 
-    let iterations: u32 = env::var("PROFILING_ITERATIONS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100);
+    let iterations: u32 =
+        env::var("PROFILING_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
 
     eprintln!("Iterations: {} (set PROFILING_ITERATIONS to change)", iterations);
 
-    let queries: Vec<(&str, &str)> = vec![
-        ("Q1", TPCH_Q1),
-        ("Q3", TPCH_Q3),
-        ("Q6", TPCH_Q6),
-    ];
+    let queries: Vec<(&str, &str)> = vec![("Q1", TPCH_Q1), ("Q3", TPCH_Q3), ("Q6", TPCH_Q6)];
 
     let args: Vec<String> = env::args().collect();
 
@@ -209,10 +201,7 @@ fn main() {
     }
 
     // Summary
-    eprintln!("\n{} SUMMARY {}",
-        "=".repeat(30),
-        "=".repeat(30)
-    );
+    eprintln!("\n{} SUMMARY {}", "=".repeat(30), "=".repeat(30));
     for (name, timing) in &results {
         eprintln!("  {}: {:?} avg execution", name, timing.total_execution);
     }

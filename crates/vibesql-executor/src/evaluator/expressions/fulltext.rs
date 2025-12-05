@@ -1,34 +1,121 @@
 //! Full-text search evaluation for MATCH...AGAINST expressions
 
-use vibesql_ast::FulltextMode;
 use crate::errors::ExecutorError;
 use std::collections::HashSet;
+use vibesql_ast::FulltextMode;
 
 /// Common English stopwords to exclude from searches
 const STOPWORDS: &[&str] = &[
-    "a", "about", "after", "all", "am", "an", "and", "any", "are", "as", "at",
-    "be", "been", "before", "being", "by",
-    "can", "could",
-    "did", "do", "does", "doing", "down",
+    "a",
+    "about",
+    "after",
+    "all",
+    "am",
+    "an",
+    "and",
+    "any",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "before",
+    "being",
+    "by",
+    "can",
+    "could",
+    "did",
+    "do",
+    "does",
+    "doing",
+    "down",
     "during",
-    "each", "even",
-    "for", "from", "further",
-    "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him", "himself", "his",
+    "each",
+    "even",
+    "for",
+    "from",
+    "further",
+    "had",
+    "has",
+    "have",
+    "having",
+    "he",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
     "how",
-    "i", "if", "in", "into", "is", "it", "its", "itself",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "itself",
     "just",
-    "me", "might", "my", "myself",
-    "no", "nor", "not",
-    "of", "off", "on", "once", "only", "or", "other", "out", "over",
+    "me",
+    "might",
+    "my",
+    "myself",
+    "no",
+    "nor",
+    "not",
+    "of",
+    "off",
+    "on",
+    "once",
+    "only",
+    "or",
+    "other",
+    "out",
+    "over",
     "own",
-    "same", "should", "so", "some",
-    "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there", "these",
-    "they", "this", "those", "through", "to", "too",
-    "under", "until", "up",
+    "same",
+    "should",
+    "so",
+    "some",
+    "than",
+    "that",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "to",
+    "too",
+    "under",
+    "until",
+    "up",
     "very",
-    "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "with",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "why",
+    "with",
     "would",
-    "you", "your", "yours", "yourself", "yourselves",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
 ];
 
 /// Tokenize text into words, removing punctuation and converting to lowercase
@@ -47,17 +134,12 @@ fn is_stopword(word: &str) -> bool {
 
 /// Filter out stopwords from tokens
 fn remove_stopwords(tokens: Vec<String>) -> Vec<String> {
-    tokens.into_iter()
-        .filter(|token| !is_stopword(token))
-        .collect()
+    tokens.into_iter().filter(|token| !is_stopword(token)).collect()
 }
 
 /// Evaluate natural language full-text search
 /// Returns true if all search terms are found in any of the text values
-pub fn eval_natural_language_search(
-    search_terms: &str,
-    text_values: &[String],
-) -> bool {
+pub fn eval_natural_language_search(search_terms: &str, text_values: &[String]) -> bool {
     let search_tokens = remove_stopwords(tokenize(search_terms));
     if search_tokens.is_empty() {
         return true; // Empty search matches everything
@@ -74,10 +156,7 @@ pub fn eval_natural_language_search(
 
 /// Evaluate boolean mode full-text search
 /// Supports operators: + (required), - (prohibited), * (wildcard), "..." (phrase)
-pub fn eval_boolean_search(
-    search_query: &str,
-    text_values: &[String],
-) -> bool {
+pub fn eval_boolean_search(search_query: &str, text_values: &[String]) -> bool {
     let combined_text = text_values.join(" ");
     let text_lower = combined_text.to_lowercase();
 
@@ -170,15 +249,13 @@ pub fn eval_boolean_search(
 
     // If we have required terms, they must match
     // If we have optional terms, at least one must match (or we just check required/prohibited)
-    optional_terms.is_empty() || optional_terms.iter().any(|term| text_lower.contains(&term.to_lowercase()))
+    optional_terms.is_empty()
+        || optional_terms.iter().any(|term| text_lower.contains(&term.to_lowercase()))
 }
 
 /// Simple query expansion: extract keywords and re-search
 /// This is a simplified implementation - full implementation would use relevance
-pub fn eval_query_expansion_search(
-    search_terms: &str,
-    text_values: &[String],
-) -> bool {
+pub fn eval_query_expansion_search(search_terms: &str, text_values: &[String]) -> bool {
     let combined_text = text_values.join(" ");
     let tokens = tokenize(&combined_text);
     let _tokens_filtered = remove_stopwords(tokens);
@@ -203,13 +280,7 @@ pub fn eval_match_against(
     // Skip empty values and convert to strings
     let values: Vec<String> = text_values
         .iter()
-        .filter_map(|val| {
-            if val.is_empty() {
-                None
-            } else {
-                Some(val.clone())
-            }
-        })
+        .filter_map(|val| if val.is_empty() { None } else { Some(val.clone()) })
         .collect();
 
     if values.is_empty() {

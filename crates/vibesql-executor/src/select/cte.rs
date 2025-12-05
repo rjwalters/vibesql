@@ -93,8 +93,9 @@ pub(super) fn derive_cte_schema(
                 .zip(&first_row.values)
                 .map(|(name, value)| {
                     let data_type = infer_type_from_value(value);
-                    vibesql_catalog::ColumnSchema::new(name.clone(), data_type, true) // nullable for
-                                                                              // simplicity
+                    vibesql_catalog::ColumnSchema::new(name.clone(), data_type, true)
+                    // nullable for
+                    // simplicity
                 })
                 .collect();
 
@@ -163,19 +164,25 @@ pub(super) fn infer_type_from_value(value: &vibesql_types::SqlValue) -> vibesql_
     match value {
         vibesql_types::SqlValue::Null => vibesql_types::DataType::Varchar { max_length: Some(255) }, // default
         vibesql_types::SqlValue::Integer(_) => vibesql_types::DataType::Integer,
-        vibesql_types::SqlValue::Varchar(_) => vibesql_types::DataType::Varchar { max_length: Some(255) },
+        vibesql_types::SqlValue::Varchar(_) => {
+            vibesql_types::DataType::Varchar { max_length: Some(255) }
+        }
         vibesql_types::SqlValue::Character(_) => vibesql_types::DataType::Character { length: 1 },
         vibesql_types::SqlValue::Boolean(_) => vibesql_types::DataType::Boolean,
         vibesql_types::SqlValue::Float(_) => vibesql_types::DataType::Float { precision: 53 },
         vibesql_types::SqlValue::Double(_) => vibesql_types::DataType::DoublePrecision,
-        vibesql_types::SqlValue::Numeric(_) => vibesql_types::DataType::Numeric { precision: 10, scale: 2 },
+        vibesql_types::SqlValue::Numeric(_) => {
+            vibesql_types::DataType::Numeric { precision: 10, scale: 2 }
+        }
         vibesql_types::SqlValue::Real(_) => vibesql_types::DataType::Real,
         vibesql_types::SqlValue::Smallint(_) => vibesql_types::DataType::Smallint,
         vibesql_types::SqlValue::Bigint(_) => vibesql_types::DataType::Bigint,
         vibesql_types::SqlValue::Unsigned(_) => vibesql_types::DataType::Unsigned,
         vibesql_types::SqlValue::Date(_) => vibesql_types::DataType::Date,
         vibesql_types::SqlValue::Time(_) => vibesql_types::DataType::Time { with_timezone: false },
-        vibesql_types::SqlValue::Timestamp(_) => vibesql_types::DataType::Timestamp { with_timezone: false },
+        vibesql_types::SqlValue::Timestamp(_) => {
+            vibesql_types::DataType::Timestamp { with_timezone: false }
+        }
         vibesql_types::SqlValue::Interval(_) => {
             // For now, return a simple INTERVAL type (can be enhanced to detect field types)
             vibesql_types::DataType::Interval {

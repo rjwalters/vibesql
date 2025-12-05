@@ -32,14 +32,7 @@ pub fn validate_results(
     // Validate expected row count if specified
     if let Some(expected) = expected_count {
         if actual_rows.len() != expected {
-            return (
-                false,
-                Some(format!(
-                    "Expected {} rows, got {}",
-                    expected,
-                    actual_rows.len()
-                )),
-            );
+            return (false, Some(format!("Expected {} rows, got {}", expected, actual_rows.len())));
         }
     }
 
@@ -48,22 +41,15 @@ pub fn validate_results(
         if actual_rows.len() != expected.len() {
             return (
                 false,
-                Some(format!(
-                    "Expected {} rows, got {} rows",
-                    expected.len(),
-                    actual_rows.len()
-                )),
+                Some(format!("Expected {} rows, got {} rows", expected.len(), actual_rows.len())),
             );
         }
 
         // Validate each row
         for (i, (actual_row, expected_row)) in actual_rows.iter().zip(expected.iter()).enumerate() {
             // Convert actual row to strings for comparison
-            let actual_values: Vec<String> = actual_row
-                .values
-                .iter()
-                .map(|v| v.to_string())
-                .collect();
+            let actual_values: Vec<String> =
+                actual_row.values.iter().map(|v| v.to_string()).collect();
 
             if actual_values.len() != expected_row.len() {
                 return (

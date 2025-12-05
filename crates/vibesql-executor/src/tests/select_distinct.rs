@@ -10,7 +10,11 @@ fn test_distinct_removes_duplicate_rows() {
     let schema = vibesql_catalog::TableSchema::new(
         "products".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "category".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -59,14 +63,22 @@ fn test_distinct_removes_duplicate_rows() {
     // SELECT DISTINCT category FROM products
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "category".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "category".to_string(),
+            },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "products".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -100,8 +112,16 @@ fn test_distinct_with_multiple_columns() {
     let schema = vibesql_catalog::TableSchema::new(
         "orders".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("customer_id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "customer_id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "status".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(20) },
@@ -154,20 +174,31 @@ fn test_distinct_with_multiple_columns() {
     // SELECT DISTINCT customer_id, status FROM orders
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: true,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "customer_id".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "customer_id".to_string(),
+                },
                 alias: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "status".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "status".to_string(),
+                },
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table { name: "orders".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "orders".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -188,7 +219,11 @@ fn test_distinct_with_null_values() {
     let schema = vibesql_catalog::TableSchema::new(
         "items".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "description".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(100) },
@@ -209,12 +244,18 @@ fn test_distinct_with_null_values() {
     .unwrap();
     db.insert_row(
         "items",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2), vibesql_types::SqlValue::Null]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Null,
+        ]),
     )
     .unwrap();
     db.insert_row(
         "items",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3), vibesql_types::SqlValue::Null]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Null,
+        ]),
     )
     .unwrap();
     db.insert_row(
@@ -231,14 +272,22 @@ fn test_distinct_with_null_values() {
     // SELECT DISTINCT description FROM items
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "description".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "description".to_string(),
+            },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "items".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "items".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -268,12 +317,16 @@ fn test_distinct_false_preserves_duplicates() {
 
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Electronics".to_string())]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(
+            "Electronics".to_string(),
+        )]),
     )
     .unwrap();
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Electronics".to_string())]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(
+            "Electronics".to_string(),
+        )]),
     )
     .unwrap();
     db.insert_row(
@@ -287,11 +340,16 @@ fn test_distinct_false_preserves_duplicates() {
     // SELECT category FROM products (without DISTINCT)
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "products".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -312,7 +370,11 @@ fn test_distinct_with_where_clause() {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "role".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(20) },
@@ -360,16 +422,24 @@ fn test_distinct_with_where_clause() {
     // SELECT DISTINCT role FROM users WHERE id > 1
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "role".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "users".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "users".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "id".to_string(),
+            }),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         }),
@@ -394,7 +464,11 @@ fn test_distinct_with_order_by() {
     let schema = vibesql_catalog::TableSchema::new(
         "products".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "category".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -442,19 +516,30 @@ fn test_distinct_with_order_by() {
     // SELECT DISTINCT category FROM products ORDER BY category
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "category".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "category".to_string(),
+            },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "products".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "products".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "category".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "category".to_string(),
+            },
             direction: vibesql_ast::OrderDirection::Asc,
         }]),
         limit: None,

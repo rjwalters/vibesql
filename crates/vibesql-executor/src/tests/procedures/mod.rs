@@ -80,9 +80,9 @@ pub(crate) fn create_empty_function(name: &str, return_type: DataType) -> Create
     create_simple_function(name, vec![], return_type, vec![])
 }
 
-mod stored_procedures;
+mod control_flow;
+mod edge_cases;
+mod error_messages;
 mod functions;
 mod parameters;
-mod control_flow;
-mod error_messages;
-mod edge_cases;
+mod stored_procedures;

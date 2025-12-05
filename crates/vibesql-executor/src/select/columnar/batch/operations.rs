@@ -69,12 +69,10 @@ impl ColumnarBatch {
 
     /// Get a value at a specific (row, column) position
     pub fn get_value(&self, row_idx: usize, col_idx: usize) -> Result<SqlValue, ExecutorError> {
-        let column = self
-            .column(col_idx)
-            .ok_or(ExecutorError::ColumnarColumnNotFound {
-                column_index: col_idx,
-                batch_columns: self.columns.len(),
-            })?;
+        let column = self.column(col_idx).ok_or(ExecutorError::ColumnarColumnNotFound {
+            column_index: col_idx,
+            batch_columns: self.columns.len(),
+        })?;
         column.get_value(row_idx)
     }
 
@@ -170,10 +168,9 @@ impl ColumnArray {
                     .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
-            Self::Mixed(values) => values
-                .get(index)
-                .cloned()
-                .ok_or(ExecutorError::ColumnIndexOutOfBounds { index }),
+            Self::Mixed(values) => {
+                values.get(index).cloned().ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
+            }
 
             Self::Int32(values, nulls) => {
                 if let Some(null_mask) = nulls {
@@ -282,11 +279,8 @@ fn days_since_epoch_to_date(days: i32) -> Date {
 
     // Handle years
     loop {
-        let year_days = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
-            366
-        } else {
-            365
-        };
+        let year_days =
+            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
         if remaining_days < year_days {
             break;
         }
@@ -330,8 +324,8 @@ fn microseconds_to_timestamp(micros: i64) -> Timestamp {
     let seconds = (remaining_micros / 1_000_000) as u8;
     let nanoseconds = ((remaining_micros % 1_000_000) * 1_000) as u32;
 
-    let time =
-        Time::new(hours, minutes, seconds, nanoseconds).unwrap_or_else(|_| Time::new(0, 0, 0, 0).unwrap());
+    let time = Time::new(hours, minutes, seconds, nanoseconds)
+        .unwrap_or_else(|_| Time::new(0, 0, 0, 0).unwrap());
 
     Timestamp::new(date, time)
 }

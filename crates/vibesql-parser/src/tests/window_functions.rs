@@ -348,7 +348,10 @@ fn test_unbounded_following() {
                 vibesql_ast::Expression::WindowFunction { over, .. } => {
                     let frame = over.frame.as_ref().unwrap();
                     assert_eq!(frame.start, vibesql_ast::FrameBound::CurrentRow);
-                    assert_eq!(frame.end.as_ref().unwrap(), &vibesql_ast::FrameBound::UnboundedFollowing);
+                    assert_eq!(
+                        frame.end.as_ref().unwrap(),
+                        &vibesql_ast::FrameBound::UnboundedFollowing
+                    );
                 }
                 _ => panic!("Expected WindowFunction"),
             },

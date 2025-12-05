@@ -33,11 +33,7 @@ pub struct InternalNode {
 impl InternalNode {
     /// Create a new internal node
     pub fn new(page_id: PageId) -> Self {
-        InternalNode {
-            page_id,
-            keys: Vec::new(),
-            children: Vec::new(),
-        }
+        InternalNode { page_id, keys: Vec::new(), children: Vec::new() }
     }
 
     /// Check if the node is full (needs splitting)
@@ -70,12 +66,7 @@ pub struct LeafNode {
 impl LeafNode {
     /// Create a new leaf node
     pub fn new(page_id: PageId) -> Self {
-        LeafNode {
-            page_id,
-            entries: Vec::new(),
-            next_leaf: NULL_PAGE_ID,
-            prev_leaf: NULL_PAGE_ID,
-        }
+        LeafNode { page_id, entries: Vec::new(), next_leaf: NULL_PAGE_ID, prev_leaf: NULL_PAGE_ID }
     }
 
     /// Check if the node is full (needs splitting)

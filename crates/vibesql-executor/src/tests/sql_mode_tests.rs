@@ -4,13 +4,16 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::{SchemaExecutor, SelectExecutor};
     use vibesql_parser::Parser;
     use vibesql_storage::Database;
     use vibesql_types::SqlMode;
-    use crate::{SelectExecutor, SchemaExecutor};
 
     /// Helper to execute a SET variable statement
-    fn execute_set_variable(db: &mut Database, sql: &str) -> Result<String, crate::errors::ExecutorError> {
+    fn execute_set_variable(
+        db: &mut Database,
+        sql: &str,
+    ) -> Result<String, crate::errors::ExecutorError> {
         let stmt = Parser::parse_sql(sql).expect("Failed to parse SET statement");
         if let vibesql_ast::Statement::SetVariable(set_stmt) = stmt {
             SchemaExecutor::execute_set_variable(&set_stmt, db)
@@ -94,7 +97,7 @@ mod tests {
         // Test MySQL comma-separated mode flags (issue #3074)
         let result = execute_set_variable(
             &mut db,
-            "SET sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE'"
+            "SET sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE'",
         );
         assert!(result.is_ok());
         match db.sql_mode() {
@@ -113,7 +116,7 @@ mod tests {
         // This is the actual bug from issue #3074
         let result = execute_set_variable(
             &mut db,
-            "SET sql_mode = ',STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE'"
+            "SET sql_mode = ',STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE'",
         );
         assert!(result.is_ok());
         match db.sql_mode() {
@@ -208,32 +211,48 @@ mod tests {
         // 5.7 rounds to 6
         let result = select_single_value(&db, "SELECT CAST(5.7 AS SIGNED)");
         match result {
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 6, "MySQL: CAST(5.7 AS SIGNED) should be 6, got {}", n),
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 6, "MySQL: CAST(5.7 AS SIGNED) should be 6, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, 6, "MySQL: CAST(5.7 AS SIGNED) should be 6, got {}", n)
+            }
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 6, "MySQL: CAST(5.7 AS SIGNED) should be 6, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
 
         // 5.4 rounds to 5
         let result = select_single_value(&db, "SELECT CAST(5.4 AS SIGNED)");
         match result {
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "MySQL: CAST(5.4 AS SIGNED) should be 5, got {}", n),
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "MySQL: CAST(5.4 AS SIGNED) should be 5, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, 5, "MySQL: CAST(5.4 AS SIGNED) should be 5, got {}", n)
+            }
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 5, "MySQL: CAST(5.4 AS SIGNED) should be 5, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
 
         // 5.5 rounds to 6 (banker's rounding rounds to nearest even, but MySQL uses round half up)
         let result = select_single_value(&db, "SELECT CAST(5.5 AS SIGNED)");
         match result {
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 6, "MySQL: CAST(5.5 AS SIGNED) should be 6, got {}", n),
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 6, "MySQL: CAST(5.5 AS SIGNED) should be 6, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, 6, "MySQL: CAST(5.5 AS SIGNED) should be 6, got {}", n)
+            }
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 6, "MySQL: CAST(5.5 AS SIGNED) should be 6, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
 
         // Negative: -5.7 rounds to -6
         let result = select_single_value(&db, "SELECT CAST(-5.7 AS SIGNED)");
         match result {
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, -6, "MySQL: CAST(-5.7 AS SIGNED) should be -6, got {}", n),
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, -6, "MySQL: CAST(-5.7 AS SIGNED) should be -6, got {}", n),
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, -6, "MySQL: CAST(-5.7 AS SIGNED) should be -6, got {}", n)
+            }
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, -6, "MySQL: CAST(-5.7 AS SIGNED) should be -6, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
     }
@@ -248,32 +267,48 @@ mod tests {
         // 5.7 truncates to 5
         let result = select_single_value(&db, "SELECT CAST(5.7 AS INTEGER)");
         match result {
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "SQLite: CAST(5.7 AS INTEGER) should be 5, got {}", n),
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "SQLite: CAST(5.7 AS INTEGER) should be 5, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 5, "SQLite: CAST(5.7 AS INTEGER) should be 5, got {}", n)
+            }
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, 5, "SQLite: CAST(5.7 AS INTEGER) should be 5, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
 
         // 5.4 truncates to 5
         let result = select_single_value(&db, "SELECT CAST(5.4 AS INTEGER)");
         match result {
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "SQLite: CAST(5.4 AS INTEGER) should be 5, got {}", n),
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "SQLite: CAST(5.4 AS INTEGER) should be 5, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 5, "SQLite: CAST(5.4 AS INTEGER) should be 5, got {}", n)
+            }
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, 5, "SQLite: CAST(5.4 AS INTEGER) should be 5, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
 
         // 5.9 truncates to 5
         let result = select_single_value(&db, "SELECT CAST(5.9 AS INTEGER)");
         match result {
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, 5, "SQLite: CAST(5.9 AS INTEGER) should be 5, got {}", n),
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, 5, "SQLite: CAST(5.9 AS INTEGER) should be 5, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, 5, "SQLite: CAST(5.9 AS INTEGER) should be 5, got {}", n)
+            }
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, 5, "SQLite: CAST(5.9 AS INTEGER) should be 5, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
 
         // Negative: -5.7 truncates to -5 (toward zero)
         let result = select_single_value(&db, "SELECT CAST(-5.7 AS INTEGER)");
         match result {
-            vibesql_types::SqlValue::Integer(n) => assert_eq!(n, -5, "SQLite: CAST(-5.7 AS INTEGER) should be -5, got {}", n),
-            vibesql_types::SqlValue::Bigint(n) => assert_eq!(n, -5, "SQLite: CAST(-5.7 AS INTEGER) should be -5, got {}", n),
+            vibesql_types::SqlValue::Integer(n) => {
+                assert_eq!(n, -5, "SQLite: CAST(-5.7 AS INTEGER) should be -5, got {}", n)
+            }
+            vibesql_types::SqlValue::Bigint(n) => {
+                assert_eq!(n, -5, "SQLite: CAST(-5.7 AS INTEGER) should be -5, got {}", n)
+            }
             other => panic!("Expected integer type, got {:?}", other),
         }
     }

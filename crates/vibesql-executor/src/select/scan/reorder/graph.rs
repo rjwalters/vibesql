@@ -74,7 +74,10 @@ pub(super) fn extract_all_conditions(from: &FromClause, conditions: &mut Vec<Exp
 }
 
 /// Extract all join conditions with their associated join types from a FROM clause
-pub(super) fn extract_conditions_with_types(from: &FromClause, conditions: &mut Vec<JoinConditionWithType>) {
+pub(super) fn extract_conditions_with_types(
+    from: &FromClause,
+    conditions: &mut Vec<JoinConditionWithType>,
+) {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } => {
             // No conditions in simple table refs
@@ -116,7 +119,8 @@ pub(super) fn extract_referenced_tables_with_schema(
         }
         Expression::ColumnRef { table: None, column } => {
             // Use schema-based lookup
-            if let Some(table) = super::utils::resolve_column_with_fallback(column, column_to_table) {
+            if let Some(table) = super::utils::resolve_column_with_fallback(column, column_to_table)
+            {
                 output.insert(table.to_lowercase());
             }
         }
@@ -129,13 +133,23 @@ pub(super) fn extract_referenced_tables_with_schema(
         }
         Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
             for arg in args {
-                extract_referenced_tables_with_schema(arg, output, available_tables, column_to_table);
+                extract_referenced_tables_with_schema(
+                    arg,
+                    output,
+                    available_tables,
+                    column_to_table,
+                );
             }
         }
         Expression::InList { expr, values, .. } => {
             extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
             for item in values {
-                extract_referenced_tables_with_schema(item, output, available_tables, column_to_table);
+                extract_referenced_tables_with_schema(
+                    item,
+                    output,
+                    available_tables,
+                    column_to_table,
+                );
             }
         }
         Expression::Between { expr, low, high, .. } => {
@@ -145,16 +159,36 @@ pub(super) fn extract_referenced_tables_with_schema(
         }
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                extract_referenced_tables_with_schema(op, output, available_tables, column_to_table);
+                extract_referenced_tables_with_schema(
+                    op,
+                    output,
+                    available_tables,
+                    column_to_table,
+                );
             }
             for clause in when_clauses {
                 for condition in &clause.conditions {
-                    extract_referenced_tables_with_schema(condition, output, available_tables, column_to_table);
+                    extract_referenced_tables_with_schema(
+                        condition,
+                        output,
+                        available_tables,
+                        column_to_table,
+                    );
                 }
-                extract_referenced_tables_with_schema(&clause.result, output, available_tables, column_to_table);
+                extract_referenced_tables_with_schema(
+                    &clause.result,
+                    output,
+                    available_tables,
+                    column_to_table,
+                );
             }
             if let Some(else_res) = else_result {
-                extract_referenced_tables_with_schema(else_res, output, available_tables, column_to_table);
+                extract_referenced_tables_with_schema(
+                    else_res,
+                    output,
+                    available_tables,
+                    column_to_table,
+                );
             }
         }
         Expression::IsNull { expr, .. } => {
@@ -168,18 +202,43 @@ pub(super) fn extract_referenced_tables_with_schema(
             // Note: We don't traverse into subqueries as they reference different tables
         }
         Expression::Position { substring, string, .. } => {
-            extract_referenced_tables_with_schema(substring, output, available_tables, column_to_table);
-            extract_referenced_tables_with_schema(string, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(
+                substring,
+                output,
+                available_tables,
+                column_to_table,
+            );
+            extract_referenced_tables_with_schema(
+                string,
+                output,
+                available_tables,
+                column_to_table,
+            );
         }
         Expression::Trim { removal_char, string, .. } => {
             if let Some(char_expr) = removal_char {
-                extract_referenced_tables_with_schema(char_expr, output, available_tables, column_to_table);
+                extract_referenced_tables_with_schema(
+                    char_expr,
+                    output,
+                    available_tables,
+                    column_to_table,
+                );
             }
-            extract_referenced_tables_with_schema(string, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(
+                string,
+                output,
+                available_tables,
+                column_to_table,
+            );
         }
         Expression::Like { expr, pattern, .. } => {
             extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
-            extract_referenced_tables_with_schema(pattern, output, available_tables, column_to_table);
+            extract_referenced_tables_with_schema(
+                pattern,
+                output,
+                available_tables,
+                column_to_table,
+            );
         }
         // For other expressions (literals, wildcards, subqueries, etc.), no direct column refs to extract
         _ => {}

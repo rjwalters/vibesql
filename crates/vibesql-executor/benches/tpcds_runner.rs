@@ -36,12 +36,14 @@ mod tpcds;
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-use tpcds::memory::{get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled, MemoryTracker};
+use tpcds::memory::{
+    get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled, MemoryTracker,
+};
 use tpcds::queries::TPCDS_QUERIES;
 use tpcds::schema::load_vibesql;
-use vibesql_executor::{SelectExecutor, clear_in_subquery_cache};
-use vibesql_storage::QueryBufferPool;
+use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
+use vibesql_storage::QueryBufferPool;
 
 #[cfg(feature = "benchmark-comparison")]
 use duckdb::Connection as DuckDBConn;
@@ -64,25 +66,26 @@ const DEFAULT_MEMORY_WARN_MB: f64 = 6000.0;
 
 /// Get expected row counts from DuckDB for validation
 #[cfg(feature = "benchmark-comparison")]
-fn get_expected_row_counts(duckdb: &DuckDBConn, queries: &[(&str, &str)]) -> HashMap<String, usize> {
+fn get_expected_row_counts(
+    duckdb: &DuckDBConn,
+    queries: &[(&str, &str)],
+) -> HashMap<String, usize> {
     let mut expected = HashMap::new();
 
     for (name, sql) in queries {
         match duckdb.prepare(sql) {
-            Ok(mut stmt) => {
-                match stmt.query([]) {
-                    Ok(mut rows) => {
-                        let mut count = 0;
-                        while rows.next().map(|r| r.is_some()).unwrap_or(false) {
-                            count += 1;
-                        }
-                        expected.insert(name.to_string(), count);
+            Ok(mut stmt) => match stmt.query([]) {
+                Ok(mut rows) => {
+                    let mut count = 0;
+                    while rows.next().map(|r| r.is_some()).unwrap_or(false) {
+                        count += 1;
                     }
-                    Err(e) => {
-                        eprintln!("DuckDB query error for {}: {:?}", name, e);
-                    }
+                    expected.insert(name.to_string(), count);
                 }
-            }
+                Err(e) => {
+                    eprintln!("DuckDB query error for {}: {:?}", name, e);
+                }
+            },
             Err(e) => {
                 eprintln!("DuckDB prepare error for {}: {:?}", name, e);
             }
@@ -96,15 +99,11 @@ fn main() {
     println!("=== TPC-DS Benchmark Runner ===\n");
 
     // Get configuration from environment
-    let scale_factor: f64 = std::env::var("SCALE_FACTOR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.01);
+    let scale_factor: f64 =
+        std::env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01);
 
-    let batch_size: usize = std::env::var("BATCH_SIZE")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_BATCH_SIZE);
+    let batch_size: usize =
+        std::env::var("BATCH_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_BATCH_SIZE);
 
     let memory_warn_mb: f64 = std::env::var("MEMORY_WARN_MB")
         .ok()
@@ -112,11 +111,8 @@ fn main() {
         .unwrap_or(DEFAULT_MEMORY_WARN_MB);
 
     let skip_slow = std::env::var("SKIP_SLOW").is_ok();
-    let slow_queries: HashSet<&str> = if skip_slow {
-        SLOW_QUERIES.iter().copied().collect()
-    } else {
-        HashSet::new()
-    };
+    let slow_queries: HashSet<&str> =
+        if skip_slow { SLOW_QUERIES.iter().copied().collect() } else { HashSet::new() };
 
     // Query filter: run only specific queries (comma-separated, e.g., "Q17,Q24,Q29")
     let query_filter: HashSet<String> = std::env::var("QUERY_FILTER")
@@ -176,7 +172,11 @@ fn main() {
         println!("Computing expected row counts from DuckDB...");
         let expect_start = Instant::now();
         let expected = get_expected_row_counts(&duckdb, TPCDS_QUERIES);
-        println!("Expected row counts computed in {:?} ({} queries)", expect_start.elapsed(), expected.len());
+        println!(
+            "Expected row counts computed in {:?} ({} queries)",
+            expect_start.elapsed(),
+            expected.len()
+        );
         expected
     } else {
         HashMap::new()
@@ -261,7 +261,8 @@ fn main() {
                     hint_memory_release();
 
                     // Record memory after query
-                    let rss_mb = memory_tracker.record()
+                    let rss_mb = memory_tracker
+                        .record()
                         .map(|s| format!("{:.1}", s.rss_mb()))
                         .unwrap_or_else(|| "-".to_string());
 
@@ -277,12 +278,16 @@ fn main() {
                                 fail_count += 1;
                                 ("FAIL", format!("FAIL (exp {})", exp))
                             }
-                            None => {
-                                ("NO_EXP", "NO_EXP".to_string())
-                            }
+                            None => ("NO_EXP", "NO_EXP".to_string()),
                         };
-                        let expected_str = expected.map(|e| e.to_string()).unwrap_or_else(|| "-".to_string());
-                        results.push((name.to_string(), Some(elapsed), row_count, status.to_string()));
+                        let expected_str =
+                            expected.map(|e| e.to_string()).unwrap_or_else(|| "-".to_string());
+                        results.push((
+                            name.to_string(),
+                            Some(elapsed),
+                            row_count,
+                            status.to_string(),
+                        ));
                         println!(
                             "{:<8} {:>12.2} {:>10} {:>10} {:>12} {}",
                             name,
@@ -293,7 +298,12 @@ fn main() {
                             status_str
                         );
                     } else {
-                        results.push((name.to_string(), Some(elapsed), row_count, "OK".to_string()));
+                        results.push((
+                            name.to_string(),
+                            Some(elapsed),
+                            row_count,
+                            "OK".to_string(),
+                        ));
                         println!(
                             "{:<8} {:>12.2} {:>10} {:>12} OK",
                             name,
@@ -316,7 +326,8 @@ fn main() {
                     // Hint memory release even after errors
                     hint_memory_release();
 
-                    let rss_mb = memory_tracker.record()
+                    let rss_mb = memory_tracker
+                        .record()
                         .map(|s| format!("{:.1}", s.rss_mb()))
                         .unwrap_or_else(|| "-".to_string());
 
@@ -402,7 +413,11 @@ fn main() {
     // Print validation summary
     if validate_mode {
         println!("\n=== Validation Results ===");
-        println!("Passed:          {} ({:.1}%)", pass_count, 100.0 * pass_count as f64 / success_count.max(1) as f64);
+        println!(
+            "Passed:          {} ({:.1}%)",
+            pass_count,
+            100.0 * pass_count as f64 / success_count.max(1) as f64
+        );
         println!("Failed:          {}", fail_count);
         if fail_count > 0 {
             println!("\nVALIDATION FAILED: {} queries returned incorrect row counts", fail_count);

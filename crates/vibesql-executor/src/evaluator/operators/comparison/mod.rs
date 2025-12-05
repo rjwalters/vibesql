@@ -7,12 +7,14 @@
 pub mod equality;
 pub mod ordering;
 
-use std::str::FromStr;
-use vibesql_types::SqlValue;
 use crate::{
     errors::ExecutorError,
-    evaluator::casting::{boolean_to_i64, is_approximate_numeric, is_exact_numeric, to_f64, to_i64},
+    evaluator::casting::{
+        boolean_to_i64, is_approximate_numeric, is_exact_numeric, to_f64, to_i64,
+    },
 };
+use std::str::FromStr;
+use vibesql_types::SqlValue;
 
 /// Public API for comparison operations
 pub(crate) struct ComparisonOps;
@@ -101,9 +103,7 @@ where
             let left_f64 = left_i64 as f64;
             let right_f64 = to_f64(right_val)?;
             return Ok(Boolean(predicate(
-                left_f64
-                    .partial_cmp(&right_f64)
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                left_f64.partial_cmp(&right_f64).unwrap_or(std::cmp::Ordering::Equal),
             )));
         }
 
@@ -125,9 +125,7 @@ where
             let left_f64 = to_f64(left_val)?;
             let right_f64 = right_i64 as f64;
             return Ok(Boolean(predicate(
-                left_f64
-                    .partial_cmp(&right_f64)
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                left_f64.partial_cmp(&right_f64).unwrap_or(std::cmp::Ordering::Equal),
             )));
         }
 
@@ -139,68 +137,60 @@ where
     // Allows: WHERE date_column <= '1998-09-01'
     match (left, right) {
         // Date compared to Varchar - parse varchar as date
-        (Date(date_val), Varchar(s)) => {
-            match vibesql_types::Date::from_str(s) {
-                Ok(parsed_date) => {
-                    return Ok(Boolean(predicate(date_val.cmp(&parsed_date))));
-                }
-                Err(_) => {
-                    return Err(ExecutorError::TypeMismatch {
-                        left: left.clone(),
-                        op: op_str.to_string(),
-                        right: right.clone(),
-                    });
-                }
+        (Date(date_val), Varchar(s)) => match vibesql_types::Date::from_str(s) {
+            Ok(parsed_date) => {
+                return Ok(Boolean(predicate(date_val.cmp(&parsed_date))));
             }
-        }
+            Err(_) => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: left.clone(),
+                    op: op_str.to_string(),
+                    right: right.clone(),
+                });
+            }
+        },
 
         // Varchar compared to Date - parse varchar as date (symmetric case)
-        (Varchar(s), Date(date_val)) => {
-            match vibesql_types::Date::from_str(s) {
-                Ok(parsed_date) => {
-                    return Ok(Boolean(predicate(parsed_date.cmp(date_val))));
-                }
-                Err(_) => {
-                    return Err(ExecutorError::TypeMismatch {
-                        left: left.clone(),
-                        op: op_str.to_string(),
-                        right: right.clone(),
-                    });
-                }
+        (Varchar(s), Date(date_val)) => match vibesql_types::Date::from_str(s) {
+            Ok(parsed_date) => {
+                return Ok(Boolean(predicate(parsed_date.cmp(date_val))));
             }
-        }
+            Err(_) => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: left.clone(),
+                    op: op_str.to_string(),
+                    right: right.clone(),
+                });
+            }
+        },
 
         // Date compared to Character - parse character as date
-        (Date(date_val), Character(s)) => {
-            match vibesql_types::Date::from_str(s) {
-                Ok(parsed_date) => {
-                    return Ok(Boolean(predicate(date_val.cmp(&parsed_date))));
-                }
-                Err(_) => {
-                    return Err(ExecutorError::TypeMismatch {
-                        left: left.clone(),
-                        op: op_str.to_string(),
-                        right: right.clone(),
-                    });
-                }
+        (Date(date_val), Character(s)) => match vibesql_types::Date::from_str(s) {
+            Ok(parsed_date) => {
+                return Ok(Boolean(predicate(date_val.cmp(&parsed_date))));
             }
-        }
+            Err(_) => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: left.clone(),
+                    op: op_str.to_string(),
+                    right: right.clone(),
+                });
+            }
+        },
 
         // Character compared to Date - parse character as date (symmetric case)
-        (Character(s), Date(date_val)) => {
-            match vibesql_types::Date::from_str(s) {
-                Ok(parsed_date) => {
-                    return Ok(Boolean(predicate(parsed_date.cmp(date_val))));
-                }
-                Err(_) => {
-                    return Err(ExecutorError::TypeMismatch {
-                        left: left.clone(),
-                        op: op_str.to_string(),
-                        right: right.clone(),
-                    });
-                }
+        (Character(s), Date(date_val)) => match vibesql_types::Date::from_str(s) {
+            Ok(parsed_date) => {
+                return Ok(Boolean(predicate(parsed_date.cmp(date_val))));
             }
-        }
+            Err(_) => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: left.clone(),
+                    op: op_str.to_string(),
+                    right: right.clone(),
+                });
+            }
+        },
 
         _ => {} // Fall through to regular comparison logic
     }
@@ -212,9 +202,7 @@ where
         // String comparisons (VARCHAR and CHAR are compatible)
         (Varchar(a), Varchar(b)) => Ok(Boolean(predicate(a.cmp(b)))),
         (Character(a), Character(b)) => Ok(Boolean(predicate(a.cmp(b)))),
-        (Character(a), Varchar(b)) | (Varchar(b), Character(a)) => {
-            Ok(Boolean(predicate(a.cmp(b))))
-        }
+        (Character(a), Varchar(b)) | (Varchar(b), Character(a)) => Ok(Boolean(predicate(a.cmp(b)))),
 
         // Temporal type comparisons (DATE, TIME, TIMESTAMP)
         (Date(a), Date(b)) => Ok(Boolean(predicate(a.cmp(b)))),
@@ -262,13 +250,7 @@ where
         (left_val @ Numeric(_), right_val)
             if matches!(
                 right_val,
-                Integer(_)
-                    | Smallint(_)
-                    | Bigint(_)
-                    | Float(_)
-                    | Real(_)
-                    | Double(_)
-                    | Numeric(_)
+                Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_)
             ) =>
         {
             let left_f64 = to_f64(left_val)?;
@@ -280,13 +262,7 @@ where
         (left_val, right_val @ Numeric(_))
             if matches!(
                 left_val,
-                Integer(_)
-                    | Smallint(_)
-                    | Bigint(_)
-                    | Float(_)
-                    | Real(_)
-                    | Double(_)
-                    | Numeric(_)
+                Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_)
             ) =>
         {
             let left_f64 = to_f64(left_val)?;

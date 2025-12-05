@@ -12,11 +12,7 @@ fn test_subscription_manager_basic_subscribe() {
     let mut deps = HashSet::new();
     deps.insert("users".to_string());
 
-    let id = manager.subscribe(
-        "SELECT * FROM users".to_string(),
-        vec![],
-        deps,
-    ).unwrap();
+    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
     assert!(manager.get(&id).is_some());
@@ -40,11 +36,13 @@ fn test_subscription_manager_with_params() {
         None, // NULL parameter
     ];
 
-    let id = manager.subscribe(
-        "SELECT * FROM users WHERE id = $1 AND name = $2 AND deleted_at IS $3".to_string(),
-        params.clone(),
-        deps,
-    ).unwrap();
+    let id = manager
+        .subscribe(
+            "SELECT * FROM users WHERE id = $1 AND name = $2 AND deleted_at IS $3".to_string(),
+            params.clone(),
+            deps,
+        )
+        .unwrap();
 
     let sub = manager.get(&id).unwrap();
     assert_eq!(sub.params.len(), 3);
@@ -60,11 +58,7 @@ fn test_subscription_manager_unsubscribe() {
     let mut deps = HashSet::new();
     deps.insert("users".to_string());
 
-    let id = manager.subscribe(
-        "SELECT * FROM users".to_string(),
-        vec![],
-        deps,
-    ).unwrap();
+    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
 
@@ -84,21 +78,19 @@ fn test_subscription_manager_table_index() {
     // Subscribe to users table
     let mut deps1 = HashSet::new();
     deps1.insert("users".to_string());
-    let id1 = manager.subscribe(
-        "SELECT * FROM users".to_string(),
-        vec![],
-        deps1,
-    ).unwrap();
+    let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1).unwrap();
 
     // Subscribe to users and orders tables
     let mut deps2 = HashSet::new();
     deps2.insert("users".to_string());
     deps2.insert("orders".to_string());
-    let id2 = manager.subscribe(
-        "SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string(),
-        vec![],
-        deps2,
-    ).unwrap();
+    let id2 = manager
+        .subscribe(
+            "SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string(),
+            vec![],
+            deps2,
+        )
+        .unwrap();
 
     // Both should be indexed under "users"
     let user_subs = manager.get_subscriptions_for_table("users");
@@ -125,8 +117,12 @@ fn test_subscription_manager_clear() {
     let mut deps = HashSet::new();
     deps.insert("users".to_string());
 
-    manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone()).unwrap();
-    manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps.clone()).unwrap();
+    manager
+        .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone())
+        .unwrap();
+    manager
+        .subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps.clone())
+        .unwrap();
     manager.subscribe("SELECT * FROM users WHERE id = 3".to_string(), vec![], deps).unwrap();
 
     assert_eq!(manager.subscription_count(), 3);
@@ -156,11 +152,8 @@ fn test_subscription_manager_unique_ids() {
     // Create multiple subscriptions and ensure they get unique IDs
     let mut ids = Vec::new();
     for i in 0..100 {
-        let id = manager.subscribe(
-            format!("SELECT {} FROM test", i),
-            vec![],
-            deps.clone(),
-        ).unwrap();
+        let id =
+            manager.subscribe(format!("SELECT {} FROM test", i), vec![], deps.clone()).unwrap();
         ids.push(id);
     }
 
@@ -174,11 +167,7 @@ fn test_subscription_manager_empty_table_dependencies() {
     let mut manager = SessionSubscriptionManager::new();
 
     // Subscribe with no table dependencies (e.g., SELECT 1)
-    let id = manager.subscribe(
-        "SELECT 1".to_string(),
-        vec![],
-        HashSet::new(),
-    ).unwrap();
+    let id = manager.subscribe("SELECT 1".to_string(), vec![], HashSet::new()).unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
 

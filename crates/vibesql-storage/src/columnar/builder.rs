@@ -219,15 +219,18 @@ impl ColumnBuilder {
     /// for zero-copy sharing with the executor layer.
     pub fn build(self) -> ColumnData {
         match self.type_class {
-            ColumnTypeClass::Int64 | ColumnTypeClass::Null => {
-                ColumnData::Int64 { values: Arc::new(self.int64_values), nulls: Arc::new(self.nulls) }
-            }
-            ColumnTypeClass::Float64 => {
-                ColumnData::Float64 { values: Arc::new(self.float64_values), nulls: Arc::new(self.nulls) }
-            }
-            ColumnTypeClass::String => {
-                ColumnData::String { values: Arc::new(self.string_values), nulls: Arc::new(self.nulls) }
-            }
+            ColumnTypeClass::Int64 | ColumnTypeClass::Null => ColumnData::Int64 {
+                values: Arc::new(self.int64_values),
+                nulls: Arc::new(self.nulls),
+            },
+            ColumnTypeClass::Float64 => ColumnData::Float64 {
+                values: Arc::new(self.float64_values),
+                nulls: Arc::new(self.nulls),
+            },
+            ColumnTypeClass::String => ColumnData::String {
+                values: Arc::new(self.string_values),
+                nulls: Arc::new(self.nulls),
+            },
             ColumnTypeClass::Bool => {
                 ColumnData::Bool { values: Arc::new(self.bool_values), nulls: Arc::new(self.nulls) }
             }
@@ -237,12 +240,14 @@ impl ColumnBuilder {
             ColumnTypeClass::Time => {
                 ColumnData::Time { values: Arc::new(self.time_values), nulls: Arc::new(self.nulls) }
             }
-            ColumnTypeClass::Timestamp => {
-                ColumnData::Timestamp { values: Arc::new(self.timestamp_values), nulls: Arc::new(self.nulls) }
-            }
-            ColumnTypeClass::Interval => {
-                ColumnData::Interval { values: Arc::new(self.interval_values), nulls: Arc::new(self.nulls) }
-            }
+            ColumnTypeClass::Timestamp => ColumnData::Timestamp {
+                values: Arc::new(self.timestamp_values),
+                nulls: Arc::new(self.nulls),
+            },
+            ColumnTypeClass::Interval => ColumnData::Interval {
+                values: Arc::new(self.interval_values),
+                nulls: Arc::new(self.nulls),
+            },
             ColumnTypeClass::Vector => {
                 // Vector values are stored as Vec<Vec<f32>>
                 ColumnData::Vector { values: Arc::new(Vec::new()), nulls: Arc::new(self.nulls) }

@@ -160,10 +160,7 @@ mod tests {
         if let Statement::Insert(insert) = bound {
             if let InsertSource::Values(rows) = &insert.source {
                 assert_eq!(rows[0][0], Expression::Literal(SqlValue::Integer(1)));
-                assert_eq!(
-                    rows[0][1],
-                    Expression::Literal(SqlValue::Varchar("Alice".to_string()))
-                );
+                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar("Alice".to_string())));
             } else {
                 panic!("Expected VALUES insert source");
             }
@@ -253,7 +250,7 @@ mod tests {
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
 
         let params = vec![
-            SqlValue::Integer(42),              // $1
+            SqlValue::Integer(42),                // $1
             SqlValue::Varchar("Bob".to_string()), // $2
         ];
         let bound = bind_parameters(&stmt, &params);

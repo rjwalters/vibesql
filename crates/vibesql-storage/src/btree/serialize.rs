@@ -57,9 +57,7 @@ fn read_varint(cursor: &mut Cursor<&[u8]>) -> Result<usize, StorageError> {
 
         // Prevent overflow - usize can hold at most 9 bytes (for 64-bit) or 5 bytes (for 32-bit)
         if shift >= std::mem::size_of::<usize>() * 8 {
-            return Err(StorageError::IoError(
-                "Varint overflow: value too large".to_string(),
-            ));
+            return Err(StorageError::IoError("Varint overflow: value too large".to_string()));
         }
     }
 
@@ -441,14 +439,8 @@ mod tests {
         // Create leaf node with multi-column keys
         let mut node = LeafNode::new(page_id);
         node.entries = vec![
-            (
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![100],
-            ),
-            (
-                vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-                vec![200],
-            ),
+            (vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())], vec![100]),
+            (vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())], vec![200]),
         ];
         node.next_leaf = 0;
 
@@ -474,12 +466,12 @@ mod tests {
     fn test_varint_encoding_edge_cases() {
         // Test varint encoding for edge case values
         let test_cases = vec![
-            (0, vec![0x00]),              // Minimum value
-            (1, vec![0x01]),              // Small value
-            (127, vec![0x7F]),            // Maximum single-byte value (0xxxxxxx)
-            (128, vec![0x80, 0x01]),      // Minimum two-byte value
-            (255, vec![0xFF, 0x01]),      // Two-byte value
-            (16383, vec![0xFF, 0x7F]),    // Maximum two-byte value
+            (0, vec![0x00]),                 // Minimum value
+            (1, vec![0x01]),                 // Small value
+            (127, vec![0x7F]),               // Maximum single-byte value (0xxxxxxx)
+            (128, vec![0x80, 0x01]),         // Minimum two-byte value
+            (255, vec![0xFF, 0x01]),         // Two-byte value
+            (16383, vec![0xFF, 0x7F]),       // Maximum two-byte value
             (16384, vec![0x80, 0x80, 0x01]), // Minimum three-byte value
         ];
 
@@ -515,9 +507,9 @@ mod tests {
         // Create leaf node with duplicate keys (multiple row_ids per key)
         let mut node = LeafNode::new(page_id);
         node.entries = vec![
-            (vec![SqlValue::Integer(5)], vec![100, 101, 102]),  // 3 duplicates
-            (vec![SqlValue::Integer(10)], vec![200]),            // 1 row_id
-            (vec![SqlValue::Integer(15)], vec![300, 301]),       // 2 duplicates
+            (vec![SqlValue::Integer(5)], vec![100, 101, 102]), // 3 duplicates
+            (vec![SqlValue::Integer(10)], vec![200]),          // 1 row_id
+            (vec![SqlValue::Integer(15)], vec![300, 301]),     // 2 duplicates
         ];
         node.next_leaf = 0;
 
@@ -529,18 +521,9 @@ mod tests {
 
         // Verify
         assert_eq!(loaded_node.entries.len(), 3);
-        assert_eq!(
-            loaded_node.entries[0],
-            (vec![SqlValue::Integer(5)], vec![100, 101, 102])
-        );
-        assert_eq!(
-            loaded_node.entries[1],
-            (vec![SqlValue::Integer(10)], vec![200])
-        );
-        assert_eq!(
-            loaded_node.entries[2],
-            (vec![SqlValue::Integer(15)], vec![300, 301])
-        );
+        assert_eq!(loaded_node.entries[0], (vec![SqlValue::Integer(5)], vec![100, 101, 102]));
+        assert_eq!(loaded_node.entries[1], (vec![SqlValue::Integer(10)], vec![200]));
+        assert_eq!(loaded_node.entries[2], (vec![SqlValue::Integer(15)], vec![300, 301]));
     }
 
     #[test]

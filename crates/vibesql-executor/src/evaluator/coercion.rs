@@ -53,9 +53,7 @@ fn parse_date_string(s: &str) -> Result<SqlValue, ExecutorError> {
     // Try parsing as ISO 8601 (YYYY-MM-DD)
     if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         let vibe_date = vibesql_types::Date::new(date.year(), date.month() as u8, date.day() as u8)
-            .map_err(|e| {
-                ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e))
-            })?;
+            .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
         return Ok(SqlValue::Date(vibe_date));
     }
 

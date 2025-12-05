@@ -31,10 +31,7 @@ pub struct Operations {
 impl Operations {
     /// Create a new operations manager
     pub fn new() -> Self {
-        Operations {
-            index_manager: IndexManager::new(),
-            spatial_indexes: HashMap::new(),
-        }
+        Operations { index_manager: IndexManager::new(), spatial_indexes: HashMap::new() }
     }
 
     /// Set the database path for index storage
@@ -148,7 +145,11 @@ impl Operations {
 
         // Check user-defined unique indexes BEFORE inserting
         if let Some(table_schema) = catalog.get_table(table_name) {
-            self.index_manager.check_unique_constraints_for_insert(table_name, table_schema, &row)?;
+            self.index_manager.check_unique_constraints_for_insert(
+                table_name,
+                table_schema,
+                &row,
+            )?;
         }
 
         // Insert the row (this validates table-level constraints like PK, UNIQUE)
@@ -287,7 +288,12 @@ impl Operations {
             batch.push(row);
 
             if batch.len() >= batch_size {
-                let indices = self.insert_rows_batch(catalog, tables, table_name, std::mem::take(&mut batch))?;
+                let indices = self.insert_rows_batch(
+                    catalog,
+                    tables,
+                    table_name,
+                    std::mem::take(&mut batch),
+                )?;
                 total_inserted += indices.len();
                 batch = Vec::with_capacity(batch_size);
             }
@@ -852,20 +858,14 @@ impl Operations {
         let search_name_upper = table_name.to_uppercase();
 
         // Extract just the table name part if qualified (e.g., "public.users" -> "users")
-        let search_table_only = search_name_upper
-            .rsplit('.')
-            .next()
-            .unwrap_or(&search_name_upper);
+        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
 
         let indexes_to_drop: Vec<String> = self
             .spatial_indexes
             .iter()
             .filter(|(_, (metadata, _))| {
                 let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or(&stored_upper);
+                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
 
                 // Match if full names match OR unqualified parts match
                 stored_upper == search_name_upper || stored_table_only == search_table_only

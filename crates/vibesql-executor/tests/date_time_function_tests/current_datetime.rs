@@ -136,9 +136,7 @@ fn test_datetime_with_timestamp_string() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar(
-            "2024-03-15 14:30:45".to_string(),
-        ))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar("2024-03-15 14:30:45".to_string()))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -156,9 +154,7 @@ fn test_datetime_with_date_string() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar(
-            "2024-03-15".to_string(),
-        ))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar("2024-03-15".to_string()))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -177,9 +173,7 @@ fn test_datetime_with_iso_format() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar(
-            "2024-03-15T14:30:45".to_string(),
-        ))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar("2024-03-15T14:30:45".to_string()))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -195,10 +189,8 @@ fn test_datetime_with_iso_format() {
 fn test_datetime_with_null() {
     let (evaluator, row) = setup_test();
 
-    let expr = create_datetime_function(
-        "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Null)],
-    );
+    let expr =
+        create_datetime_function("DATETIME", vec![create_literal(vibesql_types::SqlValue::Null)]);
     let result = evaluator.eval(&expr, &row).unwrap();
 
     assert!(matches!(result, vibesql_types::SqlValue::Null));
@@ -252,10 +244,7 @@ fn test_datetime_no_arguments_error() {
     let result = evaluator.eval(&expr, &row);
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("requires at least 1 argument"));
+    assert!(result.unwrap_err().to_string().contains("requires at least 1 argument"));
 }
 
 #[test]
@@ -264,17 +253,12 @@ fn test_datetime_invalid_string_error() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar(
-            "invalid-date".to_string(),
-        ))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar("invalid-date".to_string()))],
     );
     let result = evaluator.eval(&expr, &row);
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("Unable to parse datetime string"));
+    assert!(result.unwrap_err().to_string().contains("Unable to parse datetime string"));
 }
 
 #[test]
@@ -291,8 +275,5 @@ fn test_datetime_modifiers_not_supported() {
     let result = evaluator.eval(&expr, &row);
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("modifiers not yet supported"));
+    assert!(result.unwrap_err().to_string().contains("modifiers not yet supported"));
 }

@@ -35,7 +35,9 @@ fn test_create_unique_index() {
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
             match &stmt.index_type {
-                vibesql_ast::IndexType::BTree { unique } => assert!(*unique, "Expected unique=true"),
+                vibesql_ast::IndexType::BTree { unique } => {
+                    assert!(*unique, "Expected unique=true")
+                }
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
             assert_eq!(stmt.index_name, "IDX");

@@ -23,11 +23,7 @@ impl super::super::Catalog {
         let name = view.name.clone();
 
         // Normalize the key for case-insensitive storage
-        let key = if self.case_sensitive_identifiers {
-            name.clone()
-        } else {
-            name.to_uppercase()
-        };
+        let key = if self.case_sensitive_identifiers { name.clone() } else { name.to_uppercase() };
 
         // Check if view already exists
         if self.views.contains_key(&key) {
@@ -41,11 +37,8 @@ impl super::super::Catalog {
     /// Get a VIEW definition by name with optional case-insensitive lookup
     pub fn get_view(&self, name: &str) -> Option<&ViewDefinition> {
         // Normalize the key for lookup
-        let key = if self.case_sensitive_identifiers {
-            name.to_string()
-        } else {
-            name.to_uppercase()
-        };
+        let key =
+            if self.case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
 
         self.views.get(&key)
     }
@@ -66,11 +59,8 @@ impl super::super::Catalog {
         behavior: ViewDropBehavior,
     ) -> Result<(), CatalogError> {
         // Normalize the key for case-insensitive lookup
-        let key = if self.case_sensitive_identifiers {
-            name.to_string()
-        } else {
-            name.to_uppercase()
-        };
+        let key =
+            if self.case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
 
         // Check if view exists
         if !self.views.contains_key(&key) {
@@ -114,11 +104,7 @@ impl super::super::Catalog {
     /// This maintains backward compatibility with existing code.
     /// Use `drop_view_with_behavior` for explicit control.
     pub fn drop_view(&mut self, name: &str, cascade: bool) -> Result<(), CatalogError> {
-        let behavior = if cascade {
-            ViewDropBehavior::Cascade
-        } else {
-            ViewDropBehavior::Restrict
-        };
+        let behavior = if cascade { ViewDropBehavior::Cascade } else { ViewDropBehavior::Restrict };
         self.drop_view_with_behavior(name, behavior)
     }
 
@@ -177,7 +163,11 @@ impl super::super::Catalog {
     }
 
     /// Check if a FROM clause references a specific table or view
-    fn does_from_clause_reference_table(&self, from: &vibesql_ast::FromClause, table_name: &str) -> bool {
+    fn does_from_clause_reference_table(
+        &self,
+        from: &vibesql_ast::FromClause,
+        table_name: &str,
+    ) -> bool {
         use vibesql_ast::FromClause;
         match from {
             FromClause::Table { name, .. } => {

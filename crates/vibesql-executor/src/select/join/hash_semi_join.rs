@@ -6,8 +6,8 @@ use super::hash_join::build_existence_hash_table_parallel;
 use super::{combine_rows, FromResult};
 use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
-use crate::optimizer::where_pushdown::{extract_referenced_tables_branch, flatten_conjuncts};
 use crate::optimizer::combine_with_and;
+use crate::optimizer::where_pushdown::{extract_referenced_tables_branch, flatten_conjuncts};
 use crate::schema::CombinedSchema;
 use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 
@@ -146,12 +146,8 @@ pub(super) fn hash_semi_join_with_filter(
 
     // Partition the filter into right-only and cross-table predicates
     // Right-only predicates are applied during build, cross-table during probe
-    let (right_only_filter, probe_filter) = partition_filter_predicates(
-        filter,
-        combined_schema,
-        &left.schema,
-        &right.schema,
-    );
+    let (right_only_filter, probe_filter) =
+        partition_filter_predicates(filter, combined_schema, &left.schema, &right.schema);
 
     if debug {
         eprintln!("[SEMI_JOIN] right_only_filter={:?}", right_only_filter);
@@ -160,14 +156,14 @@ pub(super) fn hash_semi_join_with_filter(
 
     // Create evaluators for build and probe phases
     // Right-only evaluator uses only right schema
-    let right_only_evaluator = right_only_filter.as_ref().map(|_| {
-        CombinedExpressionEvaluator::with_database(&right.schema, database)
-    });
+    let right_only_evaluator = right_only_filter
+        .as_ref()
+        .map(|_| CombinedExpressionEvaluator::with_database(&right.schema, database));
 
     // Combined evaluator for probe phase (if we have cross-table predicates)
-    let probe_evaluator = probe_filter.as_ref().map(|_| {
-        CombinedExpressionEvaluator::with_database(combined_schema, database)
-    });
+    let probe_evaluator = probe_filter
+        .as_ref()
+        .map(|_| CombinedExpressionEvaluator::with_database(combined_schema, database));
 
     // Build phase: Create hash table from right side with right-only predicate filtering
     use ahash::AHashMap;
@@ -194,11 +190,13 @@ pub(super) fn hash_semi_join_with_filter(
                     // Row passes filter, add to hash table
                     hash_table.entry(key).or_default().push(idx);
                 }
-                Ok(vibesql_types::SqlValue::Boolean(false))
-                | Ok(vibesql_types::SqlValue::Null) => {
+                Ok(vibesql_types::SqlValue::Boolean(false)) | Ok(vibesql_types::SqlValue::Null) => {
                     // Row doesn't pass filter, skip it
                     if debug && _filtered_count < 3 {
-                        eprintln!("[SEMI_JOIN] Filtered out row: {:?}", &row.values[..3.min(row.values.len())]);
+                        eprintln!(
+                            "[SEMI_JOIN] Filtered out row: {:?}",
+                            &row.values[..3.min(row.values.len())]
+                        );
                     }
                     _filtered_count += 1;
                     continue;
@@ -228,8 +226,12 @@ pub(super) fn hash_semi_join_with_filter(
 
     let build_time = start.elapsed();
     if debug {
-        eprintln!("[SEMI_JOIN] build_time={:?}, hash_table_size={}, filtered_count={}",
-            build_time, hash_table.len(), _filtered_count);
+        eprintln!(
+            "[SEMI_JOIN] build_time={:?}, hash_table_size={}, filtered_count={}",
+            build_time,
+            hash_table.len(),
+            _filtered_count
+        );
     }
 
     // Probe phase: Check each left row for a match that passes the probe filter
@@ -296,8 +298,12 @@ pub(super) fn hash_semi_join_with_filter(
 
     if debug {
         let total_time = start.elapsed();
-        eprintln!("[SEMI_JOIN] probe_time={:?}, total_time={:?}, result_rows={}",
-            total_time - build_time, total_time, result_rows.len());
+        eprintln!(
+            "[SEMI_JOIN] probe_time={:?}, total_time={:?}, result_rows={}",
+            total_time - build_time,
+            total_time,
+            result_rows.len()
+        );
     }
 
     // Return result with left schema only
@@ -318,18 +324,10 @@ pub(super) fn partition_filter_predicates(
     right_schema: &CombinedSchema,
 ) -> (Option<vibesql_ast::Expression>, Option<vibesql_ast::Expression>) {
     // Get the set of right-only table names
-    let right_table_names: HashSet<String> = right_schema
-        .table_schemas
-        .keys()
-        .cloned()
-        .collect();
+    let right_table_names: HashSet<String> = right_schema.table_schemas.keys().cloned().collect();
 
     // Get the set of left table names
-    let left_table_names: HashSet<String> = left_schema
-        .table_schemas
-        .keys()
-        .cloned()
-        .collect();
+    let left_table_names: HashSet<String> = left_schema.table_schemas.keys().cloned().collect();
 
     // Flatten the filter into individual conjuncts
     let conjuncts = flatten_conjuncts(filter);
@@ -339,7 +337,9 @@ pub(super) fn partition_filter_predicates(
 
     for conjunct in conjuncts {
         // Extract tables referenced by this predicate
-        if let Some(referenced_tables) = extract_referenced_tables_branch(&conjunct, combined_schema) {
+        if let Some(referenced_tables) =
+            extract_referenced_tables_branch(&conjunct, combined_schema)
+        {
             // Check if predicate references only right tables
             let refs_left = referenced_tables.iter().any(|t| left_table_names.contains(t));
             let refs_right = referenced_tables.iter().any(|t| right_table_names.contains(t));
@@ -405,10 +405,7 @@ mod tests {
         // Left table: users(id, name)
         let left = create_test_from_result(
             "users",
-            vec![
-                ("id", DataType::Integer),
-                ("name", DataType::Varchar { max_length: Some(50) }),
-            ],
+            vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
                 vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
                 vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
@@ -458,10 +455,7 @@ mod tests {
         // Left table with NULL id
         let left = create_test_from_result(
             "users",
-            vec![
-                ("id", DataType::Integer),
-                ("name", DataType::Varchar { max_length: Some(50) }),
-            ],
+            vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
                 vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
                 vec![SqlValue::Null, SqlValue::Varchar("Unknown".to_string())],
@@ -514,10 +508,7 @@ mod tests {
         // Left table
         let left = create_test_from_result(
             "users",
-            vec![
-                ("id", DataType::Integer),
-                ("name", DataType::Varchar { max_length: Some(50) }),
-            ],
+            vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
                 vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
                 vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],

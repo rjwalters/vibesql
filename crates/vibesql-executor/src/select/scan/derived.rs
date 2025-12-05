@@ -13,10 +13,7 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
             let args_str = if args.is_empty() {
                 "*".to_string()
             } else {
-                args.iter()
-                    .map(derive_column_name_from_expr)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                args.iter().map(derive_column_name_from_expr).collect::<Vec<_>>().join(", ")
             };
             format!("{}({})", name, args_str)
         }
@@ -25,10 +22,7 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
             let args_str = if args.is_empty() {
                 "*".to_string()
             } else {
-                args.iter()
-                    .map(derive_column_name_from_expr)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                args.iter().map(derive_column_name_from_expr).collect::<Vec<_>>().join(", ")
             };
             format!("{}({}{})", name, distinct_str, args_str)
         }
@@ -55,31 +49,29 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
                 derive_column_name_from_expr(right)
             )
         }
-        vibesql_ast::Expression::Literal(val) => {
-            match val {
-                vibesql_types::SqlValue::Integer(n) => n.to_string(),
-                vibesql_types::SqlValue::Smallint(n) => n.to_string(),
-                vibesql_types::SqlValue::Bigint(n) => n.to_string(),
-                vibesql_types::SqlValue::Unsigned(n) => n.to_string(),
-                vibesql_types::SqlValue::Double(f) => f.to_string(),
-                vibesql_types::SqlValue::Float(f) => f.to_string(),
-                vibesql_types::SqlValue::Real(f) => f.to_string(),
-                vibesql_types::SqlValue::Numeric(f) => f.to_string(),
-                vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-                    format!("'{}'", s)
-                }
-                vibesql_types::SqlValue::Boolean(b) => b.to_string(),
-                vibesql_types::SqlValue::Date(d) => format!("'{}'", d),
-                vibesql_types::SqlValue::Time(t) => format!("'{}'", t),
-                vibesql_types::SqlValue::Timestamp(ts) => format!("'{}'", ts),
-                vibesql_types::SqlValue::Interval(i) => format!("INTERVAL '{}'", i),
-                vibesql_types::SqlValue::Vector(v) => {
-                    let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-                    format!("[{}]", formatted.join(", "))
-                }
-                vibesql_types::SqlValue::Null => "NULL".to_string(),
+        vibesql_ast::Expression::Literal(val) => match val {
+            vibesql_types::SqlValue::Integer(n) => n.to_string(),
+            vibesql_types::SqlValue::Smallint(n) => n.to_string(),
+            vibesql_types::SqlValue::Bigint(n) => n.to_string(),
+            vibesql_types::SqlValue::Unsigned(n) => n.to_string(),
+            vibesql_types::SqlValue::Double(f) => f.to_string(),
+            vibesql_types::SqlValue::Float(f) => f.to_string(),
+            vibesql_types::SqlValue::Real(f) => f.to_string(),
+            vibesql_types::SqlValue::Numeric(f) => f.to_string(),
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                format!("'{}'", s)
             }
-        }
+            vibesql_types::SqlValue::Boolean(b) => b.to_string(),
+            vibesql_types::SqlValue::Date(d) => format!("'{}'", d),
+            vibesql_types::SqlValue::Time(t) => format!("'{}'", t),
+            vibesql_types::SqlValue::Timestamp(ts) => format!("'{}'", ts),
+            vibesql_types::SqlValue::Interval(i) => format!("INTERVAL '{}'", i),
+            vibesql_types::SqlValue::Vector(v) => {
+                let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+                format!("[{}]", formatted.join(", "))
+            }
+            vibesql_types::SqlValue::Null => "NULL".to_string(),
+        },
         _ => "?column?".to_string(),
     }
 }
@@ -110,13 +102,16 @@ where
     let mut col_index = 0;
     for item in &query.select_list {
         match item {
-            vibesql_ast::SelectItem::Wildcard { .. } | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+            vibesql_ast::SelectItem::Wildcard { .. }
+            | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
                 // For SELECT * or SELECT table.*, use the column names from the subquery result
                 // This preserves the actual column names instead of generating generic ones
                 if let Some(first_row) = rows.first() {
                     for (j, value) in first_row.values.iter().enumerate() {
                         // Use actual column name from subquery if available
-                        let col_name = subquery_columns.get(col_index + j).cloned()
+                        let col_name = subquery_columns
+                            .get(col_index + j)
+                            .cloned()
                             .unwrap_or_else(|| format!("column{}", col_index + j + 1));
                         column_names.push(col_name);
                         column_types.push(value.get_type());

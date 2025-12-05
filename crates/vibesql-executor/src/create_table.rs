@@ -87,12 +87,10 @@ impl CreateTableExecutor {
             .columns
             .iter()
             .filter(|col_def| {
-                col_def.constraints.iter().any(|c| {
-                    matches!(
-                        c.kind,
-                        vibesql_ast::ColumnConstraintKind::AutoIncrement
-                    )
-                })
+                col_def
+                    .constraints
+                    .iter()
+                    .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement))
             })
             .map(|col_def| col_def.name.as_str())
             .collect();
@@ -104,32 +102,30 @@ impl CreateTableExecutor {
         }
 
         // Convert AST ColumnDef → Catalog ColumnSchema
-        let mut columns: Vec<ColumnSchema> = stmt
-            .columns
-            .iter()
-            .map(|col_def| {
-                // For AUTO_INCREMENT columns, set default to NEXT VALUE FOR sequence
-                let default_value = if col_def.constraints.iter().any(|c| {
-                    matches!(
-                        c.kind,
-                        vibesql_ast::ColumnConstraintKind::AutoIncrement
-                    )
-                }) {
-                    // Create sequence name: {table_name}_{column_name}_seq
-                    let sequence_name = format!("{}_{}_seq", table_name, col_def.name);
-                    Some(vibesql_ast::Expression::NextValue { sequence_name })
-                } else {
-                    col_def.default_value.as_ref().map(|expr| (**expr).clone())
-                };
+        let mut columns: Vec<ColumnSchema> =
+            stmt.columns
+                .iter()
+                .map(|col_def| {
+                    // For AUTO_INCREMENT columns, set default to NEXT VALUE FOR sequence
+                    let default_value =
+                        if col_def.constraints.iter().any(|c| {
+                            matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement)
+                        }) {
+                            // Create sequence name: {table_name}_{column_name}_seq
+                            let sequence_name = format!("{}_{}_seq", table_name, col_def.name);
+                            Some(vibesql_ast::Expression::NextValue { sequence_name })
+                        } else {
+                            col_def.default_value.as_ref().map(|expr| (**expr).clone())
+                        };
 
-                ColumnSchema {
-                    name: col_def.name.clone(),
-                    data_type: col_def.data_type.clone(),
-                    nullable: col_def.nullable,
-                    default_value,
-                }
-            })
-            .collect();
+                    ColumnSchema {
+                        name: col_def.name.clone(),
+                        data_type: col_def.data_type.clone(),
+                        nullable: col_def.nullable,
+                        default_value,
+                    }
+                })
+                .collect();
 
         // Process constraints using the constraint validator
         let constraint_result =
@@ -205,23 +201,24 @@ impl CreateTableExecutor {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Convert ReferentialAction from AST to catalog type
-                let convert_action = |action: &Option<vibesql_ast::ReferentialAction>| {
-                    match action.as_ref().unwrap_or(&vibesql_ast::ReferentialAction::NoAction) {
-                        vibesql_ast::ReferentialAction::Cascade => {
-                            vibesql_catalog::ReferentialAction::Cascade
-                        }
-                        vibesql_ast::ReferentialAction::SetNull => {
-                            vibesql_catalog::ReferentialAction::SetNull
-                        }
-                        vibesql_ast::ReferentialAction::SetDefault => {
-                            vibesql_catalog::ReferentialAction::SetDefault
-                        }
-                        vibesql_ast::ReferentialAction::Restrict => {
-                            vibesql_catalog::ReferentialAction::Restrict
-                        }
-                        vibesql_ast::ReferentialAction::NoAction => {
-                            vibesql_catalog::ReferentialAction::NoAction
-                        }
+                let convert_action = |action: &Option<vibesql_ast::ReferentialAction>| match action
+                    .as_ref()
+                    .unwrap_or(&vibesql_ast::ReferentialAction::NoAction)
+                {
+                    vibesql_ast::ReferentialAction::Cascade => {
+                        vibesql_catalog::ReferentialAction::Cascade
+                    }
+                    vibesql_ast::ReferentialAction::SetNull => {
+                        vibesql_catalog::ReferentialAction::SetNull
+                    }
+                    vibesql_ast::ReferentialAction::SetDefault => {
+                        vibesql_catalog::ReferentialAction::SetDefault
+                    }
+                    vibesql_ast::ReferentialAction::Restrict => {
+                        vibesql_catalog::ReferentialAction::Restrict
+                    }
+                    vibesql_ast::ReferentialAction::NoAction => {
+                        vibesql_catalog::ReferentialAction::NoAction
                     }
                 };
 
@@ -258,13 +255,18 @@ impl CreateTableExecutor {
                 .catalog
                 .create_sequence(
                     sequence_name.clone(),
-                    Some(1),  // start_with: 1
-                    1,        // increment_by: 1
-                    Some(1),  // min_value: 1
-                    None,     // max_value: unlimited
-                    false,    // cycle: false
+                    Some(1), // start_with: 1
+                    1,       // increment_by: 1
+                    Some(1), // min_value: 1
+                    None,    // max_value: unlimited
+                    false,   // cycle: false
                 )
-                .map_err(|e| ExecutorError::StorageError(format!("Failed to create sequence for AUTO_INCREMENT: {:?}", e)))?;
+                .map_err(|e| {
+                    ExecutorError::StorageError(format!(
+                        "Failed to create sequence for AUTO_INCREMENT: {:?}",
+                        e
+                    ))
+                })?;
         }
 
         // Create table using Database API (handles both catalog and storage)

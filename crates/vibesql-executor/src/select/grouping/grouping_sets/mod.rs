@@ -155,16 +155,10 @@ mod tests {
     #[test]
     fn test_grouping_id_single_column() {
         // Single column - should be same as GROUPING()
-        let ctx = GroupingContext {
-            base_expressions: vec![col("a")],
-            rolled_up: vec![false],
-        };
+        let ctx = GroupingContext { base_expressions: vec![col("a")], rolled_up: vec![false] };
         assert_eq!(ctx.grouping_id(&[col("a")]), 0);
 
-        let ctx = GroupingContext {
-            base_expressions: vec![col("a")],
-            rolled_up: vec![true],
-        };
+        let ctx = GroupingContext { base_expressions: vec![col("a")], rolled_up: vec![true] };
         assert_eq!(ctx.grouping_id(&[col("a")]), 1);
     }
 

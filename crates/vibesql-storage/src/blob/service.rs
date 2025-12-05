@@ -69,27 +69,22 @@ impl BlobStorageService {
     /// Create filesystem operator
     #[cfg(all(feature = "opendal", feature = "storage-fs"))]
     fn create_fs_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
-        let root = config
-            .config
-            .get("root")
-            .and_then(|v| v.as_str())
-            .unwrap_or("/var/vibesql/storage");
+        let root =
+            config.config.get("root").and_then(|v| v.as_str()).unwrap_or("/var/vibesql/storage");
 
         let builder = services::Fs::default().root(root);
 
-        Operator::new(builder)
-            .map(|op| op.finish())
-            .map_err(|e| StorageError::Other(format!("Failed to create filesystem operator: {}", e)))
+        Operator::new(builder).map(|op| op.finish()).map_err(|e| {
+            StorageError::Other(format!("Failed to create filesystem operator: {}", e))
+        })
     }
 
     /// Create S3-compatible operator (works with AWS S3, MinIO, Cloudflare R2, etc.)
     #[cfg(all(feature = "opendal", feature = "storage-s3"))]
     fn create_s3_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
-        let bucket = config
-            .config
-            .get("bucket")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| StorageError::Other("S3 backend requires 'bucket' configuration".to_string()))?;
+        let bucket = config.config.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| {
+            StorageError::Other("S3 backend requires 'bucket' configuration".to_string())
+        })?;
 
         let mut builder = services::S3::default().bucket(bucket);
 
@@ -106,7 +101,9 @@ impl BlobStorageService {
             builder = builder.access_key_id(access_key_id);
         }
 
-        if let Some(secret_access_key) = config.config.get("secret_access_key").and_then(|v| v.as_str()) {
+        if let Some(secret_access_key) =
+            config.config.get("secret_access_key").and_then(|v| v.as_str())
+        {
             builder = builder.secret_access_key(secret_access_key);
         }
 
@@ -122,11 +119,9 @@ impl BlobStorageService {
     /// Create Google Cloud Storage operator
     #[cfg(all(feature = "opendal", feature = "storage-gcs"))]
     fn create_gcs_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
-        let bucket = config
-            .config
-            .get("bucket")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| StorageError::Other("GCS backend requires 'bucket' configuration".to_string()))?;
+        let bucket = config.config.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| {
+            StorageError::Other("GCS backend requires 'bucket' configuration".to_string())
+        })?;
 
         let mut builder = services::Gcs::default().bucket(bucket);
 
@@ -134,7 +129,8 @@ impl BlobStorageService {
             builder = builder.credential(credential);
         }
 
-        if let Some(credential_path) = config.config.get("credential_path").and_then(|v| v.as_str()) {
+        if let Some(credential_path) = config.config.get("credential_path").and_then(|v| v.as_str())
+        {
             builder = builder.credential_path(credential_path);
         }
 
@@ -150,11 +146,10 @@ impl BlobStorageService {
     /// Create Azure Blob Storage operator
     #[cfg(all(feature = "opendal", feature = "storage-azure"))]
     fn create_azure_operator(config: &BlobStorageConfig) -> StorageResult<Operator> {
-        let container = config
-            .config
-            .get("container")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| StorageError::Other("Azure backend requires 'container' configuration".to_string()))?;
+        let container =
+            config.config.get("container").and_then(|v| v.as_str()).ok_or_else(|| {
+                StorageError::Other("Azure backend requires 'container' configuration".to_string())
+            })?;
 
         let mut builder = services::Azblob::default().container(container);
 
@@ -326,7 +321,9 @@ impl BlobStorageService {
             "fs" | "filesystem" => format!("/storage/blobs/{}", id.to_url_safe()),
             "s3" => {
                 if let Some(bucket) = self.config.config.get("bucket").and_then(|v| v.as_str()) {
-                    if let Some(endpoint) = self.config.config.get("endpoint").and_then(|v| v.as_str()) {
+                    if let Some(endpoint) =
+                        self.config.config.get("endpoint").and_then(|v| v.as_str())
+                    {
                         format!("{}/{}/{}", endpoint, bucket, id.to_path())
                     } else {
                         format!("s3://{}/{}", bucket, id.to_path())
@@ -343,8 +340,12 @@ impl BlobStorageService {
                 }
             }
             "azure" | "azblob" => {
-                if let Some(container) = self.config.config.get("container").and_then(|v| v.as_str()) {
-                    if let Some(account) = self.config.config.get("account_name").and_then(|v| v.as_str()) {
+                if let Some(container) =
+                    self.config.config.get("container").and_then(|v| v.as_str())
+                {
+                    if let Some(account) =
+                        self.config.config.get("account_name").and_then(|v| v.as_str())
+                    {
                         format!(
                             "https://{}.blob.core.windows.net/{}/{}",
                             account,
@@ -368,7 +369,11 @@ impl BlobStorageService {
     /// This is primarily useful for cloud backends (S3, GCS, Azure) where you want to
     /// give temporary, direct access to a blob without going through the application.
     #[cfg(feature = "opendal")]
-    pub async fn get_presigned_url(&self, id: &BlobId, expires_in: Duration) -> StorageResult<String> {
+    pub async fn get_presigned_url(
+        &self,
+        id: &BlobId,
+        expires_in: Duration,
+    ) -> StorageResult<String> {
         let path = id.to_path();
 
         if let Some(ref op) = self.operator {
@@ -393,7 +398,11 @@ impl BlobStorageService {
 
     /// Generate a presigned URL (non-opendal build - stub)
     #[cfg(not(feature = "opendal"))]
-    pub async fn get_presigned_url(&self, id: &BlobId, _expires_in: Duration) -> StorageResult<String> {
+    pub async fn get_presigned_url(
+        &self,
+        id: &BlobId,
+        _expires_in: Duration,
+    ) -> StorageResult<String> {
         Err(StorageError::Other(format!(
             "Presigned URLs require the 'opendal' feature to be enabled (blob: {})",
             id
@@ -485,10 +494,7 @@ mod tests {
 
     #[test]
     fn test_backend_accessor() {
-        let config = BlobStorageConfig {
-            backend: "s3".to_string(),
-            config: serde_json::json!({}),
-        };
+        let config = BlobStorageConfig { backend: "s3".to_string(), config: serde_json::json!({}) };
         let db = Arc::new(Database::new());
         let service = BlobStorageService::new(config, db);
 
@@ -498,10 +504,8 @@ mod tests {
     #[cfg(all(feature = "opendal", feature = "storage-memory"))]
     #[tokio::test]
     async fn test_memory_backend_store_and_get() {
-        let config = BlobStorageConfig {
-            backend: "memory".to_string(),
-            config: serde_json::json!({}),
-        };
+        let config =
+            BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
         let db = Arc::new(Database::new());
         let service = BlobStorageService::new(config, db);
 
@@ -524,10 +528,8 @@ mod tests {
     #[cfg(all(feature = "opendal", feature = "storage-memory"))]
     #[tokio::test]
     async fn test_memory_backend_not_found() {
-        let config = BlobStorageConfig {
-            backend: "memory".to_string(),
-            config: serde_json::json!({}),
-        };
+        let config =
+            BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
         let db = Arc::new(Database::new());
         let service = BlobStorageService::new(config, db);
 

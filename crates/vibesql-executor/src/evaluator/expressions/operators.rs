@@ -13,7 +13,6 @@ use crate::errors::ExecutorError;
 pub(crate) fn eval_unary_op(
     op: &vibesql_ast::UnaryOperator,
     val: &SqlValue,
-    
 ) -> Result<SqlValue, ExecutorError> {
     use vibesql_ast::UnaryOperator::*;
 

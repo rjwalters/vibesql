@@ -4,11 +4,11 @@
 //! exactly one row and one column. Includes caching for both uncorrelated
 //! and correlated subqueries.
 
-use crate::evaluator::caching::{compute_correlated_cache_key, compute_subquery_hash};
-use super::correlation::extract_correlation_values;
-use super::schema_utils::{build_merged_outer_schema, build_merged_outer_row};
 use super::super::super::core::CombinedExpressionEvaluator;
+use super::correlation::extract_correlation_values;
+use super::schema_utils::{build_merged_outer_row, build_merged_outer_schema};
 use crate::errors::ExecutorError;
+use crate::evaluator::caching::{compute_correlated_cache_key, compute_subquery_hash};
 
 impl CombinedExpressionEvaluator<'_> {
     /// Evaluate scalar subquery - must return exactly one row and one column
@@ -62,7 +62,8 @@ impl CombinedExpressionEvaluator<'_> {
         ))?;
 
         // Determine if subquery is correlated
-        let is_uncorrelated = !crate::optimizer::subquery_rewrite::correlation::is_correlated(subquery);
+        let is_uncorrelated =
+            !crate::optimizer::subquery_rewrite::correlation::is_correlated(subquery);
 
         // Compute cache key (different strategies for correlated vs uncorrelated)
         let cache_key = if is_uncorrelated {
@@ -71,7 +72,8 @@ impl CombinedExpressionEvaluator<'_> {
         } else if !self.schema.table_schemas.is_empty() {
             // Correlated: cache key includes correlation column values
             // Only attempt if we have an outer schema to reference
-            if let Some(correlation_values) = extract_correlation_values(subquery, row, self.schema) {
+            if let Some(correlation_values) = extract_correlation_values(subquery, row, self.schema)
+            {
                 let subquery_hash = compute_subquery_hash(subquery);
                 compute_correlated_cache_key(subquery_hash, &correlation_values)
             } else {
@@ -131,9 +133,7 @@ impl CombinedExpressionEvaluator<'_> {
                 // Uncorrelated: execute without outer context
                 if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_cte_and_depth(
-                        database,
-                        cte_ctx,
-                        self.depth,
+                        database, cte_ctx, self.depth,
                     )
                 } else {
                     crate::select::SelectExecutor::new(database)
@@ -144,18 +144,11 @@ impl CombinedExpressionEvaluator<'_> {
                 let row_ref = merged_row.as_ref().unwrap();
                 if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                        database,
-                        row_ref,
-                        schema_ref,
-                        cte_ctx,
-                        self.depth,
+                        database, row_ref, schema_ref, cte_ctx, self.depth,
                     )
                 } else {
                     crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                        database,
-                        row_ref,
-                        schema_ref,
-                        self.depth,
+                        database, row_ref, schema_ref, self.depth,
                     )
                 }
             };

@@ -25,9 +25,7 @@
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
-use super::helpers::{
-    is_self_join, qualify_outer_column_refs, rewrite_column_refs_with_alias,
-};
+use super::helpers::{is_self_join, qualify_outer_column_refs, rewrite_column_refs_with_alias};
 
 /// Result of converting an IN subquery to a join
 /// Contains the new FROM clause
@@ -77,12 +75,20 @@ pub(super) fn try_convert_in_to_join(
     let needs_alias = is_self_join(from, &table_name, &table_alias);
 
     // Generate a unique alias for self-joins to avoid schema conflicts
-    let (effective_alias, outer_expr_qualified, subquery_column_rewritten, subquery_where_rewritten) = if needs_alias {
+    let (
+        effective_alias,
+        outer_expr_qualified,
+        subquery_column_rewritten,
+        subquery_where_rewritten,
+    ) = if needs_alias {
         // Create a unique alias for the right side of the self-join
         let new_alias = format!("__subquery_{}", table_name);
 
         if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
-            eprintln!("[SUBQUERY_TRANSFORM] Self-join detected: table={}, new_alias={}", table_name, new_alias);
+            eprintln!(
+                "[SUBQUERY_TRANSFORM] Self-join detected: table={}, new_alias={}",
+                table_name, new_alias
+            );
         }
 
         // For a self-join, we need to qualify the outer expression columns with the
@@ -102,12 +108,14 @@ pub(super) fn try_convert_in_to_join(
         let old_table_ref = table_alias.as_ref().unwrap_or(&table_name);
 
         // Rewrite column references in the subquery column to use the new alias
-        let rewritten_col = rewrite_column_refs_with_alias(&subquery_column, old_table_ref, &new_alias);
+        let rewritten_col =
+            rewrite_column_refs_with_alias(&subquery_column, old_table_ref, &new_alias);
 
         // Rewrite column references in the subquery WHERE clause
-        let rewritten_where = subquery.where_clause.as_ref().map(|w| {
-            rewrite_column_refs_with_alias(w, old_table_ref, &new_alias)
-        });
+        let rewritten_where = subquery
+            .where_clause
+            .as_ref()
+            .map(|w| rewrite_column_refs_with_alias(w, old_table_ref, &new_alias));
 
         if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
             eprintln!("[SUBQUERY_TRANSFORM] outer_table_name={}", outer_table_name);
@@ -140,14 +148,11 @@ pub(super) fn try_convert_in_to_join(
     };
 
     // Create the right side of the join
-    let right_from = FromClause::Table { name: table_name, alias: effective_alias, column_aliases: None };
+    let right_from =
+        FromClause::Table { name: table_name, alias: effective_alias, column_aliases: None };
 
     // Create SEMI or ANTI join based on negation
-    let join_type = if negated {
-        JoinType::Anti
-    } else {
-        JoinType::Semi
-    };
+    let join_type = if negated { JoinType::Anti } else { JoinType::Semi };
 
     // Create the join
     let new_from = FromClause::Join {

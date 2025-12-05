@@ -51,17 +51,16 @@ impl Parser {
             // Check if this is procedural SELECT INTO (variables) or DDL SELECT INTO (table)
             if matches!(self.peek(), Token::UserVariable(_)) {
                 // Procedural SELECT INTO: parse comma-separated list of user variables
-                let variables = self.parse_comma_separated_list(|p| {
-                    match p.peek() {
-                        Token::UserVariable(var_name) => {
-                            let name = var_name.clone();
-                            p.advance();
-                            Ok(name)
-                        }
-                        _ => Err(ParseError {
-                            message: "Expected user variable (@var) in procedural SELECT INTO".to_string(),
-                        })
+                let variables = self.parse_comma_separated_list(|p| match p.peek() {
+                    Token::UserVariable(var_name) => {
+                        let name = var_name.clone();
+                        p.advance();
+                        Ok(name)
                     }
+                    _ => Err(ParseError {
+                        message: "Expected user variable (@var) in procedural SELECT INTO"
+                            .to_string(),
+                    }),
                 })?;
                 (None, Some(variables))
             } else {

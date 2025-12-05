@@ -51,9 +51,8 @@ fn test_parse_create_table_bit_with_length() {
 #[test]
 fn test_parse_create_table_bit_multiple_columns() {
     // Multiple BIT columns with different lengths
-    let result = Parser::parse_sql(
-        "CREATE TABLE test (flags1 BIT, flags2 BIT(16), flags3 BIT(64));",
-    );
+    let result =
+        Parser::parse_sql("CREATE TABLE test (flags1 BIT, flags2 BIT(16), flags3 BIT(64));");
     assert!(result.is_ok(), "Should parse multiple BIT columns");
     let stmt = result.unwrap();
 
@@ -89,7 +88,8 @@ fn test_parse_create_table_bit_multiple_columns() {
 #[test]
 fn test_parse_create_table_bit_with_comment() {
     // BIT with COMMENT clause (from the failing test case)
-    let result = Parser::parse_sql("CREATE TABLE t (c1 BIT COMMENT 'test', c2 BIT COMMENT 'test2');");
+    let result =
+        Parser::parse_sql("CREATE TABLE t (c1 BIT COMMENT 'test', c2 BIT COMMENT 'test2');");
     assert!(result.is_ok(), "Should parse BIT with COMMENT");
     let stmt = result.unwrap();
 

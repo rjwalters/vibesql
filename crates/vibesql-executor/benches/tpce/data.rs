@@ -77,9 +77,7 @@ impl TPCERng {
     pub fn random_nstring(&mut self, min_len: usize, max_len: usize) -> String {
         const DIGITS: &[u8] = b"0123456789";
         let len = self.random_int(min_len as i64, max_len as i64) as usize;
-        (0..len)
-            .map(|_| DIGITS[self.random_int(0, 9) as usize] as char)
-            .collect()
+        (0..len).map(|_| DIGITS[self.random_int(0, 9) as usize] as char).collect()
     }
 
     /// Generate random email address
@@ -135,79 +133,79 @@ impl TPCERng {
 /// CHARGE table: Trade charge rates
 #[derive(Debug, Clone)]
 pub struct Charge {
-    pub ch_tt_id: String,      // Trade type ID
-    pub ch_c_tier: i32,        // Customer tier (1-3)
-    pub ch_chrg: f64,          // Charge amount
+    pub ch_tt_id: String, // Trade type ID
+    pub ch_c_tier: i32,   // Customer tier (1-3)
+    pub ch_chrg: f64,     // Charge amount
 }
 
 /// COMMISSION_RATE table: Broker commission rates
 #[derive(Debug, Clone)]
 pub struct CommissionRate {
-    pub cr_c_tier: i32,        // Customer tier
-    pub cr_tt_id: String,      // Trade type ID
-    pub cr_ex_id: String,      // Exchange ID
-    pub cr_from_qty: i32,      // From quantity
-    pub cr_to_qty: i32,        // To quantity
-    pub cr_rate: f64,          // Commission rate
+    pub cr_c_tier: i32,   // Customer tier
+    pub cr_tt_id: String, // Trade type ID
+    pub cr_ex_id: String, // Exchange ID
+    pub cr_from_qty: i32, // From quantity
+    pub cr_to_qty: i32,   // To quantity
+    pub cr_rate: f64,     // Commission rate
 }
 
 /// EXCHANGE table: Stock exchanges
 #[derive(Debug, Clone)]
 pub struct Exchange {
-    pub ex_id: String,         // Exchange ID (e.g., "NYSE")
-    pub ex_name: String,       // Exchange name
-    pub ex_num_symb: i32,      // Number of symbols
-    pub ex_open: i32,          // Opening time (HHMM)
-    pub ex_close: i32,         // Closing time (HHMM)
-    pub ex_desc: String,       // Description
-    pub ex_ad_id: i64,         // Address ID
+    pub ex_id: String,    // Exchange ID (e.g., "NYSE")
+    pub ex_name: String,  // Exchange name
+    pub ex_num_symb: i32, // Number of symbols
+    pub ex_open: i32,     // Opening time (HHMM)
+    pub ex_close: i32,    // Closing time (HHMM)
+    pub ex_desc: String,  // Description
+    pub ex_ad_id: i64,    // Address ID
 }
 
 /// INDUSTRY table: Industry classifications
 #[derive(Debug, Clone)]
 pub struct Industry {
-    pub in_id: String,         // Industry ID
-    pub in_name: String,       // Industry name
-    pub in_sc_id: String,      // Sector ID
+    pub in_id: String,    // Industry ID
+    pub in_name: String,  // Industry name
+    pub in_sc_id: String, // Sector ID
 }
 
 /// SECTOR table: Economic sectors
 #[derive(Debug, Clone)]
 pub struct Sector {
-    pub sc_id: String,         // Sector ID
-    pub sc_name: String,       // Sector name
+    pub sc_id: String,   // Sector ID
+    pub sc_name: String, // Sector name
 }
 
 /// STATUS_TYPE table: Status codes
 #[derive(Debug, Clone)]
 pub struct StatusType {
-    pub st_id: String,         // Status ID
-    pub st_name: String,       // Status name
+    pub st_id: String,   // Status ID
+    pub st_name: String, // Status name
 }
 
 /// TAXRATE table: Tax rates
 #[derive(Debug, Clone)]
 pub struct Taxrate {
-    pub tx_id: String,         // Tax rate ID
-    pub tx_name: String,       // Tax name
-    pub tx_rate: f64,          // Tax rate
+    pub tx_id: String,   // Tax rate ID
+    pub tx_name: String, // Tax name
+    pub tx_rate: f64,    // Tax rate
 }
 
 /// TRADE_TYPE table: Types of trades
 #[derive(Debug, Clone)]
 pub struct TradeType {
-    pub tt_id: String,         // Trade type ID
-    pub tt_name: String,       // Trade type name
-    pub tt_is_sell: bool,      // Is sell order
-    pub tt_is_mrkt: bool,      // Is market order
+    pub tt_id: String,    // Trade type ID
+    pub tt_name: String,  // Trade type name
+    pub tt_is_sell: bool, // Is sell order
+    pub tt_is_mrkt: bool, // Is market order
 }
 
 /// ZIP_CODE table: ZIP codes
 #[derive(Debug, Clone)]
 pub struct ZipCode {
-    pub zc_code: String,       // ZIP code
-    pub zc_town: String,       // Town name
-    pub zc_div: String,        // Division (state)
+    pub zc_code: String, // ZIP code
+    pub zc_town: String, // Town name
+    pub zc_div: String,  // Division (state)
 }
 
 // =============================================================================
@@ -217,92 +215,92 @@ pub struct ZipCode {
 /// CUSTOMER table: Customer information
 #[derive(Debug, Clone)]
 pub struct Customer {
-    pub c_id: i64,             // Customer ID
-    pub c_tax_id: String,      // Tax ID (SSN)
-    pub c_st_id: String,       // Status ID
-    pub c_l_name: String,      // Last name
-    pub c_f_name: String,      // First name
-    pub c_m_name: String,      // Middle name
-    pub c_gndr: String,        // Gender (M/F)
-    pub c_tier: i32,           // Customer tier (1-3)
-    pub c_dob: String,         // Date of birth
-    pub c_ad_id: i64,          // Address ID
-    pub c_ctry_1: String,      // Country code 1
-    pub c_area_1: String,      // Area code 1
-    pub c_local_1: String,     // Local number 1
-    pub c_ext_1: String,       // Extension 1
-    pub c_ctry_2: String,      // Country code 2
-    pub c_area_2: String,      // Area code 2
-    pub c_local_2: String,     // Local number 2
-    pub c_ext_2: String,       // Extension 2
-    pub c_ctry_3: String,      // Country code 3
-    pub c_area_3: String,      // Area code 3
-    pub c_local_3: String,     // Local number 3
-    pub c_ext_3: String,       // Extension 3
-    pub c_email_1: String,     // Email 1
-    pub c_email_2: String,     // Email 2
+    pub c_id: i64,         // Customer ID
+    pub c_tax_id: String,  // Tax ID (SSN)
+    pub c_st_id: String,   // Status ID
+    pub c_l_name: String,  // Last name
+    pub c_f_name: String,  // First name
+    pub c_m_name: String,  // Middle name
+    pub c_gndr: String,    // Gender (M/F)
+    pub c_tier: i32,       // Customer tier (1-3)
+    pub c_dob: String,     // Date of birth
+    pub c_ad_id: i64,      // Address ID
+    pub c_ctry_1: String,  // Country code 1
+    pub c_area_1: String,  // Area code 1
+    pub c_local_1: String, // Local number 1
+    pub c_ext_1: String,   // Extension 1
+    pub c_ctry_2: String,  // Country code 2
+    pub c_area_2: String,  // Area code 2
+    pub c_local_2: String, // Local number 2
+    pub c_ext_2: String,   // Extension 2
+    pub c_ctry_3: String,  // Country code 3
+    pub c_area_3: String,  // Area code 3
+    pub c_local_3: String, // Local number 3
+    pub c_ext_3: String,   // Extension 3
+    pub c_email_1: String, // Email 1
+    pub c_email_2: String, // Email 2
 }
 
 /// CUSTOMER_ACCOUNT table: Brokerage accounts
 #[derive(Debug, Clone)]
 pub struct CustomerAccount {
-    pub ca_id: i64,            // Account ID
-    pub ca_b_id: i64,          // Broker ID
-    pub ca_c_id: i64,          // Customer ID
-    pub ca_name: String,       // Account name
-    pub ca_tax_st: i32,        // Tax status (0-2)
-    pub ca_bal: f64,           // Account balance
+    pub ca_id: i64,      // Account ID
+    pub ca_b_id: i64,    // Broker ID
+    pub ca_c_id: i64,    // Customer ID
+    pub ca_name: String, // Account name
+    pub ca_tax_st: i32,  // Tax status (0-2)
+    pub ca_bal: f64,     // Account balance
 }
 
 /// CUSTOMER_TAXRATE table: Customer tax rates
 #[derive(Debug, Clone)]
 pub struct CustomerTaxrate {
-    pub cx_tx_id: String,      // Tax rate ID
-    pub cx_c_id: i64,          // Customer ID
+    pub cx_tx_id: String, // Tax rate ID
+    pub cx_c_id: i64,     // Customer ID
 }
 
 /// ACCOUNT_PERMISSION table: Account access permissions
 #[derive(Debug, Clone)]
 pub struct AccountPermission {
-    pub ap_ca_id: i64,         // Account ID
-    pub ap_acl: String,        // Access control list
-    pub ap_tax_id: String,     // Tax ID of authorized person
-    pub ap_l_name: String,     // Last name
-    pub ap_f_name: String,     // First name
+    pub ap_ca_id: i64,     // Account ID
+    pub ap_acl: String,    // Access control list
+    pub ap_tax_id: String, // Tax ID of authorized person
+    pub ap_l_name: String, // Last name
+    pub ap_f_name: String, // First name
 }
 
 /// WATCH_LIST table: Customer watch lists
 #[derive(Debug, Clone)]
 pub struct WatchList {
-    pub wl_id: i64,            // Watch list ID
-    pub wl_c_id: i64,          // Customer ID
+    pub wl_id: i64,   // Watch list ID
+    pub wl_c_id: i64, // Customer ID
 }
 
 /// WATCH_ITEM table: Securities on watch lists
 #[derive(Debug, Clone)]
 pub struct WatchItem {
-    pub wi_wl_id: i64,         // Watch list ID
-    pub wi_s_symb: String,     // Security symbol
+    pub wi_wl_id: i64,     // Watch list ID
+    pub wi_s_symb: String, // Security symbol
 }
 
 /// ADDRESS table: Addresses
 #[derive(Debug, Clone)]
 pub struct Address {
-    pub ad_id: i64,            // Address ID
-    pub ad_line1: String,      // Address line 1
-    pub ad_line2: String,      // Address line 2
-    pub ad_zc_code: String,    // ZIP code
-    pub ad_ctry: String,       // Country
+    pub ad_id: i64,         // Address ID
+    pub ad_line1: String,   // Address line 1
+    pub ad_line2: String,   // Address line 2
+    pub ad_zc_code: String, // ZIP code
+    pub ad_ctry: String,    // Country
 }
 
 /// BROKER table: Broker information
 #[derive(Debug, Clone)]
 pub struct Broker {
-    pub b_id: i64,             // Broker ID
-    pub b_st_id: String,       // Status ID
-    pub b_name: String,        // Broker name
-    pub b_num_trades: i32,     // Number of trades
-    pub b_comm_total: f64,     // Total commission
+    pub b_id: i64,         // Broker ID
+    pub b_st_id: String,   // Status ID
+    pub b_name: String,    // Broker name
+    pub b_num_trades: i32, // Number of trades
+    pub b_comm_total: f64, // Total commission
 }
 
 // =============================================================================
@@ -312,103 +310,103 @@ pub struct Broker {
 /// COMPANY table: Publicly traded companies
 #[derive(Debug, Clone)]
 pub struct Company {
-    pub co_id: i64,            // Company ID
-    pub co_st_id: String,      // Status ID
-    pub co_name: String,       // Company name
-    pub co_in_id: String,      // Industry ID
-    pub co_sp_rate: String,    // S&P rating
-    pub co_ceo: String,        // CEO name
-    pub co_ad_id: i64,         // Address ID
-    pub co_desc: String,       // Description
-    pub co_open_date: String,  // IPO date
+    pub co_id: i64,           // Company ID
+    pub co_st_id: String,     // Status ID
+    pub co_name: String,      // Company name
+    pub co_in_id: String,     // Industry ID
+    pub co_sp_rate: String,   // S&P rating
+    pub co_ceo: String,       // CEO name
+    pub co_ad_id: i64,        // Address ID
+    pub co_desc: String,      // Description
+    pub co_open_date: String, // IPO date
 }
 
 /// COMPANY_COMPETITOR table: Company competitors
 #[derive(Debug, Clone)]
 pub struct CompanyCompetitor {
-    pub cp_co_id: i64,         // Company ID
-    pub cp_comp_co_id: i64,    // Competitor company ID
-    pub cp_in_id: String,      // Industry ID
+    pub cp_co_id: i64,      // Company ID
+    pub cp_comp_co_id: i64, // Competitor company ID
+    pub cp_in_id: String,   // Industry ID
 }
 
 /// SECURITY table: Tradeable securities
 #[derive(Debug, Clone)]
 pub struct Security {
-    pub s_symb: String,        // Security symbol
-    pub s_issue: String,       // Issue type
-    pub s_st_id: String,       // Status ID
-    pub s_name: String,        // Security name
-    pub s_ex_id: String,       // Exchange ID
-    pub s_co_id: i64,          // Company ID
-    pub s_num_out: i64,        // Shares outstanding
-    pub s_start_date: String,  // Start date
-    pub s_exch_date: String,   // Exchange date
-    pub s_pe: f64,             // P/E ratio
-    pub s_52wk_high: f64,      // 52-week high
+    pub s_symb: String,           // Security symbol
+    pub s_issue: String,          // Issue type
+    pub s_st_id: String,          // Status ID
+    pub s_name: String,           // Security name
+    pub s_ex_id: String,          // Exchange ID
+    pub s_co_id: i64,             // Company ID
+    pub s_num_out: i64,           // Shares outstanding
+    pub s_start_date: String,     // Start date
+    pub s_exch_date: String,      // Exchange date
+    pub s_pe: f64,                // P/E ratio
+    pub s_52wk_high: f64,         // 52-week high
     pub s_52wk_high_date: String, // 52-week high date
-    pub s_52wk_low: f64,       // 52-week low
-    pub s_52wk_low_date: String, // 52-week low date
-    pub s_dividend: f64,       // Dividend
-    pub s_yield: f64,          // Yield
+    pub s_52wk_low: f64,          // 52-week low
+    pub s_52wk_low_date: String,  // 52-week low date
+    pub s_dividend: f64,          // Dividend
+    pub s_yield: f64,             // Yield
 }
 
 /// DAILY_MARKET table: Daily market data
 #[derive(Debug, Clone)]
 pub struct DailyMarket {
-    pub dm_date: String,       // Date
-    pub dm_s_symb: String,     // Security symbol
-    pub dm_close: f64,         // Closing price
-    pub dm_high: f64,          // High price
-    pub dm_low: f64,           // Low price
-    pub dm_vol: i64,           // Volume
+    pub dm_date: String,   // Date
+    pub dm_s_symb: String, // Security symbol
+    pub dm_close: f64,     // Closing price
+    pub dm_high: f64,      // High price
+    pub dm_low: f64,       // Low price
+    pub dm_vol: i64,       // Volume
 }
 
 /// LAST_TRADE table: Most recent trade info
 #[derive(Debug, Clone)]
 pub struct LastTrade {
-    pub lt_s_symb: String,     // Security symbol
-    pub lt_dts: String,        // Timestamp
-    pub lt_price: f64,         // Last price
-    pub lt_open_price: f64,    // Opening price
-    pub lt_vol: i64,           // Volume
+    pub lt_s_symb: String,  // Security symbol
+    pub lt_dts: String,     // Timestamp
+    pub lt_price: f64,      // Last price
+    pub lt_open_price: f64, // Opening price
+    pub lt_vol: i64,        // Volume
 }
 
 /// FINANCIAL table: Company financial data
 #[derive(Debug, Clone)]
 pub struct Financial {
-    pub fi_co_id: i64,         // Company ID
-    pub fi_year: i32,          // Fiscal year
-    pub fi_qtr: i32,           // Fiscal quarter
+    pub fi_co_id: i64,             // Company ID
+    pub fi_year: i32,              // Fiscal year
+    pub fi_qtr: i32,               // Fiscal quarter
     pub fi_qtr_start_date: String, // Quarter start date
-    pub fi_revenue: f64,       // Revenue
-    pub fi_net_earn: f64,      // Net earnings
-    pub fi_basic_eps: f64,     // Basic EPS
-    pub fi_dilut_eps: f64,     // Diluted EPS
-    pub fi_margin: f64,        // Margin
-    pub fi_inventory: f64,     // Inventory
-    pub fi_assets: f64,        // Assets
-    pub fi_liability: f64,     // Liabilities
-    pub fi_out_basic: i64,     // Basic shares outstanding
-    pub fi_out_dilut: i64,     // Diluted shares outstanding
+    pub fi_revenue: f64,           // Revenue
+    pub fi_net_earn: f64,          // Net earnings
+    pub fi_basic_eps: f64,         // Basic EPS
+    pub fi_dilut_eps: f64,         // Diluted EPS
+    pub fi_margin: f64,            // Margin
+    pub fi_inventory: f64,         // Inventory
+    pub fi_assets: f64,            // Assets
+    pub fi_liability: f64,         // Liabilities
+    pub fi_out_basic: i64,         // Basic shares outstanding
+    pub fi_out_dilut: i64,         // Diluted shares outstanding
 }
 
 /// NEWS_ITEM table: News articles
 #[derive(Debug, Clone)]
 pub struct NewsItem {
-    pub ni_id: i64,            // News item ID
-    pub ni_headline: String,   // Headline
-    pub ni_summary: String,    // Summary
-    pub ni_item: String,       // Full article
-    pub ni_dts: String,        // Timestamp
-    pub ni_source: String,     // Source
-    pub ni_author: String,     // Author
+    pub ni_id: i64,          // News item ID
+    pub ni_headline: String, // Headline
+    pub ni_summary: String,  // Summary
+    pub ni_item: String,     // Full article
+    pub ni_dts: String,      // Timestamp
+    pub ni_source: String,   // Source
+    pub ni_author: String,   // Author
 }
 
 /// NEWS_XREF table: News-company associations
 #[derive(Debug, Clone)]
 pub struct NewsXref {
-    pub nx_ni_id: i64,         // News item ID
-    pub nx_co_id: i64,         // Company ID
+    pub nx_ni_id: i64, // News item ID
+    pub nx_co_id: i64, // Company ID
 }
 
 // =============================================================================
@@ -418,86 +416,86 @@ pub struct NewsXref {
 /// TRADE table: All trades
 #[derive(Debug, Clone)]
 pub struct Trade {
-    pub t_id: i64,             // Trade ID
-    pub t_dts: String,         // Timestamp
-    pub t_st_id: String,       // Status ID
-    pub t_tt_id: String,       // Trade type ID
-    pub t_is_cash: bool,       // Is cash trade
-    pub t_s_symb: String,      // Security symbol
-    pub t_qty: i32,            // Quantity
-    pub t_bid_price: f64,      // Bid price
-    pub t_ca_id: i64,          // Customer account ID
-    pub t_exec_name: String,   // Executor name
-    pub t_trade_price: f64,    // Trade price (null if not executed)
-    pub t_chrg: f64,           // Charge
-    pub t_comm: f64,           // Commission
-    pub t_tax: f64,            // Tax
-    pub t_lifo: bool,          // LIFO flag
+    pub t_id: i64,           // Trade ID
+    pub t_dts: String,       // Timestamp
+    pub t_st_id: String,     // Status ID
+    pub t_tt_id: String,     // Trade type ID
+    pub t_is_cash: bool,     // Is cash trade
+    pub t_s_symb: String,    // Security symbol
+    pub t_qty: i32,          // Quantity
+    pub t_bid_price: f64,    // Bid price
+    pub t_ca_id: i64,        // Customer account ID
+    pub t_exec_name: String, // Executor name
+    pub t_trade_price: f64,  // Trade price (null if not executed)
+    pub t_chrg: f64,         // Charge
+    pub t_comm: f64,         // Commission
+    pub t_tax: f64,          // Tax
+    pub t_lifo: bool,        // LIFO flag
 }
 
 /// TRADE_HISTORY table: Trade status history
 #[derive(Debug, Clone)]
 pub struct TradeHistory {
-    pub th_t_id: i64,          // Trade ID
-    pub th_dts: String,        // Timestamp
-    pub th_st_id: String,      // Status ID
+    pub th_t_id: i64,     // Trade ID
+    pub th_dts: String,   // Timestamp
+    pub th_st_id: String, // Status ID
 }
 
 /// TRADE_REQUEST table: Pending limit orders
 #[derive(Debug, Clone)]
 pub struct TradeRequest {
-    pub tr_t_id: i64,          // Trade ID
-    pub tr_tt_id: String,      // Trade type ID
-    pub tr_s_symb: String,     // Security symbol
-    pub tr_qty: i32,           // Quantity
-    pub tr_bid_price: f64,     // Bid price
-    pub tr_b_id: i64,          // Broker ID
+    pub tr_t_id: i64,      // Trade ID
+    pub tr_tt_id: String,  // Trade type ID
+    pub tr_s_symb: String, // Security symbol
+    pub tr_qty: i32,       // Quantity
+    pub tr_bid_price: f64, // Bid price
+    pub tr_b_id: i64,      // Broker ID
 }
 
 /// SETTLEMENT table: Trade settlements
 #[derive(Debug, Clone)]
 pub struct Settlement {
-    pub se_t_id: i64,          // Trade ID
-    pub se_cash_type: String,  // Cash type
+    pub se_t_id: i64,             // Trade ID
+    pub se_cash_type: String,     // Cash type
     pub se_cash_due_date: String, // Due date
-    pub se_amt: f64,           // Amount
+    pub se_amt: f64,              // Amount
 }
 
 /// CASH_TRANSACTION table: Cash movements
 #[derive(Debug, Clone)]
 pub struct CashTransaction {
-    pub ct_t_id: i64,          // Trade ID
-    pub ct_dts: String,        // Timestamp
-    pub ct_amt: f64,           // Amount
-    pub ct_name: String,       // Transaction name
+    pub ct_t_id: i64,    // Trade ID
+    pub ct_dts: String,  // Timestamp
+    pub ct_amt: f64,     // Amount
+    pub ct_name: String, // Transaction name
 }
 
 /// HOLDING table: Current holdings
 #[derive(Debug, Clone)]
 pub struct Holding {
-    pub h_t_id: i64,           // Trade ID (original buy)
-    pub h_ca_id: i64,          // Customer account ID
-    pub h_s_symb: String,      // Security symbol
-    pub h_dts: String,         // Timestamp
-    pub h_price: f64,          // Purchase price
-    pub h_qty: i32,            // Quantity
+    pub h_t_id: i64,      // Trade ID (original buy)
+    pub h_ca_id: i64,     // Customer account ID
+    pub h_s_symb: String, // Security symbol
+    pub h_dts: String,    // Timestamp
+    pub h_price: f64,     // Purchase price
+    pub h_qty: i32,       // Quantity
 }
 
 /// HOLDING_HISTORY table: Holding changes
 #[derive(Debug, Clone)]
 pub struct HoldingHistory {
-    pub hh_h_t_id: i64,        // Holding trade ID
-    pub hh_t_id: i64,          // Trade ID that caused change
-    pub hh_before_qty: i32,    // Quantity before
-    pub hh_after_qty: i32,     // Quantity after
+    pub hh_h_t_id: i64,     // Holding trade ID
+    pub hh_t_id: i64,       // Trade ID that caused change
+    pub hh_before_qty: i32, // Quantity before
+    pub hh_after_qty: i32,  // Quantity after
 }
 
 /// HOLDING_SUMMARY table: Aggregated holdings
 #[derive(Debug, Clone)]
 pub struct HoldingSummary {
-    pub hs_ca_id: i64,         // Customer account ID
-    pub hs_s_symb: String,     // Security symbol
-    pub hs_qty: i32,           // Total quantity
+    pub hs_ca_id: i64,     // Customer account ID
+    pub hs_s_symb: String, // Security symbol
+    pub hs_qty: i32,       // Total quantity
 }
 
 // =============================================================================
@@ -506,8 +504,8 @@ pub struct HoldingSummary {
 
 /// TPC-E data generator
 pub struct TPCEData {
-    pub scale_factor: i32,     // Number of customers / 1000
-    raw_scale: f64,            // Raw scale factor
+    pub scale_factor: i32, // Number of customers / 1000
+    raw_scale: f64,        // Raw scale factor
     pub rng: TPCERng,
     next_trade_id: i64,
     next_address_id: i64,
@@ -522,7 +520,7 @@ impl TPCEData {
     pub const NUM_TRADE_TYPES: i32 = 5;
     pub const NUM_TAXRATES: i32 = 320;
     pub const NUM_CHARGE_TIERS: i32 = 3;
-    pub const NUM_ZIP_CODES: i32 = 1000;  // Simplified from 14741
+    pub const NUM_ZIP_CODES: i32 = 1000; // Simplified from 14741
     pub const NUM_COMPANIES: i32 = 5000;
     pub const NUM_SECURITIES: i32 = 6850;
 
@@ -661,10 +659,7 @@ impl TPCEData {
         ];
         sectors
             .iter()
-            .map(|(id, name)| Sector {
-                sc_id: id.to_string(),
-                sc_name: name.to_string(),
-            })
+            .map(|(id, name)| Sector { sc_id: id.to_string(), sc_name: name.to_string() })
             .collect()
     }
 
@@ -726,11 +721,36 @@ impl TPCEData {
     /// Generate trade type records
     pub fn gen_trade_types(&mut self) -> Vec<TradeType> {
         vec![
-            TradeType { tt_id: "TMB".to_string(), tt_name: "Market-Buy".to_string(), tt_is_sell: false, tt_is_mrkt: true },
-            TradeType { tt_id: "TMS".to_string(), tt_name: "Market-Sell".to_string(), tt_is_sell: true, tt_is_mrkt: true },
-            TradeType { tt_id: "TSL".to_string(), tt_name: "Stop-Loss".to_string(), tt_is_sell: true, tt_is_mrkt: false },
-            TradeType { tt_id: "TLB".to_string(), tt_name: "Limit-Buy".to_string(), tt_is_sell: false, tt_is_mrkt: false },
-            TradeType { tt_id: "TLS".to_string(), tt_name: "Limit-Sell".to_string(), tt_is_sell: true, tt_is_mrkt: false },
+            TradeType {
+                tt_id: "TMB".to_string(),
+                tt_name: "Market-Buy".to_string(),
+                tt_is_sell: false,
+                tt_is_mrkt: true,
+            },
+            TradeType {
+                tt_id: "TMS".to_string(),
+                tt_name: "Market-Sell".to_string(),
+                tt_is_sell: true,
+                tt_is_mrkt: true,
+            },
+            TradeType {
+                tt_id: "TSL".to_string(),
+                tt_name: "Stop-Loss".to_string(),
+                tt_is_sell: true,
+                tt_is_mrkt: false,
+            },
+            TradeType {
+                tt_id: "TLB".to_string(),
+                tt_name: "Limit-Buy".to_string(),
+                tt_is_sell: false,
+                tt_is_mrkt: false,
+            },
+            TradeType {
+                tt_id: "TLS".to_string(),
+                tt_name: "Limit-Sell".to_string(),
+                tt_is_sell: true,
+                tt_is_mrkt: false,
+            },
         ]
     }
 
@@ -805,7 +825,11 @@ impl TPCEData {
         let ad_id = self.next_address_id();
         Address {
             ad_id,
-            ad_line1: format!("{} {} St", self.rng.random_int(1, 9999), self.rng.random_astring(5, 10)),
+            ad_line1: format!(
+                "{} {} St",
+                self.rng.random_int(1, 9999),
+                self.rng.random_astring(5, 10)
+            ),
             ad_line2: if self.rng.random_bool(0.3) {
                 format!("Suite {}", self.rng.random_int(100, 999))
             } else {
@@ -818,12 +842,35 @@ impl TPCEData {
 
     /// Generate customer record
     pub fn gen_customer(&mut self, c_id: i64) -> Customer {
-        let first_names = ["James", "John", "Robert", "Michael", "William", "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth"];
-        let last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"];
+        let first_names = [
+            "James",
+            "John",
+            "Robert",
+            "Michael",
+            "William",
+            "Mary",
+            "Patricia",
+            "Jennifer",
+            "Linda",
+            "Elizabeth",
+        ];
+        let last_names = [
+            "Smith",
+            "Johnson",
+            "Williams",
+            "Brown",
+            "Jones",
+            "Garcia",
+            "Miller",
+            "Davis",
+            "Rodriguez",
+            "Martinez",
+        ];
 
         Customer {
             c_id,
-            c_tax_id: format!("{}-{}-{}",
+            c_tax_id: format!(
+                "{}-{}-{}",
                 self.rng.random_nstring(3, 3),
                 self.rng.random_nstring(2, 2),
                 self.rng.random_nstring(4, 4)
@@ -891,7 +938,8 @@ impl TPCEData {
 impl TPCEData {
     /// Generate company record
     pub fn gen_company(&mut self, co_id: i64) -> Company {
-        let ceo_names = ["John Smith", "Jane Doe", "Bob Johnson", "Alice Williams", "Charlie Brown"];
+        let ceo_names =
+            ["John Smith", "Jane Doe", "Bob Johnson", "Alice Williams", "Charlie Brown"];
         let sp_ratings = ["AAA", "AA", "A", "BBB", "BB", "B", "CCC"];
         let industries: Vec<String> = (1..=30).map(|i| format!("IN{:04}", i)).collect();
 
@@ -899,12 +947,16 @@ impl TPCEData {
             co_id,
             co_st_id: "ACTV".to_string(),
             co_name: format!("Company{} Inc", co_id),
-            co_in_id: industries[self.rng.random_int(0, industries.len() as i64 - 1) as usize].clone(),
+            co_in_id: industries[self.rng.random_int(0, industries.len() as i64 - 1) as usize]
+                .clone(),
             co_sp_rate: self.rng.pick(&sp_ratings).to_string(),
             co_ceo: self.rng.pick(&ceo_names).to_string(),
             co_ad_id: self.next_address_id(),
-            co_desc: format!("A leading company in its industry, Company{} has been serving customers since {}.",
-                co_id, self.rng.random_int(1950, 2020)),
+            co_desc: format!(
+                "A leading company in its industry, Company{} has been serving customers since {}.",
+                co_id,
+                self.rng.random_int(1950, 2020)
+            ),
             co_open_date: self.rng.random_date(1950, 2020),
         }
     }
@@ -1023,11 +1075,7 @@ impl TPCEData {
 
     /// Generate holding summary record
     pub fn gen_holding_summary(&mut self, ca_id: i64, s_symb: &str, qty: i32) -> HoldingSummary {
-        HoldingSummary {
-            hs_ca_id: ca_id,
-            hs_s_symb: s_symb.to_string(),
-            hs_qty: qty,
-        }
+        HoldingSummary { hs_ca_id: ca_id, hs_s_symb: s_symb.to_string(), hs_qty: qty }
     }
 
     /// Generate settlement record for a trade

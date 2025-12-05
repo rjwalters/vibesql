@@ -307,10 +307,7 @@ fn bench_change_event_receive(c: &mut Criterion) {
 
         b.iter(|| {
             // Send an event
-            sender.send(ChangeEvent::Insert {
-                table_name: "users".to_string(),
-                row_index: 0,
-            });
+            sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 });
 
             // Receive it
             let event = receiver.try_recv();
@@ -335,10 +332,7 @@ fn bench_change_event_receive(c: &mut Criterion) {
         b.iter(|| {
             // Send 10 events
             for i in 0..10 {
-                sender.send(ChangeEvent::Insert {
-                    table_name: "users".to_string(),
-                    row_index: i,
-                });
+                sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: i });
             }
 
             // Receive all

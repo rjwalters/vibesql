@@ -55,10 +55,7 @@ pub(super) fn execute_add_constraint(
             database.catalog.drop_table(&stmt.table_name)?;
             database.catalog.create_table(updated_schema)?;
 
-            Ok(format!(
-                "PRIMARY KEY constraint added to table '{}'",
-                stmt.table_name
-            ))
+            Ok(format!("PRIMARY KEY constraint added to table '{}'", stmt.table_name))
         }
         TableConstraintKind::Unique { columns } => {
             // Extract column names from IndexColumn structs
@@ -73,10 +70,7 @@ pub(super) fn execute_add_constraint(
             database.catalog.drop_table(&stmt.table_name)?;
             database.catalog.create_table(updated_schema)?;
 
-            Ok(format!(
-                "UNIQUE constraint added to table '{}'",
-                stmt.table_name
-            ))
+            Ok(format!("UNIQUE constraint added to table '{}'", stmt.table_name))
         }
         TableConstraintKind::Check { expr } => {
             let constraint_name = stmt
@@ -85,9 +79,7 @@ pub(super) fn execute_add_constraint(
                 .clone()
                 .unwrap_or_else(|| format!("check_{}", table.schema.check_constraints.len()));
 
-            table
-                .schema_mut()
-                .add_check_constraint(constraint_name.clone(), *expr.clone())?;
+            table.schema_mut().add_check_constraint(constraint_name.clone(), *expr.clone())?;
 
             Ok(format!(
                 "CHECK constraint '{}' added to table '{}'",
@@ -102,23 +94,21 @@ pub(super) fn execute_add_constraint(
             on_update,
         } => {
             // Convert AST ReferentialAction to catalog ReferentialAction
-            let convert_action = |action: &Option<vibesql_ast::ReferentialAction>| {
-                match action {
-                    Some(vibesql_ast::ReferentialAction::Cascade) => {
-                        vibesql_catalog::ReferentialAction::Cascade
-                    }
-                    Some(vibesql_ast::ReferentialAction::SetNull) => {
-                        vibesql_catalog::ReferentialAction::SetNull
-                    }
-                    Some(vibesql_ast::ReferentialAction::SetDefault) => {
-                        vibesql_catalog::ReferentialAction::SetDefault
-                    }
-                    Some(vibesql_ast::ReferentialAction::Restrict) => {
-                        vibesql_catalog::ReferentialAction::Restrict
-                    }
-                    Some(vibesql_ast::ReferentialAction::NoAction) | None => {
-                        vibesql_catalog::ReferentialAction::NoAction
-                    }
+            let convert_action = |action: &Option<vibesql_ast::ReferentialAction>| match action {
+                Some(vibesql_ast::ReferentialAction::Cascade) => {
+                    vibesql_catalog::ReferentialAction::Cascade
+                }
+                Some(vibesql_ast::ReferentialAction::SetNull) => {
+                    vibesql_catalog::ReferentialAction::SetNull
+                }
+                Some(vibesql_ast::ReferentialAction::SetDefault) => {
+                    vibesql_catalog::ReferentialAction::SetDefault
+                }
+                Some(vibesql_ast::ReferentialAction::Restrict) => {
+                    vibesql_catalog::ReferentialAction::Restrict
+                }
+                Some(vibesql_ast::ReferentialAction::NoAction) | None => {
+                    vibesql_catalog::ReferentialAction::NoAction
                 }
             };
 
@@ -186,10 +176,7 @@ pub(super) fn execute_add_constraint(
             database.catalog.drop_table(&stmt.table_name)?;
             database.catalog.create_table(updated_schema)?;
 
-            Ok(format!(
-                "FOREIGN KEY constraint added to table '{}'",
-                stmt.table_name
-            ))
+            Ok(format!("FOREIGN KEY constraint added to table '{}'", stmt.table_name))
         }
         TableConstraintKind::Fulltext { index_name: _, columns: _ } => {
             // TODO: Implement FULLTEXT index creation

@@ -45,7 +45,7 @@ fn test_create_spatial_index_basic() {
         columns: vec![IndexColumn {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
-                prefix_length: None,
+            prefix_length: None,
         }],
     };
 
@@ -157,7 +157,7 @@ fn test_drop_spatial_index() {
         columns: vec![IndexColumn {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
-                prefix_length: None,
+            prefix_length: None,
         }],
     };
 
@@ -165,10 +165,8 @@ fn test_drop_spatial_index() {
     assert!(db.spatial_index_exists("idx_location"));
 
     // Drop spatial index
-    let drop_stmt = vibesql_ast::DropIndexStmt {
-        index_name: "idx_location".to_string(),
-        if_exists: false,
-    };
+    let drop_stmt =
+        vibesql_ast::DropIndexStmt { index_name: "idx_location".to_string(), if_exists: false };
 
     let result = DropIndexExecutor::execute(&drop_stmt, &mut db);
     assert!(result.is_ok(), "Failed to drop spatial index: {:?}", result.err());
@@ -215,7 +213,7 @@ fn test_spatial_index_if_not_exists() {
         columns: vec![IndexColumn {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
-                prefix_length: None,
+            prefix_length: None,
         }],
     };
 
@@ -230,7 +228,7 @@ fn test_spatial_index_if_not_exists() {
         columns: vec![IndexColumn {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
-                prefix_length: None,
+            prefix_length: None,
         }],
     };
 

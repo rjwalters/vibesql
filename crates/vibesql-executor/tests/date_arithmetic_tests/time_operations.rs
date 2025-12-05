@@ -12,7 +12,9 @@ fn test_date_add_hours_across_midnight() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_ADD".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp("2024-01-15 23:00:00".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
+                "2024-01-15 23:00:00".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("HOUR".to_string())),
         ],
@@ -30,9 +32,13 @@ fn test_date_add_minutes_overflow() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_ADD".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp("2024-01-15 11:30:00".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
+                "2024-01-15 11:30:00".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(90)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("MINUTE".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "MINUTE".to_string(),
+            )),
         ],
         character_unit: None,
     };
@@ -48,9 +54,13 @@ fn test_date_add_seconds_overflow() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_ADD".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp("2024-01-15 10:30:30".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
+                "2024-01-15 10:30:30".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3661)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("SECOND".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "SECOND".to_string(),
+            )),
         ],
         character_unit: None,
     };
@@ -66,7 +76,9 @@ fn test_date_sub_hours_across_midnight() {
     let expr = vibesql_ast::Expression::Function {
         name: "DATE_SUB".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp("2024-01-16 01:00:00".parse().unwrap())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
+                "2024-01-16 01:00:00".parse().unwrap(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("HOUR".to_string())),
         ],

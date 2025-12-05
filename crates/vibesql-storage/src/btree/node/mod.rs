@@ -15,15 +15,15 @@
 //! - `Key`, `RowId`: Type aliases for keys and row identifiers
 
 // Submodules
-mod structure;
+mod btree_index;
+mod datatype_serialization;
 mod operations;
 mod split_merge;
-mod datatype_serialization;
-mod btree_index;
+mod structure;
 
 // Re-export public types and structures
-pub use structure::{InternalNode, Key, LeafNode, RowId};
 pub use btree_index::BTreeIndex;
+pub use structure::{InternalNode, Key, LeafNode, RowId};
 
 // Tests module
 #[cfg(test)]

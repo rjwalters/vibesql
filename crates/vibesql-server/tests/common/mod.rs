@@ -9,7 +9,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
 use vibesql_server::auth::PasswordStore;
-use vibesql_server::config::{AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig};
+use vibesql_server::config::{
+    AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig,
+};
 use vibesql_server::connection::ConnectionHandler;
 use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
 use vibesql_server::subscription::SubscriptionConfig;
@@ -65,15 +67,13 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
 
     // Initialize observability (disabled for tests)
     let observability = Arc::new(
-        ObservabilityProvider::init(&config.observability)
-            .expect("Failed to init observability"),
+        ObservabilityProvider::init(&config.observability).expect("Failed to init observability"),
     );
 
     // Load password store if configured
     let password_store = config.auth.password_file.as_ref().map(|password_file| {
         Arc::new(
-            PasswordStore::load_from_file(password_file)
-                .expect("Failed to load password file"),
+            PasswordStore::load_from_file(password_file).expect("Failed to load password file"),
         )
     });
 
@@ -119,10 +119,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
         }
     });
 
-    TestServer {
-        addr,
-        shutdown_tx: Some(shutdown_tx),
-    }
+    TestServer { addr, shutdown_tx: Some(shutdown_tx) }
 }
 
 /// Create a test configuration with trust authentication
@@ -136,10 +133,7 @@ pub fn test_config() -> Config {
             ssl_cert: None,
             ssl_key: None,
         },
-        auth: AuthConfig {
-            method: "trust".to_string(),
-            password_file: None,
-        },
+        auth: AuthConfig { method: "trust".to_string(), password_file: None },
         logging: LoggingConfig {
             level: "error".to_string(), // Quiet for tests
             file: None,
@@ -183,11 +177,7 @@ impl TestClient {
     }
 
     /// Send startup message
-    pub async fn send_startup(
-        &mut self,
-        user: &str,
-        database: &str,
-    ) -> std::io::Result<()> {
+    pub async fn send_startup(&mut self, user: &str, database: &str) -> std::io::Result<()> {
         self.write_buf.clear();
 
         // Build startup message
@@ -295,7 +285,11 @@ impl TestClient {
     }
 
     /// Read until we get a specific message type with custom timeout
-    pub async fn read_until_message_type_timeout(&mut self, msg_type: u8, timeout: std::time::Duration) -> std::io::Result<Vec<u8>> {
+    pub async fn read_until_message_type_timeout(
+        &mut self,
+        msg_type: u8,
+        timeout: std::time::Duration,
+    ) -> std::io::Result<Vec<u8>> {
         let mut all_data = Vec::new();
         let deadline = tokio::time::Instant::now() + timeout;
 
@@ -354,8 +348,8 @@ impl TestClient {
     pub async fn is_connected(&mut self) -> bool {
         let mut buf = [0u8; 1];
         match self.stream.try_read(&mut buf) {
-            Ok(0) => false, // Connection closed
-            Ok(_) => true,  // Data available (shouldn't happen in this context)
+            Ok(0) => false,                                                   // Connection closed
+            Ok(_) => true, // Data available (shouldn't happen in this context)
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => true, // Connection open
             Err(_) => false, // Other error, assume closed
         }
@@ -389,7 +383,9 @@ fn contains_message_type(data: &[u8], msg_type: u8) -> bool {
         }
         // Skip to next message
         if pos + 5 <= data.len() {
-            let len = i32::from_be_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]]) as usize;
+            let len =
+                i32::from_be_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]])
+                    as usize;
             pos += 1 + len;
         } else {
             break;
@@ -410,17 +406,15 @@ pub fn parse_backend_messages(data: &[u8]) -> Vec<ParsedMessage> {
         }
 
         let msg_type = data[pos];
-        let len = i32::from_be_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]]) as usize;
+        let len = i32::from_be_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]])
+            as usize;
 
         if pos + 1 + len > data.len() {
             break;
         }
 
         let payload = &data[pos + 5..pos + 1 + len];
-        messages.push(ParsedMessage {
-            msg_type,
-            payload: payload.to_vec(),
-        });
+        messages.push(ParsedMessage { msg_type, payload: payload.to_vec() });
 
         pos += 1 + len;
     }
@@ -439,7 +433,14 @@ pub struct ParsedMessage {
 impl ParsedMessage {
     /// Check if this is an AuthenticationOk message
     pub fn is_auth_ok(&self) -> bool {
-        self.msg_type == b'R' && self.payload.len() >= 4 && i32::from_be_bytes([self.payload[0], self.payload[1], self.payload[2], self.payload[3]]) == 0
+        self.msg_type == b'R'
+            && self.payload.len() >= 4
+            && i32::from_be_bytes([
+                self.payload[0],
+                self.payload[1],
+                self.payload[2],
+                self.payload[3],
+            ]) == 0
     }
 
     /// Check if this is a ReadyForQuery message
@@ -484,12 +485,26 @@ impl ParsedMessage {
 
     /// Check if this is an AuthenticationCleartextPassword request
     pub fn is_cleartext_password_request(&self) -> bool {
-        self.msg_type == b'R' && self.payload.len() >= 4 && i32::from_be_bytes([self.payload[0], self.payload[1], self.payload[2], self.payload[3]]) == 3
+        self.msg_type == b'R'
+            && self.payload.len() >= 4
+            && i32::from_be_bytes([
+                self.payload[0],
+                self.payload[1],
+                self.payload[2],
+                self.payload[3],
+            ]) == 3
     }
 
     /// Check if this is an AuthenticationMD5Password request
     pub fn is_md5_password_request(&self) -> bool {
-        self.msg_type == b'R' && self.payload.len() >= 4 && i32::from_be_bytes([self.payload[0], self.payload[1], self.payload[2], self.payload[3]]) == 5
+        self.msg_type == b'R'
+            && self.payload.len() >= 4
+            && i32::from_be_bytes([
+                self.payload[0],
+                self.payload[1],
+                self.payload[2],
+                self.payload[3],
+            ]) == 5
     }
 
     /// Get MD5 salt if this is an MD5 password request

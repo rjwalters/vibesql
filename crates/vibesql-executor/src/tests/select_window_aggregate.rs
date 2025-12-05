@@ -508,15 +508,15 @@ fn test_window_function_with_group_by_aggregate() {
 
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute(&select_stmt);
-        
+
         // This should succeed - currently may fail with UnsupportedExpression
         assert!(result.is_ok(), "Expected Q12-style window function to work: {:?}", result.err());
-        
+
         let rows = result.unwrap();
         assert_eq!(rows.len(), 2); // Two categories
 
-        // Category A: total=600, partition_total=600 (only one group in partition)
-        // Category B: total=900, partition_total=900 (only one group in partition)
+    // Category A: total=600, partition_total=600 (only one group in partition)
+    // Category B: total=900, partition_total=900 (only one group in partition)
     } else {
         panic!("Expected SELECT statement");
     }
@@ -544,8 +544,16 @@ fn test_tpcds_q12_revenue_ratio_pattern() {
         "ITEM".to_string(),
         vec![
             ColumnSchema::new("I_ITEM_SK".to_string(), DataType::Integer, false),
-            ColumnSchema::new("I_ITEM_ID".to_string(), DataType::Varchar { max_length: Some(50) }, false),
-            ColumnSchema::new("I_CLASS".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ColumnSchema::new(
+                "I_ITEM_ID".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
+            ColumnSchema::new(
+                "I_CLASS".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -553,10 +561,28 @@ fn test_tpcds_q12_revenue_ratio_pattern() {
     // Insert items with different classes
     let item_table = db.get_table_mut("ITEM").unwrap();
     // Class "electronics" - items 1 and 2
-    item_table.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("ITEM001".to_string()), SqlValue::Varchar("electronics".to_string())])).unwrap();
-    item_table.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("ITEM002".to_string()), SqlValue::Varchar("electronics".to_string())])).unwrap();
+    item_table
+        .insert(Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar("ITEM001".to_string()),
+            SqlValue::Varchar("electronics".to_string()),
+        ]))
+        .unwrap();
+    item_table
+        .insert(Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar("ITEM002".to_string()),
+            SqlValue::Varchar("electronics".to_string()),
+        ]))
+        .unwrap();
     // Class "sports" - item 3
-    item_table.insert(Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("ITEM003".to_string()), SqlValue::Varchar("sports".to_string())])).unwrap();
+    item_table
+        .insert(Row::new(vec![
+            SqlValue::Integer(3),
+            SqlValue::Varchar("ITEM003".to_string()),
+            SqlValue::Varchar("sports".to_string()),
+        ]))
+        .unwrap();
 
     // Insert web sales
     let sales_table = db.get_table_mut("WEB_SALES").unwrap();
@@ -593,11 +619,11 @@ fn test_tpcds_q12_revenue_ratio_pattern() {
         let rows = result.unwrap();
         assert_eq!(rows.len(), 3); // 3 items
 
-        // Electronics class total: 300 + 700 = 1000
-        // ITEM001: 300 / 1000 * 100 = 30%
-        // ITEM002: 700 / 1000 * 100 = 70%
-        // Sports class total: 500
-        // ITEM003: 500 / 500 * 100 = 100%
+    // Electronics class total: 300 + 700 = 1000
+    // ITEM001: 300 / 1000 * 100 = 30%
+    // ITEM002: 700 / 1000 * 100 = 70%
+    // Sports class total: 500
+    // ITEM003: 500 / 500 * 100 = 100%
     } else {
         panic!("Expected SELECT statement");
     }

@@ -1,8 +1,10 @@
 //! Tests for OLD and NEW pseudo-variable references in triggers
 
-use vibesql_ast::{CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+use crate::{CreateTableExecutor, DeleteExecutor, InsertExecutor, SelectExecutor, UpdateExecutor};
+use vibesql_ast::{
+    CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
+};
 use vibesql_storage::Database;
-use crate::{InsertExecutor, UpdateExecutor, DeleteExecutor, CreateTableExecutor, SelectExecutor};
 
 #[test]
 fn test_new_in_insert_trigger() {
@@ -38,7 +40,7 @@ fn test_new_in_insert_trigger() {
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(
-            "INSERT INTO audit (msg) VALUES (NEW.name);".to_string()
+            "INSERT INTO audit (msg) VALUES (NEW.name);".to_string(),
         ),
     };
     crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db).unwrap();
@@ -111,7 +113,8 @@ fn test_old_and_new_in_update_trigger() {
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(
-            "INSERT INTO audit (old_salary, new_salary) VALUES (OLD.salary, NEW.salary);".to_string()
+            "INSERT INTO audit (old_salary, new_salary) VALUES (OLD.salary, NEW.salary);"
+                .to_string(),
         ),
     };
     crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db).unwrap();
@@ -138,7 +141,8 @@ fn test_old_and_new_in_update_trigger() {
     };
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Integer(50000)); // OLD.salary
-    assert_eq!(result.rows[0].values[1], vibesql_types::SqlValue::Integer(55000)); // NEW.salary
+    assert_eq!(result.rows[0].values[1], vibesql_types::SqlValue::Integer(55000));
+    // NEW.salary
 }
 
 #[test]
@@ -185,7 +189,7 @@ fn test_old_in_delete_trigger() {
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(
-            "INSERT INTO audit (deleted_name) VALUES (OLD.name);".to_string()
+            "INSERT INTO audit (deleted_name) VALUES (OLD.name);".to_string(),
         ),
     };
     crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db).unwrap();

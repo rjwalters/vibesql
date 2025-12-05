@@ -81,7 +81,9 @@ pub fn parse_set_schema(parser: &mut crate::Parser) -> Result<SetSchemaStmt, Par
 }
 
 /// Parse SET CATALOG statement
-pub fn parse_set_catalog(parser: &mut crate::Parser) -> Result<vibesql_ast::SetCatalogStmt, ParseError> {
+pub fn parse_set_catalog(
+    parser: &mut crate::Parser,
+) -> Result<vibesql_ast::SetCatalogStmt, ParseError> {
     parser.expect_keyword(Keyword::Set)?;
     parser.expect_keyword(Keyword::Catalog)?;
 
@@ -91,7 +93,9 @@ pub fn parse_set_catalog(parser: &mut crate::Parser) -> Result<vibesql_ast::SetC
 }
 
 /// Parse SET NAMES statement
-pub fn parse_set_names(parser: &mut crate::Parser) -> Result<vibesql_ast::SetNamesStmt, ParseError> {
+pub fn parse_set_names(
+    parser: &mut crate::Parser,
+) -> Result<vibesql_ast::SetNamesStmt, ParseError> {
     parser.expect_keyword(Keyword::Set)?;
     parser.expect_keyword(Keyword::Names)?;
 
@@ -124,7 +128,9 @@ pub fn parse_set_names(parser: &mut crate::Parser) -> Result<vibesql_ast::SetNam
 }
 
 /// Parse SET TIME ZONE statement
-pub fn parse_set_time_zone(parser: &mut crate::Parser) -> Result<vibesql_ast::SetTimeZoneStmt, ParseError> {
+pub fn parse_set_time_zone(
+    parser: &mut crate::Parser,
+) -> Result<vibesql_ast::SetTimeZoneStmt, ParseError> {
     parser.expect_keyword(Keyword::Set)?;
     parser.expect_keyword(Keyword::Time)?;
     parser.expect_keyword(Keyword::Zone)?;
@@ -174,7 +180,9 @@ pub fn parse_set_time_zone(parser: &mut crate::Parser) -> Result<vibesql_ast::Se
 /// Syntax:
 ///   SET [GLOBAL | SESSION] variable_name = expression
 ///   SET variable_name = expression (defaults to SESSION)
-pub fn parse_set_variable(parser: &mut crate::Parser) -> Result<vibesql_ast::SetVariableStmt, ParseError> {
+pub fn parse_set_variable(
+    parser: &mut crate::Parser,
+) -> Result<vibesql_ast::SetVariableStmt, ParseError> {
     parser.expect_keyword(Keyword::Set)?;
 
     // Check for optional GLOBAL or SESSION scope

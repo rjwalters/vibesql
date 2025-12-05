@@ -1,9 +1,9 @@
 //! SQLLogicTest integration for comprehensive SQL correctness testing.
 
 use async_trait::async_trait;
+use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
@@ -90,8 +90,9 @@ impl VibeSqlDB {
                     &insert_stmt.table_name
                 };
 
-                let rows_affected = vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
 
                 // Invalidate cache for this table
                 self.cache.invalidate_table(table_name);
@@ -106,8 +107,9 @@ impl VibeSqlDB {
                     &update_stmt.table_name
                 };
 
-                let rows_affected = vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
 
                 // Invalidate cache for this table
                 self.cache.invalidate_table(table_name);
@@ -122,8 +124,9 @@ impl VibeSqlDB {
                     &delete_stmt.table_name
                 };
 
-                let rows_affected = vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
 
                 // Invalidate cache for this table
                 self.cache.invalidate_table(table_name);
@@ -152,18 +155,27 @@ impl VibeSqlDB {
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::CreateSchema(create_schema_stmt) => {
-                vibesql_executor::SchemaExecutor::execute_create_schema(&create_schema_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                vibesql_executor::SchemaExecutor::execute_create_schema(
+                    &create_schema_stmt,
+                    &mut self.db,
+                )
+                .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::DropSchema(drop_schema_stmt) => {
-                vibesql_executor::SchemaExecutor::execute_drop_schema(&drop_schema_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                vibesql_executor::SchemaExecutor::execute_drop_schema(
+                    &drop_schema_stmt,
+                    &mut self.db,
+                )
+                .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::SetSchema(set_schema_stmt) => {
-                vibesql_executor::SchemaExecutor::execute_set_schema(&set_schema_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                vibesql_executor::SchemaExecutor::execute_set_schema(
+                    &set_schema_stmt,
+                    &mut self.db,
+                )
+                .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::SetCatalog(set_stmt) => {
@@ -212,8 +224,11 @@ impl VibeSqlDB {
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::CreateRole(create_role_stmt) => {
-                vibesql_executor::RoleExecutor::execute_create_role(&create_role_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                vibesql_executor::RoleExecutor::execute_create_role(
+                    &create_role_stmt,
+                    &mut self.db,
+                )
+                .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::DropRole(drop_role_stmt) => {
@@ -222,18 +237,27 @@ impl VibeSqlDB {
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::CreateDomain(create_domain_stmt) => {
-                vibesql_executor::DomainExecutor::execute_create_domain(&create_domain_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                vibesql_executor::DomainExecutor::execute_create_domain(
+                    &create_domain_stmt,
+                    &mut self.db,
+                )
+                .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::DropDomain(drop_domain_stmt) => {
-                vibesql_executor::DomainExecutor::execute_drop_domain(&drop_domain_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                vibesql_executor::DomainExecutor::execute_drop_domain(
+                    &drop_domain_stmt,
+                    &mut self.db,
+                )
+                .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::CreateType(create_type_stmt) => {
-                vibesql_executor::TypeExecutor::execute_create_type(&create_type_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                vibesql_executor::TypeExecutor::execute_create_type(
+                    &create_type_stmt,
+                    &mut self.db,
+                )
+                .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::DropType(drop_type_stmt) => {
@@ -703,7 +727,9 @@ async fn run_single_test_file() {
     let test_file = match std::env::var("SQLLOGICTEST_FILE") {
         Ok(file) => file,
         Err(_) => {
-            eprintln!("Skipping run_single_test_file: SQLLOGICTEST_FILE environment variable not set");
+            eprintln!(
+                "Skipping run_single_test_file: SQLLOGICTEST_FILE environment variable not set"
+            );
             eprintln!("Usage: SQLLOGICTEST_FILE=path/to/file.test cargo test -p vibesql --test sqllogictest_runner run_single_test_file");
             return;
         }
@@ -730,8 +756,7 @@ async fn run_single_test_file() {
     // vibesql uses MySQL-compatible division (returns REAL/DECIMAL for integer division)
     tester.add_label("mysql");
 
-    tester.run_script(&contents)
-        .unwrap_or_else(|e| panic!("Test failed for {}: {}", test_file, e));
+    tester.run_script(&contents).unwrap_or_else(|e| panic!("Test failed for {}: {}", test_file, e));
 }
 #[tokio::test]
 async fn test_div_integer_formatting() {
@@ -741,22 +766,22 @@ async fn test_div_integer_formatting() {
 
     let db = Database::new();
     let stmt = Parser::parse_sql("SELECT 47 DIV -94").unwrap();
-    
+
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             let executor = SelectExecutor::new(&db);
             let rows = executor.execute(&select).unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].values.len(), 1);
-            
+
             // Should return Integer(0), not Numeric or Float
             match &rows[0].values[0] {
                 vibesql_types::SqlValue::Integer(val) => {
                     assert_eq!(*val, 0);
-                },
+                }
                 other => panic!("Expected Integer, got {:?}", other),
             }
-        },
+        }
         _ => panic!("Expected SELECT statement"),
     }
 }
@@ -769,14 +794,14 @@ async fn test_div_more_cases() {
     use vibesql_types::SqlValue;
 
     let db = Database::new();
-    
+
     let cases = vec![
         ("SELECT 10 DIV 3", 3i64),
         ("SELECT -10 DIV 3", -3i64),
         ("SELECT 100 DIV 10", 10i64),
         ("SELECT 47 DIV -94", 0i64),
     ];
-    
+
     for (sql, expected) in cases {
         let stmt = Parser::parse_sql(sql).unwrap();
         match stmt {
@@ -786,10 +811,10 @@ async fn test_div_more_cases() {
                 match &rows[0].values[0] {
                     SqlValue::Integer(val) => {
                         assert_eq!(*val, expected, "Failed for SQL: {}", sql);
-                    },
+                    }
                     other => panic!("Expected Integer for '{}', got {:?}", sql, other),
                 }
-            },
+            }
             _ => panic!("Expected SELECT statement"),
         }
     }

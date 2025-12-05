@@ -17,9 +17,7 @@ fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
     };
 
     let executor = SelectExecutor::new(db);
-    executor
-        .execute(&select_stmt)
-        .map_err(|e| format!("Execution error: {:?}", e))
+    executor.execute(&select_stmt).map_err(|e| format!("Execution error: {:?}", e))
 }
 
 #[test]
@@ -32,12 +30,9 @@ fn test_not_col_is_null() {
 
     let mut db = Database::new();
     db.create_table(schema).unwrap();
-    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(99)]))
-        .unwrap();
-    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(100)]))
-        .unwrap();
-    db.insert_row("TAB0", Row::new(vec![SqlValue::Null]))
-        .unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(99)])).unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(100)])).unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Null])).unwrap();
 
     // Test: NOT col0 IS NULL should be equivalent to col0 IS NOT NULL
     // Should return rows where col0 is NOT NULL (i.e., 99 and 100)
@@ -48,16 +43,10 @@ fn test_not_col_is_null() {
         .expect("Query should succeed");
 
     assert_eq!(results1.len(), 2, "NOT col0 IS NULL should return 2 rows");
-    assert_eq!(
-        results2.len(), 2,
-        "col0 IS NOT NULL should return 2 rows"
-    );
+    assert_eq!(results2.len(), 2, "col0 IS NOT NULL should return 2 rows");
 
     // Both queries should return the same results
-    assert_eq!(
-        results1, results2,
-        "NOT col0 IS NULL should be equivalent to col0 IS NOT NULL"
-    );
+    assert_eq!(results1, results2, "NOT col0 IS NULL should be equivalent to col0 IS NOT NULL");
 
     // Verify the actual values
     assert_eq!(results1[0].get(0), Some(&SqlValue::Integer(99)));
@@ -78,10 +67,8 @@ fn test_not_null_is_null() {
 
     let mut db = Database::new();
     db.create_table(schema).unwrap();
-    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(1)]))
-        .unwrap();
-    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(2)]))
-        .unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(1)])).unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(2)])).unwrap();
 
     let results = execute_select(&db, "SELECT col0 FROM tab0 WHERE NOT (NULL) IS NULL")
         .expect("Query should succeed");
@@ -105,23 +92,16 @@ fn test_not_expr_is_null() {
 
     let mut db = Database::new();
     db.create_table(schema).unwrap();
-    db.insert_row("TAB1", Row::new(vec![SqlValue::Integer(2)]))
-        .unwrap();
-    db.insert_row("TAB1", Row::new(vec![SqlValue::Integer(3)]))
-        .unwrap();
-    db.insert_row("TAB1", Row::new(vec![SqlValue::Null]))
-        .unwrap();
+    db.insert_row("TAB1", Row::new(vec![SqlValue::Integer(2)])).unwrap();
+    db.insert_row("TAB1", Row::new(vec![SqlValue::Integer(3)])).unwrap();
+    db.insert_row("TAB1", Row::new(vec![SqlValue::Null])).unwrap();
 
     // col0 * col0 IS NULL is only true for the NULL row
     // NOT (col0 * col0 IS NULL) should return the non-NULL rows
     let results = execute_select(&db, "SELECT col0 FROM tab1 WHERE NOT col0 * col0 IS NULL")
         .expect("Query should succeed");
 
-    assert_eq!(
-        results.len(),
-        2,
-        "NOT col0 * col0 IS NULL should return non-NULL rows"
-    );
+    assert_eq!(results.len(), 2, "NOT col0 * col0 IS NULL should return non-NULL rows");
     assert_eq!(results[0].get(0), Some(&SqlValue::Integer(2)));
     assert_eq!(results[1].get(0), Some(&SqlValue::Integer(3)));
 }
@@ -141,21 +121,9 @@ fn test_not_in_with_null() {
 
     let mut db = Database::new();
     db.create_table(schema).unwrap();
-    db.insert_row(
-        "TAB0",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(2)]),
-    )
-    .unwrap();
-    db.insert_row(
-        "TAB0",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(2)]),
-    )
-    .unwrap();
-    db.insert_row(
-        "TAB0",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(4)]),
-    )
-    .unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(2)])).unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(2)])).unwrap();
+    db.insert_row("TAB0", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(4)])).unwrap();
 
     // This query should work correctly with proper NULL handling
     let results = execute_select(&db, "SELECT col0 FROM tab0 WHERE NOT ( + col0 ) IN ( col1 )")

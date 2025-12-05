@@ -71,7 +71,7 @@ impl BTreeIndex {
 
         // Delete all row_ids for the key from leaf
         if !leaf.delete_all(key) {
-            return Ok(false);  // Key not found
+            return Ok(false); // Key not found
         }
 
         // Write leaf back
@@ -134,7 +134,7 @@ impl BTreeIndex {
 
         // Delete specific row_id from leaf
         if !leaf.delete(key, row_id) {
-            return Ok(false);  // Key or row_id not found
+            return Ok(false); // Key or row_id not found
         }
 
         // Write leaf back

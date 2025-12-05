@@ -27,9 +27,7 @@ impl Catalog {
             .is_some();
 
         if !table_exists {
-            return Err(CatalogError::TableNotFound {
-                table_name: index.table_name.clone(),
-            });
+            return Err(CatalogError::TableNotFound { table_name: index.table_name.clone() });
         }
 
         // Verify all columns exist in the table
@@ -60,12 +58,10 @@ impl Catalog {
     ) -> Result<IndexMetadata, CatalogError> {
         let qualified_name = format!("{}.{}", table_name, index_name);
 
-        self.indexes
-            .remove(&qualified_name)
-            .ok_or_else(|| CatalogError::IndexNotFound {
-                index_name: index_name.to_string(),
-                table_name: table_name.to_string(),
-            })
+        self.indexes.remove(&qualified_name).ok_or_else(|| CatalogError::IndexNotFound {
+            index_name: index_name.to_string(),
+            table_name: table_name.to_string(),
+        })
     }
 
     /// Get an index by table and index name
@@ -76,10 +72,7 @@ impl Catalog {
 
     /// Get all indexes for a specific table
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&IndexMetadata> {
-        self.indexes
-            .values()
-            .filter(|index| index.table_name == table_name)
-            .collect()
+        self.indexes.values().filter(|index| index.table_name == table_name).collect()
     }
 
     /// List all indexes in the catalog
@@ -125,27 +118,18 @@ mod tests {
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
                 ColumnSchema::new(
                     "name".to_string(),
-                    DataType::Varchar {
-                        max_length: Some(50),
-                    },
+                    DataType::Varchar { max_length: Some(50) },
                     true,
                 ),
                 ColumnSchema::new(
                     "email".to_string(),
-                    DataType::Varchar {
-                        max_length: Some(100),
-                    },
+                    DataType::Varchar { max_length: Some(100) },
                     true,
                 ),
             ],
         );
 
-        catalog
-            .schemas
-            .get_mut(&catalog.current_schema)
-            .unwrap()
-            .create_table(table)
-            .unwrap();
+        catalog.schemas.get_mut(&catalog.current_schema).unwrap().create_table(table).unwrap();
 
         catalog
     }

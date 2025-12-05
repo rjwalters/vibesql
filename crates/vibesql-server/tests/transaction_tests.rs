@@ -36,18 +36,12 @@ impl TestServer {
         // Give the server time to start
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        TestServer {
-            port,
-            shutdown_tx: Some(shutdown_tx),
-        }
+        TestServer { port, shutdown_tx: Some(shutdown_tx) }
     }
 
     /// Get the connection string for this test server.
     fn connection_string(&self) -> String {
-        format!(
-            "host=127.0.0.1 port={} user=test dbname=test",
-            self.port
-        )
+        format!("host=127.0.0.1 port={} user=test dbname=test", self.port)
     }
 }
 
@@ -121,10 +115,9 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
 
 /// Helper to connect to the test server.
 async fn connect(server: &TestServer) -> tokio_postgres::Client {
-    let (client, connection) =
-        tokio_postgres::connect(&server.connection_string(), NoTls)
-            .await
-            .expect("Failed to connect to test server");
+    let (client, connection) = tokio_postgres::connect(&server.connection_string(), NoTls)
+        .await
+        .expect("Failed to connect to test server");
 
     // Spawn the connection handler
     tokio::spawn(async move {
@@ -149,10 +142,7 @@ async fn test_basic_transaction_commit() {
         .expect("Failed to create table");
 
     // Begin transaction
-    client
-        .simple_query("BEGIN")
-        .await
-        .expect("Failed to BEGIN transaction");
+    client.simple_query("BEGIN").await.expect("Failed to BEGIN transaction");
 
     // Insert data within transaction
     client
@@ -161,22 +151,15 @@ async fn test_basic_transaction_commit() {
         .expect("Failed to INSERT");
 
     // Commit transaction
-    client
-        .simple_query("COMMIT")
-        .await
-        .expect("Failed to COMMIT");
+    client.simple_query("COMMIT").await.expect("Failed to COMMIT");
 
     // Verify data persisted
-    let rows = client
-        .simple_query("SELECT * FROM txn_test WHERE id = 1")
-        .await
-        .expect("Failed to SELECT");
+    let rows =
+        client.simple_query("SELECT * FROM txn_test WHERE id = 1").await.expect("Failed to SELECT");
 
     // Count data rows (exclude CommandComplete messages)
-    let data_rows: Vec<_> = rows
-        .iter()
-        .filter(|msg| matches!(msg, SimpleQueryMessage::Row(_)))
-        .collect();
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
     assert_eq!(data_rows.len(), 1, "Should have 1 row after COMMIT");
 }
@@ -200,10 +183,7 @@ async fn test_transaction_rollback() {
         .expect("Failed to INSERT initial data");
 
     // Begin transaction
-    client
-        .simple_query("BEGIN")
-        .await
-        .expect("Failed to BEGIN");
+    client.simple_query("BEGIN").await.expect("Failed to BEGIN");
 
     // Insert more data within transaction
     client
@@ -212,28 +192,17 @@ async fn test_transaction_rollback() {
         .expect("Failed to INSERT in transaction");
 
     // Rollback transaction
-    client
-        .simple_query("ROLLBACK")
-        .await
-        .expect("Failed to ROLLBACK");
+    client.simple_query("ROLLBACK").await.expect("Failed to ROLLBACK");
 
     // Verify only initial data exists
-    let rows = client
-        .simple_query("SELECT * FROM rollback_test")
-        .await
-        .expect("Failed to SELECT");
+    let rows = client.simple_query("SELECT * FROM rollback_test").await.expect("Failed to SELECT");
 
-    let data_rows: Vec<_> = rows
-        .iter()
-        .filter(|msg| matches!(msg, SimpleQueryMessage::Row(_)))
-        .collect();
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
     // With proper rollback implementation, only the initial row should exist
     // Note: If rollback is not fully implemented, this test documents expected behavior
-    assert!(
-        !data_rows.is_empty(),
-        "Should have at least the initial row"
-    );
+    assert!(!data_rows.is_empty(), "Should have at least the initial row");
 }
 
 /// Test 3: Verify transaction status changes in ReadyForQuery messages
@@ -247,20 +216,14 @@ async fn test_ready_for_query_status() {
     let client = connect(&server).await;
 
     // Create a test table
-    client
-        .simple_query("CREATE TABLE status_test (id INT)")
-        .await
-        .expect("Failed to create table");
+    client.simple_query("CREATE TABLE status_test (id INT)").await.expect("Failed to create table");
 
     // The tokio_postgres client abstracts away the ReadyForQuery status,
     // but we can verify transaction state by checking that queries
     // behave correctly within transactions.
 
     // Begin transaction - server should now be in transaction state
-    client
-        .simple_query("BEGIN")
-        .await
-        .expect("BEGIN should succeed");
+    client.simple_query("BEGIN").await.expect("BEGIN should succeed");
 
     // Insert should succeed in transaction
     client
@@ -274,17 +237,12 @@ async fn test_ready_for_query_status() {
         .await
         .expect("SELECT in transaction should succeed");
 
-    let data_rows: Vec<_> = rows
-        .iter()
-        .filter(|msg| matches!(msg, SimpleQueryMessage::Row(_)))
-        .collect();
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
     assert_eq!(data_rows.len(), 1, "Should see 1 row in transaction");
 
     // Commit to return to idle state
-    client
-        .simple_query("COMMIT")
-        .await
-        .expect("COMMIT should succeed");
+    client.simple_query("COMMIT").await.expect("COMMIT should succeed");
 
     // Query after commit should still work
     let rows = client
@@ -292,10 +250,8 @@ async fn test_ready_for_query_status() {
         .await
         .expect("SELECT after COMMIT should succeed");
 
-    let data_rows: Vec<_> = rows
-        .iter()
-        .filter(|msg| matches!(msg, SimpleQueryMessage::Row(_)))
-        .collect();
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
     assert_eq!(data_rows.len(), 1, "Should see 1 row after commit");
 }
 
@@ -317,10 +273,7 @@ async fn test_error_in_transaction() {
         .expect("Failed to create table");
 
     // Begin transaction
-    client
-        .simple_query("BEGIN")
-        .await
-        .expect("BEGIN should succeed");
+    client.simple_query("BEGIN").await.expect("BEGIN should succeed");
 
     // Insert initial row
     client
@@ -329,9 +282,7 @@ async fn test_error_in_transaction() {
         .expect("First INSERT should succeed");
 
     // Try to insert duplicate (should fail due to PRIMARY KEY)
-    let result = client
-        .simple_query("INSERT INTO error_test (id) VALUES (1)")
-        .await;
+    let result = client.simple_query("INSERT INTO error_test (id) VALUES (1)").await;
 
     // The duplicate insert should fail
     assert!(result.is_err(), "Duplicate INSERT should fail");
@@ -354,10 +305,8 @@ async fn test_error_in_transaction() {
         .await
         .expect("SELECT after ROLLBACK should succeed");
 
-    let data_rows: Vec<_> = rows
-        .iter()
-        .filter(|msg| matches!(msg, SimpleQueryMessage::Row(_)))
-        .collect();
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
     // EXPECTED BEHAVIOR (when full transactions are implemented):
     // Table should be empty after rollback (original insert was rolled back)
@@ -371,10 +320,7 @@ async fn test_error_in_transaction() {
 
     // For now, verify at least one row exists (the first insert)
     // This confirms the test infrastructure works and documents current behavior
-    assert!(
-        !data_rows.is_empty(),
-        "At least the first insert should have succeeded"
-    );
+    assert!(!data_rows.is_empty(), "At least the first insert should have succeeded");
 }
 
 /// Test 5: Nested BEGIN rejection - verify error on BEGIN when already in transaction
@@ -384,10 +330,7 @@ async fn test_nested_begin_rejection() {
     let client = connect(&server).await;
 
     // Begin first transaction
-    client
-        .simple_query("BEGIN")
-        .await
-        .expect("First BEGIN should succeed");
+    client.simple_query("BEGIN").await.expect("First BEGIN should succeed");
 
     // Try to begin another transaction (should fail or warn)
     let result = client.simple_query("BEGIN").await;
@@ -444,10 +387,7 @@ async fn test_cross_session_isolation() {
         .expect("Failed to create table on client1");
 
     // Begin transaction on client1
-    client1
-        .simple_query("BEGIN")
-        .await
-        .expect("BEGIN should succeed on client1");
+    client1.simple_query("BEGIN").await.expect("BEGIN should succeed on client1");
 
     // Insert data in client1's transaction
     client1
@@ -469,10 +409,8 @@ async fn test_cross_session_isolation() {
         .await
         .expect("SELECT should succeed on client2");
 
-    let data_rows: Vec<_> = rows
-        .iter()
-        .filter(|msg| matches!(msg, SimpleQueryMessage::Row(_)))
-        .collect();
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
     // CURRENT BEHAVIOR: Sessions have isolated databases
     // Client2 sees 0 rows because it has its own separate database
@@ -481,17 +419,10 @@ async fn test_cross_session_isolation() {
     // Client2 should see 0 rows because client1's data is uncommitted
     //
     // Either way, client2 should see 0 rows here
-    assert_eq!(
-        data_rows.len(),
-        0,
-        "Client2 should not see uncommitted data"
-    );
+    assert_eq!(data_rows.len(), 0, "Client2 should not see uncommitted data");
 
     // Commit on client1
-    client1
-        .simple_query("COMMIT")
-        .await
-        .expect("COMMIT should succeed on client1");
+    client1.simple_query("COMMIT").await.expect("COMMIT should succeed on client1");
 
     // Query client2 again
     let rows = client2
@@ -499,10 +430,8 @@ async fn test_cross_session_isolation() {
         .await
         .expect("SELECT should succeed on client2 after client1 commit");
 
-    let data_rows: Vec<_> = rows
-        .iter()
-        .filter(|msg| matches!(msg, SimpleQueryMessage::Row(_)))
-        .collect();
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
     // CURRENT BEHAVIOR: Sessions have isolated databases
     // Client2 still sees 0 rows because databases are not shared

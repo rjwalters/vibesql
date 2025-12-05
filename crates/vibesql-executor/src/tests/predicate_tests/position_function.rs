@@ -20,12 +20,12 @@ fn test_position_found() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
-                substring: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "world".to_string(),
-                ))),
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "hello world".to_string(),
-                ))),
+                substring: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("world".to_string()),
+                )),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("hello world".to_string()),
+                )),
                 character_unit: None,
             },
             alias: Some("pos".to_string()),
@@ -38,7 +38,8 @@ fn test_position_found() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -57,12 +58,12 @@ fn test_position_not_found() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
-                substring: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "xyz".to_string(),
-                ))),
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "hello world".to_string(),
-                ))),
+                substring: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("xyz".to_string()),
+                )),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("hello world".to_string()),
+                )),
                 character_unit: None,
             },
             alias: Some("pos".to_string()),
@@ -75,7 +76,8 @@ fn test_position_not_found() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -94,10 +96,12 @@ fn test_position_null_substring() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
-                substring: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
-                string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "hello world".to_string(),
-                ))),
+                substring: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Null,
+                )),
+                string: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("hello world".to_string()),
+                )),
                 character_unit: None,
             },
             alias: Some("pos".to_string()),
@@ -110,7 +114,8 @@ fn test_position_null_substring() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
@@ -129,9 +134,9 @@ fn test_position_null_string() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
-                substring: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "world".to_string(),
-                ))),
+                substring: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar("world".to_string()),
+                )),
                 string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
                 character_unit: None,
             },
@@ -145,7 +150,8 @@ fn test_position_null_string() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);

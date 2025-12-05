@@ -78,11 +78,7 @@ impl ColumnarTable {
 
         // Validate first row column count
         if rows[0].len() != col_count {
-            return Err(format!(
-                "Row 0 has {} columns, expected {}",
-                rows[0].len(),
-                col_count
-            ));
+            return Err(format!("Row 0 has {} columns, expected {}", rows[0].len(), col_count));
         }
 
         // Infer column types from first non-null value in each column
@@ -97,10 +93,8 @@ impl ColumnarTable {
             .collect();
 
         // Pre-allocate column storage based on inferred types
-        let mut column_builders: Vec<ColumnBuilder> = col_types
-            .iter()
-            .map(|t| ColumnBuilder::new(*t, row_count))
-            .collect();
+        let mut column_builders: Vec<ColumnBuilder> =
+            col_types.iter().map(|t| ColumnBuilder::new(*t, row_count)).collect();
 
         // Single pass through rows - distribute values to columns
         for (row_idx, row) in rows.iter().enumerate() {
@@ -190,18 +184,12 @@ impl ColumnarTable {
 
         let columns_size: usize = self.columns.values().map(|c| c.size_in_bytes()).sum();
 
-        let column_names_size: usize = self
-            .column_names
-            .iter()
-            .map(|s| std::mem::size_of::<String>() + s.capacity())
-            .sum();
+        let column_names_size: usize =
+            self.column_names.iter().map(|s| std::mem::size_of::<String>() + s.capacity()).sum();
 
         // HashMap keys (column names stored again)
-        let hashmap_keys_size: usize = self
-            .columns
-            .keys()
-            .map(|s| std::mem::size_of::<String>() + s.capacity())
-            .sum();
+        let hashmap_keys_size: usize =
+            self.columns.keys().map(|s| std::mem::size_of::<String>() + s.capacity()).sum();
 
         std::mem::size_of::<Self>() // Base struct size
             + columns_size

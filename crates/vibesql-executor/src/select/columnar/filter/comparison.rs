@@ -60,18 +60,10 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
         (SqlValue::Integer(a), SqlValue::Integer(b)) => a.cmp(b),
         (SqlValue::Bigint(a), SqlValue::Bigint(b)) => a.cmp(b),
         (SqlValue::Smallint(a), SqlValue::Smallint(b)) => a.cmp(b),
-        (SqlValue::Float(a), SqlValue::Float(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Double(a), SqlValue::Double(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Numeric(a), SqlValue::Numeric(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Real(a), SqlValue::Real(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
+        (SqlValue::Float(a), SqlValue::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (SqlValue::Double(a), SqlValue::Double(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (SqlValue::Numeric(a), SqlValue::Numeric(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (SqlValue::Real(a), SqlValue::Real(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (SqlValue::Varchar(a), SqlValue::Varchar(b)) => a.cmp(b),
         (SqlValue::Character(a), SqlValue::Character(b)) => a.cmp(b),
         (SqlValue::Date(a), SqlValue::Date(b)) => a.cmp(b),
@@ -79,7 +71,8 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
         // Date-String comparisons: parse string to Date for native comparison
         // This handles cases like: date_column >= '1994-01-01'
         // Converting String→Date avoids per-row string allocation (vs Date→String)
-        (SqlValue::Date(date), SqlValue::Varchar(s)) | (SqlValue::Date(date), SqlValue::Character(s)) => {
+        (SqlValue::Date(date), SqlValue::Varchar(s))
+        | (SqlValue::Date(date), SqlValue::Character(s)) => {
             // Parse string as YYYY-MM-DD and compare as Date
             if let Some(parsed_date) = parse_date_string(s) {
                 date.cmp(&parsed_date)
@@ -89,7 +82,8 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
                 date_str.as_str().cmp(s.as_str())
             }
         }
-        (SqlValue::Varchar(s), SqlValue::Date(date)) | (SqlValue::Character(s), SqlValue::Date(date)) => {
+        (SqlValue::Varchar(s), SqlValue::Date(date))
+        | (SqlValue::Character(s), SqlValue::Date(date)) => {
             // Parse string as YYYY-MM-DD and compare as Date
             if let Some(parsed_date) = parse_date_string(s) {
                 parsed_date.cmp(date)
@@ -148,8 +142,11 @@ mod tests {
         let pred_value = SqlValue::Integer(85);
 
         let result = compare_values(&col_value, &pred_value);
-        assert_eq!(result, CompareResult::Ordering(std::cmp::Ordering::Greater),
-            "Float(678.28) should be > Integer(85)");
+        assert_eq!(
+            result,
+            CompareResult::Ordering(std::cmp::Ordering::Greater),
+            "Float(678.28) should be > Integer(85)"
+        );
     }
 
     #[test]
@@ -158,14 +155,19 @@ mod tests {
         let pred_value = SqlValue::Integer(85);
 
         let result = compare_values(&col_value, &pred_value);
-        assert_eq!(result, CompareResult::Ordering(std::cmp::Ordering::Less),
-            "Float(50.0) should be < Integer(85)");
+        assert_eq!(
+            result,
+            CompareResult::Ordering(std::cmp::Ordering::Less),
+            "Float(50.0) should be < Integer(85)"
+        );
     }
 
     /// Integration test for issue #3360: Full columnar filter path with Float column
     #[test]
     fn test_issue_3360_filter_float_column() {
-        use super::super::{ColumnPredicate, create_filter_bitmap, evaluate_predicate, apply_columnar_filter};
+        use super::super::{
+            apply_columnar_filter, create_filter_bitmap, evaluate_predicate, ColumnPredicate,
+        };
         use vibesql_storage::Row;
 
         // Reproduce the exact issue: FLOAT column with integer predicate
@@ -176,12 +178,8 @@ mod tests {
         ];
 
         // Predicate: col4 > 85 (column_idx=1, which is the Float column)
-        let predicates = vec![
-            ColumnPredicate::GreaterThan {
-                column_idx: 1,
-                value: SqlValue::Integer(85),
-            },
-        ];
+        let predicates =
+            vec![ColumnPredicate::GreaterThan { column_idx: 1, value: SqlValue::Integer(85) }];
 
         // Test direct evaluation
         for (i, row) in rows.iter().enumerate() {
@@ -193,7 +191,8 @@ mod tests {
         // Test bitmap creation
         let bitmap = create_filter_bitmap(rows.len(), &predicates, |row_idx, col_idx| {
             rows.get(row_idx).and_then(|row| row.get(col_idx))
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(bitmap, vec![true, true, true], "All rows should pass filter");
 

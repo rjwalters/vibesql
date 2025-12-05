@@ -1,22 +1,24 @@
 //! Sqllogictest parser.
 
 // Submodules
-pub mod location;
-pub mod error_parser;
-pub mod retry_parser;
 pub mod directive_parser;
+pub mod error_parser;
+pub mod location;
+pub mod parser_core;
 pub mod record_parser;
 pub mod records;
-pub mod parser_core;
+pub mod retry_parser;
 
 // Re-exports from submodules
-pub use self::location::Location;
+pub use self::directive_parser::{
+    Condition, Connection, Control, ControlItem, ResultMode, SortMode,
+};
 pub use self::error_parser::ExpectedError;
+pub use self::location::Location;
+pub use self::parser_core::{parse, parse_file, parse_with_name};
+pub use self::record_parser::{QueryExpect, StatementExpect};
+pub use self::records::{Injected, Record};
 pub use self::retry_parser::RetryConfig;
-pub use self::directive_parser::{Control, Condition, Connection, SortMode, ResultMode, ControlItem};
-pub use self::record_parser::{StatementExpect, QueryExpect};
-pub use self::records::{Record, Injected};
-pub use self::parser_core::{parse, parse_with_name, parse_file};
 
 /// The error type for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
@@ -94,10 +96,7 @@ mod tests {
         let records = parse::<DefaultColumnType>(script).unwrap();
         assert_eq!(
             records,
-            vec![Record::Comment(vec![
-                " comment 1".to_string(),
-                "  comment 2".to_string(),
-            ]),]
+            vec![Record::Comment(vec![" comment 1".to_string(), "  comment 2".to_string(),]),]
         );
     }
 

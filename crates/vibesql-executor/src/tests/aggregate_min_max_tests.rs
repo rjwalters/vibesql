@@ -10,42 +10,67 @@ fn test_min_function() {
     let schema = vibesql_catalog::TableSchema::new(
         "temps".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("temp".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "temp".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
     db.insert_row(
         "temps",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Integer(72)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(72),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "temps",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2), vibesql_types::SqlValue::Integer(65)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(65),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "temps",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3), vibesql_types::SqlValue::Integer(78)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Integer(78),
+        ]),
     )
     .unwrap();
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MIN".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef { table: None, column: "temp".to_string() }],
+                args: vec![vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "temp".to_string(),
+                }],
                 character_unit: None,
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "temps".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "temps".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -65,42 +90,67 @@ fn test_max_function() {
     let schema = vibesql_catalog::TableSchema::new(
         "temps".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("temp".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "temp".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
     db.insert_row(
         "temps",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1), vibesql_types::SqlValue::Integer(72)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(72),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "temps",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2), vibesql_types::SqlValue::Integer(65)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(65),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "temps",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3), vibesql_types::SqlValue::Integer(78)]),
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Integer(78),
+        ]),
     )
     .unwrap();
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MAX".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef { table: None, column: "temp".to_string() }],
+                args: vec![vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "temp".to_string(),
+                }],
                 character_unit: None,
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "temps".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "temps".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -121,7 +171,11 @@ fn test_min_max_on_strings() {
     let schema = vibesql_catalog::TableSchema::new(
         "names".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },
@@ -160,18 +214,26 @@ fn test_min_max_on_strings() {
     // Test MIN
     let stmt_min = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MIN".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }],
+                args: vec![vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "name".to_string(),
+                }],
                 character_unit: None,
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "names".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "names".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,
@@ -187,18 +249,26 @@ fn test_min_max_on_strings() {
     // Test MAX
     let stmt_max = vibesql_ast::SelectStmt {
         into_table: None,
-        into_variables: None,        with_clause: None,
+        into_variables: None,
+        with_clause: None,
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MAX".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }],
+                args: vec![vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "name".to_string(),
+                }],
                 character_unit: None,
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { name: "names".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "names".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: None,
         group_by: None,
         having: None,

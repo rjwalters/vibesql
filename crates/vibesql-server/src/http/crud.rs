@@ -153,7 +153,8 @@ impl FilterOperator {
                     let val = val.trim();
                     if val.starts_with('(') && val.ends_with(')') {
                         let inner = &val[1..val.len() - 1];
-                        let items: Vec<String> = inner.split(',').map(|s| s.trim().to_string()).collect();
+                        let items: Vec<String> =
+                            inner.split(',').map(|s| s.trim().to_string()).collect();
                         Ok(FilterOperator::In(items))
                     } else {
                         Err(format!("Invalid IN format: {}. Expected in.(a,b,c)", value))
@@ -166,7 +167,10 @@ impl FilterOperator {
                         "notnull" | "not_null" => Ok(FilterOperator::Is(IsValue::NotNull)),
                         "true" => Ok(FilterOperator::Is(IsValue::True)),
                         "false" => Ok(FilterOperator::Is(IsValue::False)),
-                        _ => Err(format!("Invalid IS value: {}. Expected null, notnull, true, or false", val)),
+                        _ => Err(format!(
+                            "Invalid IS value: {}. Expected null, notnull, true, or false",
+                            val
+                        )),
                     }
                 }
                 _ => Err(format!("Unknown filter operator: {}", op)),
@@ -186,8 +190,12 @@ impl FilterOperator {
             FilterOperator::Gte(val) => format!("\"{}\" >= '{}'", column, escape_sql_string(val)),
             FilterOperator::Lt(val) => format!("\"{}\" < '{}'", column, escape_sql_string(val)),
             FilterOperator::Lte(val) => format!("\"{}\" <= '{}'", column, escape_sql_string(val)),
-            FilterOperator::Like(val) => format!("\"{}\" LIKE '{}'", column, escape_sql_string(val)),
-            FilterOperator::Ilike(val) => format!("LOWER(\"{}\") LIKE LOWER('{}')", column, escape_sql_string(val)),
+            FilterOperator::Like(val) => {
+                format!("\"{}\" LIKE '{}'", column, escape_sql_string(val))
+            }
+            FilterOperator::Ilike(val) => {
+                format!("LOWER(\"{}\") LIKE LOWER('{}')", column, escape_sql_string(val))
+            }
             FilterOperator::In(vals) => {
                 let list = vals
                     .iter()
@@ -217,11 +225,9 @@ fn build_select_sql(table_name: &str, params: &CrudQueryParams) -> String {
 
     // SELECT clause
     let columns = match &params.select {
-        Some(cols) => cols
-            .split(',')
-            .map(|c| format!("\"{}\"", c.trim()))
-            .collect::<Vec<_>>()
-            .join(", "),
+        Some(cols) => {
+            cols.split(',').map(|c| format!("\"{}\"", c.trim())).collect::<Vec<_>>().join(", ")
+        }
         None => "*".to_string(),
     };
     sql.push_str(&format!("SELECT {} FROM \"{}\"", columns, table_name));
@@ -276,13 +282,16 @@ fn build_select_sql(table_name: &str, params: &CrudQueryParams) -> String {
 }
 
 /// Build SELECT SQL for a single resource by primary key
-fn build_select_by_pk_sql(table_name: &str, pk_column: &str, pk_value: &str, columns: Option<&str>) -> String {
+fn build_select_by_pk_sql(
+    table_name: &str,
+    pk_column: &str,
+    pk_value: &str,
+    columns: Option<&str>,
+) -> String {
     let select_cols = match columns {
-        Some(cols) => cols
-            .split(',')
-            .map(|c| format!("\"{}\"", c.trim()))
-            .collect::<Vec<_>>()
-            .join(", "),
+        Some(cols) => {
+            cols.split(',').map(|c| format!("\"{}\"", c.trim())).collect::<Vec<_>>().join(", ")
+        }
         None => "*".to_string(),
     };
     format!(
@@ -299,16 +308,16 @@ fn build_insert_sql(table_name: &str, values: &HashMap<String, JsonValue>) -> St
     let columns: Vec<String> = values.keys().map(|k| format!("\"{}\"", k)).collect();
     let vals: Vec<String> = values.values().map(json_to_sql_literal).collect();
 
-    format!(
-        "INSERT INTO \"{}\" ({}) VALUES ({})",
-        table_name,
-        columns.join(", "),
-        vals.join(", ")
-    )
+    format!("INSERT INTO \"{}\" ({}) VALUES ({})", table_name, columns.join(", "), vals.join(", "))
 }
 
 /// Build UPDATE SQL from values
-fn build_update_sql(table_name: &str, pk_column: &str, pk_value: &str, values: &HashMap<String, JsonValue>) -> String {
+fn build_update_sql(
+    table_name: &str,
+    pk_column: &str,
+    pk_value: &str,
+    values: &HashMap<String, JsonValue>,
+) -> String {
     let set_clauses: Vec<String> = values
         .iter()
         .map(|(col, val)| format!("\"{}\" = {}", col, json_to_sql_literal(val)))
@@ -364,11 +373,7 @@ fn get_primary_key_column(state: &HttpState, table_name: &str) -> Option<String>
 fn rows_to_json(columns: &[String], rows: &[Vec<JsonValue>]) -> Vec<HashMap<String, JsonValue>> {
     rows.iter()
         .map(|row| {
-            columns
-                .iter()
-                .zip(row.iter())
-                .map(|(col, val)| (col.clone(), val.clone()))
-                .collect()
+            columns.iter().zip(row.iter()).map(|(col, val)| (col.clone(), val.clone())).collect()
         })
         .collect()
 }
@@ -399,25 +404,24 @@ pub async fn list_rows(
     let sql = build_select_sql(&table_name, &params);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
+                )
+                    .into_response();
+            }
+        };
 
     match session.execute(&sql) {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
             let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
-            let row_values: Vec<Vec<JsonValue>> = rows
-                .iter()
-                .map(|r| r.values.iter().map(sql_value_to_json).collect())
-                .collect();
+            let row_values: Vec<Vec<JsonValue>> =
+                rows.iter().map(|r| r.values.iter().map(sql_value_to_json).collect()).collect();
 
             let data = rows_to_json(&column_names, &row_values);
 
@@ -430,7 +434,8 @@ pub async fn list_rows(
             .into_response(),
         Err(e) => {
             error!("Query execution failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Query failed: {}", e)))).into_response()
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Query failed: {}", e))))
+                .into_response()
         }
     }
 }
@@ -462,17 +467,18 @@ pub async fn get_row(
     let sql = build_select_by_pk_sql(&table_name, &pk_column, &id, params.select.as_deref());
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
+                )
+                    .into_response();
+            }
+        };
 
     match session.execute(&sql) {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
@@ -499,7 +505,8 @@ pub async fn get_row(
             .into_response(),
         Err(e) => {
             error!("Query execution failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Query failed: {}", e)))).into_response()
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Query failed: {}", e))))
+                .into_response()
         }
     }
 }
@@ -534,17 +541,18 @@ pub async fn create_row(
     let sql = build_insert_sql(&table_name, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
+                )
+                    .into_response();
+            }
+        };
 
     match session.execute(&sql) {
         Ok(crate::session::ExecutionResult::Insert { rows_affected }) => {
@@ -557,7 +565,8 @@ pub async fn create_row(
             .into_response(),
         Err(e) => {
             error!("Insert failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Insert failed: {}", e)))).into_response()
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Insert failed: {}", e))))
+                .into_response()
         }
     }
 }
@@ -597,17 +606,18 @@ pub async fn update_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
+                )
+                    .into_response();
+            }
+        };
 
     match session.execute(&sql) {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
@@ -628,7 +638,8 @@ pub async fn update_row(
             .into_response(),
         Err(e) => {
             error!("Update failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Update failed: {}", e)))).into_response()
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Update failed: {}", e))))
+                .into_response()
         }
     }
 }
@@ -668,17 +679,18 @@ pub async fn patch_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
+                )
+                    .into_response();
+            }
+        };
 
     match session.execute(&sql) {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
@@ -699,7 +711,8 @@ pub async fn patch_row(
             .into_response(),
         Err(e) => {
             error!("Patch failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Patch failed: {}", e)))).into_response()
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Patch failed: {}", e))))
+                .into_response()
         }
     }
 }
@@ -730,17 +743,18 @@ pub async fn delete_row(
     let sql = build_delete_sql(&table_name, &pk_column, &id);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
+                )
+                    .into_response();
+            }
+        };
 
     match session.execute(&sql) {
         Ok(crate::session::ExecutionResult::Delete { rows_affected }) => {
@@ -761,7 +775,8 @@ pub async fn delete_row(
             .into_response(),
         Err(e) => {
             error!("Delete failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Delete failed: {}", e)))).into_response()
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Delete failed: {}", e))))
+                .into_response()
         }
     }
 }
@@ -772,16 +787,27 @@ mod tests {
 
     #[test]
     fn test_filter_operator_parse() {
-        assert!(matches!(FilterOperator::parse("eq.hello"), Ok(FilterOperator::Eq(s)) if s == "hello"));
-        assert!(matches!(FilterOperator::parse("neq.world"), Ok(FilterOperator::Neq(s)) if s == "world"));
+        assert!(
+            matches!(FilterOperator::parse("eq.hello"), Ok(FilterOperator::Eq(s)) if s == "hello")
+        );
+        assert!(
+            matches!(FilterOperator::parse("neq.world"), Ok(FilterOperator::Neq(s)) if s == "world")
+        );
         assert!(matches!(FilterOperator::parse("gt.10"), Ok(FilterOperator::Gt(s)) if s == "10"));
         assert!(matches!(FilterOperator::parse("gte.5"), Ok(FilterOperator::Gte(s)) if s == "5"));
         assert!(matches!(FilterOperator::parse("lt.100"), Ok(FilterOperator::Lt(s)) if s == "100"));
         assert!(matches!(FilterOperator::parse("lte.50"), Ok(FilterOperator::Lte(s)) if s == "50"));
-        assert!(matches!(FilterOperator::parse("like.%test%"), Ok(FilterOperator::Like(s)) if s == "%test%"));
-        assert!(matches!(FilterOperator::parse("ilike.%TEST%"), Ok(FilterOperator::Ilike(s)) if s == "%TEST%"));
+        assert!(
+            matches!(FilterOperator::parse("like.%test%"), Ok(FilterOperator::Like(s)) if s == "%test%")
+        );
+        assert!(
+            matches!(FilterOperator::parse("ilike.%TEST%"), Ok(FilterOperator::Ilike(s)) if s == "%TEST%")
+        );
         assert!(matches!(FilterOperator::parse("is.null"), Ok(FilterOperator::Is(IsValue::Null))));
-        assert!(matches!(FilterOperator::parse("is.notnull"), Ok(FilterOperator::Is(IsValue::NotNull))));
+        assert!(matches!(
+            FilterOperator::parse("is.notnull"),
+            Ok(FilterOperator::Is(IsValue::NotNull))
+        ));
 
         // IN operator
         if let Ok(FilterOperator::In(items)) = FilterOperator::parse("in.(a,b,c)") {
@@ -791,7 +817,9 @@ mod tests {
         }
 
         // Plain value (no operator) defaults to eq
-        assert!(matches!(FilterOperator::parse("plain_value"), Ok(FilterOperator::Eq(s)) if s == "plain_value"));
+        assert!(
+            matches!(FilterOperator::parse("plain_value"), Ok(FilterOperator::Eq(s)) if s == "plain_value")
+        );
     }
 
     #[test]
@@ -804,10 +832,7 @@ mod tests {
             FilterOperator::Neq("test".to_string()).to_sql_condition("name"),
             "\"name\" <> 'test'"
         );
-        assert_eq!(
-            FilterOperator::Gt("10".to_string()).to_sql_condition("age"),
-            "\"age\" > '10'"
-        );
+        assert_eq!(FilterOperator::Gt("10".to_string()).to_sql_condition("age"), "\"age\" > '10'");
         assert_eq!(
             FilterOperator::In(vec!["a".to_string(), "b".to_string()]).to_sql_condition("status"),
             "\"status\" IN ('a', 'b')"

@@ -4,20 +4,22 @@
 //! modules (pooling, caching, batching, timing, execution) into a cohesive
 //! SQLLogicTest database adapter.
 
-use std::{env, time::{Duration, Instant}};
 use async_trait::async_trait;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
+use std::{
+    env,
+    time::{Duration, Instant},
+};
 use tokio::time::timeout;
 use vibesql_storage::Database;
 
+use super::super::execution::TestError;
 use super::{
     batching::BatchingManager,
     cache::CacheManager,
-    executor,
-    pool,
+    executor, pool,
     timing::{detect_statement_type, truncate_sql, TimingTracker},
 };
-use super::super::execution::TestError;
 
 /// Main database adapter for SQLLogicTest runner.
 pub struct VibeSqlDB {
@@ -52,10 +54,8 @@ impl VibeSqlDB {
             .map(|v| v != "0" && v.to_lowercase() != "false")
             .unwrap_or(true); // Enabled by default
 
-        let cache_size = env::var("SQLLOGICTEST_CACHE_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(10000); // Default: 10,000 entries
+        let cache_size =
+            env::var("SQLLOGICTEST_CACHE_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(10000); // Default: 10,000 entries
 
         // Statement timing: enabled by default, configurable
         let timing_enabled = env::var("SQLLOGICTEST_TIMING")
@@ -163,16 +163,9 @@ impl AsyncDB for VibeSqlDB {
         }
 
         // Start timing if enabled
-        let stmt_start = if self.timing_tracker.enabled {
-            Some(Instant::now())
-        } else {
-            None
-        };
-        let stmt_type = if self.timing_tracker.enabled {
-            Some(detect_statement_type(sql))
-        } else {
-            None
-        };
+        let stmt_start = if self.timing_tracker.enabled { Some(Instant::now()) } else { None };
+        let stmt_type =
+            if self.timing_tracker.enabled { Some(detect_statement_type(sql)) } else { None };
 
         // Execute query with per-query timeout
         let timeout_duration = Duration::from_millis(self.query_timeout_ms);
@@ -182,7 +175,9 @@ impl AsyncDB for VibeSqlDB {
                 self.timed_out_queries += 1;
                 eprintln!(
                     "⏱️  Query timeout ({}ms): Query {}: {}",
-                    self.query_timeout_ms, self.query_count, truncate_sql(sql, 80)
+                    self.query_timeout_ms,
+                    self.query_count,
+                    truncate_sql(sql, 80)
                 );
 
                 // Log timeout stats if verbose

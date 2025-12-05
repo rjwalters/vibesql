@@ -50,9 +50,9 @@ impl TPCCRng {
     /// NURand function per TPC-C spec (Non-Uniform Random)
     pub fn nurand(&mut self, a: i64, x: i64, y: i64) -> i64 {
         let c = match a {
-            255 => 123,   // For C_LAST
-            1023 => 456,  // For C_ID
-            8191 => 789,  // For OL_I_ID
+            255 => 123,  // For C_LAST
+            1023 => 456, // For C_ID
+            8191 => 789, // For OL_I_ID
             _ => 0,
         };
         (((self.random_int(0, a) | self.random_int(x, y)) + c) % (y - x + 1)) + x
@@ -71,17 +71,13 @@ impl TPCCRng {
     pub fn random_nstring(&mut self, min_len: usize, max_len: usize) -> String {
         const DIGITS: &[u8] = b"0123456789";
         let len = self.random_int(min_len as i64, max_len as i64) as usize;
-        (0..len)
-            .map(|_| DIGITS[self.random_int(0, 9) as usize] as char)
-            .collect()
+        (0..len).map(|_| DIGITS[self.random_int(0, 9) as usize] as char).collect()
     }
 
     /// Generate customer last name from number (0-999)
     pub fn last_name(num: i64) -> String {
-        const SYLLABLES: [&str; 10] = [
-            "BAR", "OUGHT", "ABLE", "PRI", "PRES",
-            "ESE", "ANTI", "CALLY", "ATION", "EING",
-        ];
+        const SYLLABLES: [&str; 10] =
+            ["BAR", "OUGHT", "ABLE", "PRI", "PRES", "ESE", "ANTI", "CALLY", "ATION", "EING"];
         let s1 = SYLLABLES[(num / 100) as usize];
         let s2 = SYLLABLES[((num / 10) % 10) as usize];
         let s3 = SYLLABLES[(num % 10) as usize];
@@ -124,8 +120,8 @@ impl TPCCRng {
 
 /// TPC-C data generator
 pub struct TPCCData {
-    pub scale_factor: i32,  // Number of warehouses (always >= 1)
-    raw_scale: f64,         // Raw scale factor for micro-scaling
+    pub scale_factor: i32, // Number of warehouses (always >= 1)
+    raw_scale: f64,        // Raw scale factor for micro-scaling
     pub rng: TPCCRng,
 }
 
@@ -134,7 +130,7 @@ impl TPCCData {
         Self {
             scale_factor: scale_factor.max(1.0) as i32,
             raw_scale: scale_factor,
-            rng: TPCCRng::new(42),  // Fixed seed for reproducibility
+            rng: TPCCRng::new(42), // Fixed seed for reproducibility
         }
     }
 
@@ -511,27 +507,15 @@ impl TPCCData {
             ol_number,
             ol_i_id: self.rng.random_int(1, num_items as i64) as i32,
             ol_supply_w_id: w_id,
-            ol_delivery_d: if delivered {
-                Some(TPCCRng::current_timestamp())
-            } else {
-                None
-            },
+            ol_delivery_d: if delivered { Some(TPCCRng::current_timestamp()) } else { None },
             ol_quantity: 5,
-            ol_amount: if delivered {
-                0.0
-            } else {
-                self.rng.random_decimal(0.01, 9999.99)
-            },
+            ol_amount: if delivered { 0.0 } else { self.rng.random_decimal(0.01, 9999.99) },
             ol_dist_info: self.rng.random_astring(24, 24),
         }
     }
 
     /// Generate new order record (for orders 2101-3000)
     pub fn gen_new_order(&mut self, o_id: i32, d_id: i32, w_id: i32) -> NewOrder {
-        NewOrder {
-            no_o_id: o_id,
-            no_d_id: d_id,
-            no_w_id: w_id,
-        }
+        NewOrder { no_o_id: o_id, no_d_id: d_id, no_w_id: w_id }
     }
 }

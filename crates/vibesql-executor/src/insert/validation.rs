@@ -86,28 +86,22 @@ pub fn coerce_value(
 
         // VARCHAR/CHARACTER → DATE/TIME/TIMESTAMP conversions (implicit casting)
         (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Date) => {
-            s.parse::<vibesql_types::Date>()
-                .map(SqlValue::Date)
-                .map_err(|e| ExecutorError::UnsupportedExpression(format!(
-                    "Cannot parse '{}' as DATE: {}",
-                    s, e
-                )))
+            s.parse::<vibesql_types::Date>().map(SqlValue::Date).map_err(|e| {
+                ExecutorError::UnsupportedExpression(format!("Cannot parse '{}' as DATE: {}", s, e))
+            })
         }
         (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Time { .. }) => {
-            s.parse::<vibesql_types::Time>()
-                .map(SqlValue::Time)
-                .map_err(|e| ExecutorError::UnsupportedExpression(format!(
-                    "Cannot parse '{}' as TIME: {}",
-                    s, e
-                )))
+            s.parse::<vibesql_types::Time>().map(SqlValue::Time).map_err(|e| {
+                ExecutorError::UnsupportedExpression(format!("Cannot parse '{}' as TIME: {}", s, e))
+            })
         }
         (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Timestamp { .. }) => {
-            s.parse::<vibesql_types::Timestamp>()
-                .map(SqlValue::Timestamp)
-                .map_err(|e| ExecutorError::UnsupportedExpression(format!(
+            s.parse::<vibesql_types::Timestamp>().map(SqlValue::Timestamp).map_err(|e| {
+                ExecutorError::UnsupportedExpression(format!(
                     "Cannot parse '{}' as TIMESTAMP: {}",
                     s, e
-                )))
+                ))
+            })
         }
         (SqlValue::Smallint(_), DataType::Smallint) => Ok(value),
         (SqlValue::Bigint(_), DataType::Bigint) => Ok(value),

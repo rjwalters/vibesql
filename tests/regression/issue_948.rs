@@ -7,9 +7,9 @@
 //! results as decimals when the expected column type is FloatingPoint (R).
 
 use async_trait::async_trait;
+use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
@@ -88,8 +88,9 @@ impl TestDB {
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::Insert(insert_stmt) => {
-                let rows_affected = vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(rows_affected as u64))
             }
             _ => Ok(DBOutput::StatementComplete(0)),

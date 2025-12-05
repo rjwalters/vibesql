@@ -103,11 +103,7 @@ pub enum GroupKeySpec {
     I64String { i64_col: usize, string_col: usize },
 
     /// Three integer columns (i64, i64, i64) - for TPC-H Q3 pattern
-    ThreeI64 {
-        col1_idx: usize,
-        col2_idx: usize,
-        col3_idx: usize,
-    },
+    ThreeI64 { col1_idx: usize, col2_idx: usize, col3_idx: usize },
 
     /// Generic fallback
     Generic { col_indices: Vec<(usize, DataType)> },
@@ -121,13 +117,13 @@ impl GroupKeySpec {
             1 => {
                 let (idx, dtype) = &columns[0];
                 match dtype {
-                    DataType::Integer | DataType::Bigint => GroupKeySpec::SingleI64 { col_idx: *idx },
+                    DataType::Integer | DataType::Bigint => {
+                        GroupKeySpec::SingleI64 { col_idx: *idx }
+                    }
                     DataType::Varchar { .. } | DataType::Character { .. } => {
                         GroupKeySpec::SingleString { col_idx: *idx }
                     }
-                    _ => GroupKeySpec::Generic {
-                        col_indices: columns.to_vec(),
-                    },
+                    _ => GroupKeySpec::Generic { col_indices: columns.to_vec() },
                 }
             }
             2 => {
@@ -138,14 +134,13 @@ impl GroupKeySpec {
                 if matches!(
                     (dtype1, dtype2),
                     (
-                        DataType::Varchar { max_length: Some(1) } | DataType::Character { length: 1 },
-                        DataType::Varchar { max_length: Some(1) } | DataType::Character { length: 1 }
+                        DataType::Varchar { max_length: Some(1) }
+                            | DataType::Character { length: 1 },
+                        DataType::Varchar { max_length: Some(1) }
+                            | DataType::Character { length: 1 }
                     )
                 ) {
-                    return GroupKeySpec::TwoChars {
-                        col1_idx: *idx1,
-                        col2_idx: *idx2,
-                    };
+                    return GroupKeySpec::TwoChars { col1_idx: *idx1, col2_idx: *idx2 };
                 }
 
                 // Check for two VARCHAR columns that might be single chars
@@ -157,35 +152,24 @@ impl GroupKeySpec {
                         DataType::Varchar { .. } | DataType::Character { .. }
                     )
                 ) {
-                    return GroupKeySpec::TwoChars {
-                        col1_idx: *idx1,
-                        col2_idx: *idx2,
-                    };
+                    return GroupKeySpec::TwoChars { col1_idx: *idx1, col2_idx: *idx2 };
                 }
 
                 // Check for two i64 columns
                 if matches!(dtype1, DataType::Integer | DataType::Bigint)
                     && matches!(dtype2, DataType::Integer | DataType::Bigint)
                 {
-                    return GroupKeySpec::TwoI64 {
-                        col1_idx: *idx1,
-                        col2_idx: *idx2,
-                    };
+                    return GroupKeySpec::TwoI64 { col1_idx: *idx1, col2_idx: *idx2 };
                 }
 
                 // Check for (i64, String) pattern
                 if matches!(dtype1, DataType::Integer | DataType::Bigint)
                     && matches!(dtype2, DataType::Varchar { .. } | DataType::Character { .. })
                 {
-                    return GroupKeySpec::I64String {
-                        i64_col: *idx1,
-                        string_col: *idx2,
-                    };
+                    return GroupKeySpec::I64String { i64_col: *idx1, string_col: *idx2 };
                 }
 
-                GroupKeySpec::Generic {
-                    col_indices: columns.to_vec(),
-                }
+                GroupKeySpec::Generic { col_indices: columns.to_vec() }
             }
             3 => {
                 let (idx1, dtype1) = &columns[0];
@@ -205,13 +189,9 @@ impl GroupKeySpec {
                     };
                 }
 
-                GroupKeySpec::Generic {
-                    col_indices: columns.to_vec(),
-                }
+                GroupKeySpec::Generic { col_indices: columns.to_vec() }
             }
-            _ => GroupKeySpec::Generic {
-                col_indices: columns.to_vec(),
-            },
+            _ => GroupKeySpec::Generic { col_indices: columns.to_vec() },
         }
     }
 
@@ -240,19 +220,14 @@ impl GroupKeySpec {
                 let c2 = s2.as_bytes().first().copied().unwrap_or(0);
                 GroupKey::TwoChars(c1, c2)
             }
-            GroupKeySpec::TwoI64 { col1_idx, col2_idx } => GroupKey::TwoI64(
-                row.get_i64_unchecked(*col1_idx),
-                row.get_i64_unchecked(*col2_idx),
-            ),
+            GroupKeySpec::TwoI64 { col1_idx, col2_idx } => {
+                GroupKey::TwoI64(row.get_i64_unchecked(*col1_idx), row.get_i64_unchecked(*col2_idx))
+            }
             GroupKeySpec::I64String { i64_col, string_col } => GroupKey::I64String(
                 row.get_i64_unchecked(*i64_col),
                 row.get_string_unchecked(*string_col).to_string(),
             ),
-            GroupKeySpec::ThreeI64 {
-                col1_idx,
-                col2_idx,
-                col3_idx,
-            } => GroupKey::ThreeI64(
+            GroupKeySpec::ThreeI64 { col1_idx, col2_idx, col3_idx } => GroupKey::ThreeI64(
                 row.get_i64_unchecked(*col1_idx),
                 row.get_i64_unchecked(*col2_idx),
                 row.get_i64_unchecked(*col3_idx),
@@ -292,11 +267,9 @@ impl GroupKeySpec {
             ],
             GroupKey::TwoI64(a, b) => vec![SqlValue::Integer(*a), SqlValue::Integer(*b)],
             GroupKey::I64String(i, s) => vec![SqlValue::Integer(*i), SqlValue::Varchar(s.clone())],
-            GroupKey::ThreeI64(a, b, c) => vec![
-                SqlValue::Integer(*a),
-                SqlValue::Integer(*b),
-                SqlValue::Integer(*c),
-            ],
+            GroupKey::ThreeI64(a, b, c) => {
+                vec![SqlValue::Integer(*a), SqlValue::Integer(*b), SqlValue::Integer(*c)]
+            }
             GroupKey::Generic(v) => v.clone(),
         }
     }
@@ -321,7 +294,10 @@ impl GroupKeySpec {
                     }
                 }
                 GroupKeySpec::Generic {
-                    col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+                    col_indices: group_cols
+                        .iter()
+                        .map(|&i| (i, DataType::Varchar { max_length: None }))
+                        .collect(),
                 }
             }
             2 => {
@@ -330,7 +306,10 @@ impl GroupKeySpec {
                 if let (Some(col1), Some(col2)) = (batch.column(col1_idx), batch.column(col2_idx)) {
                     // Check for two string columns (TPC-H Q1 pattern: l_returnflag, l_linestatus)
                     if matches!(col1, ColumnArray::String(_, _) | ColumnArray::FixedString(_, _))
-                        && matches!(col2, ColumnArray::String(_, _) | ColumnArray::FixedString(_, _))
+                        && matches!(
+                            col2,
+                            ColumnArray::String(_, _) | ColumnArray::FixedString(_, _)
+                        )
                     {
                         return GroupKeySpec::TwoChars { col1_idx, col2_idx };
                     }
@@ -342,45 +321,60 @@ impl GroupKeySpec {
                     }
                     // Check for (int, string) pattern
                     if matches!(col1, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _))
-                        && matches!(col2, ColumnArray::String(_, _) | ColumnArray::FixedString(_, _))
+                        && matches!(
+                            col2,
+                            ColumnArray::String(_, _) | ColumnArray::FixedString(_, _)
+                        )
                     {
-                        return GroupKeySpec::I64String {
-                            i64_col: col1_idx,
-                            string_col: col2_idx,
-                        };
+                        return GroupKeySpec::I64String { i64_col: col1_idx, string_col: col2_idx };
                     }
                 }
                 GroupKeySpec::Generic {
-                    col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+                    col_indices: group_cols
+                        .iter()
+                        .map(|&i| (i, DataType::Varchar { max_length: None }))
+                        .collect(),
                 }
             }
             3 => {
                 let col1_idx = group_cols[0];
                 let col2_idx = group_cols[1];
                 let col3_idx = group_cols[2];
-                if let (Some(col1), Some(col2), Some(col3)) = (
-                    batch.column(col1_idx),
-                    batch.column(col2_idx),
-                    batch.column(col3_idx),
-                ) {
+                if let (Some(col1), Some(col2), Some(col3)) =
+                    (batch.column(col1_idx), batch.column(col2_idx), batch.column(col3_idx))
+                {
                     // Check for three integer columns (TPC-H Q3 pattern)
-                    if matches!(col1, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _) | ColumnArray::Date(_, _))
-                        && matches!(col2, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _) | ColumnArray::Date(_, _))
-                        && matches!(col3, ColumnArray::Int64(_, _) | ColumnArray::Int32(_, _) | ColumnArray::Date(_, _))
-                    {
-                        return GroupKeySpec::ThreeI64 {
-                            col1_idx,
-                            col2_idx,
-                            col3_idx,
-                        };
+                    if matches!(
+                        col1,
+                        ColumnArray::Int64(_, _)
+                            | ColumnArray::Int32(_, _)
+                            | ColumnArray::Date(_, _)
+                    ) && matches!(
+                        col2,
+                        ColumnArray::Int64(_, _)
+                            | ColumnArray::Int32(_, _)
+                            | ColumnArray::Date(_, _)
+                    ) && matches!(
+                        col3,
+                        ColumnArray::Int64(_, _)
+                            | ColumnArray::Int32(_, _)
+                            | ColumnArray::Date(_, _)
+                    ) {
+                        return GroupKeySpec::ThreeI64 { col1_idx, col2_idx, col3_idx };
                     }
                 }
                 GroupKeySpec::Generic {
-                    col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+                    col_indices: group_cols
+                        .iter()
+                        .map(|&i| (i, DataType::Varchar { max_length: None }))
+                        .collect(),
                 }
             }
             _ => GroupKeySpec::Generic {
-                col_indices: group_cols.iter().map(|&i| (i, DataType::Varchar { max_length: None })).collect(),
+                col_indices: group_cols
+                    .iter()
+                    .map(|&i| (i, DataType::Varchar { max_length: None }))
+                    .collect(),
             },
         }
     }
@@ -409,7 +403,8 @@ impl GroupKeySpec {
                     return GroupKey::SingleI64(values[row_idx] as i64);
                 }
                 // Fallback
-                batch.get_value(row_idx, *col_idx)
+                batch
+                    .get_value(row_idx, *col_idx)
                     .map(|v| GroupKey::Generic(vec![v]))
                     .unwrap_or(GroupKey::Generic(vec![SqlValue::Null]))
             }
@@ -431,7 +426,8 @@ impl GroupKeySpec {
                     return GroupKey::SingleString(values[row_idx].clone());
                 }
                 // Fallback
-                batch.get_value(row_idx, *col_idx)
+                batch
+                    .get_value(row_idx, *col_idx)
                     .map(|v| GroupKey::Generic(vec![v]))
                     .unwrap_or(GroupKey::Generic(vec![SqlValue::Null]))
             }
@@ -554,10 +550,7 @@ mod tests {
 
     #[test]
     fn test_key_to_values() {
-        let spec = GroupKeySpec::TwoChars {
-            col1_idx: 0,
-            col2_idx: 1,
-        };
+        let spec = GroupKeySpec::TwoChars { col1_idx: 0, col2_idx: 1 };
 
         let key = GroupKey::TwoChars(b'A', b'F');
         let values = spec.key_to_values(&key);

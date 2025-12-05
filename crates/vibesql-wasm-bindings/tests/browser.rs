@@ -2,8 +2,8 @@
 //!
 //! Run with: wasm-pack test --headless --firefox crates/vibesql-wasm-bindings
 
-use wasm_bindgen_test::*;
 use vibesql_wasm::Database;
+use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -35,15 +35,13 @@ fn test_insert_and_query() {
         .expect("Failed to create table");
 
     // Insert data
-    db.execute("INSERT INTO users VALUES (1, 'Alice')".to_string())
-        .expect("Failed to insert data");
+    db.execute("INSERT INTO users VALUES (1, 'Alice')".to_string()).expect("Failed to insert data");
 
-    db.execute("INSERT INTO users VALUES (2, 'Bob')".to_string())
-        .expect("Failed to insert data");
+    db.execute("INSERT INTO users VALUES (2, 'Bob')".to_string()).expect("Failed to insert data");
 
     // Query data
-    let result = db.query("SELECT * FROM users ORDER BY id".to_string())
-        .expect("Failed to query data");
+    let result =
+        db.query("SELECT * FROM users ORDER BY id".to_string()).expect("Failed to query data");
 
     // Verify result is valid JS value (detailed validation would need JS interop)
     assert!(!result.is_undefined());
@@ -59,8 +57,7 @@ fn test_describe_table() {
         .expect("Failed to create table");
 
     // Describe table
-    let result = db.describe_table("products".to_string())
-        .expect("Failed to describe table");
+    let result = db.describe_table("products".to_string()).expect("Failed to describe table");
 
     // Verify result is valid
     assert!(!result.is_undefined());
@@ -94,8 +91,7 @@ fn test_error_handling() {
     assert!(result.is_err(), "Expected error for non-existent table");
 
     // Try to create duplicate table
-    db.execute("CREATE TABLE test (id INTEGER)".to_string())
-        .expect("Failed to create table");
+    db.execute("CREATE TABLE test (id INTEGER)".to_string()).expect("Failed to create table");
 
     let result = db.execute("CREATE TABLE test (id INTEGER)".to_string());
     assert!(result.is_err(), "Expected error for duplicate table");
@@ -110,24 +106,21 @@ fn test_transactions() {
         .expect("Failed to create table");
 
     // Insert initial data
-    db.execute("INSERT INTO accounts VALUES (1, 100)".to_string())
-        .expect("Failed to insert");
+    db.execute("INSERT INTO accounts VALUES (1, 100)".to_string()).expect("Failed to insert");
 
     // Start transaction
-    db.execute("BEGIN TRANSACTION".to_string())
-        .expect("Failed to begin transaction");
+    db.execute("BEGIN TRANSACTION".to_string()).expect("Failed to begin transaction");
 
     // Update in transaction
     db.execute("UPDATE accounts SET balance = 200 WHERE id = 1".to_string())
         .expect("Failed to update");
 
     // Commit
-    db.execute("COMMIT".to_string())
-        .expect("Failed to commit");
+    db.execute("COMMIT".to_string()).expect("Failed to commit");
 
     // Verify changes persisted
-    let result = db.query("SELECT balance FROM accounts WHERE id = 1".to_string())
-        .expect("Failed to query");
+    let result =
+        db.query("SELECT balance FROM accounts WHERE id = 1".to_string()).expect("Failed to query");
 
     assert!(!result.is_null());
 }

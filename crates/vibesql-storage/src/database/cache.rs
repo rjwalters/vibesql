@@ -32,7 +32,10 @@ impl Database {
     ///     // Use columnar data for SIMD operations
     /// }
     /// ```
-    pub fn get_columnar(&self, table_name: &str) -> Result<Option<Arc<crate::ColumnarTable>>, StorageError> {
+    pub fn get_columnar(
+        &self,
+        table_name: &str,
+    ) -> Result<Option<Arc<crate::ColumnarTable>>, StorageError> {
         // Check cache first
         if let Some(cached) = self.columnar_cache.get(table_name) {
             return Ok(Some(cached));
@@ -161,7 +164,11 @@ mod tests {
             name.to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(255) }, true),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(255) },
+                    true,
+                ),
             ],
         )
     }

@@ -77,30 +77,49 @@ where
         //
         // 2-table joins benefit from choosing optimal build/probe sides when one
         // table has highly selective predicates.
-        if reorder::should_apply_join_reordering(table_count) && reorder::all_joins_are_cross(from) {
+        if reorder::should_apply_join_reordering(table_count) && reorder::all_joins_are_cross(from)
+        {
             // Apply join reordering optimization
-            return reorder::execute_with_join_reordering(from, cte_results, database, where_clause, outer_row, outer_schema, execute_subquery);
+            return reorder::execute_with_join_reordering(
+                from,
+                cte_results,
+                database,
+                where_clause,
+                outer_row,
+                outer_schema,
+                execute_subquery,
+            );
         }
     }
 
     // Fall back to standard execution (recursive left-deep joins)
     match from {
-        vibesql_ast::FromClause::Table { name, alias, .. } => {
-            table::execute_table_scan(name, alias.as_ref(), cte_results, database, where_clause, order_by, limit, outer_row, outer_schema)
-        }
-        vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => join_scan::execute_join(
-            left,
-            right,
-            join_type,
-            condition,
-            *natural,
+        vibesql_ast::FromClause::Table { name, alias, .. } => table::execute_table_scan(
+            name,
+            alias.as_ref(),
             cte_results,
             database,
             where_clause,
+            order_by,
+            limit,
             outer_row,
             outer_schema,
-            execute_subquery,
         ),
+        vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => {
+            join_scan::execute_join(
+                left,
+                right,
+                join_type,
+                condition,
+                *natural,
+                cte_results,
+                database,
+                where_clause,
+                outer_row,
+                outer_schema,
+                execute_subquery,
+            )
+        }
         vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
             derived::execute_derived_table(query, alias, column_aliases.as_ref(), execute_subquery)
         }

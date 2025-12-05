@@ -8,8 +8,8 @@ pub mod executor;
 pub mod integrity;
 
 // Re-export the public API
-pub use executor::DeleteExecutor;
 pub use executor::execute_delete_with_trigger_context;
+pub use executor::DeleteExecutor;
 
 #[cfg(test)]
 mod tests;

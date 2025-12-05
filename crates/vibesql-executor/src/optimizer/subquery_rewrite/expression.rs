@@ -6,7 +6,9 @@
 use vibesql_ast::{Expression, SelectItem, SelectStmt};
 
 use super::correlation::is_correlated;
-use super::transformations::{add_distinct_to_in_subquery, rewrite_exists_to_in, rewrite_in_to_exists};
+use super::transformations::{
+    add_distinct_to_in_subquery, rewrite_exists_to_in, rewrite_in_to_exists,
+};
 
 /// Rewrite an expression to optimize IN subqueries
 ///
@@ -27,17 +29,17 @@ pub(super) fn rewrite_expression_with_context(
 ) -> Expression {
     match expr {
         // Optimize IN subquery
-        Expression::In {
-            expr: in_expr,
-            subquery,
-            negated,
-        } => {
+        Expression::In { expr: in_expr, subquery, negated } => {
             // Validate that this is a single-column IN subquery
             // Multi-column IN requires tuple comparison which we don't optimize
             if subquery.select_list.len() != 1 {
                 // Multi-column IN: skip optimization
                 return Expression::In {
-                    expr: Box::new(rewrite_expression_with_context(in_expr, rewrite_subquery_fn, outer_tables)),
+                    expr: Box::new(rewrite_expression_with_context(
+                        in_expr,
+                        rewrite_subquery_fn,
+                        outer_tables,
+                    )),
                     subquery: Box::new(rewrite_subquery_fn(subquery)),
                     negated: *negated,
                 };
@@ -47,10 +49,7 @@ pub(super) fn rewrite_expression_with_context(
             // Complex expressions (e.g., UPPER(col)) can't be safely used in correlation predicates
             let is_simple_column = matches!(
                 subquery.select_list.first(),
-                Some(SelectItem::Expression {
-                    expr: Expression::ColumnRef { .. },
-                    ..
-                })
+                Some(SelectItem::Expression { expr: Expression::ColumnRef { .. }, .. })
             );
 
             // Check if subquery is correlated
@@ -65,7 +64,11 @@ pub(super) fn rewrite_expression_with_context(
                 let optimized_subquery = add_distinct_to_in_subquery(subquery);
                 let optimized_subquery = rewrite_subquery_fn(&optimized_subquery);
                 Expression::In {
-                    expr: Box::new(rewrite_expression_with_context(in_expr, rewrite_subquery_fn, outer_tables)),
+                    expr: Box::new(rewrite_expression_with_context(
+                        in_expr,
+                        rewrite_subquery_fn,
+                        outer_tables,
+                    )),
                     subquery: Box::new(optimized_subquery),
                     negated: *negated,
                 }
@@ -74,7 +77,11 @@ pub(super) fn rewrite_expression_with_context(
                 let optimized_subquery = add_distinct_to_in_subquery(subquery);
                 let optimized_subquery = rewrite_subquery_fn(&optimized_subquery);
                 Expression::In {
-                    expr: Box::new(rewrite_expression_with_context(in_expr, rewrite_subquery_fn, outer_tables)),
+                    expr: Box::new(rewrite_expression_with_context(
+                        in_expr,
+                        rewrite_subquery_fn,
+                        outer_tables,
+                    )),
                     subquery: Box::new(optimized_subquery),
                     negated: *negated,
                 }
@@ -84,38 +91,60 @@ pub(super) fn rewrite_expression_with_context(
         // Recursively rewrite nested expressions (preserve outer_tables context)
         Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
             op: *op,
-            left: Box::new(rewrite_expression_with_context(left, rewrite_subquery_fn, outer_tables)),
-            right: Box::new(rewrite_expression_with_context(right, rewrite_subquery_fn, outer_tables)),
+            left: Box::new(rewrite_expression_with_context(
+                left,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            right: Box::new(rewrite_expression_with_context(
+                right,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
         },
 
         Expression::UnaryOp { op, expr } => Expression::UnaryOp {
             op: *op,
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
         },
 
         Expression::IsNull { expr, negated } => Expression::IsNull {
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
             negated: *negated,
         },
 
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-        } => Expression::Case {
-            operand: operand.as_ref().map(|e| Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))),
+        Expression::Case { operand, when_clauses, else_result } => Expression::Case {
+            operand: operand.as_ref().map(|e| {
+                Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))
+            }),
             when_clauses: when_clauses
                 .iter()
                 .map(|clause| vibesql_ast::CaseWhen {
                     conditions: clause
                         .conditions
                         .iter()
-                        .map(|c| rewrite_expression_with_context(c, rewrite_subquery_fn, outer_tables))
+                        .map(|c| {
+                            rewrite_expression_with_context(c, rewrite_subquery_fn, outer_tables)
+                        })
                         .collect(),
-                    result: rewrite_expression_with_context(&clause.result, rewrite_subquery_fn, outer_tables),
+                    result: rewrite_expression_with_context(
+                        &clause.result,
+                        rewrite_subquery_fn,
+                        outer_tables,
+                    ),
                 })
                 .collect(),
-            else_result: else_result.as_ref().map(|e| Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))),
+            else_result: else_result.as_ref().map(|e| {
+                Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))
+            }),
         },
 
         Expression::ScalarSubquery(subquery) => {
@@ -143,120 +172,153 @@ pub(super) fn rewrite_expression_with_context(
             }
         }
 
-        Expression::QuantifiedComparison {
-            expr,
-            op,
-            quantifier,
-            subquery,
-        } => Expression::QuantifiedComparison {
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
-            op: *op,
-            quantifier: quantifier.clone(),
-            subquery: Box::new(rewrite_subquery_fn(subquery)),
-        },
+        Expression::QuantifiedComparison { expr, op, quantifier, subquery } => {
+            Expression::QuantifiedComparison {
+                expr: Box::new(rewrite_expression_with_context(
+                    expr,
+                    rewrite_subquery_fn,
+                    outer_tables,
+                )),
+                op: *op,
+                quantifier: quantifier.clone(),
+                subquery: Box::new(rewrite_subquery_fn(subquery)),
+            }
+        }
 
-        Expression::InList {
-            expr,
-            values,
-            negated,
-        } => Expression::InList {
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
-            values: values.iter().map(|v| rewrite_expression_with_context(v, rewrite_subquery_fn, outer_tables)).collect(),
+        Expression::InList { expr, values, negated } => Expression::InList {
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            values: values
+                .iter()
+                .map(|v| rewrite_expression_with_context(v, rewrite_subquery_fn, outer_tables))
+                .collect(),
             negated: *negated,
         },
 
-        Expression::Between {
-            expr,
-            low,
-            high,
-            negated,
-            symmetric,
-        } => Expression::Between {
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
+        Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
             low: Box::new(rewrite_expression_with_context(low, rewrite_subquery_fn, outer_tables)),
-            high: Box::new(rewrite_expression_with_context(high, rewrite_subquery_fn, outer_tables)),
+            high: Box::new(rewrite_expression_with_context(
+                high,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
             negated: *negated,
             symmetric: *symmetric,
         },
 
         Expression::Cast { expr, data_type } => Expression::Cast {
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
             data_type: data_type.clone(),
         },
 
-        Expression::Function {
-            name,
-            args,
-            character_unit,
-        } => Expression::Function {
+        Expression::Function { name, args, character_unit } => Expression::Function {
             name: name.clone(),
-            args: args.iter().map(|a| rewrite_expression_with_context(a, rewrite_subquery_fn, outer_tables)).collect(),
+            args: args
+                .iter()
+                .map(|a| rewrite_expression_with_context(a, rewrite_subquery_fn, outer_tables))
+                .collect(),
             character_unit: character_unit.clone(),
         },
 
-        Expression::AggregateFunction {
-            name,
-            distinct,
-            args,
-        } => Expression::AggregateFunction {
+        Expression::AggregateFunction { name, distinct, args } => Expression::AggregateFunction {
             name: name.clone(),
             distinct: *distinct,
-            args: args.iter().map(|a| rewrite_expression_with_context(a, rewrite_subquery_fn, outer_tables)).collect(),
+            args: args
+                .iter()
+                .map(|a| rewrite_expression_with_context(a, rewrite_subquery_fn, outer_tables))
+                .collect(),
         },
 
-        Expression::Position {
-            substring,
-            string,
-            character_unit,
-        } => Expression::Position {
-            substring: Box::new(rewrite_expression_with_context(substring, rewrite_subquery_fn, outer_tables)),
-            string: Box::new(rewrite_expression_with_context(string, rewrite_subquery_fn, outer_tables)),
+        Expression::Position { substring, string, character_unit } => Expression::Position {
+            substring: Box::new(rewrite_expression_with_context(
+                substring,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            string: Box::new(rewrite_expression_with_context(
+                string,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
             character_unit: character_unit.clone(),
         },
 
-        Expression::Trim {
-            position,
-            removal_char,
-            string,
-        } => Expression::Trim {
+        Expression::Trim { position, removal_char, string } => Expression::Trim {
             position: position.clone(),
-            removal_char: removal_char.as_ref().map(|e| Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))),
-            string: Box::new(rewrite_expression_with_context(string, rewrite_subquery_fn, outer_tables)),
+            removal_char: removal_char.as_ref().map(|e| {
+                Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))
+            }),
+            string: Box::new(rewrite_expression_with_context(
+                string,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
         },
 
         Expression::Extract { field, expr } => Expression::Extract {
             field: field.clone(),
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
         },
 
-        Expression::Like {
-            expr,
-            pattern,
-            negated,
-        } => Expression::Like {
-            expr: Box::new(rewrite_expression_with_context(expr, rewrite_subquery_fn, outer_tables)),
-            pattern: Box::new(rewrite_expression_with_context(pattern, rewrite_subquery_fn, outer_tables)),
+        Expression::Like { expr, pattern, negated } => Expression::Like {
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            pattern: Box::new(rewrite_expression_with_context(
+                pattern,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
             negated: *negated,
         },
 
-        Expression::Interval {
-            value,
-            unit,
-            leading_precision,
-            fractional_precision,
-        } => Expression::Interval {
-            value: Box::new(rewrite_expression_with_context(value, rewrite_subquery_fn, outer_tables)),
-            unit: unit.clone(),
-            leading_precision: *leading_precision,
-            fractional_precision: *fractional_precision,
-        },
+        Expression::Interval { value, unit, leading_precision, fractional_precision } => {
+            Expression::Interval {
+                value: Box::new(rewrite_expression_with_context(
+                    value,
+                    rewrite_subquery_fn,
+                    outer_tables,
+                )),
+                unit: unit.clone(),
+                leading_precision: *leading_precision,
+                fractional_precision: *fractional_precision,
+            }
+        }
 
         Expression::Conjunction(children) => Expression::Conjunction(
-            children.iter().map(|child| rewrite_expression_with_context(child, rewrite_subquery_fn, outer_tables)).collect()
+            children
+                .iter()
+                .map(|child| {
+                    rewrite_expression_with_context(child, rewrite_subquery_fn, outer_tables)
+                })
+                .collect(),
         ),
 
         Expression::Disjunction(children) => Expression::Disjunction(
-            children.iter().map(|child| rewrite_expression_with_context(child, rewrite_subquery_fn, outer_tables)).collect()
+            children
+                .iter()
+                .map(|child| {
+                    rewrite_expression_with_context(child, rewrite_subquery_fn, outer_tables)
+                })
+                .collect(),
         ),
 
         // Literals, column refs, and special expressions don't need rewriting
@@ -285,20 +347,26 @@ pub(super) fn rewrite_from_clause(
     rewrite_subquery_fn: &impl Fn(&SelectStmt) -> SelectStmt,
 ) -> vibesql_ast::FromClause {
     match from {
-        vibesql_ast::FromClause::Table { name, alias, .. } => vibesql_ast::FromClause::Table { name: name.clone(), alias: alias.clone(), column_aliases: None },
-        vibesql_ast::FromClause::Join {
-            left,
-            right,
-            join_type,
-            condition,
-            natural,
-        } => vibesql_ast::FromClause::Join {
-            left: Box::new(rewrite_from_clause(left, rewrite_subquery_fn)),
-            right: Box::new(rewrite_from_clause(right, rewrite_subquery_fn)),
-            join_type: join_type.clone(),
-            condition: condition.as_ref().map(|c| rewrite_expression(c, rewrite_subquery_fn)),
-            natural: *natural,
+        vibesql_ast::FromClause::Table { name, alias, .. } => vibesql_ast::FromClause::Table {
+            name: name.clone(),
+            alias: alias.clone(),
+            column_aliases: None,
         },
-        vibesql_ast::FromClause::Subquery { query, alias, .. } => vibesql_ast::FromClause::Subquery { query: Box::new(rewrite_subquery_fn(query)), alias: alias.clone(), column_aliases: None },
+        vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => {
+            vibesql_ast::FromClause::Join {
+                left: Box::new(rewrite_from_clause(left, rewrite_subquery_fn)),
+                right: Box::new(rewrite_from_clause(right, rewrite_subquery_fn)),
+                join_type: join_type.clone(),
+                condition: condition.as_ref().map(|c| rewrite_expression(c, rewrite_subquery_fn)),
+                natural: *natural,
+            }
+        }
+        vibesql_ast::FromClause::Subquery { query, alias, .. } => {
+            vibesql_ast::FromClause::Subquery {
+                query: Box::new(rewrite_subquery_fn(query)),
+                alias: alias.clone(),
+                column_aliases: None,
+            }
+        }
     }
 }

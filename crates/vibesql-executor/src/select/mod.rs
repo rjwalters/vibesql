@@ -12,18 +12,17 @@ pub mod late_materialization;
 mod order;
 #[cfg(feature = "parallel")]
 mod parallel;
-mod vectorized;
 pub(crate) mod projection;
 mod projection_simd;
 pub(crate) mod scan;
 mod set_operations;
+mod vectorized;
 pub(crate) mod window;
 
 pub use cte::CteResult;
 pub use iterator::{RowIterator, TableScanIterator};
 pub use late_materialization::{
-    SelectionVector, RowReference, LazyMaterializedBatch,
-    gather_columns, gather_single_column,
+    gather_columns, gather_single_column, LazyMaterializedBatch, RowReference, SelectionVector,
 };
 pub use window::WindowFunctionKey;
 

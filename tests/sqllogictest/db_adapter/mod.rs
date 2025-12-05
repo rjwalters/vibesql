@@ -8,12 +8,12 @@
 //! - `executor`: Core SQL execution and statement dispatching
 //! - `adapter`: Main VibeSqlDB implementation tying everything together
 
-mod pool;
-mod cache;
-mod timing;
-mod batching;
-mod executor;
 mod adapter;
+mod batching;
+mod cache;
+mod executor;
+mod pool;
+mod timing;
 
 // Re-export the main adapter type
 pub use adapter::VibeSqlDB;

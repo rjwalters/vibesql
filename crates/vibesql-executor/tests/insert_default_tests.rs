@@ -10,7 +10,11 @@ fn test_character_varying_column_with_length() {
     let schema = vibesql_catalog::TableSchema::new(
         "test_cv".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "description".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(100) },
@@ -26,7 +30,9 @@ fn test_character_varying_column_with_length() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Test description".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Test description".to_string(),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -48,7 +54,11 @@ fn test_character_varying_column_without_length() {
     let schema = vibesql_catalog::TableSchema::new(
         "test_cv_nolen".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
             vibesql_catalog::ColumnSchema::new(
                 "text".to_string(),
                 vibesql_types::DataType::Varchar { max_length: None },
@@ -64,7 +74,9 @@ fn test_character_varying_column_without_length() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Unlimited length text".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Unlimited length text".to_string(),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -83,9 +95,13 @@ fn test_insert_with_default_value() {
     let mut db = vibesql_storage::Database::new();
 
     // CREATE TABLE users (id INT DEFAULT 999, name VARCHAR(50))
-    let mut id_column =
-        vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false);
-    id_column.default_value = Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(999)));
+    let mut id_column = vibesql_catalog::ColumnSchema::new(
+        "id".to_string(),
+        vibesql_types::DataType::Integer,
+        false,
+    );
+    id_column.default_value =
+        Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(999)));
 
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
@@ -130,7 +146,11 @@ fn test_insert_default_no_default_value_defined() {
     let schema = vibesql_catalog::TableSchema::new(
         "users".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, true), /* nullable */
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ), /* nullable */
             vibesql_catalog::ColumnSchema::new(
                 "name".to_string(),
                 vibesql_types::DataType::Varchar { max_length: Some(50) },

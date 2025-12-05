@@ -203,12 +203,14 @@ fn substitute_window_functions(
             let subst_when: Result<Vec<vibesql_ast::CaseWhen>, crate::ExecutorError> = when_clauses
                 .iter()
                 .map(|when_clause| {
-                    let subst_conditions: Result<Vec<vibesql_ast::Expression>, crate::ExecutorError> =
-                        when_clause
-                            .conditions
-                            .iter()
-                            .map(|cond| substitute_window_functions(cond, row, window_mapping))
-                            .collect();
+                    let subst_conditions: Result<
+                        Vec<vibesql_ast::Expression>,
+                        crate::ExecutorError,
+                    > = when_clause
+                        .conditions
+                        .iter()
+                        .map(|cond| substitute_window_functions(cond, row, window_mapping))
+                        .collect();
 
                     Ok(vibesql_ast::CaseWhen {
                         conditions: subst_conditions?,
@@ -244,7 +246,10 @@ fn substitute_window_functions(
 /// only computing projected values for rows that are actually consumed.
 /// This is more efficient than eagerly projecting all rows when LIMIT/OFFSET
 /// is present, as it avoids projecting rows that will be discarded.
-pub struct SelectProjectionIterator<'a, I: Iterator<Item = Result<vibesql_storage::Row, crate::errors::ExecutorError>>> {
+pub struct SelectProjectionIterator<
+    'a,
+    I: Iterator<Item = Result<vibesql_storage::Row, crate::errors::ExecutorError>>,
+> {
     source: I,
     select_list: Vec<vibesql_ast::SelectItem>,
     evaluator: crate::evaluator::CombinedExpressionEvaluator<'a>,
@@ -253,7 +258,9 @@ pub struct SelectProjectionIterator<'a, I: Iterator<Item = Result<vibesql_storag
     buffer_pool: vibesql_storage::QueryBufferPool,
 }
 
-impl<'a, I: Iterator<Item = Result<vibesql_storage::Row, crate::errors::ExecutorError>>> SelectProjectionIterator<'a, I> {
+impl<'a, I: Iterator<Item = Result<vibesql_storage::Row, crate::errors::ExecutorError>>>
+    SelectProjectionIterator<'a, I>
+{
     /// Creates a new SelectProjectionIterator
     ///
     /// # Arguments
@@ -270,18 +277,13 @@ impl<'a, I: Iterator<Item = Result<vibesql_storage::Row, crate::errors::Executor
         window_mapping: Option<HashMap<WindowFunctionKey, usize>>,
         buffer_pool: vibesql_storage::QueryBufferPool,
     ) -> Self {
-        Self {
-            source,
-            select_list,
-            evaluator,
-            input_schema,
-            window_mapping,
-            buffer_pool,
-        }
+        Self { source, select_list, evaluator, input_schema, window_mapping, buffer_pool }
     }
 }
 
-impl<'a, I: Iterator<Item = Result<vibesql_storage::Row, crate::errors::ExecutorError>>> Iterator for SelectProjectionIterator<'a, I> {
+impl<'a, I: Iterator<Item = Result<vibesql_storage::Row, crate::errors::ExecutorError>>> Iterator
+    for SelectProjectionIterator<'a, I>
+{
     type Item = Result<vibesql_storage::Row, crate::errors::ExecutorError>;
 
     fn next(&mut self) -> Option<Self::Item> {

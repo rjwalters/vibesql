@@ -37,7 +37,7 @@ pub mod arena_prepared;
 mod bind;
 pub mod plan;
 
-pub use plan::{CachedPlan, PkPointLookupPlan, ProjectionPlan, ColumnProjection};
+pub use plan::{CachedPlan, ColumnProjection, PkPointLookupPlan, ProjectionPlan};
 
 /// A prepared statement with cached AST and optional execution plan
 #[derive(Debug, Clone)]
@@ -66,14 +66,7 @@ impl PreparedStatement {
         // Analyze for fast-path execution plan
         let cached_plan = plan::analyze_for_plan(&statement);
 
-        Self {
-            sql,
-            statement,
-            signature,
-            param_count,
-            tables,
-            cached_plan,
-        }
+        Self { sql, statement, signature, param_count, tables, cached_plan }
     }
 
     /// Get the original SQL
@@ -628,10 +621,12 @@ mod tests {
         let stmt = cache.get_or_prepare(sql).unwrap();
         assert_eq!(stmt.param_count(), 2);
 
-        let bound = stmt.bind(&[
-            SqlValue::Varchar("Bob".to_string()),
-            SqlValue::Varchar("bob@example.com".to_string()),
-        ]).unwrap();
+        let bound = stmt
+            .bind(&[
+                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar("bob@example.com".to_string()),
+            ])
+            .unwrap();
         assert!(matches!(bound, Statement::Insert(_)));
     }
 
@@ -651,10 +646,8 @@ mod tests {
         let stmt = cache.get_or_prepare(sql).unwrap();
         assert_eq!(stmt.param_count(), 2);
 
-        let bound = stmt.bind(&[
-            SqlValue::Varchar("Charlie".to_string()),
-            SqlValue::Integer(42),
-        ]).unwrap();
+        let bound =
+            stmt.bind(&[SqlValue::Varchar("Charlie".to_string()), SqlValue::Integer(42)]).unwrap();
         assert!(matches!(bound, Statement::Update(_)));
     }
 

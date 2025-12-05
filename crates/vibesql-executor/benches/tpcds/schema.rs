@@ -62,11 +62,11 @@ use vibesql_types::Date;
 #[cfg(feature = "benchmark-comparison")]
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "benchmark-comparison")]
-use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "benchmark-comparison")]
 use mysql::prelude::*;
 #[cfg(feature = "benchmark-comparison")]
 use mysql::{Pool, PooledConn};
+#[cfg(feature = "benchmark-comparison")]
+use rusqlite::Connection as SqliteConn;
 
 use std::str::FromStr;
 
@@ -3770,15 +3770,7 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    let day_names = [
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-    ];
+    let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
     // Use configured date range
     let start_year = data.config.date_start_year;
@@ -3809,7 +3801,9 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(d_date_sk as i64),
             SqlValue::Varchar(d_date_id),
-            SqlValue::Date(Date::from_str(&date_str).unwrap_or_else(|_| Date::from_str("1998-01-01").unwrap())),
+            SqlValue::Date(
+                Date::from_str(&date_str).unwrap_or_else(|_| Date::from_str("1998-01-01").unwrap()),
+            ),
             SqlValue::Integer(d_month_seq as i64),
             SqlValue::Integer(d_week_seq as i64),
             SqlValue::Integer(d_quarter_seq as i64),
@@ -3818,23 +3812,23 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(month as i64),
             SqlValue::Integer(day as i64),
             SqlValue::Integer(d_qoy as i64),
-            SqlValue::Integer(year as i64),  // d_fy_year
-            SqlValue::Integer(d_quarter_seq as i64),  // d_fy_quarter_seq
-            SqlValue::Integer(d_week_seq as i64),  // d_fy_week_seq
+            SqlValue::Integer(year as i64),          // d_fy_year
+            SqlValue::Integer(d_quarter_seq as i64), // d_fy_quarter_seq
+            SqlValue::Integer(d_week_seq as i64),    // d_fy_week_seq
             SqlValue::Varchar(day_names[d_dow as usize].to_string()),
             SqlValue::Varchar(quarter_name),
-            SqlValue::Varchar("N".to_string()),  // d_holiday
+            SqlValue::Varchar("N".to_string()), // d_holiday
             SqlValue::Varchar(if is_weekend { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar("N".to_string()),  // d_following_holiday
-            SqlValue::Integer(((d_month_seq - 1) * 30 + 1) as i64),  // d_first_dom
-            SqlValue::Integer((d_month_seq * 30) as i64),  // d_last_dom
-            SqlValue::Integer((d_date_sk as i64 - 365).max(1)),  // d_same_day_ly
-            SqlValue::Integer((d_date_sk as i64 - 91).max(1)),  // d_same_day_lq
-            SqlValue::Varchar("N".to_string()),  // d_current_day
-            SqlValue::Varchar("N".to_string()),  // d_current_week
-            SqlValue::Varchar("N".to_string()),  // d_current_month
-            SqlValue::Varchar("N".to_string()),  // d_current_quarter
-            SqlValue::Varchar("N".to_string()),  // d_current_year
+            SqlValue::Varchar("N".to_string()), // d_following_holiday
+            SqlValue::Integer(((d_month_seq - 1) * 30 + 1) as i64), // d_first_dom
+            SqlValue::Integer((d_month_seq * 30) as i64), // d_last_dom
+            SqlValue::Integer((d_date_sk as i64 - 365).max(1)), // d_same_day_ly
+            SqlValue::Integer((d_date_sk as i64 - 91).max(1)), // d_same_day_lq
+            SqlValue::Varchar("N".to_string()), // d_current_day
+            SqlValue::Varchar("N".to_string()), // d_current_week
+            SqlValue::Varchar("N".to_string()), // d_current_month
+            SqlValue::Varchar("N".to_string()), // d_current_quarter
+            SqlValue::Varchar("N".to_string()), // d_current_year
         ]);
         rows.push(row);
 
@@ -3933,8 +3927,8 @@ fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(i_item_id),
-            SqlValue::Date(Date::from_str("1998-01-01").unwrap()),  // i_rec_start_date
-            SqlValue::Null,  // i_rec_end_date
+            SqlValue::Date(Date::from_str("1998-01-01").unwrap()), // i_rec_start_date
+            SqlValue::Null,                                        // i_rec_end_date
             SqlValue::Varchar(format!("{} {} item", CATEGORIES[category_idx], CLASSES[class_idx])),
             SqlValue::Numeric(current_price),
             SqlValue::Numeric(wholesale_cost),
@@ -3993,7 +3987,7 @@ fn load_customer_address_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(STATES[state_idx].to_string()),
             SqlValue::Varchar(data.random_zip()),
             SqlValue::Varchar("United States".to_string()),
-            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),  // ca_gmt_offset
+            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)), // ca_gmt_offset
             SqlValue::Varchar("residential".to_string()),
         ]);
         rows.push(row);
@@ -4036,11 +4030,11 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(c_customer_id),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // c_current_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // c_current_hdemo_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // c_current_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // c_current_hdemo_sk
             SqlValue::Integer(addr_sk as i64),
-            SqlValue::Integer(data.random_i32(1, 2191) as i64),  // c_first_shipto_date_sk
-            SqlValue::Integer(data.random_i32(1, 2191) as i64),  // c_first_sales_date_sk
+            SqlValue::Integer(data.random_i32(1, 2191) as i64), // c_first_shipto_date_sk
+            SqlValue::Integer(data.random_i32(1, 2191) as i64), // c_first_sales_date_sk
             SqlValue::Varchar(salutations[sal_idx].to_string()),
             SqlValue::Varchar(format!("FirstName{}", i % 1000)),
             SqlValue::Varchar(format!("LastName{}", i % 2000)),
@@ -4084,8 +4078,8 @@ fn load_store_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(s_store_id),
             SqlValue::Date(Date::from_str("1998-01-01").unwrap()),
-            SqlValue::Null,  // s_rec_end_date
-            SqlValue::Null,  // s_closed_date_sk
+            SqlValue::Null, // s_rec_end_date
+            SqlValue::Null, // s_closed_date_sk
             SqlValue::Varchar(format!("Store#{}", i)),
             SqlValue::Integer(data.random_i32(50, 500) as i64),
             SqlValue::Integer(data.random_i32(5000, 50000) as i64),
@@ -4136,7 +4130,7 @@ fn load_store_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let ss_item_sk = (i % data.item_count) + 1;
         let ss_customer_sk = (i % data.customer_count) + 1;
         let ss_store_sk = (i % data.store_count) + 1;
-        let ss_ticket_number = (i / 5) + 1;  // ~5 items per ticket
+        let ss_ticket_number = (i / 5) + 1; // ~5 items per ticket
 
         let quantity = data.random_i32(1, 100);
         let wholesale_cost = data.random_f64(1.0, 50.0);
@@ -4147,11 +4141,7 @@ fn load_store_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let ext_list_price = list_price * quantity as f64;
         let ext_discount_amt = ext_list_price - ext_sales_price;
         let ext_tax = ext_sales_price * 0.08;
-        let coupon_amt = if i % 10 == 0 {
-            ext_sales_price * 0.05
-        } else {
-            0.0
-        };
+        let coupon_amt = if i % 10 == 0 { ext_sales_price * 0.05 } else { 0.0 };
         let net_paid = ext_sales_price - coupon_amt;
         let net_paid_inc_tax = net_paid + ext_tax;
         let net_profit = net_paid - ext_wholesale_cost;
@@ -4161,11 +4151,11 @@ fn load_store_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(ss_sold_time_sk as i64),
             SqlValue::Integer(ss_item_sk as i64),
             SqlValue::Integer(ss_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // ss_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // ss_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // ss_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // ss_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // ss_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // ss_addr_sk
             SqlValue::Integer(ss_store_sk as i64),
-            SqlValue::Integer((i % 300 + 1) as i64),  // ss_promo_sk
+            SqlValue::Integer((i % 300 + 1) as i64), // ss_promo_sk
             SqlValue::Integer(ss_ticket_number as i64),
             SqlValue::Integer(quantity as i64),
             SqlValue::Numeric(wholesale_cost),
@@ -4212,11 +4202,11 @@ fn load_promotion_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(p_promo_id),
-            SqlValue::Integer(data.random_i32(1, 2191) as i64),  // p_start_date_sk
-            SqlValue::Integer(data.random_i32(1, 2191) as i64),  // p_end_date_sk
-            SqlValue::Integer(data.random_key(data.item_count) as i64),  // p_item_sk
-            SqlValue::Numeric(data.random_f64(100.0, 10000.0)),  // p_cost
-            SqlValue::Integer(data.random_i32(1, 100) as i64),   // p_response_target
+            SqlValue::Integer(data.random_i32(1, 2191) as i64), // p_start_date_sk
+            SqlValue::Integer(data.random_i32(1, 2191) as i64), // p_end_date_sk
+            SqlValue::Integer(data.random_key(data.item_count) as i64), // p_item_sk
+            SqlValue::Numeric(data.random_f64(100.0, 10000.0)), // p_cost
+            SqlValue::Integer(data.random_i32(1, 100) as i64),  // p_response_target
             SqlValue::Varchar(format!("Promo#{}", i)),
             SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
             SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
@@ -4252,7 +4242,7 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(w_warehouse_id),
             SqlValue::Varchar(format!("Warehouse#{}", i)),
-            SqlValue::Integer(data.random_i32(50000, 500000) as i64),  // sq_ft
+            SqlValue::Integer(data.random_i32(50000, 500000) as i64), // sq_ft
             SqlValue::Varchar(format!("{}", data.random_i32(1, 999))),
             SqlValue::Varchar(data.random_varchar(30)),
             SqlValue::Varchar("Boulevard".to_string()),
@@ -4342,7 +4332,7 @@ fn load_store_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let sr_customer_sk = (i % data.customer_count) + 1;
         let sr_store_sk = (i % data.store_count) + 1;
         let sr_reason_sk = (i % data.reason_count.min(15)) + 1;
-        let sr_ticket_number = (i / 3) + 1;  // ~3 items per return ticket
+        let sr_ticket_number = (i / 3) + 1; // ~3 items per return ticket
 
         let return_quantity = data.random_i32(1, 10);
         let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
@@ -4360,9 +4350,9 @@ fn load_store_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(sr_return_time_sk as i64),
             SqlValue::Integer(sr_item_sk as i64),
             SqlValue::Integer(sr_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // sr_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // sr_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // sr_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // sr_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // sr_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // sr_addr_sk
             SqlValue::Integer(sr_store_sk as i64),
             SqlValue::Integer(sr_reason_sk as i64),
             SqlValue::Integer(sr_ticket_number as i64),
@@ -4410,12 +4400,12 @@ fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(cp_catalog_page_id),
-            SqlValue::Integer(((i - 1) / 1000 + 1) as i64),  // cp_start_date_sk
-            SqlValue::Integer(((i - 1) / 1000 + 365) as i64),  // cp_end_date_sk
-            SqlValue::Varchar(data.random_varchar(80).to_string()),  // cp_department
+            SqlValue::Integer(((i - 1) / 1000 + 1) as i64), // cp_start_date_sk
+            SqlValue::Integer(((i - 1) / 1000 + 365) as i64), // cp_end_date_sk
+            SqlValue::Varchar(data.random_varchar(80).to_string()), // cp_department
             SqlValue::Integer(catalog_number as i64),
             SqlValue::Integer(page_number as i64),
-            SqlValue::Varchar(format!("Catalog page {}", i)),  // cp_description
+            SqlValue::Varchar(format!("Catalog page {}", i)), // cp_description
             SqlValue::Varchar(CATALOG_PAGE_TYPES[type_idx].to_string()),
         ]);
         rows.push(row);
@@ -4445,18 +4435,18 @@ fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(wp_web_page_id),
-            SqlValue::Integer(1),  // wp_rec_start_date_sk - reference to date_dim
-            SqlValue::Null,  // wp_rec_end_date_sk
-            SqlValue::Integer(((i - 1) / 20 + 1) as i64),  // wp_creation_date_sk
-            SqlValue::Integer(((i - 1) / 10 + 1) as i64),  // wp_access_date_sk
-            SqlValue::Varchar("N".to_string()),  // wp_autogen_flag
-            SqlValue::Integer((i % data.customer_count + 1) as i64),  // wp_customer_sk
-            SqlValue::Varchar(format!("/page/{}", i)),  // wp_url
+            SqlValue::Integer(1), // wp_rec_start_date_sk - reference to date_dim
+            SqlValue::Null,       // wp_rec_end_date_sk
+            SqlValue::Integer(((i - 1) / 20 + 1) as i64), // wp_creation_date_sk
+            SqlValue::Integer(((i - 1) / 10 + 1) as i64), // wp_access_date_sk
+            SqlValue::Varchar("N".to_string()), // wp_autogen_flag
+            SqlValue::Integer((i % data.customer_count + 1) as i64), // wp_customer_sk
+            SqlValue::Varchar(format!("/page/{}", i)), // wp_url
             SqlValue::Varchar(WEB_PAGE_TYPES[type_idx].to_string()),
-            SqlValue::Integer(data.random_i32(1, 10) as i64),  // wp_char_count
+            SqlValue::Integer(data.random_i32(1, 10) as i64), // wp_char_count
             SqlValue::Integer(data.random_i32(1, 5) as i64),  // wp_link_count
-            SqlValue::Integer(data.random_i32(1, 20) as i64),  // wp_image_count
-            SqlValue::Integer(data.random_i32(5, 100) as i64),  // wp_max_ad_count
+            SqlValue::Integer(data.random_i32(1, 20) as i64), // wp_image_count
+            SqlValue::Integer(data.random_i32(5, 100) as i64), // wp_max_ad_count
         ]);
         rows.push(row);
     }
@@ -4481,21 +4471,21 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(web_site_id),
-            SqlValue::Integer(1),  // web_rec_start_date_sk - reference to date_dim
-            SqlValue::Null,  // web_rec_end_date_sk
-            SqlValue::Varchar(format!("site_{}", i)),  // web_name
-            SqlValue::Integer(((i - 1) / 5 + 1) as i64),  // web_open_date_sk
-            SqlValue::Null,  // web_close_date_sk
+            SqlValue::Integer(1), // web_rec_start_date_sk - reference to date_dim
+            SqlValue::Null,       // web_rec_end_date_sk
+            SqlValue::Varchar(format!("site_{}", i)), // web_name
+            SqlValue::Integer(((i - 1) / 5 + 1) as i64), // web_open_date_sk
+            SqlValue::Null,       // web_close_date_sk
             SqlValue::Varchar(WEB_SITE_CLASSES[class_idx].to_string()),
-            SqlValue::Varchar(format!("Manager{}", i % 50)),  // web_manager
-            SqlValue::Integer((i % 10 + 1) as i64),  // web_mkt_id
-            SqlValue::Varchar(format!("Market class {}", i % 5)),  // web_mkt_class
-            SqlValue::Varchar(format!("Market description {}", i)),  // web_mkt_desc
-            SqlValue::Varchar(format!("MarketManager{}", i % 20)),  // web_market_manager
-            SqlValue::Integer((i % 5 + 1) as i64),  // web_company_id
+            SqlValue::Varchar(format!("Manager{}", i % 50)), // web_manager
+            SqlValue::Integer((i % 10 + 1) as i64),          // web_mkt_id
+            SqlValue::Varchar(format!("Market class {}", i % 5)), // web_mkt_class
+            SqlValue::Varchar(format!("Market description {}", i)), // web_mkt_desc
+            SqlValue::Varchar(format!("MarketManager{}", i % 20)), // web_market_manager
+            SqlValue::Integer((i % 5 + 1) as i64),           // web_company_id
             SqlValue::Varchar(format!("Company{}", i % 5 + 1)),
-            SqlValue::Varchar(format!("{}", data.random_i32(1, 999))),  // web_street_number
-            SqlValue::Varchar(data.random_varchar(30)),  // web_street_name
+            SqlValue::Varchar(format!("{}", data.random_i32(1, 999))), // web_street_number
+            SqlValue::Varchar(data.random_varchar(30)),                // web_street_name
             SqlValue::Varchar("Street".to_string()),
             SqlValue::Varchar(format!("Suite {}", data.random_i32(100, 999))),
             SqlValue::Varchar(data.random_city()),
@@ -4503,8 +4493,8 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(STATES[state_idx].to_string()),
             SqlValue::Varchar(data.random_zip()),
             SqlValue::Varchar("United States".to_string()),
-            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),  // web_gmt_offset
-            SqlValue::Numeric(data.random_f64(0.0, 0.12)),  // web_tax_percentage
+            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)), // web_gmt_offset
+            SqlValue::Numeric(data.random_f64(0.0, 0.12)),      // web_tax_percentage
         ]);
         rows.push(row);
     }
@@ -4536,7 +4526,7 @@ fn load_catalog_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let cs_warehouse_sk = (i % data.warehouse_count) + 1;
         let cs_ship_mode_sk = (i % data.ship_mode_count.min(20)) + 1;
         let cs_catalog_page_sk = (i % data.catalog_page_count) + 1;
-        let cs_order_number = (i / 5) + 1;  // ~5 items per order
+        let cs_order_number = (i / 5) + 1; // ~5 items per order
 
         let quantity = data.random_i32(1, 20);
         let wholesale_cost = data.random_f64(10.0, 100.0);
@@ -4560,14 +4550,14 @@ fn load_catalog_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(cs_sold_time_sk as i64),
             SqlValue::Integer(cs_ship_date_sk as i64),
             SqlValue::Integer(cs_bill_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // cs_bill_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // cs_bill_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cs_bill_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // cs_bill_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // cs_bill_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // cs_bill_addr_sk
             SqlValue::Integer(cs_ship_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // cs_ship_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // cs_ship_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cs_ship_addr_sk
-            SqlValue::Integer((i % 6 + 1) as i64),  // cs_call_center_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // cs_ship_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // cs_ship_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // cs_ship_addr_sk
+            SqlValue::Integer((i % 6 + 1) as i64),    // cs_call_center_sk
             SqlValue::Integer(cs_catalog_page_sk as i64),
             SqlValue::Integer(cs_ship_mode_sk as i64),
             SqlValue::Integer(cs_warehouse_sk as i64),
@@ -4621,7 +4611,7 @@ fn load_catalog_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let cr_catalog_page_sk = (i % data.catalog_page_count) + 1;
         let cr_ship_mode_sk = (i % data.ship_mode_count.min(20)) + 1;
         let cr_warehouse_sk = (i % data.warehouse_count) + 1;
-        let cr_order_number = (i / 3) + 1;  // ~3 items per return
+        let cr_order_number = (i / 3) + 1; // ~3 items per return
 
         let return_quantity = data.random_i32(1, 10);
         let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
@@ -4639,14 +4629,14 @@ fn load_catalog_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(cr_returned_time_sk as i64),
             SqlValue::Integer(cr_item_sk as i64),
             SqlValue::Integer(cr_refunded_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // cr_refunded_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // cr_refunded_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cr_refunded_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // cr_refunded_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // cr_refunded_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // cr_refunded_addr_sk
             SqlValue::Integer(cr_returning_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // cr_returning_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // cr_returning_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // cr_returning_addr_sk
-            SqlValue::Integer((i % 6 + 1) as i64),  // cr_call_center_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // cr_returning_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // cr_returning_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // cr_returning_addr_sk
+            SqlValue::Integer((i % 6 + 1) as i64),                             // cr_call_center_sk
             SqlValue::Integer(cr_catalog_page_sk as i64),
             SqlValue::Integer(cr_ship_mode_sk as i64),
             SqlValue::Integer(cr_warehouse_sk as i64),
@@ -4695,7 +4685,7 @@ fn load_web_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let ws_ship_mode_sk = (i % data.ship_mode_count.min(20)) + 1;
         let ws_web_page_sk = (i % data.web_page_count) + 1;
         let ws_web_site_sk = (i % data.web_site_count) + 1;
-        let ws_order_number = (i / 5) + 1;  // ~5 items per order
+        let ws_order_number = (i / 5) + 1; // ~5 items per order
 
         let quantity = data.random_i32(1, 20);
         let wholesale_cost = data.random_f64(10.0, 100.0);
@@ -4720,13 +4710,13 @@ fn load_web_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(ws_ship_date_sk as i64),
             SqlValue::Integer(ws_item_sk as i64),
             SqlValue::Integer(ws_bill_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // ws_bill_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // ws_bill_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // ws_bill_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // ws_bill_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // ws_bill_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // ws_bill_addr_sk
             SqlValue::Integer(ws_ship_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // ws_ship_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // ws_ship_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // ws_ship_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // ws_ship_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // ws_ship_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // ws_ship_addr_sk
             SqlValue::Integer(ws_web_page_sk as i64),
             SqlValue::Integer(ws_web_site_sk as i64),
             SqlValue::Integer(ws_ship_mode_sk as i64),
@@ -4778,7 +4768,7 @@ fn load_web_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let wr_returning_customer_sk = wr_refunded_customer_sk;
         let wr_reason_sk = (i % data.reason_count.min(15)) + 1;
         let wr_web_page_sk = (i % data.web_page_count) + 1;
-        let wr_order_number = (i / 3) + 1;  // ~3 items per return
+        let wr_order_number = (i / 3) + 1; // ~3 items per return
 
         let return_quantity = data.random_i32(1, 10);
         let return_amt = data.random_f64(10.0, 500.0) * return_quantity as f64;
@@ -4796,13 +4786,13 @@ fn load_web_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(wr_returned_time_sk as i64),
             SqlValue::Integer(wr_item_sk as i64),
             SqlValue::Integer(wr_refunded_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // wr_refunded_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // wr_refunded_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // wr_refunded_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // wr_refunded_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // wr_refunded_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // wr_refunded_addr_sk
             SqlValue::Integer(wr_returning_customer_sk as i64),
-            SqlValue::Integer((i % 1920 + 1) as i64),  // wr_returning_cdemo_sk
-            SqlValue::Integer((i % 7200 + 1) as i64),  // wr_returning_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64),  // wr_returning_addr_sk
+            SqlValue::Integer((i % 1920 + 1) as i64), // wr_returning_cdemo_sk
+            SqlValue::Integer((i % 7200 + 1) as i64), // wr_returning_hdemo_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // wr_returning_addr_sk
             SqlValue::Integer(wr_web_page_sk as i64),
             SqlValue::Integer(wr_reason_sk as i64),
             SqlValue::Integer(wr_order_number as i64),
@@ -4913,7 +4903,8 @@ fn load_household_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
                     rows.push(row);
 
                     if rows.len() >= BATCH_SIZE {
-                        db.insert_rows_batch("household_demographics", std::mem::take(&mut rows)).unwrap();
+                        db.insert_rows_batch("household_demographics", std::mem::take(&mut rows))
+                            .unwrap();
                         rows = Vec::with_capacity(BATCH_SIZE);
                     }
                 }
@@ -5643,8 +5634,13 @@ fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             d_month_seq * 30,
             (d_date_sk as i64 - 365).max(1),
             (d_date_sk as i64 - 91).max(1),
-            "N", "N", "N", "N", "N"
-        ]).unwrap();
+            "N",
+            "N",
+            "N",
+            "N",
+            "N"
+        ])
+        .unwrap();
     }
 }
 
@@ -5653,9 +5649,8 @@ fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let seconds_per_row = data.config.time_granularity.seconds_per_row();
     let num_times = data.time_dim_count;
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO time_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO time_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 0..num_times {
         let t_time_sk = i * seconds_per_row;
@@ -5664,16 +5659,29 @@ fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let minute = (t_time_sk % 3600) / 60;
         let second = t_time_sk % 60;
         let am_pm = if hour < 12 { "AM" } else { "PM" };
-        let shift = if hour < 8 { "third" } else if hour < 16 { "first" } else { "second" };
+        let shift = if hour < 8 {
+            "third"
+        } else if hour < 16 {
+            "first"
+        } else {
+            "second"
+        };
         let sub_shift = if hour % 8 < 4 { "night" } else { "day" };
-        let meal_time = if (7..9).contains(&hour) { "breakfast" }
-            else if (12..14).contains(&hour) { "lunch" }
-            else if (18..20).contains(&hour) { "dinner" }
-            else { "" };
+        let meal_time = if (7..9).contains(&hour) {
+            "breakfast"
+        } else if (12..14).contains(&hour) {
+            "lunch"
+        } else if (18..20).contains(&hour) {
+            "dinner"
+        } else {
+            ""
+        };
 
         stmt.execute(rusqlite::params![
-            t_time_sk, t_time_id, t_time_sk, hour, minute, second, am_pm, shift, sub_shift, meal_time
-        ]).unwrap();
+            t_time_sk, t_time_id, t_time_sk, hour, minute, second, am_pm, shift, sub_shift,
+            meal_time
+        ])
+        .unwrap();
     }
 }
 
@@ -5716,15 +5724,16 @@ fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             "Unknown",
             (i % 100) + 1,
             format!("Product#{}", i)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_customer_address_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     for i in 1..=data.customer_address_count {
         let ca_address_id = format!("AAAAAA{:010}", i);
@@ -5744,7 +5753,8 @@ fn load_customer_address_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             "United States",
             -5.0 + (state_idx as f64 * 0.1),
             "residential"
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -5752,9 +5762,11 @@ fn load_customer_address_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let salutations = ["Mr.", "Mrs.", "Ms.", "Dr.", ""];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare(
+            "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .unwrap();
 
     for i in 1..=data.customer_count {
         let c_customer_id = format!("AAAAAA{:010}", i);
@@ -5783,7 +5795,8 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             format!("user{}", i),
             data.random_email(),
             data.random_i32(1, 2191)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -5827,7 +5840,8 @@ fn load_store_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             "United States",
             -5.0 + (state_idx as f64 * 0.1),
             data.random_f64(0.0, 0.11)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -5885,7 +5899,8 @@ fn load_store_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             net_paid,
             net_paid_inc_tax,
             net_profit
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6424,7 +6439,13 @@ fn days_in_month(year: i32, month: i32) -> i32 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
-        2 => if is_leap_year(year) { 29 } else { 28 },
+        2 => {
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
+        }
         _ => 30, // fallback
     }
 }
@@ -6481,8 +6502,13 @@ fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             d_month_seq * 30,
             (d_date_sk as i64 - 365).max(1),
             (d_date_sk as i64 - 91).max(1),
-            "N", "N", "N", "N", "N"
-        ]).unwrap();
+            "N",
+            "N",
+            "N",
+            "N",
+            "N"
+        ])
+        .unwrap();
     }
 }
 
@@ -6491,9 +6517,8 @@ fn load_time_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let seconds_per_row = data.config.time_granularity.seconds_per_row();
     let num_times = data.time_dim_count;
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO time_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO time_dim VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 0..num_times {
         let t_time_sk = i * seconds_per_row;
@@ -6502,16 +6527,29 @@ fn load_time_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
         let minute = (t_time_sk % 3600) / 60;
         let second = t_time_sk % 60;
         let am_pm = if hour < 12 { "AM" } else { "PM" };
-        let shift = if hour < 8 { "third" } else if hour < 16 { "first" } else { "second" };
+        let shift = if hour < 8 {
+            "third"
+        } else if hour < 16 {
+            "first"
+        } else {
+            "second"
+        };
         let sub_shift = if hour % 8 < 4 { "night" } else { "day" };
-        let meal_time = if (7..9).contains(&hour) { "breakfast" }
-            else if (12..14).contains(&hour) { "lunch" }
-            else if (18..20).contains(&hour) { "dinner" }
-            else { "" };
+        let meal_time = if (7..9).contains(&hour) {
+            "breakfast"
+        } else if (12..14).contains(&hour) {
+            "lunch"
+        } else if (18..20).contains(&hour) {
+            "dinner"
+        } else {
+            ""
+        };
 
         stmt.execute(duckdb::params![
-            t_time_sk, t_time_id, t_time_sk, hour, minute, second, am_pm, shift, sub_shift, meal_time
-        ]).unwrap();
+            t_time_sk, t_time_id, t_time_sk, hour, minute, second, am_pm, shift, sub_shift,
+            meal_time
+        ])
+        .unwrap();
     }
 }
 
@@ -6554,15 +6592,16 @@ fn load_item_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             "Unknown",
             (i % 100) + 1,
             format!("Product#{}", i)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_customer_address_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     for i in 1..=data.customer_address_count {
         let ca_address_id = format!("AAAAAA{:010}", i);
@@ -6582,7 +6621,8 @@ fn load_customer_address_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             "United States",
             -5.0 + (state_idx as f64 * 0.1),
             "residential"
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6590,9 +6630,11 @@ fn load_customer_address_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let salutations = ["Mr.", "Mrs.", "Ms.", "Dr.", ""];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare(
+            "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .unwrap();
 
     for i in 1..=data.customer_count {
         let c_customer_id = format!("AAAAAA{:010}", i);
@@ -6621,7 +6663,8 @@ fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             format!("user{}", i),
             data.random_email(),
             data.random_i32(1, 2191)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6665,7 +6708,8 @@ fn load_store_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             "United States",
             -5.0 + (state_idx as f64 * 0.1),
             data.random_f64(0.0, 0.11)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6723,7 +6767,8 @@ fn load_store_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             net_paid,
             net_paid_inc_tax,
             net_profit
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6765,15 +6810,16 @@ fn load_promotion_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             format!("Details for promo {}", i),
             purposes[i % 3],
             channels[i % 2]
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     for i in 1..=data.warehouse_count {
         let w_warehouse_id = format!("AAAAAA{:010}", i);
@@ -6794,7 +6840,8 @@ fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             data.random_zip(),
             "United States",
             -5.0 - (state_idx % 4) as f64
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6803,9 +6850,7 @@ fn load_ship_mode_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let ship_types = ["REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "ECONOMY"];
     let carriers = ["DHL", "FEDEX", "UPS", "USPS", "AIRBORNE"];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO ship_mode VALUES (?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO ship_mode VALUES (?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 1..=data.ship_mode_count.min(20) {
         let sm_ship_mode_id = format!("AAAAAA{:010}", i);
@@ -6819,32 +6864,37 @@ fn load_ship_mode_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             format!("{}{}", &carriers[carrier_idx][0..2], i),
             carriers[carrier_idx],
             format!("Contract {}", i)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_reason_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let reasons = [
-        "Did not like the color", "Did not fit", "Wrong item shipped",
-        "Found better price elsewhere", "Product quality issue", "Changed mind",
-        "Gift returned", "Damaged in shipping", "Not as described", "Duplicate order",
-        "Ordered by mistake", "Product defective", "Size too small", "Size too large",
-        "Wrong product received"
+        "Did not like the color",
+        "Did not fit",
+        "Wrong item shipped",
+        "Found better price elsewhere",
+        "Product quality issue",
+        "Changed mind",
+        "Gift returned",
+        "Damaged in shipping",
+        "Not as described",
+        "Duplicate order",
+        "Ordered by mistake",
+        "Product defective",
+        "Size too small",
+        "Size too large",
+        "Wrong product received",
     ];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO reason VALUES (?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO reason VALUES (?, ?, ?)").unwrap();
 
     for i in 1..=data.reason_count.min(reasons.len()) {
         let r_reason_id = format!("AAAAAA{:010}", i);
 
-        stmt.execute(rusqlite::params![
-            i,
-            r_reason_id,
-            reasons[i - 1]
-        ]).unwrap();
+        stmt.execute(rusqlite::params![i, r_reason_id, reasons[i - 1]]).unwrap();
     }
 }
 
@@ -6897,7 +6947,8 @@ fn load_store_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             reversed_charge,
             store_credit,
             net_loss
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6906,9 +6957,8 @@ fn load_catalog_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let departments = ["Men", "Women", "Children", "Electronics", "Home", "Garden"];
     let page_types = ["Cover", "Regular", "Index", "Special"];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO catalog_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO catalog_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 1..=data.catalog_page_count {
         let cp_catalog_page_id = format!("AAAAAA{:010}", i);
@@ -6925,7 +6975,8 @@ fn load_catalog_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             i % 100 + 1,
             format!("Catalog page {} description", i),
             page_types[type_idx]
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6933,9 +6984,9 @@ fn load_catalog_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 fn load_web_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let page_types = ["Home", "Product", "Category", "Search", "Checkout", "Cart"];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     for i in 1..=data.web_page_count {
         let wp_web_page_id = format!("AAAAAA{:010}", i);
@@ -6956,7 +7007,8 @@ fn load_web_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             data.random_i32(5, 50),
             data.random_i32(1, 20),
             data.random_i32(1, 10)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -6997,7 +7049,8 @@ fn load_web_site_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             "United States",
             -5.0 - (state_idx % 4) as f64,
             data.random_f64(0.0, 0.11)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7069,7 +7122,8 @@ fn load_catalog_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             net_paid_inc_ship,
             net_paid_inc_ship_tax,
             net_profit
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7128,7 +7182,8 @@ fn load_catalog_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             reversed_charge,
             store_credit,
             net_loss
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7200,7 +7255,8 @@ fn load_web_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             net_paid_inc_ship,
             net_paid_inc_ship_tax,
             net_profit
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7256,15 +7312,16 @@ fn load_web_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             reversed_charge,
             account_credit,
             net_loss
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_customer_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     let mut sk = 0;
     'outer: for gender in GENDERS.iter() {
@@ -7291,7 +7348,8 @@ fn load_customer_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
                             dep_count,
                             dep_employed,
                             dep_college
-                        ]).unwrap();
+                        ])
+                        .unwrap();
                     }
                 }
             }
@@ -7301,9 +7359,8 @@ fn load_customer_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_household_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)").unwrap();
 
     let mut sk = 0;
     'outer: for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
@@ -7321,7 +7378,8 @@ fn load_household_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
                         buy_potential,
                         dep_count,
                         vehicle_count
-                    ]).unwrap();
+                    ])
+                    .unwrap();
                 }
             }
         }
@@ -7330,17 +7388,11 @@ fn load_household_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_income_band_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO income_band VALUES (?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO income_band VALUES (?, ?, ?)").unwrap();
 
     let count = data.income_band_count.min(INCOME_BANDS.len());
     for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
-        stmt.execute(rusqlite::params![
-            i + 1,
-            lower,
-            upper
-        ]).unwrap();
+        stmt.execute(rusqlite::params![i + 1, lower, upper]).unwrap();
     }
 }
 
@@ -7391,7 +7443,8 @@ fn load_call_center_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             "United States",
             -5.0 - (state_idx % 4) as f64,
             data.random_f64(0.0, 0.11)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7401,9 +7454,7 @@ fn load_inventory_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_items = data.item_count;
     let num_warehouses = data.warehouse_count;
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO inventory VALUES (?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO inventory VALUES (?, ?, ?, ?)").unwrap();
 
     let mut count = 0;
     'outer: for week in 0..num_dates {
@@ -7425,7 +7476,8 @@ fn load_inventory_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
                     item_sk,
                     warehouse_sk,
                     data.random_i32(0, 1000)
-                ]).unwrap();
+                ])
+                .unwrap();
             }
         }
     }
@@ -7469,15 +7521,16 @@ fn load_promotion_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             format!("Details for promo {}", i),
             purposes[i % 3],
             channels[i % 2]
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     for i in 1..=data.warehouse_count {
         let w_warehouse_id = format!("AAAAAA{:010}", i);
@@ -7498,7 +7551,8 @@ fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             data.random_zip(),
             "United States",
             -5.0 - (state_idx % 4) as f64
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7507,9 +7561,7 @@ fn load_ship_mode_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let ship_types = ["REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "ECONOMY"];
     let carriers = ["DHL", "FEDEX", "UPS", "USPS", "AIRBORNE"];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO ship_mode VALUES (?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO ship_mode VALUES (?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 1..=data.ship_mode_count.min(20) {
         let sm_ship_mode_id = format!("AAAAAA{:010}", i);
@@ -7523,32 +7575,37 @@ fn load_ship_mode_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             format!("{}{}", &carriers[carrier_idx][0..2], i),
             carriers[carrier_idx],
             format!("Contract {}", i)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_reason_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let reasons = [
-        "Did not like the color", "Did not fit", "Wrong item shipped",
-        "Found better price elsewhere", "Product quality issue", "Changed mind",
-        "Gift returned", "Damaged in shipping", "Not as described", "Duplicate order",
-        "Ordered by mistake", "Product defective", "Size too small", "Size too large",
-        "Wrong product received"
+        "Did not like the color",
+        "Did not fit",
+        "Wrong item shipped",
+        "Found better price elsewhere",
+        "Product quality issue",
+        "Changed mind",
+        "Gift returned",
+        "Damaged in shipping",
+        "Not as described",
+        "Duplicate order",
+        "Ordered by mistake",
+        "Product defective",
+        "Size too small",
+        "Size too large",
+        "Wrong product received",
     ];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO reason VALUES (?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO reason VALUES (?, ?, ?)").unwrap();
 
     for i in 1..=data.reason_count.min(reasons.len()) {
         let r_reason_id = format!("AAAAAA{:010}", i);
 
-        stmt.execute(duckdb::params![
-            i as i64,
-            r_reason_id,
-            reasons[i - 1]
-        ]).unwrap();
+        stmt.execute(duckdb::params![i as i64, r_reason_id, reasons[i - 1]]).unwrap();
     }
 }
 
@@ -7601,7 +7658,8 @@ fn load_store_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             reversed_charge,
             store_credit,
             net_loss
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7610,9 +7668,8 @@ fn load_catalog_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let departments = ["Men", "Women", "Children", "Electronics", "Home", "Garden"];
     let page_types = ["Cover", "Regular", "Index", "Special"];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO catalog_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO catalog_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 1..=data.catalog_page_count {
         let cp_catalog_page_id = format!("AAAAAA{:010}", i);
@@ -7629,7 +7686,8 @@ fn load_catalog_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             ((i % 100) + 1) as i64,
             format!("Catalog page {} description", i),
             page_types[type_idx]
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7637,9 +7695,9 @@ fn load_catalog_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 fn load_web_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let page_types = ["Home", "Product", "Category", "Search", "Checkout", "Cart"];
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     for i in 1..=data.web_page_count {
         let wp_web_page_id = format!("AAAAAA{:010}", i);
@@ -7660,7 +7718,8 @@ fn load_web_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             data.random_i32(5, 50),
             data.random_i32(1, 20),
             data.random_i32(1, 10)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7701,7 +7760,8 @@ fn load_web_site_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             "United States",
             -5.0 - (state_idx % 4) as f64,
             data.random_f64(0.0, 0.11)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7773,7 +7833,8 @@ fn load_catalog_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             net_paid_inc_ship,
             net_paid_inc_ship_tax,
             net_profit
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7832,7 +7893,8 @@ fn load_catalog_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             reversed_charge,
             store_credit,
             net_loss
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7904,7 +7966,8 @@ fn load_web_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             net_paid_inc_ship,
             net_paid_inc_ship_tax,
             net_profit
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -7960,15 +8023,16 @@ fn load_web_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             reversed_charge,
             account_credit,
             net_loss
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_customer_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn
+        .prepare("INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .unwrap();
 
     let mut sk = 0;
     'outer: for gender in GENDERS.iter() {
@@ -7995,7 +8059,8 @@ fn load_customer_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
                             dep_count,
                             dep_employed,
                             dep_college
-                        ]).unwrap();
+                        ])
+                        .unwrap();
                     }
                 }
             }
@@ -8005,9 +8070,8 @@ fn load_customer_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_household_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt =
+        conn.prepare("INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)").unwrap();
 
     let mut sk = 0;
     'outer: for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
@@ -8025,7 +8089,8 @@ fn load_household_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
                         buy_potential,
                         dep_count,
                         vehicle_count
-                    ]).unwrap();
+                    ])
+                    .unwrap();
                 }
             }
         }
@@ -8034,17 +8099,11 @@ fn load_household_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn load_income_band_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
-    let mut stmt = conn.prepare(
-        "INSERT INTO income_band VALUES (?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO income_band VALUES (?, ?, ?)").unwrap();
 
     let count = data.income_band_count.min(INCOME_BANDS.len());
     for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
-        stmt.execute(duckdb::params![
-            (i + 1) as i64,
-            lower,
-            upper
-        ]).unwrap();
+        stmt.execute(duckdb::params![(i + 1) as i64, lower, upper]).unwrap();
     }
 }
 
@@ -8095,7 +8154,8 @@ fn load_call_center_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
             "United States",
             -5.0 - (state_idx % 4) as f64,
             data.random_f64(0.0, 0.11)
-        ]).unwrap();
+        ])
+        .unwrap();
     }
 }
 
@@ -8105,9 +8165,7 @@ fn load_inventory_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_items = data.item_count;
     let num_warehouses = data.warehouse_count;
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO inventory VALUES (?, ?, ?, ?)"
-    ).unwrap();
+    let mut stmt = conn.prepare("INSERT INTO inventory VALUES (?, ?, ?, ?)").unwrap();
 
     let mut count = 0;
     'outer: for week in 0..num_dates {
@@ -8129,7 +8187,8 @@ fn load_inventory_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
                     item_sk as i64,
                     warehouse_sk as i64,
                     data.random_i32(0, 1000)
-                ]).unwrap();
+                ])
+                .unwrap();
             }
         }
     }
@@ -8905,7 +8964,8 @@ fn load_time_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
                 t_sub_shift,
                 t_meal_time,
             ),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -8978,7 +9038,8 @@ fn load_customer_address_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
         conn.exec_drop(
             "INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params,
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -9019,7 +9080,8 @@ fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
         conn.exec_drop(
             "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params,
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -9195,7 +9257,8 @@ fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
         conn.exec_drop(
             "INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params,
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -9217,7 +9280,8 @@ fn load_ship_mode_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
                 carriers[i % carriers.len()],
                 format!("Contract{}", i),
             ),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -9240,7 +9304,8 @@ fn load_reason_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
         conn.exec_drop(
             "INSERT INTO reason VALUES (?, ?, ?)",
             (i as i64, &reason_id, reasons[i % reasons.len()]),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -9318,7 +9383,8 @@ fn load_catalog_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
                 format!("Catalog page {} description", i),
                 "bi-annual",
             ),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -9349,7 +9415,8 @@ fn load_web_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
         conn.exec_drop(
             "INSERT INTO web_page VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params,
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 
@@ -9432,17 +9499,17 @@ fn load_catalog_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
 
         let params: Vec<Value> = vec![
             Value::from(date_sk as i64),
-            Value::NULL, // time_sk
+            Value::NULL,                                           // time_sk
             Value::from((date_sk + data.random_i32(1, 7)) as i64), // ship_date_sk
             Value::from(customer_sk as i64),
-            Value::NULL, // bill_cdemo_sk
-            Value::NULL, // bill_hdemo_sk
-            Value::NULL, // bill_addr_sk
+            Value::NULL,                     // bill_cdemo_sk
+            Value::NULL,                     // bill_hdemo_sk
+            Value::NULL,                     // bill_addr_sk
             Value::from(customer_sk as i64), // ship_customer_sk
-            Value::NULL, // ship_cdemo_sk
-            Value::NULL, // ship_hdemo_sk
-            Value::NULL, // ship_addr_sk
-            Value::NULL, // call_center_sk
+            Value::NULL,                     // ship_cdemo_sk
+            Value::NULL,                     // ship_hdemo_sk
+            Value::NULL,                     // ship_addr_sk
+            Value::NULL,                     // call_center_sk
             Value::from(page_sk as i64),
             Value::from(ship_mode_sk as i64),
             Value::from(warehouse_sk as i64),
@@ -9507,14 +9574,14 @@ fn load_catalog_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
             Value::NULL, // time_sk
             Value::from(item_sk as i64),
             Value::from(customer_sk as i64), // refunded_customer_sk
-            Value::NULL, // refunded_cdemo_sk
-            Value::NULL, // refunded_hdemo_sk
-            Value::NULL, // refunded_addr_sk
+            Value::NULL,                     // refunded_cdemo_sk
+            Value::NULL,                     // refunded_hdemo_sk
+            Value::NULL,                     // refunded_addr_sk
             Value::from(customer_sk as i64), // returning_customer_sk
-            Value::NULL, // returning_cdemo_sk
-            Value::NULL, // returning_hdemo_sk
-            Value::NULL, // returning_addr_sk
-            Value::NULL, // call_center_sk
+            Value::NULL,                     // returning_cdemo_sk
+            Value::NULL,                     // returning_hdemo_sk
+            Value::NULL,                     // returning_addr_sk
+            Value::NULL,                     // call_center_sk
             Value::from(page_sk as i64),
             Value::from(ship_mode_sk as i64),
             Value::from(warehouse_sk as i64),
@@ -9575,17 +9642,17 @@ fn load_web_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
 
         let params: Vec<Value> = vec![
             Value::from(date_sk as i64),
-            Value::NULL, // time_sk
+            Value::NULL,                                           // time_sk
             Value::from((date_sk + data.random_i32(1, 7)) as i64), // ship_date_sk
             Value::from(item_sk as i64),
             Value::from(customer_sk as i64),
-            Value::NULL, // bill_cdemo_sk
-            Value::NULL, // bill_hdemo_sk
-            Value::NULL, // bill_addr_sk
+            Value::NULL,                     // bill_cdemo_sk
+            Value::NULL,                     // bill_hdemo_sk
+            Value::NULL,                     // bill_addr_sk
             Value::from(customer_sk as i64), // ship_customer_sk
-            Value::NULL, // ship_cdemo_sk
-            Value::NULL, // ship_hdemo_sk
-            Value::NULL, // ship_addr_sk
+            Value::NULL,                     // ship_cdemo_sk
+            Value::NULL,                     // ship_hdemo_sk
+            Value::NULL,                     // ship_addr_sk
             Value::from(page_sk as i64),
             Value::from(site_sk as i64),
             Value::from(ship_mode_sk as i64),
@@ -9648,13 +9715,13 @@ fn load_web_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
             Value::NULL, // time_sk
             Value::from(item_sk as i64),
             Value::from(customer_sk as i64), // refunded_customer_sk
-            Value::NULL, // refunded_cdemo_sk
-            Value::NULL, // refunded_hdemo_sk
-            Value::NULL, // refunded_addr_sk
+            Value::NULL,                     // refunded_cdemo_sk
+            Value::NULL,                     // refunded_hdemo_sk
+            Value::NULL,                     // refunded_addr_sk
             Value::from(customer_sk as i64), // returning_customer_sk
-            Value::NULL, // returning_cdemo_sk
-            Value::NULL, // returning_hdemo_sk
-            Value::NULL, // returning_addr_sk
+            Value::NULL,                     // returning_cdemo_sk
+            Value::NULL,                     // returning_hdemo_sk
+            Value::NULL,                     // returning_addr_sk
             Value::from(page_sk as i64),
             Value::from(reason_sk as i64),
             Value::from(order_num as i64),
@@ -9707,7 +9774,8 @@ fn load_customer_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData)
                                 dep_employed as i64,
                                 dep_college as i64,
                             ),
-                        ).unwrap();
+                        )
+                        .unwrap();
                     }
                 }
             }
@@ -9736,7 +9804,8 @@ fn load_household_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData
                             dep_count as i64,
                             vehicle_count as i64,
                         ),
-                    ).unwrap();
+                    )
+                    .unwrap();
                 }
             }
         }
@@ -9747,10 +9816,8 @@ fn load_household_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData
 fn load_income_band_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     let count = data.income_band_count.min(INCOME_BANDS.len());
     for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
-        conn.exec_drop(
-            "INSERT INTO income_band VALUES (?, ?, ?)",
-            ((i + 1) as i64, lower, upper),
-        ).unwrap();
+        conn.exec_drop("INSERT INTO income_band VALUES (?, ?, ?)", ((i + 1) as i64, lower, upper))
+            .unwrap();
     }
 }
 
@@ -9837,9 +9904,9 @@ fn load_inventory_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
                         warehouse_sk as i64,
                         data.random_i32(0, 1000) as i64,
                     ),
-                ).unwrap();
+                )
+                .unwrap();
             }
         }
     }
 }
-

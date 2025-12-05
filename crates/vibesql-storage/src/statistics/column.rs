@@ -1,8 +1,8 @@
 //! Column-level statistics for selectivity estimation
 
+use super::histogram::{BucketStrategy, Histogram};
 use std::collections::HashMap;
 use vibesql_types::SqlValue;
-use super::histogram::{Histogram, BucketStrategy};
 
 /// Statistics for a single column
 #[derive(Debug, Clone)]
@@ -93,11 +93,8 @@ impl ColumnStatistics {
         let mut mcvs: Vec<_> = value_counts
             .into_iter()
             .map(|(val, count)| {
-                let frequency = if total_non_null > 0 {
-                    count as f64 / total_non_null as f64
-                } else {
-                    0.0
-                };
+                let frequency =
+                    if total_non_null > 0 { count as f64 / total_non_null as f64 } else { 0.0 };
                 (val, frequency)
             })
             .collect();
@@ -170,7 +167,11 @@ impl ColumnStatistics {
                     return 1.0; // All values satisfy
                 }
                 if value >= max {
-                    return if operator == ">=" && value == max { 1.0 / (self.n_distinct as f64) } else { 0.0 };
+                    return if operator == ">=" && value == max {
+                        1.0 / (self.n_distinct as f64)
+                    } else {
+                        0.0
+                    };
                 }
                 // Linear interpolation (rough estimate)
                 0.33
@@ -180,7 +181,11 @@ impl ColumnStatistics {
                     return 1.0;
                 }
                 if value <= min {
-                    return if operator == "<=" && value == min { 1.0 / (self.n_distinct as f64) } else { 0.0 };
+                    return if operator == "<=" && value == min {
+                        1.0 / (self.n_distinct as f64)
+                    } else {
+                        0.0
+                    };
                 }
                 // Linear interpolation
                 0.33

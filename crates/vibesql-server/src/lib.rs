@@ -23,12 +23,14 @@ pub use observability::ObservabilityProvider;
 pub use protocol::{
     BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
 };
-pub use scheduler::{ScheduleExecutor, ScheduleExecutorConfig, SchedulerManager, SchedulerManagerConfig};
+pub use scheduler::{
+    ScheduleExecutor, ScheduleExecutorConfig, SchedulerManager, SchedulerManagerConfig,
+};
 pub use session::{Column, ExecutionResult, Row, Session};
 pub use subscription::{
-    extract_table_dependencies, extract_table_refs, SessionSubscription,
-    SessionSubscriptionId, SessionSubscriptionManager, Subscription, SubscriptionError,
-    SubscriptionId, SubscriptionManager, SubscriptionUpdate,
+    extract_table_dependencies, extract_table_refs, SessionSubscription, SessionSubscriptionId,
+    SessionSubscriptionManager, Subscription, SubscriptionError, SubscriptionId,
+    SubscriptionManager, SubscriptionUpdate,
 };
 // Re-export ChangeEvent from storage layer for consistency
 pub use vibesql_storage::ChangeEvent;

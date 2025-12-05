@@ -37,14 +37,8 @@ pub const EDUCATION_STATUS: &[&str] = &[
 pub const CREDIT_RATINGS: &[&str] = &["Low Risk", "Good", "High Risk", "Unknown"];
 
 // Buy potential options
-pub const BUY_POTENTIALS: &[&str] = &[
-    "Unknown",
-    "0-500",
-    "501-1000",
-    "1001-5000",
-    "5001-10000",
-    ">10000",
-];
+pub const BUY_POTENTIALS: &[&str] =
+    &["Unknown", "0-500", "501-1000", "1001-5000", "5001-10000", ">10000"];
 
 // Dependents count (0-6)
 pub const DEP_COUNTS: &[i32] = &[0, 1, 2, 3, 4, 5, 6];
@@ -80,9 +74,8 @@ pub const INCOME_BANDS: &[(i32, i32)] = &[
 ];
 
 // Ship modes
-pub const SHIP_MODES: &[&str] = &[
-    "REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "LIBRARY", "NEXT DAY",
-];
+pub const SHIP_MODES: &[&str] =
+    &["REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "LIBRARY", "NEXT DAY"];
 
 // States (US states for customer addresses)
 pub const STATES: &[&str] = &[
@@ -96,15 +89,15 @@ pub const STATES: &[&str] = &[
 pub const COUNTRIES: &[&str] = &["United States"];
 
 // Store names prefixes
-pub const STORE_NAMES: &[&str] = &[
-    "able", "ation", "bar", "cally", "eing", "ese", "ought", "pri", "able", "eing",
-];
+pub const STORE_NAMES: &[&str] =
+    &["able", "ation", "bar", "cally", "eing", "ese", "ought", "pri", "able", "eing"];
 
 // Catalog page types
 pub const CATALOG_PAGE_TYPES: &[&str] = &["bi-annual", "quarterly", "monthly"];
 
 // Web page types
-pub const WEB_PAGE_TYPES: &[&str] = &["welcome", "order", "protected", "feedback", "review", "dynamic"];
+pub const WEB_PAGE_TYPES: &[&str] =
+    &["welcome", "order", "protected", "feedback", "review", "dynamic"];
 
 // Web site classes
 pub const WEB_SITE_CLASSES: &[&str] = &["Unknown", "Unknown"];
@@ -300,9 +293,8 @@ pub const ITEM_COLORS: &[&str] = &[
 ];
 
 // Item sizes
-pub const ITEM_SIZES: &[&str] = &[
-    "small", "medium", "large", "extra large", "petite", "N/A", "economy", "economy",
-];
+pub const ITEM_SIZES: &[&str] =
+    &["small", "medium", "large", "extra large", "petite", "N/A", "economy", "economy"];
 
 // Item units
 pub const ITEM_UNITS: &[&str] = &[
@@ -379,11 +371,7 @@ impl TPCDSConfig {
 
     /// Create a minimal config for fastest loading (testing only)
     pub fn minimal() -> Self {
-        Self {
-            date_start_year: 1998,
-            date_end_year: 2003,
-            time_granularity: TimeGranularity::Hour,
-        }
+        Self { date_start_year: 1998, date_end_year: 2003, time_granularity: TimeGranularity::Hour }
     }
 
     /// Calculate the number of days in the date range
@@ -404,23 +392,23 @@ pub struct TPCDSData {
     pub config: TPCDSConfig,
 
     // Dimension table counts (fixed or scaled)
-    pub date_dim_count: usize,       // Configurable (default: ~2K days for 1998-2003)
-    pub time_dim_count: usize,       // Configurable (default: 1,440 minutes)
-    pub item_count: usize,           // SF * 18,000
-    pub customer_count: usize,       // SF * 100,000
+    pub date_dim_count: usize, // Configurable (default: ~2K days for 1998-2003)
+    pub time_dim_count: usize, // Configurable (default: 1,440 minutes)
+    pub item_count: usize,     // SF * 18,000
+    pub customer_count: usize, // SF * 100,000
     pub customer_address_count: usize,
     pub customer_demographics_count: usize, // ~1,920 combinations
     pub household_demographics_count: usize,
-    pub income_band_count: usize,    // 20 bands
-    pub store_count: usize,          // 12 * SF (min 12)
-    pub catalog_page_count: usize,   // SF * 11,718
-    pub web_page_count: usize,       // SF * 60
-    pub web_site_count: usize,       // 30 * SF (min 6)
-    pub warehouse_count: usize,      // 5 * SF (min 5)
-    pub ship_mode_count: usize,      // 20
-    pub reason_count: usize,         // 35
-    pub promotion_count: usize,      // SF * 300
-    pub call_center_count: usize,    // 6 * SF (min 6)
+    pub income_band_count: usize,  // 20 bands
+    pub store_count: usize,        // 12 * SF (min 12)
+    pub catalog_page_count: usize, // SF * 11,718
+    pub web_page_count: usize,     // SF * 60
+    pub web_site_count: usize,     // 30 * SF (min 6)
+    pub warehouse_count: usize,    // 5 * SF (min 5)
+    pub ship_mode_count: usize,    // 20
+    pub reason_count: usize,       // 35
+    pub promotion_count: usize,    // SF * 300
+    pub call_center_count: usize,  // 6 * SF (min 6)
 
     // Fact table counts (scaled)
     pub store_sales_count: usize,
@@ -504,9 +492,7 @@ impl TPCDSData {
 
     pub fn random_varchar(&mut self, max_len: usize) -> String {
         let len = self.rng.random_range(10..max_len.max(11));
-        (0..len)
-            .map(|_| self.rng.sample(rand::distr::Alphanumeric) as char)
-            .collect()
+        (0..len).map(|_| self.rng.sample(rand::distr::Alphanumeric) as char).collect()
     }
 
     pub fn random_i32(&mut self, min: i32, max: i32) -> i32 {

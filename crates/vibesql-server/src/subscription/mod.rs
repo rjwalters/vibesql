@@ -42,12 +42,12 @@
 //! }
 //! ```
 
+pub mod error;
 mod manager;
 mod router;
 pub mod session;
 mod table_dependencies;
 mod table_extract;
-pub mod error;
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -56,12 +56,12 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+pub use error::{classify_error, classify_error_str, SubscriptionErrorKind};
 pub use manager::SubscriptionManager;
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
 pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager};
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
-pub use error::{SubscriptionErrorKind, classify_error, classify_error_str};
 // SubscriptionMetrics is defined inline in this module and exported directly
 
 // ============================================================================
@@ -250,12 +250,7 @@ pub struct SubscriptionRetryPolicy {
 
 impl Default for SubscriptionRetryPolicy {
     fn default() -> Self {
-        Self {
-            max_retries: 3,
-            base_delay_ms: 1000,
-            max_delay_ms: 30000,
-            backoff_multiplier: 2.0,
-        }
+        Self { max_retries: 3, base_delay_ms: 1000, max_delay_ms: 30000, backoff_multiplier: 2.0 }
     }
 }
 
@@ -270,8 +265,7 @@ impl SubscriptionRetryPolicy {
     ///
     /// Duration to wait before the next retry
     fn calculate_backoff(&self, attempt: u32) -> Duration {
-        let backoff_ms = self.base_delay_ms as f64
-            * self.backoff_multiplier.powi(attempt as i32);
+        let backoff_ms = self.base_delay_ms as f64 * self.backoff_multiplier.powi(attempt as i32);
 
         let capped_ms = backoff_ms.min(self.max_delay_ms as f64);
         Duration::from_millis(capped_ms as u64)
@@ -539,10 +533,7 @@ fn hash_row(row: &crate::Row) -> u64 {
 ///
 /// Returns `Some(SubscriptionUpdate::Delta)` if there are changes,
 /// or `None` if the result sets are identical.
-pub fn compute_delta(
-    old: &[crate::Row],
-    new: &[crate::Row],
-) -> Option<SubscriptionUpdate> {
+pub fn compute_delta(old: &[crate::Row], new: &[crate::Row]) -> Option<SubscriptionUpdate> {
     use std::collections::HashMap;
 
     // Build hash maps for efficient lookup
@@ -597,11 +588,7 @@ pub fn compute_delta(
     // This is semantically correct, just not optimal for clients that could patch in place
     let updates = Vec::new();
 
-    Some(SubscriptionUpdate::Delta {
-        inserts,
-        updates,
-        deletes,
-    })
+    Some(SubscriptionUpdate::Delta { inserts, updates, deletes })
 }
 
 #[cfg(test)]
@@ -624,8 +611,6 @@ mod tests {
         let id = SubscriptionId(42);
         assert_eq!(format!("{}", id), "sub-42");
     }
-
-
 
     #[test]
     fn test_hash_rows_empty() {
@@ -685,9 +670,7 @@ mod tests {
             crate::Row {
                 values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
             },
-            crate::Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
         // Same old and new should return None
@@ -707,26 +690,17 @@ mod tests {
             crate::Row {
                 values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
             },
-            crate::Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
         let delta = compute_delta(&old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
-                assert_eq!(
-                    inserts[0].values[1],
-                    SqlValue::Varchar("Bob".to_string())
-                );
+                assert_eq!(inserts[0].values[1], SqlValue::Varchar("Bob".to_string()));
                 assert!(updates.is_empty());
                 assert!(deletes.is_empty());
             }
@@ -742,9 +716,7 @@ mod tests {
             crate::Row {
                 values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
             },
-            crate::Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
         let new = vec![crate::Row {
@@ -755,11 +727,7 @@ mod tests {
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 assert!(inserts.is_empty());
                 assert!(updates.is_empty());
                 assert_eq!(deletes.len(), 1);
@@ -785,11 +753,7 @@ mod tests {
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(deletes.len(), 1);
                 assert!(updates.is_empty());
@@ -810,20 +774,14 @@ mod tests {
             crate::Row {
                 values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
             },
-            crate::Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
         let delta = compute_delta(&old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 assert_eq!(inserts.len(), 2);
                 assert!(updates.is_empty());
                 assert!(deletes.is_empty());
@@ -840,9 +798,7 @@ mod tests {
             crate::Row {
                 values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
             },
-            crate::Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
         let new: Vec<crate::Row> = vec![];
 
@@ -850,11 +806,7 @@ mod tests {
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 assert!(inserts.is_empty());
                 assert!(updates.is_empty());
                 assert_eq!(deletes.len(), 2);
@@ -869,35 +821,21 @@ mod tests {
 
         // Test handling of duplicate rows
         let old = vec![
-            crate::Row {
-                values: vec![SqlValue::Integer(1)],
-            },
-            crate::Row {
-                values: vec![SqlValue::Integer(1)],
-            },
+            crate::Row { values: vec![SqlValue::Integer(1)] },
+            crate::Row { values: vec![SqlValue::Integer(1)] },
         ];
 
         let new = vec![
-            crate::Row {
-                values: vec![SqlValue::Integer(1)],
-            },
-            crate::Row {
-                values: vec![SqlValue::Integer(1)],
-            },
-            crate::Row {
-                values: vec![SqlValue::Integer(1)],
-            },
+            crate::Row { values: vec![SqlValue::Integer(1)] },
+            crate::Row { values: vec![SqlValue::Integer(1)] },
+            crate::Row { values: vec![SqlValue::Integer(1)] },
         ];
 
         let delta = compute_delta(&old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta {
-                inserts,
-                updates,
-                deletes,
-            } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
                 // One additional duplicate row was inserted
                 assert_eq!(inserts.len(), 1);
                 assert!(updates.is_empty());

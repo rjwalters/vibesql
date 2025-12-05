@@ -8,10 +8,7 @@ use vibesql_types::SqlValue;
 fn test_extract_range_predicate_greater_than() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::GreaterThan,
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col0".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(60))),
     };
 
@@ -25,10 +22,7 @@ fn test_extract_range_predicate_greater_than() {
 fn test_extract_range_predicate_less_than_or_equal() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::LessThanOrEqual,
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col0".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(43))),
     };
 
@@ -41,10 +35,7 @@ fn test_extract_range_predicate_less_than_or_equal() {
 #[test]
 fn test_extract_range_predicate_between() {
     let expr = Expression::Between {
-        expr: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col0".to_string(),
-        }),
+        expr: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
         low: Box::new(Expression::Literal(SqlValue::Integer(10))),
         high: Box::new(Expression::Literal(SqlValue::Integer(20))),
         negated: false,
@@ -65,18 +56,12 @@ fn test_extract_range_predicate_combined_and() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col0".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::LessThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col0".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(20))),
         }),
     };
@@ -94,10 +79,7 @@ fn test_extract_range_predicate_flipped_comparison() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::LessThan,
         left: Box::new(Expression::Literal(SqlValue::Integer(60))),
-        right: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col0".to_string(),
-        }),
+        right: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
     };
 
     let range = extract_range_predicate(&expr, "col0").unwrap();
@@ -111,10 +93,7 @@ fn test_where_clause_fully_satisfied_simple_equal() {
     // col0 = 5
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col0".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(5))),
     };
 
@@ -125,10 +104,7 @@ fn test_where_clause_fully_satisfied_simple_equal() {
 fn test_where_clause_fully_satisfied_between() {
     // col0 BETWEEN 10 AND 20
     let expr = Expression::Between {
-        expr: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col0".to_string(),
-        }),
+        expr: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
         low: Box::new(Expression::Literal(SqlValue::Integer(10))),
         high: Box::new(Expression::Literal(SqlValue::Integer(20))),
         negated: false,
@@ -142,10 +118,7 @@ fn test_where_clause_fully_satisfied_between() {
 fn test_where_clause_fully_satisfied_in_list() {
     // col0 IN (1, 2, 3)
     let expr = Expression::InList {
-        expr: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col0".to_string(),
-        }),
+        expr: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
         values: vec![
             Expression::Literal(SqlValue::Integer(1)),
             Expression::Literal(SqlValue::Integer(2)),
@@ -164,18 +137,12 @@ fn test_where_clause_fully_satisfied_combined_range() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col0".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::LessThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col0".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(20))),
         }),
     };
@@ -190,18 +157,12 @@ fn test_where_clause_not_fully_satisfied_multiple_columns() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col0".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col1".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
     };
@@ -216,18 +177,12 @@ fn test_where_clause_not_fully_satisfied_or() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col0".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "col0".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
     };
@@ -246,27 +201,18 @@ fn test_extract_composite_predicates_full_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_w_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_d_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -289,18 +235,12 @@ fn test_extract_composite_predicates_partial_match() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -319,18 +259,12 @@ fn test_extract_composite_predicates_case_insensitive() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "C_W_ID".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "C_W_ID".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "C_D_ID".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "C_D_ID".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -352,18 +286,12 @@ fn test_extract_composite_predicates_with_string_values() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "department".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "department".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Varchar("Engineering".to_string()))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "name".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Varchar("Alice".to_string()))),
         }),
     };
@@ -382,10 +310,7 @@ fn test_extract_composite_predicates_with_string_values() {
 fn test_extract_composite_predicates_empty_columns() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "col".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "col".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
     };
 
@@ -411,27 +336,18 @@ fn test_extract_prefix_predicates_partial_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_w_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_d_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_balance".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_balance".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
     };
@@ -458,18 +374,12 @@ fn test_extract_prefix_predicates_single_column() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_balance".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_balance".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
     };
@@ -493,18 +403,12 @@ fn test_extract_prefix_predicates_gap_in_columns() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -525,10 +429,7 @@ fn test_extract_prefix_predicates_no_first_column() {
     // Expected: None (can't use prefix without first column)
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "c_d_id".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(2))),
     };
 
@@ -549,27 +450,18 @@ fn test_extract_prefix_predicates_full_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_w_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_d_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -597,27 +489,18 @@ fn test_build_residual_where_clause_partial_covered() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_w_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_d_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_balance".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_balance".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
     };
@@ -656,18 +539,12 @@ fn test_build_residual_where_clause_all_covered() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -690,18 +567,12 @@ fn test_build_residual_where_clause_none_covered() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_balance".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_balance".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_credit".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_credit".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Varchar("BC".to_string()))),
         }),
     };
@@ -724,10 +595,7 @@ fn test_build_residual_where_clause_multiple_uncovered() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_w_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
@@ -741,10 +609,7 @@ fn test_build_residual_where_clause_multiple_uncovered() {
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_credit".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_credit".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Varchar("BC".to_string()))),
         }),
     };
@@ -769,10 +634,7 @@ fn test_extract_composite_predicates_with_in_basic() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::And,
         left: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -782,10 +644,7 @@ fn test_extract_composite_predicates_with_in_basic() {
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
     };
@@ -824,17 +683,11 @@ fn test_extract_composite_predicates_with_in_reversed() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -907,10 +760,7 @@ fn test_generate_composite_keys_in_on_second_column() {
     // IN on second column: [Eq(1), In([2, 3])]
     let predicates = vec![
         CompositePredicateType::Equality(SqlValue::Integer(1)),
-        CompositePredicateType::In(vec![
-            SqlValue::Integer(2),
-            SqlValue::Integer(3),
-        ]),
+        CompositePredicateType::In(vec![SqlValue::Integer(2), SqlValue::Integer(3)]),
     ];
 
     let keys = generate_composite_keys(&predicates);
@@ -924,14 +774,8 @@ fn test_generate_composite_keys_in_on_second_column() {
 fn test_generate_composite_keys_multiple_in() {
     // Multiple IN predicates: [In([1, 2]), In([3, 4])]
     let predicates = vec![
-        CompositePredicateType::In(vec![
-            SqlValue::Integer(1),
-            SqlValue::Integer(2),
-        ]),
-        CompositePredicateType::In(vec![
-            SqlValue::Integer(3),
-            SqlValue::Integer(4),
-        ]),
+        CompositePredicateType::In(vec![SqlValue::Integer(1), SqlValue::Integer(2)]),
+        CompositePredicateType::In(vec![SqlValue::Integer(3), SqlValue::Integer(4)]),
     ];
 
     let keys = generate_composite_keys(&predicates);
@@ -951,18 +795,12 @@ fn test_where_clause_satisfied_by_composite_key_equality_only() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -977,10 +815,7 @@ fn test_where_clause_satisfied_by_composite_key_with_in() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::And,
         left: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -990,10 +825,7 @@ fn test_where_clause_satisfied_by_composite_key_with_in() {
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
     };
@@ -1011,27 +843,18 @@ fn test_where_clause_not_satisfied_extra_predicate() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_w_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_d_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "extra_col".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "extra_col".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -1047,10 +870,7 @@ fn test_where_clause_not_satisfied_negated_in() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::And,
         left: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -1060,10 +880,7 @@ fn test_where_clause_not_satisfied_negated_in() {
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
     };
@@ -1084,27 +901,18 @@ fn test_composite_key_satisfaction_full_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_w_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "c_d_id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -1121,18 +929,12 @@ fn test_composite_key_satisfaction_missing_predicate() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -1149,18 +951,12 @@ fn test_composite_key_satisfaction_range_predicate() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -1177,18 +973,12 @@ fn test_composite_key_satisfaction_or_predicate() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_w_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_w_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "c_d_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "c_d_id".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -1202,10 +992,7 @@ fn test_composite_key_satisfaction_single_column() {
     // WHERE c_id = 42 with index [c_id]
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "c_id".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "c_id".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(42))),
     };
 
@@ -1220,18 +1007,12 @@ fn test_composite_key_satisfaction_case_insensitive() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "C_W_ID".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "C_W_ID".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "C_D_ID".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "C_D_ID".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -1245,10 +1026,7 @@ fn test_composite_key_satisfaction_null_value() {
     // WHERE c_id = NULL should NOT be satisfied (NULL comparisons need special handling)
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            table: None,
-            column: "c_id".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef { table: None, column: "c_id".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Null)),
     };
 

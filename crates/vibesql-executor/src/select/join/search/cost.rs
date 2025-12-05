@@ -34,10 +34,8 @@ impl JoinOrderContext {
                 .unwrap_or_else(|| table_name.clone());
 
             // Get actual table row count from database using the resolved table name
-            let base_rows = database
-                .get_table(&actual_table_name)
-                .map(|t| t.row_count())
-                .unwrap_or(10000); // Fallback for CTEs/subqueries
+            let base_rows =
+                database.get_table(&actual_table_name).map(|t| t.row_count()).unwrap_or(10000); // Fallback for CTEs/subqueries
 
             cardinalities.insert(table_name.clone(), base_rows);
         }
@@ -68,23 +66,22 @@ impl JoinOrderContext {
                 .unwrap_or_else(|| table_name.clone());
 
             // Get actual table row count from database using the resolved table name
-            let base_rows = database
-                .get_table(&actual_table_name)
-                .map(|t| t.row_count())
-                .unwrap_or(10000); // Fallback for CTEs/subqueries
+            let base_rows =
+                database.get_table(&actual_table_name).map(|t| t.row_count()).unwrap_or(10000); // Fallback for CTEs/subqueries
 
             // Apply selectivity estimation for local predicates on this table
-            let estimated_rows = if let Some(predicates) = table_local_predicates.get(&table_name.to_lowercase()) {
+            let estimated_rows = if let Some(predicates) =
+                table_local_predicates.get(&table_name.to_lowercase())
+            {
                 // Get table statistics for selectivity estimation (using actual table name)
-                let stats = database
-                    .get_table(&actual_table_name)
-                    .and_then(|t| t.get_statistics());
+                let stats = database.get_table(&actual_table_name).and_then(|t| t.get_statistics());
 
                 if let Some(stats) = stats {
                     // Estimate combined selectivity of all local predicates
                     let mut selectivity = 1.0;
                     for pred in predicates {
-                        let pred_sel = crate::optimizer::selectivity::estimate_selectivity(pred, stats);
+                        let pred_sel =
+                            crate::optimizer::selectivity::estimate_selectivity(pred, stats);
                         selectivity *= pred_sel;
                     }
                     // Apply selectivity to base row count
@@ -119,7 +116,6 @@ impl JoinOrderContext {
         cardinalities
     }
 
-
     /// Compute join selectivities for each edge based on column NDV (number of distinct values)
     ///
     /// For equijoin A.x = B.y, selectivity = 1 / max(NDV(A.x), NDV(B.y))
@@ -153,10 +149,8 @@ impl JoinOrderContext {
             let right_table = edge.right_table.to_lowercase();
 
             // Resolve aliases to actual table names for database lookups
-            let actual_left_table = alias_to_table
-                .get(&left_table)
-                .cloned()
-                .unwrap_or_else(|| edge.left_table.clone());
+            let actual_left_table =
+                alias_to_table.get(&left_table).cloned().unwrap_or_else(|| edge.left_table.clone());
             let actual_right_table = alias_to_table
                 .get(&right_table)
                 .cloned()
@@ -174,7 +168,9 @@ impl JoinOrderContext {
             let left_ndv = left_stats
                 .as_ref()
                 .and_then(|(_, stats)| {
-                    stats.columns.get(&edge.left_column)
+                    stats
+                        .columns
+                        .get(&edge.left_column)
                         .or_else(|| stats.columns.get(&edge.left_column.to_uppercase()))
                         .or_else(|| stats.columns.get(&edge.left_column.to_lowercase()))
                 })
@@ -185,7 +181,9 @@ impl JoinOrderContext {
             let right_ndv = right_stats
                 .as_ref()
                 .and_then(|(_, stats)| {
-                    stats.columns.get(&edge.right_column)
+                    stats
+                        .columns
+                        .get(&edge.right_column)
                         .or_else(|| stats.columns.get(&edge.right_column.to_uppercase()))
                         .or_else(|| stats.columns.get(&edge.right_column.to_lowercase()))
                 })
@@ -202,17 +200,26 @@ impl JoinOrderContext {
             let right_is_pk = is_likely_primary_key(right_ndv, right_row_count);
 
             let selectivity = compute_pk_fk_selectivity(
-                left_ndv, right_ndv,
-                left_row_count, right_row_count,
-                left_is_pk, right_is_pk,
+                left_ndv,
+                right_ndv,
+                left_row_count,
+                right_row_count,
+                left_is_pk,
+                right_is_pk,
             );
 
             // Debug logging
             if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
                 let pk_fk_info = if left_is_pk && !right_is_pk {
-                    format!(" [PK-FK: left is PK, ratio={:.1}]", right_row_count as f64 / right_ndv.max(1) as f64)
+                    format!(
+                        " [PK-FK: left is PK, ratio={:.1}]",
+                        right_row_count as f64 / right_ndv.max(1) as f64
+                    )
                 } else if right_is_pk && !left_is_pk {
-                    format!(" [PK-FK: right is PK, ratio={:.1}]", left_row_count as f64 / left_ndv.max(1) as f64)
+                    format!(
+                        " [PK-FK: right is PK, ratio={:.1}]",
+                        left_row_count as f64 / left_ndv.max(1) as f64
+                    )
                 } else if left_is_pk && right_is_pk {
                     " [PK-PK join]".to_string()
                 } else {
@@ -305,8 +312,8 @@ impl JoinOrderContext {
                     1,
                     std::cmp::min(
                         left_cardinality,
-                        (left_cardinality as f64 * selectivity) as usize
-                    )
+                        (left_cardinality as f64 * selectivity) as usize,
+                    ),
                 )
             }
             _ => {
@@ -345,17 +352,16 @@ impl JoinOrderContext {
             let left_desc = if joined_tables.is_empty() {
                 "(start)".to_string()
             } else {
-                format!("{{{}}}({} rows)", joined_tables.iter().cloned().collect::<Vec<_>>().join(","), left_cardinality)
+                format!(
+                    "{{{}}}({} rows)",
+                    joined_tables.iter().cloned().collect::<Vec<_>>().join(","),
+                    left_cardinality
+                )
             };
             let right_desc = format!("{}({} rows)", next_table, right_cardinality);
             eprintln!(
                 "[JOIN_COST] {} + {} -> output={}, ops={}, selectivity={:.6}, type={:?}",
-                left_desc,
-                right_desc,
-                output_cardinality,
-                operations,
-                selectivity,
-                join_type
+                left_desc, right_desc, output_cardinality, operations, selectivity, join_type
             );
         }
 
@@ -439,13 +445,14 @@ impl JoinOrderContext {
                     1,
                     std::cmp::min(
                         left_cardinality,
-                        (base_estimate as f64 * effective_correlation) as usize
-                    )
+                        (base_estimate as f64 * effective_correlation) as usize,
+                    ),
                 )
             }
             _ => {
                 // INNER/LEFT/etc: use cross-product × selectivity × correlation
-                let base_estimate = left_cardinality as f64 * right_cardinality as f64 * selectivity;
+                let base_estimate =
+                    left_cardinality as f64 * right_cardinality as f64 * selectivity;
                 let correlated_estimate = base_estimate * effective_correlation;
                 std::cmp::max(1, correlated_estimate as usize)
             }
@@ -516,7 +523,11 @@ impl JoinOrderContext {
     ///
     /// If multiple edges exist with different join types, returns the "most restrictive" type.
     /// Priority: SEMI > ANTI > INNER (SEMI/ANTI are more selective)
-    fn get_join_type(&self, joined_tables: &BTreeSet<String>, next_table: &str) -> vibesql_ast::JoinType {
+    fn get_join_type(
+        &self,
+        joined_tables: &BTreeSet<String>,
+        next_table: &str,
+    ) -> vibesql_ast::JoinType {
         use vibesql_ast::JoinType;
 
         let mut found_type = JoinType::Inner; // Default
@@ -590,10 +601,11 @@ fn estimate_predicate_selectivity_heuristic(pred: &vibesql_ast::Expression) -> f
 
         // Range comparisons: moderately selective (25%)
         Expression::BinaryOp {
-            op: BinaryOperator::LessThan |
-                BinaryOperator::LessThanOrEqual |
-                BinaryOperator::GreaterThan |
-                BinaryOperator::GreaterThanOrEqual,
+            op:
+                BinaryOperator::LessThan
+                | BinaryOperator::LessThanOrEqual
+                | BinaryOperator::GreaterThan
+                | BinaryOperator::GreaterThanOrEqual,
             ..
         } => 0.25,
 
@@ -601,9 +613,7 @@ fn estimate_predicate_selectivity_heuristic(pred: &vibesql_ast::Expression) -> f
         Expression::Between { .. } => 0.33,
 
         // IN list: depends on number of values (estimate 5% per value, cap at 50%)
-        Expression::InList { values, negated: false, .. } => {
-            (values.len() as f64 * 0.05).min(0.50)
-        }
+        Expression::InList { values, negated: false, .. } => (values.len() as f64 * 0.05).min(0.50),
         Expression::InList { values, negated: true, .. } => {
             1.0 - (values.len() as f64 * 0.05).min(0.50)
         }
@@ -696,15 +706,11 @@ fn compute_pk_fk_selectivity(
         // PK-FK join: left is PK (dimension), right is FK (fact)
         // Each FK value matches at most one PK value
         // Selectivity based on PK uniqueness
-        (true, false) => {
-            1.0 / left_ndv as f64
-        }
+        (true, false) => 1.0 / left_ndv as f64,
 
         // FK-PK join: left is FK (fact), right is PK (dimension)
         // Each FK value matches at most one PK value
-        (false, true) => {
-            1.0 / right_ndv as f64
-        }
+        (false, true) => 1.0 / right_ndv as f64,
 
         // PK-PK join (1:1 relationship) or non-PK join
         // Use traditional formula: 1 / max(NDV)
@@ -742,9 +748,9 @@ mod tests {
         // PK-FK: left is PK (customer), right is FK (orders)
         // customer.c_custkey (PK, 150K unique) = orders.o_custkey (FK, 100K unique out of 1.5M rows)
         let selectivity = compute_pk_fk_selectivity(
-            150_000,  // left_ndv (customer PK)
-            100_000,  // right_ndv (orders FK)
-            150_000,  // left_row_count (customer)
+            150_000,   // left_ndv (customer PK)
+            100_000,   // right_ndv (orders FK)
+            150_000,   // left_row_count (customer)
             1_500_000, // right_row_count (orders)
             true,      // left is PK
             false,     // right is FK
@@ -754,10 +760,10 @@ mod tests {
 
         // FK-PK: left is FK (orders), right is PK (customer)
         let selectivity = compute_pk_fk_selectivity(
-            100_000,  // left_ndv (orders FK)
-            150_000,  // right_ndv (customer PK)
+            100_000,   // left_ndv (orders FK)
+            150_000,   // right_ndv (customer PK)
             1_500_000, // left_row_count (orders)
-            150_000,  // right_row_count (customer)
+            150_000,   // right_row_count (customer)
             false,     // left is FK
             true,      // right is PK
         );

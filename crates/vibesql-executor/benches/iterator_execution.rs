@@ -112,9 +112,8 @@ fn bench_where_with_limit(c: &mut Criterion) {
             &row_count,
             |b, _| {
                 b.iter(|| {
-                    let stmt = parse_select(
-                        "SELECT * FROM large_table WHERE amount > 50 LIMIT 10;",
-                    );
+                    let stmt =
+                        parse_select("SELECT * FROM large_table WHERE amount > 50 LIMIT 10;");
                     let executor = SelectExecutor::new(&db);
                     black_box(executor.execute(&stmt).unwrap())
                 });
@@ -212,9 +211,7 @@ fn bench_projection_with_limit(c: &mut Criterion) {
             &row_count,
             |b, _| {
                 b.iter(|| {
-                    let stmt = parse_select(
-                        "SELECT id * 2, amount + 100, value FROM large_table;",
-                    );
+                    let stmt = parse_select("SELECT id * 2, amount + 100, value FROM large_table;");
                     let executor = SelectExecutor::new(&db);
                     black_box(executor.execute(&stmt).unwrap())
                 });
@@ -236,30 +233,22 @@ fn bench_materialized_queries(c: &mut Criterion) {
         group.throughput(Throughput::Elements(row_count as u64));
 
         // ORDER BY requires materialization (cannot use iterator path)
-        group.bench_with_input(
-            BenchmarkId::new("order_by", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let stmt = parse_select("SELECT * FROM large_table ORDER BY amount;");
-                    let executor = SelectExecutor::new(&db);
-                    black_box(executor.execute(&stmt).unwrap())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("order_by", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let stmt = parse_select("SELECT * FROM large_table ORDER BY amount;");
+                let executor = SelectExecutor::new(&db);
+                black_box(executor.execute(&stmt).unwrap())
+            });
+        });
 
         // DISTINCT requires materialization (cannot use iterator path)
-        group.bench_with_input(
-            BenchmarkId::new("distinct", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let stmt = parse_select("SELECT DISTINCT amount FROM large_table;");
-                    let executor = SelectExecutor::new(&db);
-                    black_box(executor.execute(&stmt).unwrap())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("distinct", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let stmt = parse_select("SELECT DISTINCT amount FROM large_table;");
+                let executor = SelectExecutor::new(&db);
+                black_box(executor.execute(&stmt).unwrap())
+            });
+        });
     }
 
     group.finish();

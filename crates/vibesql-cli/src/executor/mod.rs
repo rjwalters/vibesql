@@ -114,7 +114,10 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::CreateView(view_stmt) => {
-                match vibesql_executor::advanced_objects::execute_create_view(&view_stmt, &mut self.db) {
+                match vibesql_executor::advanced_objects::execute_create_view(
+                    &view_stmt,
+                    &mut self.db,
+                ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
                     }
@@ -122,7 +125,10 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::DropView(drop_stmt) => {
-                match vibesql_executor::advanced_objects::execute_drop_view(&drop_stmt, &mut self.db) {
+                match vibesql_executor::advanced_objects::execute_drop_view(
+                    &drop_stmt,
+                    &mut self.db,
+                ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
                     }
@@ -172,7 +178,10 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::SetVariable(set_var_stmt) => {
-                match vibesql_executor::SchemaExecutor::execute_set_variable(&set_var_stmt, &mut self.db) {
+                match vibesql_executor::SchemaExecutor::execute_set_variable(
+                    &set_var_stmt,
+                    &mut self.db,
+                ) {
                     Ok(_) => {
                         result.row_count = 0;
                     }
@@ -244,7 +253,8 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::BeginTransaction(begin_stmt) => {
-                match vibesql_executor::BeginTransactionExecutor::execute(&begin_stmt, &mut self.db) {
+                match vibesql_executor::BeginTransactionExecutor::execute(&begin_stmt, &mut self.db)
+                {
                     Ok(msg) => {
                         println!("{}", msg);
                         result.row_count = 0;
@@ -280,7 +290,10 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::RollbackToSavepoint(rollback_stmt) => {
-                match vibesql_executor::RollbackToSavepointExecutor::execute(&rollback_stmt, &mut self.db) {
+                match vibesql_executor::RollbackToSavepointExecutor::execute(
+                    &rollback_stmt,
+                    &mut self.db,
+                ) {
                     Ok(msg) => {
                         println!("{}", msg);
                         result.row_count = 0;
@@ -289,7 +302,10 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::ReleaseSavepoint(release_stmt) => {
-                match vibesql_executor::ReleaseSavepointExecutor::execute(&release_stmt, &mut self.db) {
+                match vibesql_executor::ReleaseSavepointExecutor::execute(
+                    &release_stmt,
+                    &mut self.db,
+                ) {
                     Ok(msg) => {
                         println!("{}", msg);
                         result.row_count = 0;
@@ -425,11 +441,8 @@ impl SqlExecutor {
             }
 
             let nullable = if column.nullable { "YES" } else { "NO" };
-            let default_val = column
-                .default_value
-                .as_ref()
-                .map(|v| format!("{:?}", v))
-                .unwrap_or_default();
+            let default_val =
+                column.default_value.as_ref().map(|v| format!("{:?}", v)).unwrap_or_default();
 
             // Check if column is part of primary key
             let key = if table
@@ -500,10 +513,7 @@ impl SqlExecutor {
     }
 
     /// Execute SHOW INDEX statement
-    fn execute_show_index(
-        &self,
-        stmt: &vibesql_ast::ShowIndexStmt,
-    ) -> anyhow::Result<QueryResult> {
+    fn execute_show_index(&self, stmt: &vibesql_ast::ShowIndexStmt) -> anyhow::Result<QueryResult> {
         let normalized_name = stmt.table_name.to_uppercase();
 
         // Verify table exists
@@ -521,18 +531,18 @@ impl SqlExecutor {
                     // Add one row per column in the index
                     for (seq, col) in index_meta.columns.iter().enumerate() {
                         rows.push(vec![
-                            normalized_name.clone(),           // Table
+                            normalized_name.clone(),                               // Table
                             if index_meta.unique { "0" } else { "1" }.to_string(), // Non_unique
-                            index_meta.index_name.clone(),     // Key_name
-                            (seq + 1).to_string(),             // Seq_in_index
-                            col.column_name.clone(),           // Column_name
-                            "A".to_string(),                   // Collation (always Ascending for now)
-                            String::new(),                     // Cardinality
-                            String::new(),                     // Sub_part
-                            String::new(),                     // Packed
-                            String::new(),                     // Null
-                            "BTREE".to_string(),               // Index_type
-                            String::new(),                     // Comment
+                            index_meta.index_name.clone(),                         // Key_name
+                            (seq + 1).to_string(),                                 // Seq_in_index
+                            col.column_name.clone(),                               // Column_name
+                            "A".to_string(), // Collation (always Ascending for now)
+                            String::new(),   // Cardinality
+                            String::new(),   // Sub_part
+                            String::new(),   // Packed
+                            String::new(),   // Null
+                            "BTREE".to_string(), // Index_type
+                            String::new(),   // Comment
                         ]);
                     }
                 }
@@ -579,11 +589,8 @@ impl SqlExecutor {
         // Add columns
         let mut column_defs: Vec<String> = Vec::new();
         for column in &table.schema.columns {
-            let mut def = format!(
-                "  {} {}",
-                column.name,
-                display::format_data_type(&column.data_type)
-            );
+            let mut def =
+                format!("  {} {}", column.name, display::format_data_type(&column.data_type));
             if !column.nullable {
                 def.push_str(" NOT NULL");
             }

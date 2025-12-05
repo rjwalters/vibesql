@@ -52,9 +52,7 @@ impl Parser {
     /// - CUBE(...)
     /// - GROUPING SETS(...)
     /// - Simple expression
-    fn parse_mixed_grouping_item(
-        &mut self,
-    ) -> Result<vibesql_ast::MixedGroupingItem, ParseError> {
+    fn parse_mixed_grouping_item(&mut self) -> Result<vibesql_ast::MixedGroupingItem, ParseError> {
         if self.peek_keyword(Keyword::Rollup) {
             self.consume_keyword(Keyword::Rollup)?;
             self.expect_token(Token::LParen)?;
@@ -92,9 +90,7 @@ impl Parser {
         items: Vec<vibesql_ast::MixedGroupingItem>,
     ) -> Result<vibesql_ast::GroupByClause, ParseError> {
         if items.is_empty() {
-            return Err(ParseError {
-                message: "GROUP BY clause cannot be empty".to_string(),
-            });
+            return Err(ParseError { message: "GROUP BY clause cannot be empty".to_string() });
         }
 
         // Check if this is a pure (non-mixed) clause
@@ -116,9 +112,8 @@ impl Parser {
         }
 
         // Multiple items - check if all are simple expressions
-        let all_simple = items.iter().all(|item| {
-            matches!(item, vibesql_ast::MixedGroupingItem::Simple(_))
-        });
+        let all_simple =
+            items.iter().all(|item| matches!(item, vibesql_ast::MixedGroupingItem::Simple(_)));
 
         if all_simple {
             // Extract all simple expressions into a Simple clause

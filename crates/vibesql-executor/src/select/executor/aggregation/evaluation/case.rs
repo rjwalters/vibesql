@@ -1,7 +1,10 @@
 //! CASE expression evaluation in aggregate context
 
 use super::super::super::builder::SelectExecutor;
-use crate::{errors::ExecutorError, evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator}};
+use crate::{
+    errors::ExecutorError,
+    evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
+};
 
 /// Evaluate CASE expression with potential aggregates in operand/conditions/results
 ///
@@ -76,7 +79,9 @@ pub(super) fn evaluate(
                     // Check if condition is TRUE (not FALSE or NULL)
                     let is_true = match condition_value {
                         vibesql_types::SqlValue::Boolean(true) => true,
-                        vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
+                        vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => {
+                            false
+                        }
                         // SQLLogicTest compatibility: treat integers as truthy/falsy
                         vibesql_types::SqlValue::Integer(0) => false,
                         vibesql_types::SqlValue::Integer(_) => true,

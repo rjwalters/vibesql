@@ -20,7 +20,9 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // CSE: Check cache if enabled and expression is deterministic
-        if self.enable_cse && super::super::expression_hash::ExpressionHasher::is_deterministic(expr) {
+        if self.enable_cse
+            && super::super::expression_hash::ExpressionHasher::is_deterministic(expr)
+        {
             let hash = super::super::expression_hash::ExpressionHasher::hash(expr);
 
             // Check cache (get requires mut borrow to update LRU order)
@@ -140,7 +142,8 @@ impl CombinedExpressionEvaluator<'_> {
                                     return Ok(SqlValue::Boolean(false));
                                 }
 
-                                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+                                let sql_mode =
+                                    self.database.map(|db| db.sql_mode()).unwrap_or_default();
                                 ExpressionEvaluator::eval_binary_op_static(
                                     &left_val, op, &right_val, sql_mode,
                                 )
@@ -167,7 +170,8 @@ impl CombinedExpressionEvaluator<'_> {
                                     return Ok(SqlValue::Boolean(true));
                                 }
 
-                                let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+                                let sql_mode =
+                                    self.database.map(|db| db.sql_mode()).unwrap_or_default();
                                 ExpressionEvaluator::eval_binary_op_static(
                                     &left_val, op, &right_val, sql_mode,
                                 )
@@ -179,7 +183,9 @@ impl CombinedExpressionEvaluator<'_> {
                         let left_val = self.eval(left, row)?;
                         let right_val = self.eval(right, row)?;
                         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                        ExpressionEvaluator::eval_binary_op_static(&left_val, op, &right_val, sql_mode)
+                        ExpressionEvaluator::eval_binary_op_static(
+                            &left_val, op, &right_val, sql_mode,
+                        )
                     }
                 }
             }
@@ -195,7 +201,9 @@ impl CombinedExpressionEvaluator<'_> {
             }
 
             // Scalar subquery - must return exactly one row and one column
-            vibesql_ast::Expression::ScalarSubquery(subquery) => self.eval_scalar_subquery(subquery, row),
+            vibesql_ast::Expression::ScalarSubquery(subquery) => {
+                self.eval_scalar_subquery(subquery, row)
+            }
 
             // BETWEEN predicate: expr BETWEEN low AND high
             vibesql_ast::Expression::Between { expr, low, high, negated, symmetric } => {
@@ -203,7 +211,9 @@ impl CombinedExpressionEvaluator<'_> {
             }
 
             // CAST expression: CAST(expr AS data_type)
-            vibesql_ast::Expression::Cast { expr, data_type } => self.eval_cast(expr, data_type, row),
+            vibesql_ast::Expression::Cast { expr, data_type } => {
+                self.eval_cast(expr, data_type, row)
+            }
 
             // POSITION expression: POSITION(substring IN string)
             vibesql_ast::Expression::Position { substring, string, character_unit: _ } => {
@@ -216,9 +226,7 @@ impl CombinedExpressionEvaluator<'_> {
             }
 
             // EXTRACT expression: EXTRACT(field FROM expr)
-            vibesql_ast::Expression::Extract { field, expr } => {
-                self.eval_extract(field, expr, row)
-            }
+            vibesql_ast::Expression::Extract { field, expr } => self.eval_extract(field, expr, row),
 
             // LIKE pattern matching: expr LIKE pattern
             vibesql_ast::Expression::Like { expr, pattern, negated } => {
@@ -241,7 +249,9 @@ impl CombinedExpressionEvaluator<'_> {
             }
 
             // IS NULL / IS NOT NULL
-            vibesql_ast::Expression::IsNull { expr, negated } => self.eval_is_null(expr, *negated, row),
+            vibesql_ast::Expression::IsNull { expr, negated } => {
+                self.eval_is_null(expr, *negated, row)
+            }
 
             // Function expressions - handle scalar functions (not aggregates)
             vibesql_ast::Expression::Function { name, args, character_unit } => {
@@ -263,7 +273,12 @@ impl CombinedExpressionEvaluator<'_> {
                 // For now, ignore precision and call existing function
                 // Phase 2 will implement precision-aware formatting
                 let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                super::super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &sql_mode)
+                super::super::functions::eval_scalar_function(
+                    "CURRENT_TIMESTAMP",
+                    &[],
+                    &None,
+                    &sql_mode,
+                )
             }
 
             // Unary operations (delegate to shared function)
@@ -318,9 +333,10 @@ impl CombinedExpressionEvaluator<'_> {
                     }
                 } else {
                     // No database context available
-                    Err(ExecutorError::UnsupportedExpression(
-                        format!("Session variable @@{} cannot be evaluated without database context", name)
-                    ))
+                    Err(ExecutorError::UnsupportedExpression(format!(
+                        "Session variable @@{} cannot be evaluated without database context",
+                        name
+                    )))
                 }
             }
 
@@ -336,9 +352,10 @@ impl CombinedExpressionEvaluator<'_> {
                         SqlValue::Boolean(true) => {}
                         SqlValue::Null => has_null = true,
                         _ => {
-                            return Err(ExecutorError::UnsupportedExpression(
-                                format!("Conjunction term is not boolean: {:?}", val),
-                            ))
+                            return Err(ExecutorError::UnsupportedExpression(format!(
+                                "Conjunction term is not boolean: {:?}",
+                                val
+                            )))
                         }
                     }
                 }
@@ -361,9 +378,10 @@ impl CombinedExpressionEvaluator<'_> {
                         SqlValue::Boolean(false) => {}
                         SqlValue::Null => has_null = true,
                         _ => {
-                            return Err(ExecutorError::UnsupportedExpression(
-                                format!("Disjunction term is not boolean: {:?}", val),
-                            ))
+                            return Err(ExecutorError::UnsupportedExpression(format!(
+                                "Disjunction term is not boolean: {:?}",
+                                val
+                            )))
                         }
                     }
                 }
@@ -399,9 +417,12 @@ impl CombinedExpressionEvaluator<'_> {
         let mut text_values = Vec::new();
         for column_name in columns {
             // Try to resolve column in inner schema
-            let col_value = if let Some(col_index) = self.get_column_index_cached(None, column_name) {
+            let col_value = if let Some(col_index) = self.get_column_index_cached(None, column_name)
+            {
                 row.get(col_index).cloned()
-            } else if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+            } else if let (Some(outer_row), Some(outer_schema)) =
+                (self.outer_row, self.outer_schema)
+            {
                 // Try outer schema if available
                 if let Some(col_index) = outer_schema.get_column_index(None, column_name) {
                     outer_row.get(col_index).cloned()
@@ -413,7 +434,8 @@ impl CombinedExpressionEvaluator<'_> {
             };
 
             match col_value {
-                Some(vibesql_types::SqlValue::Varchar(s)) | Some(vibesql_types::SqlValue::Character(s)) => text_values.push(s),
+                Some(vibesql_types::SqlValue::Varchar(s))
+                | Some(vibesql_types::SqlValue::Character(s)) => text_values.push(s),
                 Some(vibesql_types::SqlValue::Null) => {
                     // NULL values are treated as empty strings in MATCH
                     text_values.push(String::new());
@@ -427,7 +449,11 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // Perform full-text search
-        let result = super::super::expressions::fulltext::eval_match_against(&search_string, &text_values, mode)?;
+        let result = super::super::expressions::fulltext::eval_match_against(
+            &search_string,
+            &text_values,
+            mode,
+        )?;
         Ok(vibesql_types::SqlValue::Boolean(result))
     }
 }

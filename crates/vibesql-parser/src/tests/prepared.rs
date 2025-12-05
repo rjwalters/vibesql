@@ -51,7 +51,8 @@ fn test_parse_prepare_as_select() {
 
 #[test]
 fn test_parse_prepare_with_param_types() {
-    let result = Parser::parse_sql("PREPARE my_insert(INT, VARCHAR) AS INSERT INTO users VALUES ($1, $2)");
+    let result =
+        Parser::parse_sql("PREPARE my_insert(INT, VARCHAR) AS INSERT INTO users VALUES ($1, $2)");
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Prepare(stmt) => {
@@ -67,7 +68,8 @@ fn test_parse_prepare_with_param_types() {
 
 #[test]
 fn test_parse_prepare_as_insert() {
-    let result = Parser::parse_sql("PREPARE my_insert AS INSERT INTO users (id, name) VALUES (?, ?)");
+    let result =
+        Parser::parse_sql("PREPARE my_insert AS INSERT INTO users (id, name) VALUES (?, ?)");
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Prepare(stmt) => {

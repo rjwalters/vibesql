@@ -221,8 +221,9 @@ fn evaluate_window_function_for_partition(
 
             // FIRST_VALUE returns the same value for all rows in the partition
             // (the value from the first row)
-            let value = crate::evaluator::window::evaluate_first_value(partition, value_expr, eval_fn)
-                .map_err(ExecutorError::UnsupportedExpression)?;
+            let value =
+                crate::evaluator::window::evaluate_first_value(partition, value_expr, eval_fn)
+                    .map_err(ExecutorError::UnsupportedExpression)?;
 
             // Return the same value for all rows
             vec![value; partition.len()]
@@ -245,8 +246,9 @@ fn evaluate_window_function_for_partition(
 
             // LAST_VALUE returns the same value for all rows in the partition
             // (the value from the last row)
-            let value = crate::evaluator::window::evaluate_last_value(partition, value_expr, eval_fn)
-                .map_err(ExecutorError::UnsupportedExpression)?;
+            let value =
+                crate::evaluator::window::evaluate_last_value(partition, value_expr, eval_fn)
+                    .map_err(ExecutorError::UnsupportedExpression)?;
 
             // Return the same value for all rows
             vec![value; partition.len()]

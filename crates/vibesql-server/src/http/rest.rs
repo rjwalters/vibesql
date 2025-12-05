@@ -16,8 +16,8 @@ use tracing::{debug, error};
 
 use vibesql_storage::Database;
 
-use super::types::*;
 use super::graphql;
+use super::types::*;
 use crate::subscription::{SubscriptionManager, SubscriptionUpdate};
 
 /// Pagination configuration
@@ -32,20 +32,13 @@ pub struct PaginationParams {
 impl PaginationParams {
     /// Create pagination from request parameters
     pub fn from_request(limit: Option<usize>, offset: Option<usize>) -> Self {
-        Self {
-            offset: offset.unwrap_or(0),
-            limit: limit.unwrap_or(usize::MAX),
-        }
+        Self { offset: offset.unwrap_or(0), limit: limit.unwrap_or(usize::MAX) }
     }
 
     /// Apply pagination to results
     pub fn apply(&self, rows: Vec<Vec<serde_json::Value>>) -> (Vec<Vec<serde_json::Value>>, usize) {
         let total_count = rows.len();
-        let paginated = rows
-            .into_iter()
-            .skip(self.offset)
-            .take(self.limit)
-            .collect();
+        let paginated = rows.into_iter().skip(self.offset).take(self.limit).collect();
         (paginated, total_count)
     }
 }
@@ -58,11 +51,11 @@ pub struct HttpState {
 }
 
 /// Create the HTTP API router
-pub fn create_http_router(db: Arc<Database>, subscription_manager: Arc<SubscriptionManager>) -> Router {
-    let state = HttpState {
-        db: db.clone(),
-        subscription_manager: subscription_manager.clone(),
-    };
+pub fn create_http_router(
+    db: Arc<Database>,
+    subscription_manager: Arc<SubscriptionManager>,
+) -> Router {
+    let state = HttpState { db: db.clone(), subscription_manager: subscription_manager.clone() };
 
     // Create main router with state
     let main_router = Router::new()
@@ -100,10 +93,7 @@ async fn graphql_handler(
     if let Some(introspection_result) = graphql::try_introspection_query(&state.db, &req.query) {
         return (
             StatusCode::OK,
-            Json(graphql::GraphQLResponse {
-                data: Some(introspection_result),
-                errors: None,
-            }),
+            Json(graphql::GraphQLResponse { data: Some(introspection_result), errors: None }),
         )
             .into_response();
     }
@@ -152,23 +142,24 @@ async fn graphql_handler(
     debug!("Generated SQL: {}", sql);
 
     // Create a session and execute the query
-    let mut session = match crate::session::Session::new("graphql".to_string(), "graphql_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(graphql::GraphQLResponse {
-                    data: None,
-                    errors: Some(vec![graphql::GraphQLError::new(format!(
-                        "Failed to create session: {}",
-                        e
-                    ))]),
-                }),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("graphql".to_string(), "graphql_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(graphql::GraphQLResponse {
+                        data: None,
+                        errors: Some(vec![graphql::GraphQLError::new(format!(
+                            "Failed to create session: {}",
+                            e
+                        ))]),
+                    }),
+                )
+                    .into_response();
+            }
+        };
 
     // Execute the main query
     let result = if params.is_empty() {
@@ -181,7 +172,8 @@ async fn graphql_handler(
         Ok(exec_result) => {
             match exec_result {
                 crate::session::ExecutionResult::Select { rows, columns } => {
-                    let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+                    let column_names: Vec<String> =
+                        columns.iter().map(|c| c.name.clone()).collect();
                     let row_values: Vec<Vec<_>> = rows
                         .iter()
                         .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
@@ -200,17 +192,26 @@ async fn graphql_handler(
 
                     // If we have nested fields, resolve relationships
                     if has_nested {
-                        if let graphql::GraphQLQueryInfo::Query { table_name, nested_fields, .. } = &query_info {
+                        if let graphql::GraphQLQueryInfo::Query {
+                            table_name, nested_fields, ..
+                        } = &query_info
+                        {
                             // Build schema map from database
                             let schemas = build_schema_map(&state.db);
 
                             if !schemas.is_empty() {
                                 let ctx = graphql::GraphQLExecutionContext::new(&schemas);
-                                let nested_queries = graphql::build_nested_queries(&ctx, table_name, nested_fields);
+                                let nested_queries =
+                                    graphql::build_nested_queries(&ctx, table_name, nested_fields);
 
                                 // Execute nested queries and attach results
                                 for nested in &nested_queries {
-                                    if let Err(e) = execute_nested_query(&mut session, &mut rows_json, nested, &ctx) {
+                                    if let Err(e) = execute_nested_query(
+                                        &mut session,
+                                        &mut rows_json,
+                                        nested,
+                                        &ctx,
+                                    ) {
                                         debug!("Warning: nested query failed: {}", e);
                                     }
                                 }
@@ -218,10 +219,8 @@ async fn graphql_handler(
                         }
                     }
 
-                    let rows_json_values: Vec<serde_json::Value> = rows_json
-                        .into_iter()
-                        .map(serde_json::Value::Object)
-                        .collect();
+                    let rows_json_values: Vec<serde_json::Value> =
+                        rows_json.into_iter().map(serde_json::Value::Object).collect();
 
                     let response = graphql::GraphQLResponse {
                         data: Some(json!({
@@ -293,7 +292,9 @@ async fn graphql_handler(
 }
 
 /// Build a map of table schemas from the database
-fn build_schema_map(db: &vibesql_storage::Database) -> std::collections::HashMap<String, vibesql_catalog::TableSchema> {
+fn build_schema_map(
+    db: &vibesql_storage::Database,
+) -> std::collections::HashMap<String, vibesql_catalog::TableSchema> {
     let mut schemas = std::collections::HashMap::new();
     for table_name in db.list_tables() {
         if let Some(table) = db.get_table(&table_name) {
@@ -306,9 +307,9 @@ fn build_schema_map(db: &vibesql_storage::Database) -> std::collections::HashMap
 /// Execute a nested query and attach results to parent rows
 fn execute_nested_query(
     session: &mut crate::session::Session,
-    parent_rows: &mut Vec<serde_json::Map<String, serde_json::Value>>,
+    parent_rows: &mut [serde_json::Map<String, serde_json::Value>],
     nested: &graphql::NestedQueryInfo,
-    ctx: &graphql::GraphQLExecutionContext,
+    _ctx: &graphql::GraphQLExecutionContext,
 ) -> Result<(), String> {
     if parent_rows.is_empty() {
         return Ok(());
@@ -328,9 +329,7 @@ fn execute_nested_query(
     let parent_values: Vec<serde_json::Value> = parent_rows
         .iter()
         .filter_map(|row| {
-            row.iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(key_column))
-                .map(|(_, v)| v.clone())
+            row.iter().find(|(k, _)| k.eq_ignore_ascii_case(key_column)).map(|(_, v)| v.clone())
         })
         .collect();
 
@@ -368,7 +367,7 @@ fn execute_nested_query(
     // Execute any deeper nested queries recursively
     let mut nested_rows_mut = nested_rows;
     for deeper_nested in &nested.nested {
-        if let Err(e) = execute_nested_query(session, &mut nested_rows_mut, deeper_nested, ctx) {
+        if let Err(e) = execute_nested_query(session, &mut nested_rows_mut, deeper_nested, _ctx) {
             debug!("Warning: deeper nested query failed: {}", e);
         }
     }
@@ -411,17 +410,18 @@ async fn execute_query(
     };
 
     // Create a session for query execution
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
-            )
-                .into_response();
-        }
-    };
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse::new(format!("Failed to create session: {}", e))),
+                )
+                    .into_response();
+            }
+        };
 
     // Execute the query
     let result = if params.is_empty() {
@@ -434,7 +434,8 @@ async fn execute_query(
         Ok(exec_result) => {
             match exec_result {
                 crate::session::ExecutionResult::Select { rows, columns } => {
-                    let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+                    let column_names: Vec<String> =
+                        columns.iter().map(|c| c.name.clone()).collect();
                     let row_values: Vec<Vec<_>> = rows
                         .iter()
                         .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
@@ -520,7 +521,8 @@ async fn get_table_info(
     // Get schema information
     if let Some(table) = state.db.get_table(&table_name) {
         let schema = &table.schema;
-        let pk_columns: Vec<&String> = schema.primary_key.as_ref().map(|pk| pk.iter().collect()).unwrap_or_default();
+        let pk_columns: Vec<&String> =
+            schema.primary_key.as_ref().map(|pk| pk.iter().collect()).unwrap_or_default();
 
         let columns: Vec<ColumnInfo> = schema
             .columns
@@ -617,30 +619,30 @@ async fn subscribe_stream(
     };
 
     // Execute initial query
-    let mut session = match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create session: {}", e);
-            let event_data = serde_json::to_string(&SseEvent {
-                event_type: "error".to_string(),
-                columns: None,
-                rows: None,
-                old: None,
-                new: None,
-                error: Some(format!("Failed to create session: {}", e)),
-            }).unwrap_or_default();
+    let mut session =
+        match crate::session::Session::new("http".to_string(), "http_user".to_string()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create session: {}", e);
+                let event_data = serde_json::to_string(&SseEvent {
+                    event_type: "error".to_string(),
+                    columns: None,
+                    rows: None,
+                    old: None,
+                    new: None,
+                    error: Some(format!("Failed to create session: {}", e)),
+                })
+                .unwrap_or_default();
 
-            let stream = futures::stream::once(async move {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Event::default().data(event_data)
-                )
-            });
+                let stream = futures::stream::once(async move {
+                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                        Event::default().data(event_data),
+                    )
+                });
 
-            return Sse::new(stream)
-                .keep_alive(KeepAlive::default())
-                .into_response();
-        }
-    };
+                return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
+            }
+        };
 
     // Execute the initial query
     let result = if params_vec.is_empty() {
@@ -663,17 +665,14 @@ async fn subscribe_stream(
                 old: None,
                 new: None,
                 error: Some("Subscription query must be a SELECT statement".to_string()),
-            }).unwrap_or_default();
+            })
+            .unwrap_or_default();
 
             let stream = futures::stream::once(async move {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Event::default().data(event_data)
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Event::default().data(event_data))
             });
 
-            return Sse::new(stream)
-                .keep_alive(KeepAlive::default())
-                .into_response();
+            return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
         }
         Err(e) => {
             error!("Query execution failed: {}", e);
@@ -684,17 +683,14 @@ async fn subscribe_stream(
                 old: None,
                 new: None,
                 error: Some(format!("Query execution failed: {}", e)),
-            }).unwrap_or_default();
+            })
+            .unwrap_or_default();
 
             let stream = futures::stream::once(async move {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Event::default().data(event_data)
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Event::default().data(event_data))
             });
 
-            return Sse::new(stream)
-                .keep_alive(KeepAlive::default())
-                .into_response();
+            return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
         }
     };
 
@@ -711,23 +707,22 @@ async fn subscribe_stream(
                 old: None,
                 new: None,
                 error: Some(format!("Failed to create subscription: {}", e)),
-            }).unwrap_or_default();
-            
+            })
+            .unwrap_or_default();
+
             let stream = futures::stream::once(async move {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Event::default().data(event_data)
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Event::default().data(event_data))
             });
-            
-            return Sse::new(stream)
-                .keep_alive(KeepAlive::default())
-                .into_response();
+
+            return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
         }
     };
 
     // Send initial results
     let columns_clone = columns.clone();
-    if let Err(e) = state.subscription_manager.send_initial_results(subscription_id, &state.db).await {
+    if let Err(e) =
+        state.subscription_manager.send_initial_results(subscription_id, &state.db).await
+    {
         error!("Failed to send initial results: {}", e);
         state.subscription_manager.unsubscribe(subscription_id);
 
@@ -738,17 +733,14 @@ async fn subscribe_stream(
             old: None,
             new: None,
             error: Some(format!("Failed to send initial results: {}", e)),
-        }).unwrap_or_default();
+        })
+        .unwrap_or_default();
 
         let stream = futures::stream::once(async move {
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                Event::default().data(event_data)
-            )
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Event::default().data(event_data))
         });
 
-        return Sse::new(stream)
-            .keep_alive(KeepAlive::default())
-            .into_response();
+        return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
     }
 
     // Create stream that receives updates from subscription and converts to SSE events
@@ -849,9 +841,7 @@ async fn subscribe_stream(
     };
 
     // Create SSE response with keepalive
-    Sse::new(stream)
-        .keep_alive(KeepAlive::default())
-        .into_response()
+    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
 
 #[cfg(test)]
@@ -904,10 +894,7 @@ mod tests {
     #[test]
     fn test_pagination_apply_offset_exceeds_total() {
         let pagination = PaginationParams::from_request(Some(10), Some(100));
-        let rows = vec![
-            vec![serde_json::json!("a")],
-            vec![serde_json::json!("b")],
-        ];
+        let rows = vec![vec![serde_json::json!("a")], vec![serde_json::json!("b")]];
 
         let (paginated, total) = pagination.apply(rows);
         assert_eq!(total, 2, "Total should be 2");

@@ -1,21 +1,23 @@
 //! Tests for ALTER TABLE ADD/DROP PRIMARY KEY and FOREIGN KEY constraints (Phase 6 of #1388)
 
-use vibesql_ast::{Statement};
+use vibesql_ast::Statement;
 use vibesql_storage::Database;
 
 /// Helper to parse and execute SQL statement
 fn exec_sql(db: &mut Database, sql: &str) -> Result<String, String> {
-    let stmt = vibesql_parser::Parser::parse_sql(sql)
-        .map_err(|e| format!("Parse error: {:?}", e))?;
+    let stmt =
+        vibesql_parser::Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
 
     match stmt {
-        Statement::CreateTable(s) => crate::CreateTableExecutor::execute(&s, db)
-            .map_err(|e| e.to_string()),
+        Statement::CreateTable(s) => {
+            crate::CreateTableExecutor::execute(&s, db).map_err(|e| e.to_string())
+        }
         Statement::Insert(s) => crate::InsertExecutor::execute(db, &s)
             .map(|count| format!("{} row(s) inserted", count))
             .map_err(|e| e.to_string()),
-        Statement::AlterTable(s) => crate::alter::AlterTableExecutor::execute(&s, db)
-            .map_err(|e| e.to_string()),
+        Statement::AlterTable(s) => {
+            crate::alter::AlterTableExecutor::execute(&s, db).map_err(|e| e.to_string())
+        }
         Statement::Delete(s) => crate::delete::DeleteExecutor::execute(&s, db)
             .map(|count| format!("{} row(s) deleted", count))
             .map_err(|e| e.to_string()),
@@ -46,11 +48,14 @@ fn test_alter_table_add_primary_key_single_column() {
 fn test_alter_table_add_primary_key_composite() {
     let mut db = Database::new();
 
-    exec_sql(&mut db, "CREATE TABLE order_items (order_id INT, item_id INT, quantity INT)").unwrap();
-    exec_sql(&mut db, "INSERT INTO order_items VALUES (1, 100, 5), (1, 101, 3), (2, 100, 2)").unwrap();
+    exec_sql(&mut db, "CREATE TABLE order_items (order_id INT, item_id INT, quantity INT)")
+        .unwrap();
+    exec_sql(&mut db, "INSERT INTO order_items VALUES (1, 100, 5), (1, 101, 3), (2, 100, 2)")
+        .unwrap();
 
     // Add composite primary key
-    let result = exec_sql(&mut db, "ALTER TABLE order_items ADD PRIMARY KEY (order_id, item_id)").unwrap();
+    let result =
+        exec_sql(&mut db, "ALTER TABLE order_items ADD PRIMARY KEY (order_id, item_id)").unwrap();
     assert!(result.contains("PRIMARY KEY"));
 
     // Verify duplicate insert fails
@@ -86,7 +91,9 @@ fn test_alter_table_add_foreign_key_basic() {
     exec_sql(&mut db, "INSERT INTO orders VALUES (1, 1), (2, 2)").unwrap();
 
     // Add foreign key
-    let result = exec_sql(&mut db, "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id)").unwrap();
+    let result =
+        exec_sql(&mut db, "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id)")
+            .unwrap();
     assert!(result.contains("FOREIGN KEY"));
 
     // Verify orphan row is rejected
@@ -164,7 +171,11 @@ fn test_foreign_key_cascade_delete() {
     exec_sql(&mut db, "INSERT INTO orders VALUES (1, 1), (2, 1), (3, 2)").unwrap();
 
     // Add foreign key with CASCADE delete
-    exec_sql(&mut db, "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE").unwrap();
+    exec_sql(
+        &mut db,
+        "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    )
+    .unwrap();
 
     // Delete parent row
     exec_sql(&mut db, "DELETE FROM users WHERE id = 1").unwrap();
@@ -185,7 +196,11 @@ fn test_foreign_key_restrict_delete() {
     exec_sql(&mut db, "INSERT INTO orders VALUES (1, 1), (2, 2)").unwrap();
 
     // Add foreign key with NO ACTION (equivalent to RESTRICT)
-    exec_sql(&mut db, "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE NO ACTION").unwrap();
+    exec_sql(
+        &mut db,
+        "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE NO ACTION",
+    )
+    .unwrap();
 
     // Delete parent row should fail
     let err = exec_sql(&mut db, "DELETE FROM users WHERE id = 1").unwrap_err();
@@ -207,7 +222,11 @@ fn test_foreign_key_set_null() {
     exec_sql(&mut db, "INSERT INTO orders VALUES (1, 1), (2, 1), (3, 2)").unwrap();
 
     // Add foreign key with SET NULL
-    exec_sql(&mut db, "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL").unwrap();
+    exec_sql(
+        &mut db,
+        "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL",
+    )
+    .unwrap();
 
     // Delete parent row
     exec_sql(&mut db, "DELETE FROM users WHERE id = 1").unwrap();
@@ -227,7 +246,11 @@ fn test_foreign_key_self_reference() {
     exec_sql(&mut db, "CREATE TABLE employees (id INT PRIMARY KEY, manager_id INT)").unwrap();
 
     // Add self-referencing foreign key
-    exec_sql(&mut db, "ALTER TABLE employees ADD FOREIGN KEY (manager_id) REFERENCES employees(id)").unwrap();
+    exec_sql(
+        &mut db,
+        "ALTER TABLE employees ADD FOREIGN KEY (manager_id) REFERENCES employees(id)",
+    )
+    .unwrap();
 
     // CEO with no manager (NULL)
     exec_sql(&mut db, "INSERT INTO employees VALUES (1, NULL)").unwrap();
@@ -250,7 +273,11 @@ fn test_foreign_key_composite() {
     exec_sql(&mut db, "CREATE TABLE courses (dept VARCHAR(10), course_num INT, title VARCHAR(100), PRIMARY KEY (dept, course_num))").unwrap();
     exec_sql(&mut db, "CREATE TABLE enrollments (student_id INT, dept VARCHAR(10), course_num INT, grade VARCHAR(2))").unwrap();
 
-    exec_sql(&mut db, "INSERT INTO courses VALUES ('CS', 101, 'Intro to CS'), ('CS', 201, 'Data Structures')").unwrap();
+    exec_sql(
+        &mut db,
+        "INSERT INTO courses VALUES ('CS', 101, 'Intro to CS'), ('CS', 201, 'Data Structures')",
+    )
+    .unwrap();
 
     // Add composite foreign key
     exec_sql(&mut db, "ALTER TABLE enrollments ADD FOREIGN KEY (dept, course_num) REFERENCES courses(dept, course_num)").unwrap();
@@ -274,7 +301,11 @@ fn test_foreign_key_update_cascade() {
     exec_sql(&mut db, "INSERT INTO orders VALUES (1, 1), (2, 1)").unwrap();
 
     // Add foreign key with CASCADE update
-    exec_sql(&mut db, "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE").unwrap();
+    exec_sql(
+        &mut db,
+        "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE",
+    )
+    .unwrap();
 
     // Update parent key
     exec_sql(&mut db, "UPDATE users SET id = 100 WHERE id = 1").unwrap();
@@ -302,7 +333,11 @@ fn test_cascading_foreign_keys_multi_level() {
     exec_sql(&mut db, "INSERT INTO order_items VALUES (1, 1), (2, 1), (3, 2)").unwrap();
 
     // Add cascading foreign keys
-    exec_sql(&mut db, "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE").unwrap();
+    exec_sql(
+        &mut db,
+        "ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    )
+    .unwrap();
     exec_sql(&mut db, "ALTER TABLE order_items ADD FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE").unwrap();
 
     // Delete user - should cascade to orders and order_items

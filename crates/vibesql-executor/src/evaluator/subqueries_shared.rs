@@ -37,9 +37,7 @@ use vibesql_types::SqlValue;
 /// - `Err(SubqueryReturnedMultipleRows)` if more than one row
 /// - `Err(SubqueryColumnCountMismatch)` if not exactly one column
 /// - `Err(ColumnIndexOutOfBounds)` if row doesn't have a value at index 0
-pub fn eval_scalar_subquery_core(
-    rows: &[Row],
-) -> Result<SqlValue, ExecutorError> {
+pub fn eval_scalar_subquery_core(rows: &[Row]) -> Result<SqlValue, ExecutorError> {
     // SQL:1999 Section 7.9: Scalar subquery must return exactly 1 row
     if rows.len() > 1 {
         return Err(ExecutorError::SubqueryReturnedMultipleRows {
@@ -62,10 +60,7 @@ pub fn eval_scalar_subquery_core(
     if rows.is_empty() {
         Ok(SqlValue::Null)
     } else {
-        rows[0]
-            .get(0)
-            .cloned()
-            .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: 0 })
+        rows[0].get(0).cloned().ok_or(ExecutorError::ColumnIndexOutOfBounds { index: 0 })
     }
 }
 
@@ -133,10 +128,7 @@ where
     // - ALL: returns TRUE (vacuously true - all zero rows satisfy the condition)
     // - ANY/SOME: returns FALSE (no rows to satisfy the condition)
     if rows.is_empty() {
-        return Ok(SqlValue::Boolean(matches!(
-            quantifier,
-            vibesql_ast::Quantifier::All
-        )));
+        return Ok(SqlValue::Boolean(matches!(quantifier, vibesql_ast::Quantifier::All)));
     }
 
     // If left value is NULL, result is NULL

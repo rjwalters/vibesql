@@ -78,16 +78,15 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 left: Box::new(self.convert_expression(left)),
                 right: Box::new(self.convert_expression(right)),
             },
-            arena_expr::Expression::Conjunction(children) => {
-                Expression::Conjunction(children.iter().map(|e| self.convert_expression(e)).collect())
+            arena_expr::Expression::Conjunction(children) => Expression::Conjunction(
+                children.iter().map(|e| self.convert_expression(e)).collect(),
+            ),
+            arena_expr::Expression::Disjunction(children) => Expression::Disjunction(
+                children.iter().map(|e| self.convert_expression(e)).collect(),
+            ),
+            arena_expr::Expression::UnaryOp { op, expr } => {
+                Expression::UnaryOp { op: *op, expr: Box::new(self.convert_expression(expr)) }
             }
-            arena_expr::Expression::Disjunction(children) => {
-                Expression::Disjunction(children.iter().map(|e| self.convert_expression(e)).collect())
-            }
-            arena_expr::Expression::UnaryOp { op, expr } => Expression::UnaryOp {
-                op: *op,
-                expr: Box::new(self.convert_expression(expr)),
-            },
             arena_expr::Expression::IsNull { expr, negated } => Expression::IsNull {
                 expr: Box::new(self.convert_expression(expr)),
                 negated: *negated,
@@ -110,85 +109,64 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an ExtendedExpr to an owned Expression.
     fn convert_extended_expr(&self, ext: &arena_expr::ExtendedExpr<'arena>) -> Expression {
         match ext {
-            arena_expr::ExtendedExpr::Function {
-                name,
-                args,
-                character_unit,
-            } => Expression::Function {
-                name: self.resolve(*name),
-                args: args.iter().map(|e| self.convert_expression(e)).collect(),
-                character_unit: character_unit.map(|u| u.into()),
-            },
-            arena_expr::ExtendedExpr::AggregateFunction {
-                name,
-                distinct,
-                args,
-            } => Expression::AggregateFunction {
-                name: self.resolve(*name),
-                distinct: *distinct,
-                args: args.iter().map(|e| self.convert_expression(e)).collect(),
-            },
-            arena_expr::ExtendedExpr::Case {
-                operand,
-                when_clauses,
-                else_result,
-            } => Expression::Case {
-                operand: operand.map(|e| Box::new(self.convert_expression(e))),
-                when_clauses: when_clauses.iter().map(|cw| self.convert_case_when(cw)).collect(),
-                else_result: else_result.map(|e| Box::new(self.convert_expression(e))),
-            },
+            arena_expr::ExtendedExpr::Function { name, args, character_unit } => {
+                Expression::Function {
+                    name: self.resolve(*name),
+                    args: args.iter().map(|e| self.convert_expression(e)).collect(),
+                    character_unit: character_unit.map(|u| u.into()),
+                }
+            }
+            arena_expr::ExtendedExpr::AggregateFunction { name, distinct, args } => {
+                Expression::AggregateFunction {
+                    name: self.resolve(*name),
+                    distinct: *distinct,
+                    args: args.iter().map(|e| self.convert_expression(e)).collect(),
+                }
+            }
+            arena_expr::ExtendedExpr::Case { operand, when_clauses, else_result } => {
+                Expression::Case {
+                    operand: operand.map(|e| Box::new(self.convert_expression(e))),
+                    when_clauses: when_clauses
+                        .iter()
+                        .map(|cw| self.convert_case_when(cw))
+                        .collect(),
+                    else_result: else_result.map(|e| Box::new(self.convert_expression(e))),
+                }
+            }
             arena_expr::ExtendedExpr::ScalarSubquery(subquery) => {
                 Expression::ScalarSubquery(Box::new(self.convert_select(subquery)))
             }
-            arena_expr::ExtendedExpr::In {
-                expr,
-                subquery,
-                negated,
-            } => Expression::In {
+            arena_expr::ExtendedExpr::In { expr, subquery, negated } => Expression::In {
                 expr: Box::new(self.convert_expression(expr)),
                 subquery: Box::new(self.convert_select(subquery)),
                 negated: *negated,
             },
-            arena_expr::ExtendedExpr::InList {
-                expr,
-                values,
-                negated,
-            } => Expression::InList {
+            arena_expr::ExtendedExpr::InList { expr, values, negated } => Expression::InList {
                 expr: Box::new(self.convert_expression(expr)),
                 values: values.iter().map(|e| self.convert_expression(e)).collect(),
                 negated: *negated,
             },
-            arena_expr::ExtendedExpr::Between {
-                expr,
-                low,
-                high,
-                negated,
-                symmetric,
-            } => Expression::Between {
-                expr: Box::new(self.convert_expression(expr)),
-                low: Box::new(self.convert_expression(low)),
-                high: Box::new(self.convert_expression(high)),
-                negated: *negated,
-                symmetric: *symmetric,
-            },
+            arena_expr::ExtendedExpr::Between { expr, low, high, negated, symmetric } => {
+                Expression::Between {
+                    expr: Box::new(self.convert_expression(expr)),
+                    low: Box::new(self.convert_expression(low)),
+                    high: Box::new(self.convert_expression(high)),
+                    negated: *negated,
+                    symmetric: *symmetric,
+                }
+            }
             arena_expr::ExtendedExpr::Cast { expr, data_type } => Expression::Cast {
                 expr: Box::new(self.convert_expression(expr)),
                 data_type: data_type.clone(),
             },
-            arena_expr::ExtendedExpr::Position {
-                substring,
-                string,
-                character_unit,
-            } => Expression::Position {
-                substring: Box::new(self.convert_expression(substring)),
-                string: Box::new(self.convert_expression(string)),
-                character_unit: character_unit.map(|u| u.into()),
-            },
-            arena_expr::ExtendedExpr::Trim {
-                position,
-                removal_char,
-                string,
-            } => Expression::Trim {
+            arena_expr::ExtendedExpr::Position { substring, string, character_unit } => {
+                Expression::Position {
+                    substring: Box::new(self.convert_expression(substring)),
+                    string: Box::new(self.convert_expression(string)),
+                    character_unit: character_unit.map(|u| u.into()),
+                }
+            }
+            arena_expr::ExtendedExpr::Trim { position, removal_char, string } => Expression::Trim {
                 position: position.map(|p| p.into()),
                 removal_char: removal_char.map(|e| Box::new(self.convert_expression(e))),
                 string: Box::new(self.convert_expression(string)),
@@ -197,11 +175,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 field: (*field).into(),
                 expr: Box::new(self.convert_expression(expr)),
             },
-            arena_expr::ExtendedExpr::Like {
-                expr,
-                pattern,
-                negated,
-            } => Expression::Like {
+            arena_expr::ExtendedExpr::Like { expr, pattern, negated } => Expression::Like {
                 expr: Box::new(self.convert_expression(expr)),
                 pattern: Box::new(self.convert_expression(pattern)),
                 negated: *negated,
@@ -210,17 +184,14 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 subquery: Box::new(self.convert_select(subquery)),
                 negated: *negated,
             },
-            arena_expr::ExtendedExpr::QuantifiedComparison {
-                expr,
-                op,
-                quantifier,
-                subquery,
-            } => Expression::QuantifiedComparison {
-                expr: Box::new(self.convert_expression(expr)),
-                op: *op,
-                quantifier: (*quantifier).into(),
-                subquery: Box::new(self.convert_select(subquery)),
-            },
+            arena_expr::ExtendedExpr::QuantifiedComparison { expr, op, quantifier, subquery } => {
+                Expression::QuantifiedComparison {
+                    expr: Box::new(self.convert_expression(expr)),
+                    op: *op,
+                    quantifier: (*quantifier).into(),
+                    subquery: Box::new(self.convert_select(subquery)),
+                }
+            }
             arena_expr::ExtendedExpr::Interval {
                 value,
                 unit,
@@ -232,37 +203,34 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 leading_precision: *leading_precision,
                 fractional_precision: *fractional_precision,
             },
-            arena_expr::ExtendedExpr::DuplicateKeyValue { column } => Expression::DuplicateKeyValue {
-                column: self.resolve(*column),
-            },
+            arena_expr::ExtendedExpr::DuplicateKeyValue { column } => {
+                Expression::DuplicateKeyValue { column: self.resolve(*column) }
+            }
             arena_expr::ExtendedExpr::WindowFunction { function, over } => {
                 Expression::WindowFunction {
                     function: self.convert_window_function_spec(function),
                     over: self.convert_window_spec(over),
                 }
             }
-            arena_expr::ExtendedExpr::NextValue { sequence_name } => Expression::NextValue {
-                sequence_name: self.resolve(*sequence_name),
-            },
-            arena_expr::ExtendedExpr::MatchAgainst {
-                columns,
-                search_modifier,
-                mode,
-            } => Expression::MatchAgainst {
-                columns: columns.iter().map(|s| self.resolve(*s)).collect(),
-                search_modifier: Box::new(self.convert_expression(search_modifier)),
-                mode: (*mode).into(),
-            },
-            arena_expr::ExtendedExpr::PseudoVariable {
-                pseudo_table,
-                column,
-            } => Expression::PseudoVariable {
-                pseudo_table: (*pseudo_table).into(),
-                column: self.resolve(*column),
-            },
-            arena_expr::ExtendedExpr::SessionVariable { name } => Expression::SessionVariable {
-                name: self.resolve(*name),
-            },
+            arena_expr::ExtendedExpr::NextValue { sequence_name } => {
+                Expression::NextValue { sequence_name: self.resolve(*sequence_name) }
+            }
+            arena_expr::ExtendedExpr::MatchAgainst { columns, search_modifier, mode } => {
+                Expression::MatchAgainst {
+                    columns: columns.iter().map(|s| self.resolve(*s)).collect(),
+                    search_modifier: Box::new(self.convert_expression(search_modifier)),
+                    mode: (*mode).into(),
+                }
+            }
+            arena_expr::ExtendedExpr::PseudoVariable { pseudo_table, column } => {
+                Expression::PseudoVariable {
+                    pseudo_table: (*pseudo_table).into(),
+                    column: self.resolve(*column),
+                }
+            }
+            arena_expr::ExtendedExpr::SessionVariable { name } => {
+                Expression::SessionVariable { name: self.resolve(*name) }
+            }
         }
     }
 
@@ -284,12 +252,10 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                     args: args.iter().map(|e| self.convert_expression(e)).collect(),
                 }
             }
-            arena_expr::WindowFunctionSpec::Ranking { name, args } => {
-                WindowFunctionSpec::Ranking {
-                    name: self.resolve(*name),
-                    args: args.iter().map(|e| self.convert_expression(e)).collect(),
-                }
-            }
+            arena_expr::WindowFunctionSpec::Ranking { name, args } => WindowFunctionSpec::Ranking {
+                name: self.resolve(*name),
+                args: args.iter().map(|e| self.convert_expression(e)).collect(),
+            },
             arena_expr::WindowFunctionSpec::Value { name, args } => WindowFunctionSpec::Value {
                 name: self.resolve(*name),
                 args: args.iter().map(|e| self.convert_expression(e)).collect(),
@@ -334,10 +300,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     }
 
     fn convert_order_by_item(&self, item: &arena_expr::OrderByItem<'arena>) -> OrderByItem {
-        OrderByItem {
-            expr: self.convert_expression(&item.expr),
-            direction: item.direction.into(),
-        }
+        OrderByItem { expr: self.convert_expression(&item.expr), direction: item.direction.into() }
     }
 
     // ========================================================================
@@ -347,11 +310,16 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an arena SelectStmt to an owned SelectStmt.
     pub fn convert_select(&self, stmt: &arena_select::SelectStmt<'arena>) -> SelectStmt {
         SelectStmt {
-            with_clause: stmt.with_clause.as_ref().map(|ctes| {
-                ctes.iter().map(|cte| self.convert_cte(cte)).collect()
-            }),
+            with_clause: stmt
+                .with_clause
+                .as_ref()
+                .map(|ctes| ctes.iter().map(|cte| self.convert_cte(cte)).collect()),
             distinct: stmt.distinct,
-            select_list: stmt.select_list.iter().map(|item| self.convert_select_item(item)).collect(),
+            select_list: stmt
+                .select_list
+                .iter()
+                .map(|item| self.convert_select_item(item))
+                .collect(),
             into_table: self.resolve_opt(stmt.into_table),
             into_variables: stmt
                 .into_variables
@@ -374,10 +342,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     fn convert_cte(&self, cte: &arena_select::CommonTableExpr<'arena>) -> CommonTableExpr {
         CommonTableExpr {
             name: self.resolve(cte.name),
-            columns: cte
-                .columns
-                .as_ref()
-                .map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
+            columns: cte.columns.as_ref().map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
             query: Box::new(self.convert_select(cte.query)),
         }
     }
@@ -385,16 +350,12 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     fn convert_select_item(&self, item: &arena_select::SelectItem<'arena>) -> SelectItem {
         match item {
             arena_select::SelectItem::Wildcard { alias } => SelectItem::Wildcard {
-                alias: alias
-                    .as_ref()
-                    .map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
+                alias: alias.as_ref().map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
             },
             arena_select::SelectItem::QualifiedWildcard { qualifier, alias } => {
                 SelectItem::QualifiedWildcard {
                     qualifier: self.resolve(*qualifier),
-                    alias: alias
-                        .as_ref()
-                        .map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
+                    alias: alias.as_ref().map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
                 }
             }
             arena_select::SelectItem::Expression { expr, alias } => SelectItem::Expression {
@@ -409,30 +370,28 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             arena_select::FromClause::Table { name, alias, column_aliases } => FromClause::Table {
                 name: self.resolve(*name),
                 alias: self.resolve_opt(*alias),
-                column_aliases: column_aliases.as_ref().map(|cols|
-                    cols.iter().map(|s| self.resolve(*s)).collect()
-                ),
+                column_aliases: column_aliases
+                    .as_ref()
+                    .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
             },
-            arena_select::FromClause::Join {
-                left,
-                right,
-                join_type,
-                condition,
-                natural,
-            } => FromClause::Join {
-                left: Box::new(self.convert_from_clause(left)),
-                right: Box::new(self.convert_from_clause(right)),
-                join_type: (*join_type).into(),
-                condition: condition.as_ref().map(|e| self.convert_expression(e)),
-                natural: *natural,
-            },
-            arena_select::FromClause::Subquery { query, alias, column_aliases } => FromClause::Subquery {
-                query: Box::new(self.convert_select(query)),
-                alias: self.resolve(*alias),
-                column_aliases: column_aliases.as_ref().map(|cols|
-                    cols.iter().map(|s| self.resolve(*s)).collect()
-                ),
-            },
+            arena_select::FromClause::Join { left, right, join_type, condition, natural } => {
+                FromClause::Join {
+                    left: Box::new(self.convert_from_clause(left)),
+                    right: Box::new(self.convert_from_clause(right)),
+                    join_type: (*join_type).into(),
+                    condition: condition.as_ref().map(|e| self.convert_expression(e)),
+                    natural: *natural,
+                }
+            }
+            arena_select::FromClause::Subquery { query, alias, column_aliases } => {
+                FromClause::Subquery {
+                    query: Box::new(self.convert_select(query)),
+                    alias: self.resolve(*alias),
+                    column_aliases: column_aliases
+                        .as_ref()
+                        .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
+                }
+            }
         }
     }
 
@@ -441,52 +400,56 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             arena_select::GroupByClause::Simple(exprs) => {
                 GroupByClause::Simple(exprs.iter().map(|e| self.convert_expression(e)).collect())
             }
-            arena_select::GroupByClause::Rollup(elements) => {
-                GroupByClause::Rollup(elements.iter().map(|e| self.convert_grouping_element(e)).collect())
-            }
-            arena_select::GroupByClause::Cube(elements) => {
-                GroupByClause::Cube(elements.iter().map(|e| self.convert_grouping_element(e)).collect())
-            }
-            arena_select::GroupByClause::GroupingSets(sets) => {
-                GroupByClause::GroupingSets(sets.iter().map(|s| self.convert_grouping_set(s)).collect())
-            }
-            arena_select::GroupByClause::Mixed(items) => {
-                GroupByClause::Mixed(items.iter().map(|i| self.convert_mixed_grouping_item(i)).collect())
-            }
+            arena_select::GroupByClause::Rollup(elements) => GroupByClause::Rollup(
+                elements.iter().map(|e| self.convert_grouping_element(e)).collect(),
+            ),
+            arena_select::GroupByClause::Cube(elements) => GroupByClause::Cube(
+                elements.iter().map(|e| self.convert_grouping_element(e)).collect(),
+            ),
+            arena_select::GroupByClause::GroupingSets(sets) => GroupByClause::GroupingSets(
+                sets.iter().map(|s| self.convert_grouping_set(s)).collect(),
+            ),
+            arena_select::GroupByClause::Mixed(items) => GroupByClause::Mixed(
+                items.iter().map(|i| self.convert_mixed_grouping_item(i)).collect(),
+            ),
         }
     }
 
-    fn convert_grouping_element(&self, ge: &arena_select::GroupingElement<'arena>) -> GroupingElement {
+    fn convert_grouping_element(
+        &self,
+        ge: &arena_select::GroupingElement<'arena>,
+    ) -> GroupingElement {
         match ge {
             arena_select::GroupingElement::Single(expr) => {
                 GroupingElement::Single(self.convert_expression(expr))
             }
-            arena_select::GroupingElement::Composite(exprs) => {
-                GroupingElement::Composite(exprs.iter().map(|e| self.convert_expression(e)).collect())
-            }
+            arena_select::GroupingElement::Composite(exprs) => GroupingElement::Composite(
+                exprs.iter().map(|e| self.convert_expression(e)).collect(),
+            ),
         }
     }
 
     fn convert_grouping_set(&self, gs: &arena_select::GroupingSet<'arena>) -> GroupingSet {
-        GroupingSet {
-            columns: gs.columns.iter().map(|e| self.convert_expression(e)).collect(),
-        }
+        GroupingSet { columns: gs.columns.iter().map(|e| self.convert_expression(e)).collect() }
     }
 
-    fn convert_mixed_grouping_item(&self, mgi: &arena_select::MixedGroupingItem<'arena>) -> MixedGroupingItem {
+    fn convert_mixed_grouping_item(
+        &self,
+        mgi: &arena_select::MixedGroupingItem<'arena>,
+    ) -> MixedGroupingItem {
         match mgi {
             arena_select::MixedGroupingItem::Simple(expr) => {
                 MixedGroupingItem::Simple(self.convert_expression(expr))
             }
-            arena_select::MixedGroupingItem::Rollup(elements) => {
-                MixedGroupingItem::Rollup(elements.iter().map(|e| self.convert_grouping_element(e)).collect())
-            }
-            arena_select::MixedGroupingItem::Cube(elements) => {
-                MixedGroupingItem::Cube(elements.iter().map(|e| self.convert_grouping_element(e)).collect())
-            }
-            arena_select::MixedGroupingItem::GroupingSets(sets) => {
-                MixedGroupingItem::GroupingSets(sets.iter().map(|s| self.convert_grouping_set(s)).collect())
-            }
+            arena_select::MixedGroupingItem::Rollup(elements) => MixedGroupingItem::Rollup(
+                elements.iter().map(|e| self.convert_grouping_element(e)).collect(),
+            ),
+            arena_select::MixedGroupingItem::Cube(elements) => MixedGroupingItem::Cube(
+                elements.iter().map(|e| self.convert_grouping_element(e)).collect(),
+            ),
+            arena_select::MixedGroupingItem::GroupingSets(sets) => MixedGroupingItem::GroupingSets(
+                sets.iter().map(|s| self.convert_grouping_set(s)).collect(),
+            ),
         }
     }
 
@@ -529,10 +492,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     }
 
     fn convert_assignment(&self, a: &arena_dml::Assignment<'arena>) -> Assignment {
-        Assignment {
-            column: self.resolve(a.column),
-            value: self.convert_expression(&a.value),
-        }
+        Assignment { column: self.resolve(a.column), value: self.convert_expression(&a.value) }
     }
 
     /// Convert an arena UpdateStmt to an owned UpdateStmt.

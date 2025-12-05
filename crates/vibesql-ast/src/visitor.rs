@@ -389,7 +389,9 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::NextValue { sequence_name } => visitor.visit_next_value(sequence_name),
 
-        Expression::MatchAgainst { search_modifier, .. } => walk_expression(visitor, search_modifier),
+        Expression::MatchAgainst { search_modifier, .. } => {
+            walk_expression(visitor, search_modifier)
+        }
 
         Expression::PseudoVariable { pseudo_table, column } => {
             visitor.visit_pseudo_variable(pseudo_table, column)
@@ -534,10 +536,9 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             children.into_iter().map(|c| transform_expression(visitor, c)).collect(),
         ),
 
-        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
-            op,
-            expr: Box::new(transform_expression(visitor, *inner)),
-        },
+        Expression::UnaryOp { op, expr: inner } => {
+            Expression::UnaryOp { op, expr: Box::new(transform_expression(visitor, *inner)) }
+        }
 
         Expression::Function { name, args, character_unit } => Expression::Function {
             name,
@@ -551,10 +552,9 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             args: args.into_iter().map(|a| transform_expression(visitor, a)).collect(),
         },
 
-        Expression::IsNull { expr: inner, negated } => Expression::IsNull {
-            expr: Box::new(transform_expression(visitor, *inner)),
-            negated,
-        },
+        Expression::IsNull { expr: inner, negated } => {
+            Expression::IsNull { expr: Box::new(transform_expression(visitor, *inner)), negated }
+        }
 
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
             operand: operand.map(|op| Box::new(transform_expression(visitor, *op))),
@@ -596,10 +596,9 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             symmetric,
         },
 
-        Expression::Cast { expr: inner, data_type } => Expression::Cast {
-            expr: Box::new(transform_expression(visitor, *inner)),
-            data_type,
-        },
+        Expression::Cast { expr: inner, data_type } => {
+            Expression::Cast { expr: Box::new(transform_expression(visitor, *inner)), data_type }
+        }
 
         Expression::Position { substring, string, character_unit } => Expression::Position {
             substring: Box::new(transform_expression(visitor, *substring)),
@@ -613,10 +612,9 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             string: Box::new(transform_expression(visitor, *string)),
         },
 
-        Expression::Extract { field, expr: inner } => Expression::Extract {
-            field,
-            expr: Box::new(transform_expression(visitor, *inner)),
-        },
+        Expression::Extract { field, expr: inner } => {
+            Expression::Extract { field, expr: Box::new(transform_expression(visitor, *inner)) }
+        }
 
         Expression::Like { expr: inner, pattern, negated } => Expression::Like {
             expr: Box::new(transform_expression(visitor, *inner)),
@@ -624,10 +622,9 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             negated,
         },
 
-        Expression::Exists { subquery, negated } => Expression::Exists {
-            subquery: Box::new(transform_select(visitor, *subquery)),
-            negated,
-        },
+        Expression::Exists { subquery, negated } => {
+            Expression::Exists { subquery: Box::new(transform_select(visitor, *subquery)), negated }
+        }
 
         Expression::QuantifiedComparison { expr: inner, op, quantifier, subquery } => {
             Expression::QuantifiedComparison {
@@ -685,14 +682,11 @@ fn transform_window_function<V: ExpressionMutVisitor>(
 }
 
 /// Transform a window specification
-fn transform_window_spec<V: ExpressionMutVisitor>(
-    visitor: &mut V,
-    spec: WindowSpec,
-) -> WindowSpec {
+fn transform_window_spec<V: ExpressionMutVisitor>(visitor: &mut V, spec: WindowSpec) -> WindowSpec {
     WindowSpec {
-        partition_by: spec.partition_by.map(|exprs| {
-            exprs.into_iter().map(|e| transform_expression(visitor, e)).collect()
-        }),
+        partition_by: spec
+            .partition_by
+            .map(|exprs| exprs.into_iter().map(|e| transform_expression(visitor, e)).collect()),
         order_by: spec.order_by.map(|items| {
             items
                 .into_iter()
@@ -973,10 +967,7 @@ fn walk_delete<V: ExpressionVisitor>(visitor: &mut V, stmt: &DeleteStmt) {
 // ============================================================================
 
 /// Transform a SELECT statement using a mutable visitor
-pub fn transform_select<V: ExpressionMutVisitor>(
-    visitor: &mut V,
-    stmt: SelectStmt,
-) -> SelectStmt {
+pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectStmt) -> SelectStmt {
     SelectStmt {
         with_clause: stmt.with_clause.map(|ctes| {
             ctes.into_iter()
@@ -992,10 +983,9 @@ pub fn transform_select<V: ExpressionMutVisitor>(
             .select_list
             .into_iter()
             .map(|item| match item {
-                SelectItem::Expression { expr, alias } => SelectItem::Expression {
-                    expr: transform_expression(visitor, expr),
-                    alias,
-                },
+                SelectItem::Expression { expr, alias } => {
+                    SelectItem::Expression { expr: transform_expression(visitor, expr), alias }
+                }
                 other => other,
             })
             .collect(),
@@ -1027,7 +1017,9 @@ pub fn transform_select<V: ExpressionMutVisitor>(
 /// Transform a FROM clause
 fn transform_from_clause<V: ExpressionMutVisitor>(visitor: &mut V, from: FromClause) -> FromClause {
     match from {
-        FromClause::Table { name, alias, column_aliases } => FromClause::Table { name, alias, column_aliases },
+        FromClause::Table { name, alias, column_aliases } => {
+            FromClause::Table { name, alias, column_aliases }
+        }
         FromClause::Subquery { query, alias, column_aliases } => FromClause::Subquery {
             query: Box::new(transform_select(visitor, *query)),
             alias,
@@ -1121,19 +1113,14 @@ fn transform_mixed_grouping_item<V: ExpressionMutVisitor>(
 }
 
 /// Transform an INSERT statement
-pub fn transform_insert<V: ExpressionMutVisitor>(
-    visitor: &mut V,
-    stmt: InsertStmt,
-) -> InsertStmt {
+pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertStmt) -> InsertStmt {
     InsertStmt {
         table_name: stmt.table_name,
         columns: stmt.columns,
         source: match stmt.source {
             InsertSource::Values(rows) => InsertSource::Values(
                 rows.into_iter()
-                    .map(|row| {
-                        row.into_iter().map(|e| transform_expression(visitor, e)).collect()
-                    })
+                    .map(|row| row.into_iter().map(|e| transform_expression(visitor, e)).collect())
                     .collect(),
             ),
             InsertSource::Select(select) => {
@@ -1154,10 +1141,7 @@ pub fn transform_insert<V: ExpressionMutVisitor>(
 }
 
 /// Transform an UPDATE statement
-pub fn transform_update<V: ExpressionMutVisitor>(
-    visitor: &mut V,
-    stmt: UpdateStmt,
-) -> UpdateStmt {
+pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateStmt) -> UpdateStmt {
     UpdateStmt {
         table_name: stmt.table_name,
         assignments: stmt
@@ -1175,10 +1159,7 @@ pub fn transform_update<V: ExpressionMutVisitor>(
 }
 
 /// Transform a DELETE statement
-pub fn transform_delete<V: ExpressionMutVisitor>(
-    visitor: &mut V,
-    stmt: DeleteStmt,
-) -> DeleteStmt {
+pub fn transform_delete<V: ExpressionMutVisitor>(visitor: &mut V, stmt: DeleteStmt) -> DeleteStmt {
     DeleteStmt {
         only: stmt.only,
         table_name: stmt.table_name,
@@ -1349,10 +1330,7 @@ mod tests {
         walk_expression(&mut visitor, &expr);
         assert_eq!(
             visitor.columns,
-            vec![
-                (Some("users".to_string()), "id".to_string()),
-                (None, "value".to_string())
-            ]
+            vec![(Some("users".to_string()), "id".to_string()), (None, "value".to_string())]
         );
     }
 

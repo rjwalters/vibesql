@@ -71,9 +71,7 @@ pub(super) fn try_convert_exists_to_join(
     }
 
     // Skip if subquery has complex features
-    if subquery.group_by.is_some()
-        || subquery.having.is_some()
-        || subquery.set_operation.is_some()
+    if subquery.group_by.is_some() || subquery.having.is_some() || subquery.set_operation.is_some()
     {
         return None;
     }
@@ -82,7 +80,14 @@ pub(super) fn try_convert_exists_to_join(
     match &subquery.from {
         Some(FromClause::Table { name, alias, .. }) => {
             // Simple single-table case: use existing logic
-            try_convert_simple_exists_to_join(from, subquery, negated, name.clone(), alias.clone(), where_clause)
+            try_convert_simple_exists_to_join(
+                from,
+                subquery,
+                negated,
+                name.clone(),
+                alias.clone(),
+                where_clause,
+            )
         }
         Some(from_clause @ FromClause::Join { .. }) => {
             // Multi-table subquery (explicit or implicit joins): wrap as derived table
@@ -132,14 +137,11 @@ fn try_convert_simple_exists_to_join(
     };
 
     // Create the right side of the join
-    let right_from = FromClause::Table { name: table_name, alias: effective_alias, column_aliases: None };
+    let right_from =
+        FromClause::Table { name: table_name, alias: effective_alias, column_aliases: None };
 
     // Create SEMI or ANTI join based on negation
-    let join_type = if negated {
-        JoinType::Anti
-    } else {
-        JoinType::Semi
-    };
+    let join_type = if negated { JoinType::Anti } else { JoinType::Semi };
 
     // Create the join
     let new_from = FromClause::Join {
@@ -183,7 +185,8 @@ fn try_convert_complex_exists_to_join(
 ) -> Option<(FromClause, Option<Expression>)> {
     // Extract correlation predicates and internal predicates from the WHERE clause
     // Correlation predicates reference outer tables, internal predicates don't
-    let (correlation_preds, internal_preds) = split_predicates_by_correlation(where_clause, subquery);
+    let (correlation_preds, internal_preds) =
+        split_predicates_by_correlation(where_clause, subquery);
 
     if correlation_preds.is_empty() {
         // No correlation predicates found - this shouldn't happen since we checked is_correlated
@@ -191,13 +194,17 @@ fn try_convert_complex_exists_to_join(
     }
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
-        eprintln!("[SUBQUERY_TRANSFORM] Complex EXISTS: {} correlation preds, {} internal preds",
-                 correlation_preds.len(), internal_preds.len());
+        eprintln!(
+            "[SUBQUERY_TRANSFORM] Complex EXISTS: {} correlation preds, {} internal preds",
+            correlation_preds.len(),
+            internal_preds.len()
+        );
     }
 
     // From the correlation predicates, extract the subquery column(s) that correlate with outer
     // For example, from `c.c_customer_sk = ss_customer_sk`, extract `ss_customer_sk`
-    let (join_condition, subquery_columns) = build_join_condition_and_select_columns(&correlation_preds, subquery)?;
+    let (join_condition, subquery_columns) =
+        build_join_condition_and_select_columns(&correlation_preds, subquery)?;
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
         eprintln!("[SUBQUERY_TRANSFORM] Complex EXISTS: subquery_columns={:?}", subquery_columns);
@@ -208,22 +215,24 @@ fn try_convert_complex_exists_to_join(
 
     // Generate a unique alias for the derived table
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let alias = format!("__exists_subq_{}", COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let alias =
+        format!("__exists_subq_{}", COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
 
     // Build the derived table SELECT statement
     // SELECT DISTINCT <subquery_columns> FROM <subquery_from> WHERE <internal_preds>
     let derived_select = SelectStmt {
         with_clause: None,
         distinct: true, // DISTINCT to deduplicate for semi-join semantics
-        select_list: subquery_columns.iter().map(|col| {
-            SelectItem::Expression {
+        select_list: subquery_columns
+            .iter()
+            .map(|col| SelectItem::Expression {
                 expr: Expression::ColumnRef {
                     table: col.table.clone(),
                     column: col.column.clone(),
                 },
                 alias: Some(col.column.clone()),
-            }
-        }).collect(),
+            })
+            .collect(),
         into_table: None,
         into_variables: None,
         from: Some(subquery_from.clone()),
@@ -237,17 +246,18 @@ fn try_convert_complex_exists_to_join(
     };
 
     // Create the derived table as FromClause::Subquery
-    let right_from = FromClause::Subquery { query: Box::new(derived_select), alias: alias.clone(), column_aliases: None };
+    let right_from = FromClause::Subquery {
+        query: Box::new(derived_select),
+        alias: alias.clone(),
+        column_aliases: None,
+    };
 
     // Rewrite the join condition to reference the derived table alias
-    let rewritten_join_condition = rewrite_join_condition_for_derived_table(&join_condition, &subquery_columns, &alias);
+    let rewritten_join_condition =
+        rewrite_join_condition_for_derived_table(&join_condition, &subquery_columns, &alias);
 
     // Create SEMI or ANTI join based on negation
-    let join_type = if negated {
-        JoinType::Anti
-    } else {
-        JoinType::Semi
-    };
+    let join_type = if negated { JoinType::Anti } else { JoinType::Semi };
 
     // Create the join
     let new_from = FromClause::Join {
@@ -284,7 +294,9 @@ fn split_predicates_by_correlation(
     let predicates = flatten_and_predicates(expr);
 
     for pred in predicates {
-        if crate::optimizer::subquery_rewrite::correlation::has_external_column_refs(&pred, subquery) {
+        if crate::optimizer::subquery_rewrite::correlation::has_external_column_refs(
+            &pred, subquery,
+        ) {
             correlation.push(pred);
         } else {
             internal.push(pred);
@@ -369,8 +381,14 @@ fn extract_subquery_column_from_correlation(
     match pred {
         Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
             // Check if left is external and right is internal, or vice versa
-            let left_external = crate::optimizer::subquery_rewrite::correlation::has_external_column_refs(left, subquery);
-            let right_external = crate::optimizer::subquery_rewrite::correlation::has_external_column_refs(right, subquery);
+            let left_external =
+                crate::optimizer::subquery_rewrite::correlation::has_external_column_refs(
+                    left, subquery,
+                );
+            let right_external =
+                crate::optimizer::subquery_rewrite::correlation::has_external_column_refs(
+                    right, subquery,
+                );
 
             if left_external && !right_external {
                 // Right side is the subquery column
@@ -389,10 +407,9 @@ fn extract_subquery_column_from_correlation(
 /// Extract column reference from an expression
 fn extract_column_ref(expr: &Expression) -> Option<ColumnRef> {
     match expr {
-        Expression::ColumnRef { table, column } => Some(ColumnRef {
-            table: table.clone(),
-            column: column.clone(),
-        }),
+        Expression::ColumnRef { table, column } => {
+            Some(ColumnRef { table: table.clone(), column: column.clone() })
+        }
         _ => None,
     }
 }
@@ -408,11 +425,10 @@ fn rewrite_join_condition_for_derived_table(
     match condition {
         Expression::ColumnRef { table, column } => {
             // Check if this column is one of the subquery columns
-            if subquery_columns.iter().any(|c| c.column == *column && (c.table.is_none() || c.table.as_ref() == table.as_ref())) {
-                Expression::ColumnRef {
-                    table: Some(alias.to_string()),
-                    column: column.clone(),
-                }
+            if subquery_columns.iter().any(|c| {
+                c.column == *column && (c.table.is_none() || c.table.as_ref() == table.as_ref())
+            }) {
+                Expression::ColumnRef { table: Some(alias.to_string()), column: column.clone() }
             } else {
                 condition.clone()
             }
@@ -420,12 +436,17 @@ fn rewrite_join_condition_for_derived_table(
         Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
             op: op.clone(),
             left: Box::new(rewrite_join_condition_for_derived_table(left, subquery_columns, alias)),
-            right: Box::new(rewrite_join_condition_for_derived_table(right, subquery_columns, alias)),
+            right: Box::new(rewrite_join_condition_for_derived_table(
+                right,
+                subquery_columns,
+                alias,
+            )),
         },
         Expression::Conjunction(children) => Expression::Conjunction(
-            children.iter()
+            children
+                .iter()
                 .map(|c| rewrite_join_condition_for_derived_table(c, subquery_columns, alias))
-                .collect()
+                .collect(),
         ),
         _ => condition.clone(),
     }

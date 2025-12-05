@@ -18,7 +18,9 @@ fn test_substr_basic() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello World".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Hello World".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
         ],
@@ -34,7 +36,9 @@ fn test_substr_to_end() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello World".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Hello World".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(7)),
         ],
         character_unit: None,
@@ -67,7 +71,9 @@ fn test_instr_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello World".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Hello World".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("World".to_string())),
         ],
         character_unit: None,
@@ -82,7 +88,9 @@ fn test_instr_not_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello World".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Hello World".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("xyz".to_string())),
         ],
         character_unit: None,
@@ -116,7 +124,9 @@ fn test_locate_basic() {
         name: "LOCATE".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("World".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello World".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Hello World".to_string(),
+            )),
         ],
         character_unit: None,
     };
@@ -131,7 +141,9 @@ fn test_locate_with_start() {
         name: "LOCATE".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("o".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Hello World".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                "Hello World".to_string(),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(6)),
         ],
         character_unit: None,
@@ -171,7 +183,8 @@ fn test_format_zero_decimals() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("1,234,568".to_string())); // Rounds
+    assert_eq!(result, vibesql_types::SqlValue::Varchar("1,234,568".to_string()));
+    // Rounds
 }
 
 #[test]
@@ -273,8 +286,11 @@ fn test_schema_alias() {
 #[test]
 fn test_user() {
     let (evaluator, row) = create_test_evaluator();
-    let expr =
-        vibesql_ast::Expression::Function { name: "USER".to_string(), args: vec![], character_unit: None };
+    let expr = vibesql_ast::Expression::Function {
+        name: "USER".to_string(),
+        args: vec![],
+        character_unit: None,
+    };
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
         vibesql_types::SqlValue::Varchar(s) => {

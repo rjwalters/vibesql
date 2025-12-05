@@ -33,14 +33,7 @@ impl<'a> RowValidator<'a> {
         batch_unique_values: &'a [Vec<Vec<vibesql_types::SqlValue>>],
         skip_duplicate_checks: bool,
     ) -> Self {
-        Self {
-            db,
-            schema,
-            table_name,
-            batch_pk_values,
-            batch_unique_values,
-            skip_duplicate_checks,
-        }
+        Self { db, schema, table_name, batch_pk_values, batch_unique_values, skip_duplicate_checks }
     }
 
     /// Validate all constraints in a single pass through the row
@@ -301,7 +294,12 @@ impl<'a> RowValidator<'a> {
         &self,
         row_values: &[vibesql_types::SqlValue],
     ) -> Result<(), ExecutorError> {
-        super::constraints::enforce_unique_indexes(self.db, self.schema, self.table_name, row_values)
+        super::constraints::enforce_unique_indexes(
+            self.db,
+            self.schema,
+            self.table_name,
+            row_values,
+        )
     }
 
     /// Phase 6: Validate FOREIGN KEY references using pre-extracted keys

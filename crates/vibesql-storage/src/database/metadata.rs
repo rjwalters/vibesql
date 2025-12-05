@@ -2,8 +2,8 @@
 // Schema Metadata Management
 // ============================================================================
 
-use vibesql_types::SqlValue;
 use std::collections::HashMap;
+use vibesql_types::SqlValue;
 
 /// Manages schema metadata and session state
 #[derive(Debug, Clone)]
@@ -32,21 +32,14 @@ impl Metadata {
         );
 
         // version - simple version string
-        session_variables.insert(
-            "VERSION".to_string(),
-            SqlValue::Varchar("8.0.0-vibesql".to_string()),
-        );
+        session_variables
+            .insert("VERSION".to_string(), SqlValue::Varchar("8.0.0-vibesql".to_string()));
 
         // character_set_client - default to utf8mb4
-        session_variables.insert(
-            "CHARACTER_SET_CLIENT".to_string(),
-            SqlValue::Varchar("utf8mb4".to_string()),
-        );
+        session_variables
+            .insert("CHARACTER_SET_CLIENT".to_string(), SqlValue::Varchar("utf8mb4".to_string()));
 
-        Metadata {
-            session_variables,
-            routine_body_cache: HashMap::new(),
-        }
+        Metadata { session_variables, routine_body_cache: HashMap::new() }
     }
 
     // ============================================================================

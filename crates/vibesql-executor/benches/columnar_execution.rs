@@ -6,7 +6,8 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 use vibesql_executor::select::columnar::{
-    execute_columnar_aggregate, fast_aggregate_on_rows, AggregateOp, AggregateSource, AggregateSpec, ColumnPredicate,
+    execute_columnar_aggregate, fast_aggregate_on_rows, AggregateOp, AggregateSource,
+    AggregateSpec, ColumnPredicate,
 };
 use vibesql_storage::Row;
 use vibesql_types::{Date, SqlValue};
@@ -16,8 +17,8 @@ fn create_lineitem_data(row_count: usize) -> Vec<Row> {
     (0..row_count)
         .map(|i| {
             Row::new(vec![
-                SqlValue::Integer((i % 50) as i64),          // l_quantity
-                SqlValue::Double(100.0 + (i % 1000) as f64), // l_extendedprice
+                SqlValue::Integer((i % 50) as i64),               // l_quantity
+                SqlValue::Double(100.0 + (i % 1000) as f64),      // l_extendedprice
                 SqlValue::Double(0.01 + (i % 10) as f64 / 100.0), // l_discount
                 SqlValue::Date(Date::new(1994 + (i % 2) as i32, 1 + (i % 12) as u8, 1).unwrap()), // l_shipdate
             ])
@@ -43,14 +44,9 @@ fn row_by_row_aggregate(
                         false
                     }
                 }
-                ColumnPredicate::Between {
-                    column_idx,
-                    low,
-                    high,
-                } => {
+                ColumnPredicate::Between { column_idx, low, high } => {
                     if let Some(cell_value) = row.get(*column_idx) {
-                        !compare_less_than(cell_value, low)
-                            && !compare_less_than(high, cell_value)
+                        !compare_less_than(cell_value, low) && !compare_less_than(high, cell_value)
                     } else {
                         false
                     }
@@ -118,10 +114,7 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
 
         // Predicates: l_quantity < 24 AND l_discount BETWEEN 0.05 AND 0.07
         let predicates = vec![
-            ColumnPredicate::LessThan {
-                column_idx: 0,
-                value: SqlValue::Integer(24),
-            },
+            ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(24) },
             ColumnPredicate::Between {
                 column_idx: 2,
                 low: SqlValue::Double(0.05),
@@ -137,27 +130,21 @@ fn bench_tpch_q6_style(c: &mut Criterion) {
         ];
 
         // Benchmark row-by-row execution
-        group.bench_with_input(
-            BenchmarkId::new("row_by_row", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("row_by_row", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let _result =
+                    black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
+            });
+        });
 
         // Benchmark columnar execution (converts rows to batch first)
-        group.bench_with_input(
-            BenchmarkId::new("columnar", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let _result =
-                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("columnar", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let _result = black_box(
+                    execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap(),
+                );
+            });
+        });
 
         // Benchmark fast single-pass aggregate (no batch conversion)
         group.bench_with_input(
@@ -188,11 +175,8 @@ fn bench_simple_aggregation(c: &mut Criterion) {
         let predicates = vec![];
 
         // Aggregates: SUM(l_extendedprice), AVG(l_discount), COUNT(*)
-        let aggregates_tuple = vec![
-            (1, AggregateOp::Sum),
-            (2, AggregateOp::Avg),
-            (0, AggregateOp::Count),
-        ];
+        let aggregates_tuple =
+            vec![(1, AggregateOp::Sum), (2, AggregateOp::Avg), (0, AggregateOp::Count)];
         let aggregates = vec![
             AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
             AggregateSpec { op: AggregateOp::Avg, source: AggregateSource::Column(2) },
@@ -200,27 +184,21 @@ fn bench_simple_aggregation(c: &mut Criterion) {
         ];
 
         // Benchmark row-by-row execution
-        group.bench_with_input(
-            BenchmarkId::new("row_by_row", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("row_by_row", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let _result =
+                    black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
+            });
+        });
 
         // Benchmark columnar execution
-        group.bench_with_input(
-            BenchmarkId::new("columnar", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let _result =
-                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("columnar", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let _result = black_box(
+                    execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap(),
+                );
+            });
+        });
 
         // Benchmark fast single-pass aggregate (no batch conversion)
         group.bench_with_input(
@@ -261,41 +239,29 @@ fn bench_selective_filtering(c: &mut Criterion) {
         ];
 
         let aggregates_tuple = vec![(1, AggregateOp::Sum)];
-        let aggregates = vec![
-            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) },
-        ];
+        let aggregates =
+            vec![AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) }];
 
         // Benchmark row-by-row execution
-        group.bench_with_input(
-            BenchmarkId::new("row_by_row", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let _result = black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("row_by_row", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let _result =
+                    black_box(row_by_row_aggregate(&rows, &predicates, &aggregates_tuple));
+            });
+        });
 
         // Benchmark columnar execution
-        group.bench_with_input(
-            BenchmarkId::new("columnar", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let _result =
-                        black_box(execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap());
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("columnar", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let _result = black_box(
+                    execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap(),
+                );
+            });
+        });
     }
 
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_tpch_q6_style,
-    bench_simple_aggregation,
-    bench_selective_filtering
-);
+criterion_group!(benches, bench_tpch_q6_style, bench_simple_aggregation, bench_selective_filtering);
 criterion_main!(benches);

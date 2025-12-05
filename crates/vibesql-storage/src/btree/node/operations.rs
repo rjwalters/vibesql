@@ -16,8 +16,8 @@ impl InternalNode {
     pub fn find_child_index(&self, key: &Key) -> usize {
         // Binary search to find the appropriate child
         match self.keys.binary_search(key) {
-            Ok(idx) => idx + 1,  // Key found, go to right child
-            Err(idx) => idx,     // Key not found, idx is the insertion point
+            Ok(idx) => idx + 1, // Key found, go to right child
+            Err(idx) => idx,    // Key not found, idx is the insertion point
         }
     }
 
@@ -61,10 +61,7 @@ impl LeafNode {
     /// Returns a reference to the Vec of row_ids if found
     #[allow(dead_code)]
     pub fn search(&self, key: &Key) -> Option<&Vec<RowId>> {
-        self.entries
-            .binary_search_by_key(&key, |(k, _)| k)
-            .ok()
-            .map(|idx| &self.entries[idx].1)
+        self.entries.binary_search_by_key(&key, |(k, _)| k).ok().map(|idx| &self.entries[idx].1)
     }
 
     /// Delete a specific row_id for a key from this leaf node
@@ -84,10 +81,10 @@ impl LeafNode {
                     }
                     true
                 } else {
-                    false  // row_id not found for this key
+                    false // row_id not found for this key
                 }
             }
-            Err(_) => false,  // Key not found
+            Err(_) => false, // Key not found
         }
     }
 

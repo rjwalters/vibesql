@@ -121,9 +121,5 @@ fn test_basic_sql_examples() {
     println!("===================================\n");
 
     // Require all tests to pass (stricter assertion)
-    assert_eq!(
-        failed, 0,
-        "{} basic example(s) failed - all examples should pass",
-        failed
-    );
+    assert_eq!(failed, 0, "{} basic example(s) failed - all examples should pass", failed);
 }

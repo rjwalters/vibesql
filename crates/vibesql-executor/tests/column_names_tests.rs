@@ -89,7 +89,8 @@ fn test_column_names_functions() {
     let db = create_test_database();
     let executor = SelectExecutor::new(&db);
 
-    let stmt = vibesql_parser::Parser::parse_sql("SELECT COUNT(*), AVG(salary) FROM employees").unwrap();
+    let stmt =
+        vibesql_parser::Parser::parse_sql("SELECT COUNT(*), AVG(salary) FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         assert_eq!(result.columns.len(), 2);
@@ -123,8 +124,10 @@ fn test_column_names_mixed() {
     let db = create_test_database();
     let executor = SelectExecutor::new(&db);
 
-    let stmt = vibesql_parser::Parser::parse_sql("SELECT id, name AS emp_name, salary * 12 FROM employees")
-        .unwrap();
+    let stmt = vibesql_parser::Parser::parse_sql(
+        "SELECT id, name AS emp_name, salary * 12 FROM employees",
+    )
+    .unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         assert_eq!(result.columns.len(), 3);
@@ -144,7 +147,8 @@ fn test_column_names_function_with_alias() {
     let executor = SelectExecutor::new(&db);
 
     let stmt =
-        vibesql_parser::Parser::parse_sql("SELECT COUNT(*) AS total_employees FROM employees").unwrap();
+        vibesql_parser::Parser::parse_sql("SELECT COUNT(*) AS total_employees FROM employees")
+            .unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         assert_eq!(result.columns, vec!["TOTAL_EMPLOYEES"]);

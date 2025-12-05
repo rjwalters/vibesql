@@ -81,10 +81,7 @@ impl<'arena> ArenaParser<'arena> {
             let expr = self.parse_not_expression()?;
             let expr_ref = self.arena.alloc(expr);
 
-            Ok(Expression::UnaryOp {
-                op: UnaryOperator::Not,
-                expr: expr_ref,
-            })
+            Ok(Expression::UnaryOp { op: UnaryOperator::Not, expr: expr_ref })
         } else {
             self.parse_comparison_expression()
         }
@@ -274,22 +271,15 @@ impl<'arena> ArenaParser<'arena> {
                 self.expect_token(Token::RParen)?;
 
                 let left_ref = self.arena.alloc(left);
-                return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::QuantifiedComparison {
-                    expr: left_ref,
-                    op,
-                    quantifier,
-                    subquery,
-                })));
+                return Ok(Expression::Extended(self.arena.alloc(
+                    ExtendedExpr::QuantifiedComparison { expr: left_ref, op, quantifier, subquery },
+                )));
             }
 
             let right = self.parse_additive_expression()?;
             let left_ref = self.arena.alloc(left);
             let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp {
-                op,
-                left: left_ref,
-                right: right_ref,
-            };
+            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
         }
 
         // Check for IS NULL / IS NOT NULL
@@ -299,10 +289,7 @@ impl<'arena> ArenaParser<'arena> {
             self.expect_keyword(Keyword::Null)?;
 
             let left_ref = self.arena.alloc(left);
-            left = Expression::IsNull {
-                expr: left_ref,
-                negated,
-            };
+            left = Expression::IsNull { expr: left_ref, negated };
         }
 
         Ok(left)
@@ -324,11 +311,7 @@ impl<'arena> ArenaParser<'arena> {
             let right = self.parse_multiplicative_expression()?;
             let left_ref = self.arena.alloc(left);
             let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp {
-                op,
-                left: left_ref,
-                right: right_ref,
-            };
+            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
         }
 
         Ok(left)
@@ -351,11 +334,7 @@ impl<'arena> ArenaParser<'arena> {
             let right = self.parse_unary_expression()?;
             let left_ref = self.arena.alloc(left);
             let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp {
-                op,
-                left: left_ref,
-                right: right_ref,
-            };
+            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
         }
 
         Ok(left)
@@ -368,19 +347,13 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 let expr = self.parse_unary_expression()?;
                 let expr_ref = self.arena.alloc(expr);
-                Ok(Expression::UnaryOp {
-                    op: UnaryOperator::Plus,
-                    expr: expr_ref,
-                })
+                Ok(Expression::UnaryOp { op: UnaryOperator::Plus, expr: expr_ref })
             }
             Token::Symbol('-') => {
                 self.advance();
                 let expr = self.parse_unary_expression()?;
                 let expr_ref = self.arena.alloc(expr);
-                Ok(Expression::UnaryOp {
-                    op: UnaryOperator::Minus,
-                    expr: expr_ref,
-                })
+                Ok(Expression::UnaryOp { op: UnaryOperator::Minus, expr: expr_ref })
             }
             _ => self.parse_primary_expression(),
         }
@@ -415,7 +388,9 @@ impl<'arena> ArenaParser<'arena> {
             let name = name.clone();
             self.advance();
             let name = self.intern(&name);
-            return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::SessionVariable { name })));
+            return Ok(Expression::Extended(
+                self.arena.alloc(ExtendedExpr::SessionVariable { name }),
+            ));
         }
 
         // Literals
@@ -464,20 +439,14 @@ impl<'arena> ArenaParser<'arena> {
                     let col = col.clone();
                     self.advance();
                     let col_sym = self.intern(&col);
-                    return Ok(Expression::ColumnRef {
-                        table: Some(name_sym),
-                        column: col_sym,
-                    });
+                    return Ok(Expression::ColumnRef { table: Some(name_sym), column: col_sym });
                 } else if matches!(self.peek(), Token::Symbol('*')) {
                     self.advance();
                     return Ok(Expression::Wildcard);
                 }
             }
 
-            return Ok(Expression::ColumnRef {
-                table: None,
-                column: name_sym,
-            });
+            return Ok(Expression::ColumnRef { table: None, column: name_sym });
         }
 
         // Wildcard (*)
@@ -494,7 +463,9 @@ impl<'arena> ArenaParser<'arena> {
             if self.peek_keyword(Keyword::Select) {
                 let subquery = self.parse_select_statement()?;
                 self.expect_token(Token::RParen)?;
-                return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::ScalarSubquery(subquery))));
+                return Ok(Expression::Extended(
+                    self.arena.alloc(ExtendedExpr::ScalarSubquery(subquery)),
+                ));
             }
 
             // Regular parenthesized expression
@@ -503,9 +474,7 @@ impl<'arena> ArenaParser<'arena> {
             return Ok(expr);
         }
 
-        Err(ParseError {
-            message: format!("Expected expression, found {:?}", self.peek()),
-        })
+        Err(ParseError { message: format!("Expected expression, found {:?}", self.peek()) })
     }
 
     /// Parse literal values.
@@ -520,9 +489,7 @@ impl<'arena> ArenaParser<'arena> {
                 } else if let Ok(f) = n.parse::<f64>() {
                     Some(Expression::Literal(SqlValue::Double(f)))
                 } else {
-                    return Err(ParseError {
-                        message: format!("Invalid number: {}", n),
-                    });
+                    return Err(ParseError { message: format!("Invalid number: {}", n) });
                 }
             }
             Token::String(s) => {
@@ -603,7 +570,9 @@ impl<'arena> ArenaParser<'arena> {
                         let timestamp_str = s.clone();
                         self.advance();
                         match timestamp_str.parse::<vibesql_types::Timestamp>() {
-                            Ok(timestamp) => Some(Expression::Literal(SqlValue::Timestamp(timestamp))),
+                            Ok(timestamp) => {
+                                Some(Expression::Literal(SqlValue::Timestamp(timestamp)))
+                            }
                             Err(e) => {
                                 return Err(ParseError {
                                     message: format!("Invalid TIMESTAMP literal: {}", e),
@@ -650,9 +619,9 @@ impl<'arena> ArenaParser<'arena> {
                 // Parse the interval string into an Interval type
                 match interval_spec.parse::<vibesql_types::Interval>() {
                     Ok(interval) => Ok(Some(Expression::Literal(SqlValue::Interval(interval)))),
-                    Err(e) => Err(ParseError {
-                        message: format!("Invalid INTERVAL literal: {}", e),
-                    }),
+                    Err(e) => {
+                        Err(ParseError { message: format!("Invalid INTERVAL literal: {}", e) })
+                    }
                 }
             }
             _ => Err(ParseError {
@@ -700,7 +669,9 @@ impl<'arena> ArenaParser<'arena> {
             self.expect_token(Token::LParen)?;
             let subquery = self.parse_select_statement()?;
             self.expect_token(Token::RParen)?;
-            return Ok(Some(Expression::Extended(self.arena.alloc(ExtendedExpr::Exists { subquery, negated }))));
+            return Ok(Some(Expression::Extended(
+                self.arena.alloc(ExtendedExpr::Exists { subquery, negated }),
+            )));
         }
 
         Ok(None)
@@ -738,12 +709,13 @@ impl<'arena> ArenaParser<'arena> {
         }
 
         // Parse optional ELSE
-        let else_result: Option<&'arena Expression<'arena>> = if self.try_consume_keyword(Keyword::Else) {
-            let expr = self.parse_expression()?;
-            Some(self.arena.alloc(expr))
-        } else {
-            None
-        };
+        let else_result: Option<&'arena Expression<'arena>> =
+            if self.try_consume_keyword(Keyword::Else) {
+                let expr = self.parse_expression()?;
+                Some(self.arena.alloc(expr))
+            } else {
+                None
+            };
 
         self.consume_keyword(Keyword::End)?;
 
@@ -767,10 +739,7 @@ impl<'arena> ArenaParser<'arena> {
 
         self.expect_token(Token::RParen)?;
 
-        Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Cast {
-            expr: expr_ref,
-            data_type,
-        })))
+        Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Cast { expr: expr_ref, data_type })))
     }
 
     /// Parse current date/time functions.
@@ -799,9 +768,9 @@ impl<'arena> ArenaParser<'arena> {
     fn parse_optional_precision(&mut self) -> Result<Option<u32>, ParseError> {
         if self.try_consume(&Token::LParen) {
             if let Token::Number(n) = self.peek() {
-                let n = n.parse::<u32>().map_err(|_| ParseError {
-                    message: "Invalid precision".to_string(),
-                })?;
+                let n = n
+                    .parse::<u32>()
+                    .map_err(|_| ParseError { message: "Invalid precision".to_string() })?;
                 self.advance();
                 self.expect_token(Token::RParen)?;
                 return Ok(Some(n));
@@ -819,10 +788,7 @@ impl<'arena> ArenaParser<'arena> {
         self.expect_token(Token::LParen)?;
 
         // Check for aggregate functions with DISTINCT
-        let is_aggregate = matches!(
-            name_upper.as_str(),
-            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX"
-        );
+        let is_aggregate = matches!(name_upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX");
 
         if is_aggregate {
             let distinct = self.try_consume_keyword(Keyword::Distinct);
@@ -900,11 +866,7 @@ impl<'arena> ArenaParser<'arena> {
         self.expect_token(Token::RParen)?;
 
         let function = WindowFunctionSpec::Aggregate { name, args };
-        let over = WindowSpec {
-            partition_by,
-            order_by,
-            frame,
-        };
+        let over = WindowSpec { partition_by, order_by, frame };
 
         Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::WindowFunction { function, over })))
     }

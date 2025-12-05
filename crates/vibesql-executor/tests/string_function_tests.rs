@@ -137,7 +137,9 @@ fn test_trim_from_only_spaces() {
     let expr = vibesql_ast::Expression::Trim {
         position: None,
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("    ".to_string()))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "    ".to_string(),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
@@ -149,7 +151,9 @@ fn test_trim_from_empty_string() {
     let expr = vibesql_ast::Expression::Trim {
         position: None,
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("".to_string()))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "".to_string(),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
@@ -161,7 +165,9 @@ fn test_trim_from_no_spaces() {
     let expr = vibesql_ast::Expression::Trim {
         position: None,
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "hello".to_string(),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar("hello".to_string()));
@@ -173,10 +179,12 @@ fn test_trim_with_char_still_works() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Trim {
         position: Some(vibesql_ast::TrimPosition::Both),
-        removal_char: Some(Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "x".to_string(),
-        )))),
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("xfoox".to_string()))),
+        removal_char: Some(Box::new(vibesql_ast::Expression::Literal(
+            vibesql_types::SqlValue::Varchar("x".to_string()),
+        ))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "xfoox".to_string(),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar("foo".to_string()));

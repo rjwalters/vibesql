@@ -1,8 +1,8 @@
 #![allow(clippy::doc_lazy_continuation)]
 
-use super::{combine_rows, FromResult};
-use super::build::{CompositeKey, build_hash_table_composite_parallel, build_hash_table_parallel};
+use super::build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey};
 use super::columnar::{hash_join_indices_columnar, hash_join_indices_columnar_multi};
+use super::{combine_rows, FromResult};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 // Note: Memory limit checking removed from hash join.
@@ -72,9 +72,9 @@ pub(in crate::select::join) fn hash_join_inner(
     // This provides ~20-30% speedup for integer equi-joins by:
     // 1. Using FxHash-style hashing without SqlValue enum dispatch
     // 2. Better cache locality with contiguous i64 arrays
-    let join_pairs: Vec<(usize, usize)> = if let Some(pairs) = hash_join_indices_columnar(
-        build_rows, probe_rows, build_col_idx, probe_col_idx
-    ) {
+    let join_pairs: Vec<(usize, usize)> = if let Some(pairs) =
+        hash_join_indices_columnar(build_rows, probe_rows, build_col_idx, probe_col_idx)
+    {
         pairs
     } else {
         // Fallback: Generic hash join using SqlValue keys
@@ -176,7 +176,10 @@ pub(in crate::select::join) fn hash_join_inner_multi(
     // 2. Better cache locality with contiguous i64 arrays
     // 3. Pre-computed composite hashes for multi-column keys
     let join_pairs: Vec<(usize, usize)> = if let Some(pairs) = hash_join_indices_columnar_multi(
-        build_rows, probe_rows, build_col_indices, probe_col_indices
+        build_rows,
+        probe_rows,
+        build_col_indices,
+        probe_col_indices,
     ) {
         pairs
     } else {

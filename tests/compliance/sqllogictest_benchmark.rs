@@ -13,10 +13,10 @@
 
 use async_trait::async_trait;
 use md5::{Digest, Md5};
-use vibesql_parser::Parser;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use std::path::Path;
 use std::time::{Duration, Instant};
+use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
@@ -33,9 +33,7 @@ pub struct BenchmarkMetrics {
 
 impl BenchmarkMetrics {
     fn new() -> Self {
-        Self {
-            total_duration: Duration::ZERO,
-        }
+        Self { total_duration: Duration::ZERO }
     }
 }
 
@@ -102,8 +100,8 @@ impl ComparisonResult {
         // Calculate and display speedup ratio if both succeeded
         if let (Some(vibesql), Some(sqlite)) = (&self.vibesql, &self.sqlite) {
             if vibesql.total_duration.as_nanos() > 0 && sqlite.total_duration.as_nanos() > 0 {
-                let speedup = sqlite.total_duration.as_secs_f64()
-                    / vibesql.total_duration.as_secs_f64();
+                let speedup =
+                    sqlite.total_duration.as_secs_f64() / vibesql.total_duration.as_secs_f64();
 
                 if speedup > 1.0 {
                     println!("\nVibeSQL is {:.2}x faster than SQLite", speedup);
@@ -159,11 +157,7 @@ impl SqliteDB {
 
         let formatted_rows: Vec<Vec<String>> = rows
             .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|val| self.format_sqlite_value(val))
-                    .collect()
-            })
+            .map(|row| row.iter().map(|val| self.format_sqlite_value(val)).collect())
             .collect();
 
         let total_values: usize = formatted_rows.iter().map(|r| r.len()).sum();
@@ -234,7 +228,9 @@ impl SqliteDB {
         let trimmed = sql.trim().to_uppercase();
         if trimmed.starts_with("SELECT") || trimmed.starts_with("WITH") {
             // Execute query
-            let mut stmt = self.conn.prepare(sql)
+            let mut stmt = self
+                .conn
+                .prepare(sql)
                 .map_err(|e| TestError(format!("SQLite prepare error: {}", e)))?;
 
             let column_count = stmt.column_count();
@@ -262,7 +258,9 @@ impl SqliteDB {
             }
         } else {
             // Execute statement
-            let rows_affected = self.conn.execute(sql, [])
+            let rows_affected = self
+                .conn
+                .execute(sql, [])
                 .map_err(|e| TestError(format!("SQLite execute error: {}", e)))?;
             Ok(DBOutput::StatementComplete(rows_affected as u64))
         }
@@ -391,18 +389,21 @@ impl VibeSqlDB {
                 Ok(DBOutput::StatementComplete(0))
             }
             vibesql_ast::Statement::Insert(insert_stmt) => {
-                let rows_affected = vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(rows_affected as u64))
             }
             vibesql_ast::Statement::Update(update_stmt) => {
-                let rows_affected = vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(rows_affected as u64))
             }
             vibesql_ast::Statement::Delete(delete_stmt) => {
-                let rows_affected = vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)
-                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                let rows_affected =
+                    vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)
+                        .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(rows_affected as u64))
             }
             vibesql_ast::Statement::DropTable(drop_stmt) => {
@@ -630,9 +631,7 @@ where
 {
     let start_time = Instant::now();
 
-    let mut runner = sqllogictest::Runner::new(|| async {
-        Ok::<_, TestError>(DB::default())
-    });
+    let mut runner = sqllogictest::Runner::new(|| async { Ok::<_, TestError>(DB::default()) });
     // Add "mysql" label for skipif/onlyif directives
     runner.add_label("mysql");
 
@@ -646,9 +645,7 @@ where
             eprintln!("{} completed in {:?}", engine_name, total_duration);
             Ok(metrics)
         }
-        Err(e) => {
-            Err(BenchmarkError::TestError(format!("Test execution failed: {:?}", e)))
-        }
+        Err(e) => Err(BenchmarkError::TestError(format!("Test execution failed: {:?}", e))),
     }
 }
 
@@ -656,9 +653,7 @@ where
 ///
 /// This function runs the test file on both engines independently. If one engine
 /// fails, the other continues and the comparison can still provide partial results.
-pub async fn compare_engines(
-    test_file: &Path,
-) -> Result<ComparisonResult, BenchmarkError> {
+pub async fn compare_engines(test_file: &Path) -> Result<ComparisonResult, BenchmarkError> {
     println!("Benchmarking VibeSQL...");
     let vibesql = match benchmark_engine::<VibeSqlDB>(test_file, "VibeSQL").await {
         Ok(metrics) => {
@@ -685,10 +680,10 @@ pub async fn compare_engines(
 
     // Return error only if both failed
     match (&vibesql, &sqlite) {
-        (None, None) => Err(BenchmarkError::TestError(
-            "Both engines failed to run the test file".to_string()
-        )),
-        _ => Ok(ComparisonResult { vibesql, sqlite })
+        (None, None) => {
+            Err(BenchmarkError::TestError("Both engines failed to run the test file".to_string()))
+        }
+        _ => Ok(ComparisonResult { vibesql, sqlite }),
     }
 }
 

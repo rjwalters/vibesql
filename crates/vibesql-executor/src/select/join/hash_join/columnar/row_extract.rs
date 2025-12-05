@@ -31,7 +31,8 @@ pub fn extract_multi_i64_columns(
     rows: &[vibesql_storage::Row],
     col_indices: &[usize],
 ) -> Option<Vec<Vec<i64>>> {
-    let mut columns: Vec<Vec<i64>> = col_indices.iter().map(|_| Vec::with_capacity(rows.len())).collect();
+    let mut columns: Vec<Vec<i64>> =
+        col_indices.iter().map(|_| Vec::with_capacity(rows.len())).collect();
 
     for row in rows {
         for (out_idx, &col_idx) in col_indices.iter().enumerate() {
@@ -150,9 +151,8 @@ mod tests {
             Row::new(vec![SqlValue::Integer(99), SqlValue::Integer(99)]), // No match
         ];
 
-        let pairs = hash_join_indices_columnar_multi(
-            &build_rows, &probe_rows, &[0, 1], &[0, 1]
-        ).unwrap();
+        let pairs =
+            hash_join_indices_columnar_multi(&build_rows, &probe_rows, &[0, 1], &[0, 1]).unwrap();
 
         // Should have 3 pairs: (0,0), (3,0), (1,1)
         assert_eq!(pairs.len(), 3);
@@ -174,18 +174,14 @@ mod tests {
     #[test]
     fn test_hash_join_indices_columnar_multi_with_non_integer() {
         // Build rows with string column (should fall back to None)
-        let build_rows = vec![
-            Row::new(vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(10)]),
-        ];
+        let build_rows =
+            vec![Row::new(vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(10)])];
 
-        let probe_rows = vec![
-            Row::new(vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(10)]),
-        ];
+        let probe_rows =
+            vec![Row::new(vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(10)])];
 
         // Should return None because not all columns are integers
-        let result = hash_join_indices_columnar_multi(
-            &build_rows, &probe_rows, &[0, 1], &[0, 1]
-        );
+        let result = hash_join_indices_columnar_multi(&build_rows, &probe_rows, &[0, 1], &[0, 1]);
         assert!(result.is_none());
     }
 

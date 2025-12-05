@@ -20,12 +20,21 @@ fn test_like_wildcard_percent() {
         )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]))
-        .unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Bob".to_string())]))
-        .unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alex".to_string())]))
-        .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Bob".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alex".to_string())]),
+    )
+    .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -35,9 +44,16 @@ fn test_like_wildcard_percent() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "name".to_string(),
+            }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 "Al%".to_string(),
             ))),
@@ -49,7 +65,8 @@ fn test_like_wildcard_percent() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2); // Alice and Alex
@@ -67,12 +84,21 @@ fn test_like_wildcard_underscore() {
         )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("cat".to_string())]))
-        .unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("bat".to_string())]))
-        .unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("cart".to_string())]))
-        .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("cat".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("bat".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("cart".to_string())]),
+    )
+    .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -82,9 +108,16 @@ fn test_like_wildcard_underscore() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "name".to_string(),
+            }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 "_at".to_string(),
             ))),
@@ -96,7 +129,8 @@ fn test_like_wildcard_underscore() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2); // cat and bat (cart is 4 chars)
@@ -114,12 +148,21 @@ fn test_not_like() {
         )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]))
-        .unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Bob".to_string())]))
-        .unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alex".to_string())]))
-        .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Bob".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alex".to_string())]),
+    )
+    .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -129,9 +172,16 @@ fn test_not_like() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "name".to_string(),
+            }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 "Al%".to_string(),
             ))),
@@ -143,7 +193,8 @@ fn test_not_like() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // Only Bob
@@ -162,8 +213,11 @@ fn test_like_null_pattern() {
         )],
     );
     db.create_table(schema).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]))
-        .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]),
+    )
+    .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -173,9 +227,16 @@ fn test_like_null_pattern() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "name".to_string(),
+            }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             negated: false,
         }),
@@ -185,7 +246,8 @@ fn test_like_null_pattern() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 0); // NULL pattern matches nothing
@@ -204,8 +266,11 @@ fn test_like_null_value() {
     );
     db.create_table(schema).unwrap();
     db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Null])).unwrap();
-    db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]))
-        .unwrap();
+    db.insert_row(
+        "test",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar("Alice".to_string())]),
+    )
+    .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -215,9 +280,16 @@ fn test_like_null_value() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { name: "test".to_string(), alias: None, column_aliases: None }),
+        from: Some(vibesql_ast::FromClause::Table {
+            name: "test".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: None,
+                column: "name".to_string(),
+            }),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 "Al%".to_string(),
             ))),
@@ -229,7 +301,8 @@ fn test_like_null_value() {
         limit: None,
         offset: None,
         into_table: None,
-        into_variables: None,    };
+        into_variables: None,
+    };
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // NULL value doesn't match, only Alice

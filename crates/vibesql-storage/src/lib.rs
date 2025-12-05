@@ -32,13 +32,15 @@ pub use change_events::{
 pub use columnar::{ColumnData, ColumnarTable};
 pub use columnar_cache::{CacheStats, ColumnarCache};
 pub use database::{
-    Database, DatabaseConfig, IndexData, IndexManager, IndexMetadata, SpillPolicy,
-    SpatialIndexMetadata, TransactionState,
+    Database, DatabaseConfig, IndexData, IndexManager, IndexMetadata, SpatialIndexMetadata,
+    SpillPolicy, TransactionState,
 };
 pub use error::{StorageError, StorageResult};
-pub use query_buffer_pool::{QueryBufferPool, QueryBufferPoolStats, RowBufferGuard, ValueBufferGuard};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};
 pub use persistence::load::{parse_sql_statements, read_sql_dump};
+pub use query_buffer_pool::{
+    QueryBufferPool, QueryBufferPoolStats, RowBufferGuard, ValueBufferGuard,
+};
 pub use row::Row;
 pub use statistics::{ColumnStatistics, TableStatistics};
 pub use table::Table;

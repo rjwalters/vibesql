@@ -15,7 +15,9 @@ fn test_parse_match_against_natural_language() {
     if let vibesql_ast::Statement::Select(select) = stmt {
         assert!(select.where_clause.is_some(), "Should have WHERE clause");
 
-        if let vibesql_ast::Expression::MatchAgainst { columns, mode, .. } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::MatchAgainst { columns, mode, .. } =
+            &select.where_clause.unwrap()
+        {
             assert_eq!(columns.len(), 2);
             assert_eq!(columns[0], "TITLE");
             assert_eq!(columns[1], "BODY");
@@ -37,7 +39,9 @@ fn test_parse_match_against_boolean_mode() {
 
     let stmt = result.unwrap();
     if let vibesql_ast::Statement::Select(select) = stmt {
-        if let vibesql_ast::Expression::MatchAgainst { columns, mode, .. } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::MatchAgainst { columns, mode, .. } =
+            &select.where_clause.unwrap()
+        {
             assert_eq!(columns.len(), 2);
             assert_eq!(*mode, vibesql_ast::FulltextMode::Boolean);
         } else {
@@ -57,7 +61,9 @@ fn test_parse_match_against_query_expansion() {
 
     let stmt = result.unwrap();
     if let vibesql_ast::Statement::Select(select) = stmt {
-        if let vibesql_ast::Expression::MatchAgainst { columns, mode, .. } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::MatchAgainst { columns, mode, .. } =
+            &select.where_clause.unwrap()
+        {
             assert_eq!(columns.len(), 1);
             assert_eq!(columns[0], "TITLE");
             assert_eq!(*mode, vibesql_ast::FulltextMode::QueryExpansion);
@@ -71,14 +77,13 @@ fn test_parse_match_against_query_expansion() {
 
 #[test]
 fn test_parse_match_against_single_column() {
-    let result = Parser::parse_sql(
-        "SELECT * FROM articles WHERE MATCH(title) AGAINST ('search');",
-    );
+    let result = Parser::parse_sql("SELECT * FROM articles WHERE MATCH(title) AGAINST ('search');");
     assert!(result.is_ok(), "Single column MATCH should parse: {:?}", result);
 
     let stmt = result.unwrap();
     if let vibesql_ast::Statement::Select(select) = stmt {
-        if let vibesql_ast::Expression::MatchAgainst { columns, .. } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::MatchAgainst { columns, .. } = &select.where_clause.unwrap()
+        {
             assert_eq!(columns.len(), 1);
             assert_eq!(columns[0], "TITLE");
         } else {
@@ -118,14 +123,14 @@ fn test_parse_match_against_in_select_list() {
 
 #[test]
 fn test_parse_match_against_mixed_case() {
-    let result = Parser::parse_sql(
-        "SELECT * FROM Articles WHERE MATCH(Title, Body) AGAINST ('search');",
-    );
+    let result =
+        Parser::parse_sql("SELECT * FROM Articles WHERE MATCH(Title, Body) AGAINST ('search');");
     assert!(result.is_ok(), "Mixed case MATCH should parse: {:?}", result);
 
     let stmt = result.unwrap();
     if let vibesql_ast::Statement::Select(select) = stmt {
-        if let vibesql_ast::Expression::MatchAgainst { columns, .. } = &select.where_clause.unwrap() {
+        if let vibesql_ast::Expression::MatchAgainst { columns, .. } = &select.where_clause.unwrap()
+        {
             assert_eq!(columns[0], "TITLE");
             assert_eq!(columns[1], "BODY");
         } else {

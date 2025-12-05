@@ -35,12 +35,7 @@ impl Interval {
     pub fn new(value: String) -> Self {
         // Parse the interval string to extract internal representation
         let (months, days, microseconds) = Self::parse_interval(&value);
-        Interval {
-            value,
-            months,
-            days,
-            microseconds,
-        }
+        Interval { value, months, days, microseconds }
     }
 
     /// Parse an interval string into (months, days, microseconds)
@@ -69,8 +64,7 @@ impl Interval {
                 let to_unit = parts[to_pos + 1];
 
                 // Handle YEAR TO MONTH (format: "Y-M" or "Y")
-                if from_unit.eq_ignore_ascii_case("YEAR") && to_unit.eq_ignore_ascii_case("MONTH")
-                {
+                if from_unit.eq_ignore_ascii_case("YEAR") && to_unit.eq_ignore_ascii_case("MONTH") {
                     if let Some(dash_pos) = value_part.find('-') {
                         let years: i32 = value_part[..dash_pos].parse().unwrap_or(0);
                         let month_part: i32 = value_part[dash_pos + 1..].parse().unwrap_or(0);

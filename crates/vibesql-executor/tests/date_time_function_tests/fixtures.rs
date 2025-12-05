@@ -3,7 +3,10 @@
 use crate::common::create_test_evaluator;
 
 /// Helper to create a datetime function expression with given name and arguments
-pub fn create_datetime_function(name: &str, args: Vec<vibesql_ast::Expression>) -> vibesql_ast::Expression {
+pub fn create_datetime_function(
+    name: &str,
+    args: Vec<vibesql_ast::Expression>,
+) -> vibesql_ast::Expression {
     vibesql_ast::Expression::Function { name: name.to_string(), args, character_unit: None }
 }
 

@@ -12,10 +12,7 @@
 #![allow(clippy::redundant_guards)]
 //! - Direct memory access to column values
 
-use crate::{
-    errors::ExecutorError,
-    schema::CombinedSchema,
-};
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
@@ -24,19 +21,9 @@ use vibesql_types::SqlValue;
 #[derive(Debug, Clone)]
 enum CompiledPredicate {
     /// Column comparison: column_idx op literal_value
-    ColumnLiteral {
-        column_idx: usize,
-        op: ComparisonOp,
-        literal: SqlValue,
-    },
+    ColumnLiteral { column_idx: usize, op: ComparisonOp, literal: SqlValue },
     /// BETWEEN: column_idx BETWEEN low AND high
-    Between {
-        column_idx: usize,
-        low: SqlValue,
-        high: SqlValue,
-        negated: bool,
-        symmetric: bool,
-    },
+    Between { column_idx: usize, low: SqlValue, high: SqlValue, negated: bool, symmetric: bool },
 }
 
 impl CompiledPredicate {
@@ -77,11 +64,14 @@ impl CompiledPredicate {
 
     /// Check if this predicate is IS NULL check
     fn is_null_check(&self) -> bool {
-        matches!(self, CompiledPredicate::ColumnLiteral {
-            op: ComparisonOp::Equal,
-            literal: SqlValue::Null,
-            ..
-        })
+        matches!(
+            self,
+            CompiledPredicate::ColumnLiteral {
+                op: ComparisonOp::Equal,
+                literal: SqlValue::Null,
+                ..
+            }
+        )
     }
 
     /// Check if this predicate requires non-null value (any comparison except IS NULL)
@@ -112,10 +102,7 @@ pub struct CompiledWhereClause {
 impl CompiledWhereClause {
     /// Try to compile a WHERE clause into the optimized form
     /// Returns None if the WHERE clause contains unsupported patterns
-    pub fn try_compile(
-        where_expr: &Expression,
-        schema: &CombinedSchema,
-    ) -> Option<Self> {
+    pub fn try_compile(where_expr: &Expression, schema: &CombinedSchema) -> Option<Self> {
         let mut predicates = Vec::new();
 
         // Try to extract AND-combined predicates
@@ -191,12 +178,14 @@ impl CompiledWhereClause {
         match expr {
             Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
                 // Recursively extract from left and right
-                Self::extract_and_predicates(left, schema, predicates) &&
-                Self::extract_and_predicates(right, schema, predicates)
+                Self::extract_and_predicates(left, schema, predicates)
+                    && Self::extract_and_predicates(right, schema, predicates)
             }
             Expression::Between { expr: col_expr, low, high, negated, symmetric } => {
                 // Try to compile BETWEEN predicate
-                Self::try_compile_between(col_expr, low, high, *negated, *symmetric, schema, predicates)
+                Self::try_compile_between(
+                    col_expr, low, high, *negated, *symmetric, schema, predicates,
+                )
             }
             _ => {
                 // Try to compile as simple binary comparison
@@ -245,13 +234,7 @@ impl CompiledWhereClause {
             return false;
         }
 
-        predicates.push(CompiledPredicate::Between {
-            column_idx,
-            low,
-            high,
-            negated,
-            symmetric,
-        });
+        predicates.push(CompiledPredicate::Between { column_idx, low, high, negated, symmetric });
 
         true
     }
@@ -280,23 +263,17 @@ impl CompiledWhereClause {
         };
 
         // Try column on left, literal on right
-        if let (Some(column_idx), Some(literal)) = (
-            Self::try_extract_column(left, schema),
-            Self::try_extract_literal(right),
-        ) {
-            predicates.push(CompiledPredicate::ColumnLiteral {
-                column_idx,
-                op: comp_op,
-                literal,
-            });
+        if let (Some(column_idx), Some(literal)) =
+            (Self::try_extract_column(left, schema), Self::try_extract_literal(right))
+        {
+            predicates.push(CompiledPredicate::ColumnLiteral { column_idx, op: comp_op, literal });
             return true;
         }
 
         // Try literal on left, column on right (flip operator)
-        if let (Some(literal), Some(column_idx)) = (
-            Self::try_extract_literal(left),
-            Self::try_extract_column(right, schema),
-        ) {
+        if let (Some(literal), Some(column_idx)) =
+            (Self::try_extract_literal(left), Self::try_extract_column(right, schema))
+        {
             let flipped_op = Self::flip_operator(comp_op);
             predicates.push(CompiledPredicate::ColumnLiteral {
                 column_idx,
@@ -352,7 +329,11 @@ impl CompiledWhereClause {
 
     /// Evaluate a single compiled predicate
     #[inline(always)]
-    fn evaluate_single(&self, predicate: &CompiledPredicate, row: &Row) -> Result<bool, ExecutorError> {
+    fn evaluate_single(
+        &self,
+        predicate: &CompiledPredicate,
+        row: &Row,
+    ) -> Result<bool, ExecutorError> {
         match predicate {
             CompiledPredicate::ColumnLiteral { column_idx, op, literal } => {
                 let column_value = &row.values[*column_idx];
@@ -368,7 +349,12 @@ impl CompiledWhereClause {
 
     /// Fast comparison of SQL values with type-specific logic
     #[inline(always)]
-    fn compare_values(&self, left: &SqlValue, right: &SqlValue, op: ComparisonOp) -> Result<bool, ExecutorError> {
+    fn compare_values(
+        &self,
+        left: &SqlValue,
+        right: &SqlValue,
+        op: ComparisonOp,
+    ) -> Result<bool, ExecutorError> {
         use SqlValue::*;
 
         // Handle NULL - comparisons with NULL return NULL (false in WHERE context)
@@ -389,10 +375,10 @@ impl CompiledWhereClause {
             (Real(l), Real(r)) => Ok(self.apply_op_float(*l, *r, op)),
 
             // String comparisons (dates are stored as strings in TPC-H)
-            (Varchar(l), Varchar(r)) |
-            (Character(l), Character(r)) |
-            (Varchar(l), Character(r)) |
-            (Character(l), Varchar(r)) => Ok(self.apply_op(l.as_str(), r.as_str(), op)),
+            (Varchar(l), Varchar(r))
+            | (Character(l), Character(r))
+            | (Varchar(l), Character(r))
+            | (Character(l), Varchar(r)) => Ok(self.apply_op(l.as_str(), r.as_str(), op)),
 
             // Cross-type comparisons - fall back to slower path
             _ => self.compare_values_generic(left, right, op),
@@ -400,7 +386,12 @@ impl CompiledWhereClause {
     }
 
     /// Generic comparison for cross-type cases
-    fn compare_values_generic(&self, left: &SqlValue, right: &SqlValue, op: ComparisonOp) -> Result<bool, ExecutorError> {
+    fn compare_values_generic(
+        &self,
+        left: &SqlValue,
+        right: &SqlValue,
+        op: ComparisonOp,
+    ) -> Result<bool, ExecutorError> {
         // Use the existing operator registry for correctness
         use crate::evaluator::operators::OperatorRegistry;
         use vibesql_ast::BinaryOperator;
@@ -419,9 +410,9 @@ impl CompiledWhereClause {
         match result {
             SqlValue::Boolean(b) => Ok(b),
             SqlValue::Null => Ok(false),
-            _ => Err(ExecutorError::InvalidWhereClause(
-                "Comparison must return boolean".to_string()
-            )),
+            _ => {
+                Err(ExecutorError::InvalidWhereClause("Comparison must return boolean".to_string()))
+            }
         }
     }
 
@@ -454,7 +445,13 @@ impl CompiledWhereClause {
     /// Check if value is between low and high (inclusive)
     /// For SYMMETRIC: swap bounds if low > high before comparison
     #[inline(always)]
-    fn is_between(&self, value: &SqlValue, low: &SqlValue, high: &SqlValue, symmetric: bool) -> Result<bool, ExecutorError> {
+    fn is_between(
+        &self,
+        value: &SqlValue,
+        low: &SqlValue,
+        high: &SqlValue,
+        symmetric: bool,
+    ) -> Result<bool, ExecutorError> {
         // Handle SYMMETRIC: swap bounds if low > high
         let (effective_low, effective_high) = if symmetric {
             // Check if bounds need swapping
@@ -514,10 +511,7 @@ mod tests {
 
         // l_quantity < 24
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "l_quantity".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(24))),
         };
@@ -567,10 +561,7 @@ mod tests {
 
         // l_quantity < 24
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "l_quantity".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(24))),
         };
@@ -713,10 +704,7 @@ mod tests {
 
         // l_quantity > 10
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "l_quantity".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         };
@@ -745,10 +733,7 @@ mod tests {
         // l_quantity NOT BETWEEN 31 AND NULL
         // This should fall back to regular evaluator for proper NULL semantics
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "l_quantity".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
             low: Box::new(Expression::Literal(SqlValue::Integer(31))),
             high: Box::new(Expression::Literal(SqlValue::Null)),
             negated: true,
@@ -761,10 +746,7 @@ mod tests {
 
         // Also test with NULL low bound
         let expr_null_low = Expression::Between {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "l_quantity".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
             low: Box::new(Expression::Literal(SqlValue::Null)),
             high: Box::new(Expression::Literal(SqlValue::Integer(100))),
             negated: false,
@@ -782,10 +764,7 @@ mod tests {
 
         // l_quantity BETWEEN 10 AND 100
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef {
-                table: None,
-                column: "l_quantity".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
             low: Box::new(Expression::Literal(SqlValue::Integer(10))),
             high: Box::new(Expression::Literal(SqlValue::Integer(100))),
             negated: false,

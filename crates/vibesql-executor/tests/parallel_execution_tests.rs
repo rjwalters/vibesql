@@ -18,8 +18,16 @@ fn setup_large_test_db(num_rows: usize) -> Database {
     let schema = vibesql_catalog::TableSchema::new(
         "TEST_PARALLEL".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, false),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "value".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -86,8 +94,16 @@ fn test_parallel_filter_with_null_values() {
     let schema = vibesql_catalog::TableSchema::new(
         "TEST_NULLS".to_string(),
         vec![
-            vibesql_catalog::ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),
-            vibesql_catalog::ColumnSchema::new("value".to_string(), vibesql_types::DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "value".to_string(),
+                vibesql_types::DataType::Integer,
+                true,
+            ),
         ],
     );
     db.create_table(schema).unwrap();
@@ -99,7 +115,8 @@ fn test_parallel_filter_with_null_values() {
         } else {
             vibesql_types::SqlValue::Integer((i % 100) as i64)
         };
-        let row = vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i as i64), value]);
+        let row =
+            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i as i64), value]);
         db.insert_row("TEST_NULLS", row).unwrap();
     }
 

@@ -30,7 +30,9 @@ impl super::super::Catalog {
                 for table_name in schema.list_tables() {
                     if let Some(table) = schema.get_table(&table_name, false) {
                         for column in &table.columns {
-                            if let vibesql_types::DataType::UserDefined { type_name } = &column.data_type {
+                            if let vibesql_types::DataType::UserDefined { type_name } =
+                                &column.data_type
+                            {
                                 if type_name == name {
                                     return Err(CatalogError::TypeInUse(name.to_string()));
                                 }
@@ -50,7 +52,9 @@ impl super::super::Catalog {
                 for table_name in schema.list_tables() {
                     if let Some(table) = schema.get_table(&table_name, false) {
                         for column in &table.columns {
-                            if let vibesql_types::DataType::UserDefined { type_name } = &column.data_type {
+                            if let vibesql_types::DataType::UserDefined { type_name } =
+                                &column.data_type
+                            {
                                 if type_name == name {
                                     tables_to_drop.push(format!("{}.{}", schema_name, table_name));
                                     break;

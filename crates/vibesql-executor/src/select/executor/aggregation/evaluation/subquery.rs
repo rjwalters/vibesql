@@ -96,9 +96,12 @@ pub(super) fn evaluate_quantified(
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     let (left_expr, op, quantifier, subquery) = match expr {
-        vibesql_ast::Expression::QuantifiedComparison { expr: left_expr, op, quantifier, subquery } => {
-            (left_expr, op, quantifier, subquery)
-        }
+        vibesql_ast::Expression::QuantifiedComparison {
+            expr: left_expr,
+            op,
+            quantifier,
+            subquery,
+        } => (left_expr, op, quantifier, subquery),
         _ => unreachable!("evaluate_quantified called with non-quantified expression"),
     };
 
@@ -113,7 +116,10 @@ pub(super) fn evaluate_quantified(
 
     // Empty subquery special cases
     if rows.is_empty() {
-        return Ok(vibesql_types::SqlValue::Boolean(matches!(quantifier, vibesql_ast::Quantifier::All)));
+        return Ok(vibesql_types::SqlValue::Boolean(matches!(
+            quantifier,
+            vibesql_ast::Quantifier::All
+        )));
     }
 
     // If left value is NULL, return NULL
@@ -142,11 +148,14 @@ pub(super) fn evaluate_quantified(
 
                 // Create temp evaluator for comparison
                 let temp_schema = vibesql_catalog::TableSchema::new("temp".to_string(), vec![]);
-                let temp_evaluator = ExpressionEvaluator::with_database(&temp_schema, executor.database);
+                let temp_evaluator =
+                    ExpressionEvaluator::with_database(&temp_schema, executor.database);
                 let cmp_result = temp_evaluator.eval_binary_op(&left_val, op, right_val)?;
 
                 match cmp_result {
-                    vibesql_types::SqlValue::Boolean(false) => return Ok(vibesql_types::SqlValue::Boolean(false)),
+                    vibesql_types::SqlValue::Boolean(false) => {
+                        return Ok(vibesql_types::SqlValue::Boolean(false))
+                    }
                     vibesql_types::SqlValue::Null => has_null = true,
                     _ => {}
                 }
@@ -177,11 +186,14 @@ pub(super) fn evaluate_quantified(
 
                 // Create temp evaluator for comparison
                 let temp_schema = vibesql_catalog::TableSchema::new("temp".to_string(), vec![]);
-                let temp_evaluator = ExpressionEvaluator::with_database(&temp_schema, executor.database);
+                let temp_evaluator =
+                    ExpressionEvaluator::with_database(&temp_schema, executor.database);
                 let cmp_result = temp_evaluator.eval_binary_op(&left_val, op, right_val)?;
 
                 match cmp_result {
-                    vibesql_types::SqlValue::Boolean(true) => return Ok(vibesql_types::SqlValue::Boolean(true)),
+                    vibesql_types::SqlValue::Boolean(true) => {
+                        return Ok(vibesql_types::SqlValue::Boolean(true))
+                    }
                     vibesql_types::SqlValue::Null => has_null = true,
                     _ => {}
                 }

@@ -424,10 +424,7 @@ fn test_tpch_q3_star_schema_no_cross_join() {
             "Table {} at position {} has no join condition with previous tables {:?}. \
              This would cause a CROSS JOIN and memory limit exceeded. \
              Full order: {:?}",
-            current_table,
-            i,
-            previous_tables,
-            order
+            current_table, i, previous_tables, order
         );
     }
 
@@ -579,11 +576,7 @@ fn test_time_bounded_search_returns_valid_ordering() {
 fn test_time_bounded_search_completes_fast_for_small_queries() {
     // Test that small queries complete within time budget
     let mut analyzer = JoinOrderAnalyzer::new();
-    analyzer.register_tables(vec![
-        "t1".to_string(),
-        "t2".to_string(),
-        "t3".to_string(),
-    ]);
+    analyzer.register_tables(vec!["t1".to_string(), "t2".to_string(), "t3".to_string()]);
 
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),
@@ -667,11 +660,7 @@ fn test_time_bounded_search_with_generous_budget() {
 fn test_legacy_behavior_with_time_budget_disabled() {
     // Test that disabling time budget uses legacy table-count based logic
     let mut analyzer = JoinOrderAnalyzer::new();
-    analyzer.register_tables(vec![
-        "t1".to_string(),
-        "t2".to_string(),
-        "t3".to_string(),
-    ]);
+    analyzer.register_tables(vec!["t1".to_string(), "t2".to_string(), "t3".to_string()]);
 
     analyzer.add_edge(JoinEdge {
         left_table: "t1".to_string(),

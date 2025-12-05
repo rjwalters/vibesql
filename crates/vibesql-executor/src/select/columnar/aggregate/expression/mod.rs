@@ -19,10 +19,10 @@
 //! - `simd` - SIMD-accelerated computation via Arrow
 //! - `batch` - Batch-native expression processing on ColumnarBatch
 
-mod evaluator;
-mod vectorized;
-mod simd;
 mod batch;
+mod evaluator;
+mod simd;
+mod vectorized;
 
 #[cfg(test)]
 mod tests;
@@ -33,10 +33,10 @@ use vibesql_ast::Expression;
 use super::{AggregateOp, AggregateSource, AggregateSpec};
 
 // Re-export public API
-pub(super) use vectorized::compute_expression_aggregate;
 pub(super) use batch::compute_batch_expression_aggregate;
 pub use batch::evaluate_expression_to_column;
 pub use batch::evaluate_expression_with_cached_column;
+pub(super) use vectorized::compute_expression_aggregate;
 
 /// Extract aggregate operations from AST expressions
 ///
@@ -78,11 +78,7 @@ pub fn extract_aggregates(
 
     for expr in exprs.iter() {
         match expr {
-            Expression::AggregateFunction {
-                name,
-                distinct,
-                args,
-            } => {
+            Expression::AggregateFunction { name, distinct, args } => {
                 // DISTINCT not supported for columnar optimization
                 if *distinct {
                     return None;
@@ -100,10 +96,7 @@ pub fn extract_aggregates(
                 // Handle COUNT(*)
                 if op == AggregateOp::Count && args.is_empty() {
                     // For COUNT(*), use column 0 (the column index is ignored by compute_count)
-                    aggregates.push(AggregateSpec {
-                        op,
-                        source: AggregateSource::Column(0),
-                    });
+                    aggregates.push(AggregateSpec { op, source: AggregateSource::Column(0) });
                     continue;
                 }
 
@@ -111,17 +104,13 @@ pub fn extract_aggregates(
                 if op == AggregateOp::Count && args.len() == 1 {
                     match &args[0] {
                         Expression::Wildcard => {
-                            aggregates.push(AggregateSpec {
-                                op,
-                                source: AggregateSource::CountStar,
-                            });
+                            aggregates
+                                .push(AggregateSpec { op, source: AggregateSource::CountStar });
                             continue;
                         }
                         Expression::ColumnRef { table: _, column } if column == "*" => {
-                            aggregates.push(AggregateSpec {
-                                op,
-                                source: AggregateSource::CountStar,
-                            });
+                            aggregates
+                                .push(AggregateSpec { op, source: AggregateSource::CountStar });
                             continue;
                         }
                         _ => {}

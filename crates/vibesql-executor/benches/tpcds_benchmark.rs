@@ -24,10 +24,10 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use memory_monitor::{format_bytes, MemoryMonitor, MemoryPressure};
 use std::hint::black_box;
 use std::sync::{Mutex, OnceLock};
+use tpcds::memory::hint_memory_release;
 use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
-use tpcds::memory::hint_memory_release;
 
 // =============================================================================
 // List Mode Detection
@@ -65,10 +65,7 @@ fn get_query_results() -> &'static Mutex<Vec<QueryResult>> {
 fn get_memory_monitor() -> &'static Mutex<MemoryMonitor> {
     MEMORY_MONITOR.get_or_init(|| {
         let monitor = MemoryMonitor::new();
-        eprintln!(
-            "Memory monitor initialized (threshold: {:.0}%)",
-            monitor.threshold_percent()
-        );
+        eprintln!("Memory monitor initialized (threshold: {:.0}%)", monitor.threshold_percent());
         Mutex::new(monitor)
     })
 }
@@ -108,14 +105,10 @@ fn print_query_summary() {
             return;
         }
 
-        let passed: Vec<_> = results
-            .iter()
-            .filter(|r| matches!(r, QueryResult::Passed { .. }))
-            .collect();
-        let skipped: Vec<_> = results
-            .iter()
-            .filter(|r| matches!(r, QueryResult::Skipped { .. }))
-            .collect();
+        let passed: Vec<_> =
+            results.iter().filter(|r| matches!(r, QueryResult::Passed { .. })).collect();
+        let skipped: Vec<_> =
+            results.iter().filter(|r| matches!(r, QueryResult::Skipped { .. })).collect();
         let memory_skipped: Vec<_> = skipped
             .iter()
             .filter(|r| {
@@ -131,14 +124,19 @@ fn print_query_summary() {
         eprintln!("TPC-DS BENCHMARK SUMMARY");
         eprintln!("{}", "=".repeat(60));
         eprintln!("Passed:  {} queries", passed.len());
-        eprintln!("Skipped: {} queries ({} due to memory pressure)", skipped.len(), memory_skipped.len());
+        eprintln!(
+            "Skipped: {} queries ({} due to memory pressure)",
+            skipped.len(),
+            memory_skipped.len()
+        );
         eprintln!("{}", "-".repeat(60));
 
         // Print memory statistics
         if let Ok(mut monitor) = get_memory_monitor().lock() {
             let stats = monitor.current_stats();
             eprintln!("\nMemory Statistics:");
-            eprintln!("  Current usage: {} / {} ({:.1}%)",
+            eprintln!(
+                "  Current usage: {} / {} ({:.1}%)",
                 format_bytes(stats.used_bytes),
                 format_bytes(stats.total_bytes),
                 stats.usage_percent
@@ -208,9 +206,9 @@ fn get_comparison_engine() -> Option<String> {
 #[cfg(feature = "benchmark-comparison")]
 fn sqlite_enabled() -> bool {
     match get_comparison_engine() {
-        None => true,                                    // Default: all engines
-        Some(ref e) if e == "all" => true,               // Explicit all
-        Some(ref e) if e == "sqlite" => true,            // SQLite only
+        None => true,                         // Default: all engines
+        Some(ref e) if e == "all" => true,    // Explicit all
+        Some(ref e) if e == "sqlite" => true, // SQLite only
         _ => false,
     }
 }
@@ -219,9 +217,9 @@ fn sqlite_enabled() -> bool {
 #[cfg(feature = "benchmark-comparison")]
 fn duckdb_enabled() -> bool {
     match get_comparison_engine() {
-        None => true,                                    // Default: all engines
-        Some(ref e) if e == "all" => true,               // Explicit all
-        Some(ref e) if e == "duckdb" => true,            // DuckDB only
+        None => true,                         // Default: all engines
+        Some(ref e) if e == "all" => true,    // Explicit all
+        Some(ref e) if e == "duckdb" => true, // DuckDB only
         _ => false,
     }
 }
@@ -230,8 +228,8 @@ fn duckdb_enabled() -> bool {
 #[cfg(feature = "benchmark-comparison")]
 fn mysql_enabled() -> bool {
     match get_comparison_engine() {
-        Some(ref e) if e == "mysql" => true,             // MySQL only
-        _ => false,                                      // Not included in default/all (requires external server)
+        Some(ref e) if e == "mysql" => true, // MySQL only
+        _ => false, // Not included in default/all (requires external server)
     }
 }
 
@@ -297,20 +295,24 @@ fn get_mysql_conn() -> Option<&'static Mutex<MySqlConn>> {
     if !mysql_enabled() {
         return None;
     }
-    MYSQL_CONN.get_or_init(|| {
-        eprintln!("Loading TPC-DS MySQL database (scale factor {})...", SCALE_FACTOR);
-        let start = std::time::Instant::now();
-        match load_mysql(SCALE_FACTOR) {
-            Some(conn) => {
-                eprintln!("MySQL database loaded in {:?}", start.elapsed());
-                Some(Mutex::new(conn))
+    MYSQL_CONN
+        .get_or_init(|| {
+            eprintln!("Loading TPC-DS MySQL database (scale factor {})...", SCALE_FACTOR);
+            let start = std::time::Instant::now();
+            match load_mysql(SCALE_FACTOR) {
+                Some(conn) => {
+                    eprintln!("MySQL database loaded in {:?}", start.elapsed());
+                    Some(Mutex::new(conn))
+                }
+                None => {
+                    eprintln!(
+                        "MySQL database not available (MYSQL_URL not set or connection failed)"
+                    );
+                    None
+                }
             }
-            None => {
-                eprintln!("MySQL database not available (MYSQL_URL not set or connection failed)");
-                None
-            }
-        }
-    }).as_ref()
+        })
+        .as_ref()
 }
 
 // =============================================================================
@@ -341,9 +343,8 @@ fn try_vibesql_query(db: &VibeDB, sql: &str) -> Result<usize, QueryError> {
 
     if let vibesql_ast::Statement::Select(select) = stmt {
         let executor = SelectExecutor::new(db);
-        let result = executor
-            .execute(&select)
-            .map_err(|e| QueryError::ExecutionError(e.to_string()))?;
+        let result =
+            executor.execute(&select).map_err(|e| QueryError::ExecutionError(e.to_string()))?;
         Ok(result.len())
     } else {
         Err(QueryError::NotASelect)
@@ -418,20 +419,14 @@ fn bench_sanity_queries(c: &mut Criterion) {
 
         // Check memory pressure before executing query
         if let Some(reason) = check_memory_before_query(&query_name) {
-            record_query_result(QueryResult::Skipped {
-                name: query_name,
-                reason,
-            });
+            record_query_result(QueryResult::Skipped { name: query_name, reason });
             continue;
         }
 
         // Validate query before benchmarking
         match try_vibesql_query(db, sql) {
             Ok(row_count) => {
-                record_query_result(QueryResult::Passed {
-                    name: query_name,
-                    row_count,
-                });
+                record_query_result(QueryResult::Passed { name: query_name, row_count });
                 group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
                     b.iter(|| {
                         let count = benchmark_vibesql_query(db, sql);
@@ -482,9 +477,9 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
         return;
     };
 
-    let sqlite_conn = get_sqlite_conn();  // Returns None if SQLite disabled
-    let duckdb_conn = get_duckdb_conn();  // Returns None if DuckDB disabled
-    let mysql_conn = get_mysql_conn();    // Returns None if MySQL disabled or unavailable
+    let sqlite_conn = get_sqlite_conn(); // Returns None if SQLite disabled
+    let duckdb_conn = get_duckdb_conn(); // Returns None if DuckDB disabled
+    let mysql_conn = get_mysql_conn(); // Returns None if MySQL disabled or unavailable
 
     // Log which engines are enabled
     if let Some(engine) = get_comparison_engine() {
@@ -496,10 +491,7 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
 
         // Check memory pressure before executing query
         if let Some(reason) = check_memory_before_query(&query_name) {
-            record_query_result(QueryResult::Skipped {
-                name: query_name,
-                reason,
-            });
+            record_query_result(QueryResult::Skipped { name: query_name, reason });
             continue;
         }
 
@@ -593,20 +585,14 @@ fn bench_tpcds_queries(c: &mut Criterion) {
 
         // Check memory pressure before executing query
         if let Some(reason) = check_memory_before_query(&query_name) {
-            record_query_result(QueryResult::Skipped {
-                name: query_name,
-                reason,
-            });
+            record_query_result(QueryResult::Skipped { name: query_name, reason });
             continue;
         }
 
         // Validate query before benchmarking
         match try_vibesql_query(db, sql) {
             Ok(row_count) => {
-                record_query_result(QueryResult::Passed {
-                    name: query_name,
-                    row_count,
-                });
+                record_query_result(QueryResult::Passed { name: query_name, row_count });
                 group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
                     b.iter(|| {
                         let count = benchmark_vibesql_query(db, sql);
@@ -662,20 +648,14 @@ fn bench_tpcds_slow_queries(c: &mut Criterion) {
 
         // Check memory pressure before executing query
         if let Some(reason) = check_memory_before_query(&query_name) {
-            record_query_result(QueryResult::Skipped {
-                name: query_name,
-                reason,
-            });
+            record_query_result(QueryResult::Skipped { name: query_name, reason });
             continue;
         }
 
         // Validate query before benchmarking
         match try_vibesql_query(db, sql) {
             Ok(row_count) => {
-                record_query_result(QueryResult::Passed {
-                    name: query_name,
-                    row_count,
-                });
+                record_query_result(QueryResult::Passed { name: query_name, row_count });
                 group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
                     b.iter(|| {
                         let count = benchmark_vibesql_query(db, sql);
@@ -708,12 +688,7 @@ fn bench_tpcds_slow_queries(c: &mut Criterion) {
 // =============================================================================
 
 #[cfg(not(feature = "benchmark-comparison"))]
-criterion_group!(
-    benches,
-    bench_sanity_queries,
-    bench_tpcds_queries,
-    bench_tpcds_slow_queries,
-);
+criterion_group!(benches, bench_sanity_queries, bench_tpcds_queries, bench_tpcds_slow_queries,);
 
 #[cfg(feature = "benchmark-comparison")]
 criterion_group!(

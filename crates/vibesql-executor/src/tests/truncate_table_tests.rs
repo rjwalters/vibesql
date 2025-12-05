@@ -36,12 +36,21 @@ fn test_truncate_single_table() {
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
     // Insert some rows
-    db.insert_row("USERS", Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]))
-        .unwrap();
-    db.insert_row("USERS", Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]))
-        .unwrap();
-    db.insert_row("USERS", Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Carol".to_string())]))
-        .unwrap();
+    db.insert_row(
+        "USERS",
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "USERS",
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "USERS",
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Carol".to_string())]),
+    )
+    .unwrap();
 
     assert_eq!(db.get_table("USERS").unwrap().row_count(), 3);
 
@@ -287,8 +296,10 @@ fn test_truncate_empty_table() {
 
 #[test]
 fn test_truncate_resets_auto_increment() {
-    use vibesql_ast::{ColumnConstraint, ColumnConstraintKind, Expression, InsertSource, InsertStmt};
     use crate::InsertExecutor;
+    use vibesql_ast::{
+        ColumnConstraint, ColumnConstraintKind, Expression, InsertSource, InsertStmt,
+    };
 
     let mut db = Database::new();
 
@@ -301,14 +312,8 @@ fn test_truncate_resets_auto_increment() {
                 data_type: DataType::Integer,
                 nullable: false,
                 constraints: vec![
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::AutoIncrement,
-                    },
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::PrimaryKey,
-                    },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
                 ],
                 default_value: None,
                 comment: None,
@@ -380,8 +385,10 @@ fn test_truncate_resets_auto_increment() {
 
 #[test]
 fn test_truncate_resets_auto_increment_multiple_inserts() {
-    use vibesql_ast::{ColumnConstraint, ColumnConstraintKind, Expression, InsertSource, InsertStmt};
     use crate::InsertExecutor;
+    use vibesql_ast::{
+        ColumnConstraint, ColumnConstraintKind, Expression, InsertSource, InsertStmt,
+    };
 
     let mut db = Database::new();
 
@@ -394,14 +401,8 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 data_type: DataType::Integer,
                 nullable: false,
                 constraints: vec![
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::AutoIncrement,
-                    },
-                    ColumnConstraint {
-                        name: None,
-                        kind: ColumnConstraintKind::PrimaryKey,
-                    },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
                 ],
                 default_value: None,
                 comment: None,
