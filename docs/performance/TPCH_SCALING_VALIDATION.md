@@ -208,6 +208,12 @@ SCALE_FACTOR=1.0 QUERY_TIMEOUT_SECS=300 timeout 7200 ./target/release/deps/tpch_
 - Related: #2490 (TPC-H optimization tracking)
 - Related: #2407 (100% TPC-H pass rate)
 
+### Follow-on Issues Created
+
+- **#3629** - CRITICAL: Data loading O(n^2+) scaling (`loom:urgent`)
+- **#3630** - Q9 >200x scaling regression
+- **#3631** - Q18 11.5x scaling issue
+
 ---
 
 *Last Updated: 2025-12-05*
