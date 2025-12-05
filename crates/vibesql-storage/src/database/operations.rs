@@ -592,6 +592,7 @@ impl Operations {
     ///
     /// Extracts vectors from the specified table and builds an IVFFlat index
     /// using k-means clustering.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
@@ -694,6 +695,7 @@ impl Operations {
     ///
     /// Extracts vectors from the specified table and builds an HNSW index
     /// using the hierarchical navigable small world algorithm.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_hnsw_index(
         &mut self,
         catalog: &vibesql_catalog::Catalog,

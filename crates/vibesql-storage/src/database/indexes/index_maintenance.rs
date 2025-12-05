@@ -687,6 +687,7 @@ impl IndexManager {
     /// * `dimensions` - Number of dimensions in the vectors
     /// * `lists` - Number of clusters for the IVFFlat algorithm
     /// * `metric` - Distance metric to use (L2, Cosine, InnerProduct)
+    #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index(
         &mut self,
         index_name: String,
@@ -767,6 +768,7 @@ impl IndexManager {
     ///
     /// This is the main entry point for creating IVFFlat indexes when the
     /// table rows have already been accessed by the caller (executor layer).
+    #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index_with_vectors(
         &mut self,
         index_name: String,
@@ -938,6 +940,7 @@ impl IndexManager {
     ///
     /// This is the main entry point for creating HNSW indexes when the
     /// table rows have already been accessed by the caller (executor layer).
+    #[allow(clippy::too_many_arguments)]
     pub fn create_hnsw_index_with_vectors(
         &mut self,
         index_name: String,

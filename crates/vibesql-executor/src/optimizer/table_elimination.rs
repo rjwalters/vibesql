@@ -224,6 +224,18 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         return stmt.clone();
     }
 
+    // If ALL tables would be eliminated, return unchanged.
+    // Eliminating all tables would leave no FROM clause, causing incorrect
+    // semantics for WHERE clauses that evaluate to FALSE (like NULL IS NOT NULL).
+    if kept_tables.is_empty() {
+        if verbose {
+            eprintln!(
+                "[TABLE_ELIM_OPT] Skipping: would eliminate all tables, leaving no FROM clause"
+            );
+        }
+        return stmt.clone();
+    }
+
     // Build new FROM clause without eliminated tables
     let new_from = rebuild_from_clause(&kept_tables);
 

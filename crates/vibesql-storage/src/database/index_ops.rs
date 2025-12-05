@@ -125,6 +125,7 @@ impl Database {
     /// * `dimensions` - Number of dimensions in the vectors
     /// * `lists` - Number of clusters for the IVFFlat algorithm
     /// * `metric` - Distance metric to use (L2, Cosine, InnerProduct)
+    #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index(
         &mut self,
         index_name: String,
@@ -202,6 +203,7 @@ impl Database {
     /// * `m` - Maximum number of connections per node (default 16)
     /// * `ef_construction` - Size of dynamic candidate list during construction (default 64)
     /// * `metric` - Distance metric to use (L2, Cosine, InnerProduct)
+    #[allow(clippy::too_many_arguments)]
     pub fn create_hnsw_index(
         &mut self,
         index_name: String,
