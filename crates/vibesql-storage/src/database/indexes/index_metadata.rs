@@ -32,13 +32,13 @@ pub(super) fn normalize_index_name(name: &str) -> String {
 /// Set to very high value (100K) to keep Phase 2 conservative - disk-backed
 /// indexes are functional but not enabled by default yet
 ///
-/// For tests, disable disk-backed indexes entirely (use usize::MAX) to ensure
-/// fast test execution. The specific test that verifies disk-backed functionality
-/// is marked with #[ignore] and must be run explicitly.
-#[cfg(not(test))]
+/// For tests and benchmarks (with `in-memory-indexes` feature), disable disk-backed
+/// indexes entirely (use usize::MAX) to ensure fast execution. The specific test that
+/// verifies disk-backed functionality is marked with #[ignore] and must be run explicitly.
+#[cfg(all(not(test), not(feature = "in-memory-indexes")))]
 pub(super) const DISK_BACKED_THRESHOLD: usize = 100_000;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "in-memory-indexes"))]
 pub(super) const DISK_BACKED_THRESHOLD: usize = usize::MAX;
 
 /// Helper function to safely acquire a lock on a BTreeIndex mutex

@@ -79,7 +79,9 @@ mysql-comparison = ["mysql"]
 # Usage: cargo bench --features benchmark-comparison
 # For DuckDB comparisons (OLAP), use: cargo bench --features benchmark-comparison,duckdb-comparison
 # MySQL requires MYSQL_URL env var (e.g., mysql://root:password@localhost:3306/tpch)
-benchmark-comparison = ["sqlite-comparison", "native-columnar"]
+# Note: This enables in-memory-indexes for vibesql-storage to avoid slow disk-backed index
+# creation for ephemeral benchmark data at large scale factors.
+benchmark-comparison = ["sqlite-comparison", "native-columnar", "vibesql-storage/in-memory-indexes"]
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
 # Enable detailed profiling output for TPC-C transactions
@@ -95,6 +97,10 @@ simd = []
 # Use jemalloc allocator for better memory release characteristics
 # Usage: cargo bench --features jemalloc -- tpcds_runner
 jemalloc = ["tikv-jemallocator", "tikv-jemalloc-ctl"]
+# Enable fast in-memory indexes for large scale benchmarks (SF >= 0.1)
+# This avoids slow disk-backed index creation for ephemeral benchmark data.
+# Usage: cargo bench --features large-scale-benchmarks -- tpcds_runner
+large-scale-benchmarks = ["vibesql-storage/in-memory-indexes"]
 
 [[test]]
 name = "foreign_key_tests"

@@ -18,6 +18,9 @@ use rusqlite::Connection as SqliteConn;
 
 use std::str::FromStr;
 
+/// Batch size for bulk inserts - matches TPC-DS for consistency
+const BATCH_SIZE: usize = 5000;
+
 // =============================================================================
 // Database Loaders
 // =============================================================================
@@ -26,21 +29,50 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     let mut db = VibeDB::new();
     let mut data = TPCHData::new(scale_factor);
 
+    eprintln!("Loading TPC-H database (SF {})...", scale_factor);
+    eprintln!("  Creating schema... ");
+
     // Create schema
     create_tpch_schema_vibesql(&mut db);
+    eprintln!("  Creating schema... done");
 
-    // Load data
+    // Load data with progress logging
+    eprint!("  Loading region (5 rows)... ");
     load_region_vibesql(&mut db);
+    eprintln!("done");
+
+    eprint!("  Loading nation (25 rows)... ");
     load_nation_vibesql(&mut db);
+    eprintln!("done");
+
+    eprint!("  Loading customer ({} rows)... ", data.customer_count);
     load_customer_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading supplier ({} rows)... ", data.supplier_count);
     load_supplier_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading part ({} rows)... ", data.part_count);
     load_part_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading partsupp ({} rows)... ", data.part_count * 4);
     load_partsupp_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading orders ({} rows)... ", data.orders_count);
     load_orders_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading lineitem ({} rows)... ", data.lineitem_count);
     load_lineitem_vibesql(&mut db, &mut data);
+    eprintln!("done");
 
     // Create indexes to match SQLite benchmark (for fair comparison)
+    eprint!("  Creating indexes... ");
     create_tpch_indexes_vibesql(&mut db);
+    eprintln!("done");
 
     // Compute statistics for join order optimization
     // This enables the cost-based optimizer to make better decisions
@@ -575,9 +607,12 @@ fn create_tpch_schema_vibesql(db: &mut VibeDB) {
 /// Without these indexes, VibeSQL must do full table scans while SQLite uses index seeks,
 /// making the comparison unfair (276x performance gap on Q2).
 fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
+    use std::time::Instant;
     use vibesql_ast::{IndexColumn, OrderDirection};
 
     // Region table: PRIMARY KEY (r_regionkey)
+    eprint!("    idx_region_pk... ");
+    let start = Instant::now();
     db.create_index(
         "idx_region_pk".to_string(),
         "REGION".to_string(),
@@ -589,8 +624,11 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         }],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 
     // Nation table: PRIMARY KEY (n_nationkey)
+    eprint!("    idx_nation_pk... ");
+    let start = Instant::now();
     db.create_index(
         "idx_nation_pk".to_string(),
         "NATION".to_string(),
@@ -602,8 +640,11 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         }],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 
     // Customer table: PRIMARY KEY (c_custkey)
+    eprint!("    idx_customer_pk... ");
+    let start = Instant::now();
     db.create_index(
         "idx_customer_pk".to_string(),
         "CUSTOMER".to_string(),
@@ -615,8 +656,11 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         }],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 
     // Supplier table: PRIMARY KEY (s_suppkey)
+    eprint!("    idx_supplier_pk... ");
+    let start = Instant::now();
     db.create_index(
         "idx_supplier_pk".to_string(),
         "SUPPLIER".to_string(),
@@ -628,8 +672,11 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         }],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 
     // Orders table: PRIMARY KEY (o_orderkey)
+    eprint!("    idx_orders_pk... ");
+    let start = Instant::now();
     db.create_index(
         "idx_orders_pk".to_string(),
         "ORDERS".to_string(),
@@ -641,8 +688,11 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         }],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 
     // Lineitem table: PRIMARY KEY (l_orderkey, l_linenumber)
+    eprint!("    idx_lineitem_pk (600K rows)... ");
+    let start = Instant::now();
     db.create_index(
         "idx_lineitem_pk".to_string(),
         "LINEITEM".to_string(),
@@ -661,8 +711,11 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         ],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 
     // Part table: PRIMARY KEY (p_partkey)
+    eprint!("    idx_part_pk... ");
+    let start = Instant::now();
     db.create_index(
         "idx_part_pk".to_string(),
         "PART".to_string(),
@@ -674,8 +727,11 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         }],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 
     // Partsupp table: PRIMARY KEY (ps_partkey, ps_suppkey)
+    eprint!("    idx_partsupp_pk... ");
+    let start = Instant::now();
     db.create_index(
         "idx_partsupp_pk".to_string(),
         "PARTSUPP".to_string(),
@@ -694,6 +750,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         ],
     )
     .unwrap();
+    eprintln!("{:?}", start.elapsed());
 }
 
 #[cfg(feature = "sqlite-comparison")]
@@ -1126,6 +1183,9 @@ fn load_nation_duckdb(conn: &DuckDBConn) {
 fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE);
+
     for i in 0..data.customer_count {
         let nation_key = i % 25;
         let acctbal = (i as f64 * 17.3) % 10000.0 - 999.99;
@@ -1139,7 +1199,16 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
             SqlValue::Varchar(SEGMENTS[i % SEGMENTS.len()].to_string()),
             SqlValue::Varchar(data.random_varchar(117)),
         ]);
-        db.insert_row("CUSTOMER", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("CUSTOMER", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("CUSTOMER", rows).unwrap();
     }
 }
 
@@ -1192,6 +1261,9 @@ fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 fn load_supplier_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE);
+
     for i in 0..data.supplier_count {
         let nation_key = i % 25;
         let acctbal = (i as f64 * 13.7) % 10000.0 - 999.99;
@@ -1204,7 +1276,16 @@ fn load_supplier_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
             SqlValue::Numeric(acctbal),
             SqlValue::Varchar(data.random_varchar(101)),
         ]);
-        db.insert_row("SUPPLIER", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("SUPPLIER", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("SUPPLIER", rows).unwrap();
     }
 }
 
@@ -1256,6 +1337,9 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     use super::data::{COLORS, CONTAINERS, TYPES};
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE);
+
     for i in 0..data.part_count {
         let color1 = COLORS[i % COLORS.len()];
         let color2 = COLORS[(i * 7) % COLORS.len()];
@@ -1272,7 +1356,16 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
             SqlValue::Numeric(retailprice),
             SqlValue::Varchar(data.random_varchar(23)),
         ]);
-        db.insert_row("PART", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("PART", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("PART", rows).unwrap();
     }
 }
 
@@ -1337,6 +1430,9 @@ fn load_part_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 fn load_partsupp_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE);
+
     // Each part is supplied by 4 suppliers
     for part_key in 1..=data.part_count {
         for j in 0..4 {
@@ -1353,8 +1449,17 @@ fn load_partsupp_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
                 SqlValue::Numeric(supplycost),
                 SqlValue::Varchar(data.random_varchar(199)),
             ]);
-            db.insert_row("PARTSUPP", row).unwrap();
+            rows.push(row);
+
+            if rows.len() >= BATCH_SIZE {
+                db.insert_rows_batch("PARTSUPP", std::mem::take(&mut rows)).unwrap();
+                rows = Vec::with_capacity(BATCH_SIZE);
+            }
         }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("PARTSUPP", rows).unwrap();
     }
 }
 
@@ -1417,6 +1522,9 @@ fn load_partsupp_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE);
+
     for i in 0..data.orders_count {
         let cust_key = (i % data.customer_count) + 1;
         let totalprice = (i as f64 * 271.3) % 500000.0 + 1000.0;
@@ -1433,7 +1541,16 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
             SqlValue::Integer(0),
             SqlValue::Varchar(data.random_varchar(79)),
         ]);
-        db.insert_row("ORDERS", row).unwrap();
+        rows.push(row);
+
+        if rows.len() >= BATCH_SIZE {
+            db.insert_rows_batch("ORDERS", std::mem::take(&mut rows)).unwrap();
+            rows = Vec::with_capacity(BATCH_SIZE);
+        }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("ORDERS", rows).unwrap();
     }
 }
 
@@ -1503,13 +1620,16 @@ fn get_valid_supplier_for_part(
 fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    let mut rows = Vec::with_capacity(BATCH_SIZE);
     let mut line_id = 0;
-    for order_num in 1..=data.orders_count {
+
+    'outer: for order_num in 1..=data.orders_count {
         let num_lines = (order_num * 3 % 7) + 1; // 1-7 lines per order
 
         for line_num in 1..=num_lines {
             if line_id >= data.lineitem_count {
-                break;
+                break 'outer;
             }
 
             let part_key = (line_id * 13) % data.part_count + 1;
@@ -1542,10 +1662,19 @@ fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
                 SqlValue::Varchar(SHIP_MODES[line_id % SHIP_MODES.len()].to_string()),
                 SqlValue::Varchar(data.random_varchar(44)),
             ]);
-            db.insert_row("LINEITEM", row).unwrap();
+            rows.push(row);
+
+            if rows.len() >= BATCH_SIZE {
+                db.insert_rows_batch("LINEITEM", std::mem::take(&mut rows)).unwrap();
+                rows = Vec::with_capacity(BATCH_SIZE);
+            }
 
             line_id += 1;
         }
+    }
+
+    if !rows.is_empty() {
+        db.insert_rows_batch("LINEITEM", rows).unwrap();
     }
 }
 
