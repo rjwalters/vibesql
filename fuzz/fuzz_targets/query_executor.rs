@@ -10,19 +10,23 @@
 //! - Expression evaluation
 //! - Type coercion during execution
 //! - Memory management in execution pipelines
+//!
+//! The fuzzer covers SELECT, INSERT, UPDATE, and DELETE statements using
+//! transaction rollback to maintain database isolation between fuzz iterations.
 
 use libfuzzer_sys::fuzz_target;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 // Import the vibesql crates
-use vibesql_executor::SelectExecutor;
+use vibesql_executor::{DeleteExecutor, InsertExecutor, SelectExecutor, UpdateExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
-/// Create a test database with sample tables once per fuzzing session
-fn get_test_database() -> &'static Database {
-    static DB: OnceLock<Database> = OnceLock::new();
-    DB.get_or_init(create_test_database)
+/// Get a mutable reference to the shared test database
+fn get_test_database() -> Arc<Mutex<Database>> {
+    static DB: OnceLock<Arc<Mutex<Database>>> = OnceLock::new();
+    DB.get_or_init(|| Arc::new(Mutex::new(create_test_database())))
+        .clone()
 }
 
 fn create_test_database() -> Database {
@@ -71,7 +75,7 @@ fn execute_sql(db: &mut Database, sql: &str) {
                 let _ = vibesql_executor::CreateTableExecutor::execute(create, db);
             }
             vibesql_ast::Statement::Insert(insert) => {
-                let _ = vibesql_executor::InsertExecutor::execute(db, insert);
+                let _ = InsertExecutor::execute(db, insert);
             }
             _ => {}
         }
@@ -96,13 +100,46 @@ fuzz_target!(|data: &[u8]| {
         Err(_) => return, // Parse errors are expected, not crashes
     };
 
-    // Get our test database (immutable reference - SELECT only)
-    let db = get_test_database();
+    // Get our test database
+    let db_arc = get_test_database();
+    let mut db = match db_arc.lock() {
+        Ok(guard) => guard,
+        Err(_) => return, // Poisoned lock, skip this iteration
+    };
 
-    // Only execute SELECT statements to avoid modifying the database
-    if let vibesql_ast::Statement::Select(select_stmt) = &stmt {
-        // Execute the query - should never panic
-        let executor = SelectExecutor::new(db);
-        let _ = executor.execute(select_stmt);
+    // Execute different statement types
+    match &stmt {
+        vibesql_ast::Statement::Select(select_stmt) => {
+            // SELECT doesn't modify state, no transaction needed
+            let executor = SelectExecutor::new(&*db);
+            let _ = executor.execute(select_stmt);
+        }
+        vibesql_ast::Statement::Insert(insert_stmt) => {
+            // BEGIN transaction to isolate INSERT
+            if db.begin_transaction().is_ok() {
+                let _ = InsertExecutor::execute(&mut *db, insert_stmt);
+                // ROLLBACK to restore original state
+                let _ = db.rollback_transaction();
+            }
+        }
+        vibesql_ast::Statement::Update(update_stmt) => {
+            // BEGIN transaction to isolate UPDATE
+            if db.begin_transaction().is_ok() {
+                let _ = UpdateExecutor::execute(update_stmt, &mut *db);
+                // ROLLBACK to restore original state
+                let _ = db.rollback_transaction();
+            }
+        }
+        vibesql_ast::Statement::Delete(delete_stmt) => {
+            // BEGIN transaction to isolate DELETE
+            if db.begin_transaction().is_ok() {
+                let _ = DeleteExecutor::execute(delete_stmt, &mut *db);
+                // ROLLBACK to restore original state
+                let _ = db.rollback_transaction();
+            }
+        }
+        _ => {
+            // Skip other statement types (DDL, etc.)
+        }
     }
 });
