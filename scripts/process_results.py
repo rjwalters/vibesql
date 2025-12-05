@@ -787,7 +787,12 @@ class SysbenchParser(BenchmarkParser):
         return results, summary
 
     def parse_criterion_directory(self, criterion_dir: Path) -> List[Dict]:
-        """Parse Criterion benchmark results from directory."""
+        """Parse Criterion benchmark results from directory.
+
+        Criterion directory structure:
+            target/criterion/sysbench_point_select/vibesql/10000/new/estimates.json
+                             ^benchmark_group       ^engine  ^table_size
+        """
         results = []
 
         for bench_group in criterion_dir.glob("sysbench_*"):
@@ -796,48 +801,51 @@ class SysbenchParser(BenchmarkParser):
 
             test_name = bench_group.name.replace("sysbench_", "")
 
-            for bench_run in bench_group.iterdir():
-                if not bench_run.is_dir():
+            # Iterate over engine directories (vibesql, sqlite, duckdb)
+            for engine_dir in bench_group.iterdir():
+                if not engine_dir.is_dir():
                     continue
 
-                parts = bench_run.name.split("/") if "/" in bench_run.name else [bench_run.name]
-                if len(parts) >= 1:
-                    engine = parts[0].lower()
-                    table_size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 10000
-                else:
-                    continue
+                engine = engine_dir.name.lower()
 
-                estimates_file = bench_run / "new" / "estimates.json"
-                if not estimates_file.exists():
-                    continue
+                # Iterate over table_size directories (e.g., 10000)
+                for size_dir in engine_dir.iterdir():
+                    if not size_dir.is_dir():
+                        continue
 
-                try:
-                    with open(estimates_file) as f:
-                        estimates = json.load(f)
+                    table_size = int(size_dir.name) if size_dir.name.isdigit() else 10000
 
-                    mean_ns = estimates.get("mean", {}).get("point_estimate", 0)
-                    std_dev_ns = estimates.get("std_dev", {}).get("point_estimate", 0)
-                    median_ns = estimates.get("median", {}).get("point_estimate", 0)
+                    estimates_file = size_dir / "new" / "estimates.json"
+                    if not estimates_file.exists():
+                        continue
 
-                    sample_file = bench_run / "new" / "sample.json"
-                    iterations = 0
-                    if sample_file.exists():
-                        with open(sample_file) as f:
-                            sample = json.load(f)
-                            iterations = len(sample.get("times", []))
+                    try:
+                        with open(estimates_file) as f:
+                            estimates = json.load(f)
 
-                    results.append({
-                        'database_engine': engine,
-                        'test_name': test_name,
-                        'table_size': table_size,
-                        'mean_time_ns': mean_ns,
-                        'std_dev_ns': std_dev_ns,
-                        'median_time_ns': median_ns,
-                        'iterations': iterations
-                    })
-                except (json.JSONDecodeError, KeyError) as e:
-                    print(f"Warning: Failed to parse {estimates_file}: {e}")
-                    continue
+                        mean_ns = estimates.get("mean", {}).get("point_estimate", 0)
+                        std_dev_ns = estimates.get("std_dev", {}).get("point_estimate", 0)
+                        median_ns = estimates.get("median", {}).get("point_estimate", 0)
+
+                        sample_file = size_dir / "new" / "sample.json"
+                        iterations = 0
+                        if sample_file.exists():
+                            with open(sample_file) as f:
+                                sample = json.load(f)
+                                iterations = len(sample.get("times", []))
+
+                        results.append({
+                            'database_engine': engine,
+                            'test_name': test_name,
+                            'table_size': table_size,
+                            'mean_time_ns': mean_ns,
+                            'std_dev_ns': std_dev_ns,
+                            'median_time_ns': median_ns,
+                            'iterations': iterations
+                        })
+                    except (json.JSONDecodeError, KeyError) as e:
+                        print(f"Warning: Failed to parse {estimates_file}: {e}")
+                        continue
 
         return results
 
