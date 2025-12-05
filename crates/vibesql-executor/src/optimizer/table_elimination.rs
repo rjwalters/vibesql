@@ -570,6 +570,13 @@ fn find_equijoin_tables(
             find_equijoin_tables(left, tables, _table_names, table_prefixes);
             find_equijoin_tables(right, tables, _table_names, table_prefixes);
         }
+        // Also recurse into OR branches to find equijoins
+        // This is critical for queries like TPC-H Q19 where the join condition
+        // (p_partkey = l_partkey) appears inside multiple OR branches
+        Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+            find_equijoin_tables(left, tables, _table_names, table_prefixes);
+            find_equijoin_tables(right, tables, _table_names, table_prefixes);
+        }
         Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
             // Check if this is a join between two tables
             let mut left_tables = HashSet::new();
