@@ -51,7 +51,7 @@ sha2 = "0.10"
 base64 = "0.22"
 hmac = "0.12"
 pbkdf2 = "0.12"
-jsonwebtoken = "10"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 
 # Configuration and error handling
 toml = "0.9"
