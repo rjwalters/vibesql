@@ -123,7 +123,14 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     load_store_vibesql(&mut db, &mut data);
     eprintln!("done");
 
-    // Phase 2 dimension tables
+    // Load store_sales immediately after store to match DuckDB's loading order
+    // (RNG state must match between loaders for deterministic data generation)
+    eprint!("  Loading store_sales ({} rows)... ", data.store_sales_count);
+    std::io::stderr().flush().ok();
+    load_store_sales_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    // Phase 2 tables
     eprint!("  Loading promotion ({} rows)... ", data.promotion_count);
     std::io::stderr().flush().ok();
     load_promotion_vibesql(&mut db, &mut data);
@@ -144,7 +151,12 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     load_reason_vibesql(&mut db, &mut data);
     eprintln!("done");
 
-    // Phase 3 dimension tables
+    eprint!("  Loading store_returns ({} rows)... ", data.store_returns_count);
+    std::io::stderr().flush().ok();
+    load_store_returns_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    // Phase 3 tables
     eprint!("  Loading catalog_page ({} rows)... ", data.catalog_page_count);
     std::io::stderr().flush().ok();
     load_catalog_page_vibesql(&mut db, &mut data);
@@ -160,39 +172,6 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     load_web_site_vibesql(&mut db, &mut data);
     eprintln!("done");
 
-    // Phase 4 dimension tables (demographics and call center)
-    eprint!("  Loading customer_demographics ({} rows)... ", data.customer_demographics_count);
-    std::io::stderr().flush().ok();
-    load_customer_demographics_vibesql(&mut db, &mut data);
-    eprintln!("done");
-
-    eprint!("  Loading household_demographics ({} rows)... ", data.household_demographics_count);
-    std::io::stderr().flush().ok();
-    load_household_demographics_vibesql(&mut db, &mut data);
-    eprintln!("done");
-
-    eprint!("  Loading income_band... ");
-    std::io::stderr().flush().ok();
-    load_income_band_vibesql(&mut db, &mut data);
-    eprintln!("done");
-
-    eprint!("  Loading call_center ({} rows)... ", data.call_center_count);
-    std::io::stderr().flush().ok();
-    load_call_center_vibesql(&mut db, &mut data);
-    eprintln!("done");
-
-    // Load fact tables
-    eprint!("  Loading store_sales ({} rows)... ", data.store_sales_count);
-    std::io::stderr().flush().ok();
-    load_store_sales_vibesql(&mut db, &mut data);
-    eprintln!("done");
-
-    eprint!("  Loading store_returns ({} rows)... ", data.store_returns_count);
-    std::io::stderr().flush().ok();
-    load_store_returns_vibesql(&mut db, &mut data);
-    eprintln!("done");
-
-    // Phase 3 fact tables
     eprint!("  Loading catalog_sales ({} rows)... ", data.catalog_sales_count);
     std::io::stderr().flush().ok();
     load_catalog_sales_vibesql(&mut db, &mut data);
@@ -213,7 +192,27 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     load_web_returns_vibesql(&mut db, &mut data);
     eprintln!("done");
 
-    // Phase 4 fact table (inventory)
+    // Phase 4 tables (demographics, call center, inventory)
+    eprint!("  Loading customer_demographics ({} rows)... ", data.customer_demographics_count);
+    std::io::stderr().flush().ok();
+    load_customer_demographics_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading household_demographics ({} rows)... ", data.household_demographics_count);
+    std::io::stderr().flush().ok();
+    load_household_demographics_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading income_band... ");
+    std::io::stderr().flush().ok();
+    load_income_band_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
+    eprint!("  Loading call_center ({} rows)... ", data.call_center_count);
+    std::io::stderr().flush().ok();
+    load_call_center_vibesql(&mut db, &mut data);
+    eprintln!("done");
+
     eprint!("  Loading inventory ({} rows)... ", data.inventory_count);
     std::io::stderr().flush().ok();
     load_inventory_vibesql(&mut db, &mut data);
@@ -3780,11 +3779,13 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     for d_date_sk in 1..=num_dates {
         let days_since_base = d_date_sk as i64 - 1;
 
-        // Calculate date components (simplified, ignoring leap years for benchmark)
+        // Calculate date components (matching DuckDB's logic)
         let year = start_year + (days_since_base / 365) as i32;
         let day_of_year = (days_since_base % 365) as i32;
         let month = (day_of_year / 30).min(11) + 1;
-        let day = (day_of_year % 30) + 1;
+        let raw_day = (day_of_year % 30) + 1;
+        // Clamp day to valid range for this month/year (handles Feb 29 in non-leap years)
+        let day = raw_day.min(days_in_month(year, month));
 
         let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
         let d_date_id = format!("AAAAAA{:010}", d_date_sk);
@@ -4189,36 +4190,40 @@ fn load_store_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 // =============================================================================
 
 fn load_promotion_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
-    use super::data::PROMO_PURPOSES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
+    // Match DuckDB's deterministic data generation pattern
+    let channels = ["Y", "N"];
+    let purposes = ["Unknown", "Direct", "Digital"];
     let mut rows = Vec::with_capacity(data.promotion_count);
 
     for i in 1..=data.promotion_count {
         let p_promo_id = format!("AAAAAA{:010}", i);
-        let purpose_idx = i % PROMO_PURPOSES.len();
+        let start_date_sk = data.random_i32(1, 500);
+        let end_date_sk = start_date_sk + data.random_i32(7, 30);
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(p_promo_id),
-            SqlValue::Integer(data.random_i32(1, 2191) as i64), // p_start_date_sk
-            SqlValue::Integer(data.random_i32(1, 2191) as i64), // p_end_date_sk
-            SqlValue::Integer(data.random_key(data.item_count) as i64), // p_item_sk
-            SqlValue::Numeric(data.random_f64(100.0, 10000.0)), // p_cost
-            SqlValue::Integer(data.random_i32(1, 100) as i64),  // p_response_target
-            SqlValue::Varchar(format!("Promo#{}", i)),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
-            SqlValue::Varchar(format!("Channel details for promo {}", i)),
-            SqlValue::Varchar(PROMO_PURPOSES[purpose_idx].to_string()),
-            SqlValue::Varchar(if data.random_bool() { "Y" } else { "N" }.to_string()),
+            SqlValue::Integer(start_date_sk as i64),
+            SqlValue::Integer(end_date_sk as i64),
+            SqlValue::Integer(((i % data.item_count) + 1) as i64),
+            SqlValue::Numeric(data.random_f64(100.0, 10000.0)),
+            SqlValue::Integer(data.random_i32(1, 10) as i64),
+            SqlValue::Varchar(format!("Promo {}", i)),
+            // Match DuckDB's deterministic channel pattern
+            SqlValue::Varchar(channels[i % 2].to_string()),       // p_channel_dmail
+            SqlValue::Varchar(channels[(i + 1) % 2].to_string()), // p_channel_email
+            SqlValue::Varchar(channels[i % 2].to_string()),       // p_channel_catalog
+            SqlValue::Varchar(channels[(i + 1) % 2].to_string()), // p_channel_tv
+            SqlValue::Varchar(channels[i % 2].to_string()),       // p_channel_radio
+            SqlValue::Varchar(channels[(i + 1) % 2].to_string()), // p_channel_press
+            SqlValue::Varchar(channels[i % 2].to_string()),       // p_channel_event
+            SqlValue::Varchar(channels[(i + 1) % 2].to_string()), // p_channel_demo
+            SqlValue::Varchar(format!("Details for promo {}", i)),
+            SqlValue::Varchar(purposes[i % 3].to_string()),
+            SqlValue::Varchar(channels[i % 2].to_string()),       // p_discount_active
         ]);
         rows.push(row);
     }
@@ -4518,24 +4523,26 @@ fn load_catalog_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     for i in 0..data.catalog_sales_count {
         let cs_sold_date_sk = (i % num_dates) + 1;
         let cs_sold_time_sk = (i % 24) * 3600;
-        let cs_ship_date_sk = cs_sold_date_sk + data.random_i32(1, 30) as usize;
+        // Match DuckDB's random parameters exactly
+        let cs_ship_date_sk = cs_sold_date_sk + data.random_i32(1, 14) as usize;
+        let cs_item_sk = (i % data.item_count) + 1;
         let cs_bill_customer_sk = (i % data.customer_count) + 1;
         let cs_ship_customer_sk = cs_bill_customer_sk;
-        let cs_item_sk = (i % data.item_count) + 1;
         let cs_promo_sk = (i % data.promotion_count) + 1;
         let cs_warehouse_sk = (i % data.warehouse_count) + 1;
         let cs_ship_mode_sk = (i % data.ship_mode_count.min(20)) + 1;
         let cs_catalog_page_sk = (i % data.catalog_page_count) + 1;
         let cs_order_number = (i / 5) + 1; // ~5 items per order
 
-        let quantity = data.random_i32(1, 20);
-        let wholesale_cost = data.random_f64(10.0, 100.0);
-        let list_price = wholesale_cost * 1.5;
+        // Match DuckDB's random parameters exactly
+        let quantity = data.random_i32(1, 100);
+        let wholesale_cost = data.random_f64(1.0, 50.0);
+        let list_price = wholesale_cost * data.random_f64(1.5, 3.0);
         let sales_price = list_price * data.random_f64(0.8, 1.0);
-        let ext_discount_amt = (list_price - sales_price) * quantity as f64;
         let ext_sales_price = sales_price * quantity as f64;
         let ext_wholesale_cost = wholesale_cost * quantity as f64;
         let ext_list_price = list_price * quantity as f64;
+        let ext_discount_amt = ext_list_price - ext_sales_price;
         let ext_tax = ext_sales_price * 0.08;
         let coupon_amt = data.random_f64(0.0, 20.0);
         let ext_ship_cost = data.random_f64(5.0, 30.0);
@@ -4676,7 +4683,8 @@ fn load_web_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     for i in 0..data.web_sales_count {
         let ws_sold_date_sk = (i % num_dates) + 1;
         let ws_sold_time_sk = (i % 24) * 3600;
-        let ws_ship_date_sk = ws_sold_date_sk + data.random_i32(1, 30) as usize;
+        // Match DuckDB's random parameters exactly
+        let ws_ship_date_sk = ws_sold_date_sk + data.random_i32(1, 14) as usize;
         let ws_item_sk = (i % data.item_count) + 1;
         let ws_bill_customer_sk = (i % data.customer_count) + 1;
         let ws_ship_customer_sk = ws_bill_customer_sk;
@@ -4687,14 +4695,15 @@ fn load_web_sales_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let ws_web_site_sk = (i % data.web_site_count) + 1;
         let ws_order_number = (i / 5) + 1; // ~5 items per order
 
-        let quantity = data.random_i32(1, 20);
-        let wholesale_cost = data.random_f64(10.0, 100.0);
-        let list_price = wholesale_cost * 1.5;
+        // Match DuckDB's random parameters exactly
+        let quantity = data.random_i32(1, 100);
+        let wholesale_cost = data.random_f64(1.0, 50.0);
+        let list_price = wholesale_cost * data.random_f64(1.5, 3.0);
         let sales_price = list_price * data.random_f64(0.8, 1.0);
-        let ext_discount_amt = (list_price - sales_price) * quantity as f64;
         let ext_sales_price = sales_price * quantity as f64;
         let ext_wholesale_cost = wholesale_cost * quantity as f64;
         let ext_list_price = list_price * quantity as f64;
+        let ext_discount_amt = ext_list_price - ext_sales_price;
         let ext_tax = ext_sales_price * 0.08;
         let coupon_amt = data.random_f64(0.0, 20.0);
         let ext_ship_cost = data.random_f64(5.0, 30.0);
@@ -6428,13 +6437,11 @@ fn create_tpcds_schema_duckdb(conn: &DuckDBConn) {
 }
 
 /// Returns true if the given year is a leap year
-#[cfg(feature = "benchmark-comparison")]
 fn is_leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
 /// Returns the number of days in the given month for the given year
-#[cfg(feature = "benchmark-comparison")]
 fn days_in_month(year: i32, month: i32) -> i32 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
