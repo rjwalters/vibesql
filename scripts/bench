@@ -21,11 +21,35 @@ Examples:
 
 import argparse
 import os
+import platform
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+
+
+def strip_quarantine():
+    """Remove macOS quarantine attribute from built binaries.
+
+    macOS Gatekeeper can flag freshly-compiled binaries as 'malware' because
+    they aren't code-signed. This removes the quarantine extended attribute
+    to prevent false positive blocks.
+    """
+    if platform.system() != "Darwin":
+        return
+
+    target_dir = Path(__file__).parent.parent / "target"
+    if not target_dir.exists():
+        return
+
+    # Remove quarantine from all executables in target/
+    subprocess.run(
+        ["find", str(target_dir), "-type", "f", "-perm", "+111",
+         "-exec", "xattr", "-d", "com.apple.quarantine", "{}", ";"],
+        capture_output=True,
+        stderr=subprocess.DEVNULL
+    )
 
 
 @dataclass
@@ -319,6 +343,8 @@ def run_tpch_criterion(config: BenchConfig) -> int:
         print("❌ Build failed")
         return 1
 
+    strip_quarantine()
+
     # Run the Criterion benchmark
     print("\nRunning TPC-H benchmarks (all engines)...")
     cmd = [
@@ -365,7 +391,9 @@ def run_tpcc(config: BenchConfig) -> int:
     if result.returncode != 0:
         print("❌ Build failed")
         return 1
-    
+
+    strip_quarantine()
+
     # Set up environment
     env = os.environ.copy()
     duration = config.duration or 60

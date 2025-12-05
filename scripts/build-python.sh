@@ -8,6 +8,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHON_BINDINGS_DIR="$REPO_ROOT/crates/vibesql-python-bindings"
 
+# Strip macOS quarantine attribute from built binaries
+# macOS Gatekeeper can flag freshly-compiled binaries as 'malware'
+strip_quarantine() {
+    if [[ "$(uname)" == "Darwin" ]] && [[ -d "$REPO_ROOT/target" ]]; then
+        find "$REPO_ROOT/target" -type f -perm +111 -exec xattr -d com.apple.quarantine {} \; 2>/dev/null || true
+    fi
+}
+
 echo "VibeSQL Python Bindings Builder"
 echo "================================"
 echo ""
@@ -42,6 +50,9 @@ cd "$PYTHON_BINDINGS_DIR"
 
 # Build the wheel in release mode (use python3 -m to ensure we find maturin)
 python3 -m maturin build --release
+
+# Strip quarantine on macOS
+strip_quarantine
 
 echo ""
 echo "✓ Build complete!"

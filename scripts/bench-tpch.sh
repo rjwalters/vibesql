@@ -68,6 +68,14 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Strip macOS quarantine attribute from built binaries
+# macOS Gatekeeper can flag freshly-compiled binaries as 'malware'
+strip_quarantine() {
+    if [[ "$(uname)" == "Darwin" ]] && [[ -d "$REPO_ROOT/target" ]]; then
+        find "$REPO_ROOT/target" -type f -perm +111 -exec xattr -d com.apple.quarantine {} \; 2>/dev/null || true
+    fi
+}
+
 # Find timeout command (GNU coreutils timeout or gtimeout on macOS)
 if command -v timeout &> /dev/null; then
     TIMEOUT_CMD="timeout"
@@ -91,6 +99,7 @@ run_standard_mode() {
     # Build benchmark
     echo -e "${YELLOW}Building benchmark...${NC}"
     cargo build --release -p vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison 2>&1 | grep -E "(Compiling|Finished)" || true
+    strip_quarantine
     echo -e "${GREEN}✓ Build complete${NC}"
     echo ""
 
@@ -122,6 +131,7 @@ run_isolated_mode() {
     # Build benchmark binary
     echo -e "${YELLOW}Building benchmark...${NC}"
     cargo build --release -p vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison 2>&1 | grep -E "(Compiling|Finished)" || true
+    strip_quarantine
     BENCH_BIN=$(find target/release/deps -name "${BENCH_NAME}-*" -type f -perm +111 | head -1)
 
     if [ -z "$BENCH_BIN" ]; then
@@ -225,6 +235,7 @@ run_compare_mode() {
     if [ -z "$BENCH_BIN" ]; then
         echo -e "${YELLOW}Building benchmark...${NC}"
         cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison --no-run
+        strip_quarantine
         BENCH_BIN=$(find target/release/deps -name 'tpch_benchmark-*' -type f -executable | head -1)
     fi
 
@@ -268,6 +279,7 @@ run_quick_compare_mode() {
     if [ ! -f target/release/deps/tpch_benchmark-* ]; then
         echo -e "${YELLOW}Building benchmark...${NC}"
         cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison --no-run
+        strip_quarantine
     fi
 
     BENCH=$(find target/release/deps -name 'tpch_benchmark-*' -type f -executable | head -1)

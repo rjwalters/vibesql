@@ -29,6 +29,17 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Strip macOS quarantine attribute from built binaries
+# macOS Gatekeeper can flag freshly-compiled binaries as 'malware'
+strip_quarantine() {
+    if [[ "$(uname)" == "Darwin" ]] && [[ -d "$REPO_ROOT/target" ]]; then
+        find "$REPO_ROOT/target" -type f -perm +111 -exec xattr -d com.apple.quarantine {} \; 2>/dev/null || true
+    fi
+}
+
 echo -e "${BLUE}=== TPC-DS Isolated Benchmark Runner ===${NC}"
 echo "Output: ${OUTPUT_FILE}"
 echo ""
@@ -53,6 +64,7 @@ echo ""
 echo "--- Phase 1: VibeSQL-only ---" >> "$OUTPUT_FILE"
 
 if cargo bench --package vibesql-executor --bench ${BENCH_NAME} -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+    strip_quarantine
     echo -e "${GREEN}✓ VibeSQL benchmark completed${NC}"
     ((ENGINES_PASSED++))
 else
@@ -68,6 +80,7 @@ echo ""
 echo "--- Phase 2: SQLite comparison ---" >> "$OUTPUT_FILE"
 
 if TPCDS_ENGINE=sqlite cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+    strip_quarantine
     echo -e "${GREEN}✓ SQLite comparison completed${NC}"
     ((ENGINES_PASSED++))
 else
@@ -83,6 +96,7 @@ echo ""
 echo "--- Phase 3: DuckDB comparison ---" >> "$OUTPUT_FILE"
 
 if TPCDS_ENGINE=duckdb cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+    strip_quarantine
     echo -e "${GREEN}✓ DuckDB comparison completed${NC}"
     ((ENGINES_PASSED++))
 else
@@ -99,6 +113,7 @@ if [ -n "$MYSQL_URL" ]; then
     echo "--- Phase 4: MySQL comparison ---" >> "$OUTPUT_FILE"
 
     if TPCDS_ENGINE=mysql cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+        strip_quarantine
         echo -e "${GREEN}✓ MySQL comparison completed${NC}"
         ((ENGINES_PASSED++))
     else
