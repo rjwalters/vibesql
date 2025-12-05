@@ -52,12 +52,12 @@ def query_latest(cursor: Any):
 
     # Direct query instead of view (VibeSQL doesn't support views)
     # Note: Using run_timestamp column (timestamp is reserved)
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL, use MAX(run_id) subquery instead
     query = """
         SELECT run_id, run_timestamp, benchmark_suite, git_commit, git_branch,
                total_queries, passed_queries, failed_queries, timeout_queries, notes
         FROM benchmark_runs
-        ORDER BY run_id DESC
-        LIMIT 1
+        WHERE run_id = (SELECT MAX(run_id) FROM benchmark_runs)
     """
     results = execute_query(cursor, query)
 
