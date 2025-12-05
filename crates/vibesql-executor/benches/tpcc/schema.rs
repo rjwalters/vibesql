@@ -6,13 +6,13 @@
 use super::data::TPCCData;
 use vibesql_storage::Database as VibeDB;
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::prelude::*;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::{Pool, PooledConn};
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 use rusqlite::Connection as SqliteConn;
 
 // =============================================================================
@@ -73,7 +73,7 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     db
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     let conn = SqliteConn::open_in_memory().unwrap();
     let mut data = TPCCData::new(scale_factor);
@@ -102,7 +102,7 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     conn
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     let conn = DuckDBConn::open_in_memory().unwrap();
     let mut data = TPCCData::new(scale_factor);
@@ -134,7 +134,7 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 /// Load MySQL TPC-C database
 /// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/tpcc)
 /// Returns None if MYSQL_URL is not set or connection fails
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     let url = std::env::var("MYSQL_URL").ok()?;
     let pool = Pool::new(url.as_str()).ok()?;
@@ -694,7 +694,7 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCCData, d_id: i32, w_id: i3
 // SQLite Schema and Loading (for comparison)
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn create_tpcc_schema_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         "
@@ -827,7 +827,7 @@ fn create_tpcc_schema_sqlite(conn: &SqliteConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn create_tpcc_indexes_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         "
@@ -839,7 +839,7 @@ fn create_tpcc_indexes_sqlite(conn: &SqliteConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCCData) {
     let mut stmt = conn.prepare("INSERT INTO item VALUES (?, ?, ?, ?, ?)").unwrap();
 
@@ -857,7 +857,7 @@ fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCCData) {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCCData, w_id: i32) {
     let warehouse = data.gen_warehouse(w_id);
     conn.execute(
@@ -877,7 +877,7 @@ fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCCData, w_id: i32) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn load_stock_sqlite(conn: &SqliteConn, data: &mut TPCCData, w_id: i32) {
     let mut stmt = conn
         .prepare("INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -909,7 +909,7 @@ fn load_stock_sqlite(conn: &SqliteConn, data: &mut TPCCData, w_id: i32) {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn load_district_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     let district = data.gen_district(d_id, w_id);
     conn.execute(
@@ -931,7 +931,7 @@ fn load_district_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id:
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     let mut cust_stmt = conn.prepare(
         "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -984,7 +984,7 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id:
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     let customers_per_district = data.customers_per_district();
     let orders_per_district = data.orders_per_district();
@@ -1049,7 +1049,7 @@ fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCCData, d_id: i32, w_id: i
 // DuckDB Schema and Loading (for comparison)
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn create_tpcc_schema_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         "
@@ -1182,7 +1182,7 @@ fn create_tpcc_schema_duckdb(conn: &DuckDBConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn create_tpcc_indexes_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         "
@@ -1194,7 +1194,7 @@ fn create_tpcc_indexes_duckdb(conn: &DuckDBConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn load_item_duckdb(conn: &DuckDBConn, data: &mut TPCCData) {
     let mut stmt = conn.prepare("INSERT INTO item VALUES (?, ?, ?, ?, ?)").unwrap();
 
@@ -1212,7 +1212,7 @@ fn load_item_duckdb(conn: &DuckDBConn, data: &mut TPCCData) {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCCData, w_id: i32) {
     let warehouse = data.gen_warehouse(w_id);
     conn.execute(
@@ -1232,7 +1232,7 @@ fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCCData, w_id: i32) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn load_stock_duckdb(conn: &DuckDBConn, data: &mut TPCCData, w_id: i32) {
     let mut stmt = conn
         .prepare("INSERT INTO stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -1264,7 +1264,7 @@ fn load_stock_duckdb(conn: &DuckDBConn, data: &mut TPCCData, w_id: i32) {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn load_district_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     let district = data.gen_district(d_id, w_id);
     conn.execute(
@@ -1286,7 +1286,7 @@ fn load_district_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id:
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     let mut cust_stmt = conn.prepare(
         "INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -1339,7 +1339,7 @@ fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id:
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     let customers_per_district = data.customers_per_district();
     let orders_per_district = data.orders_per_district();
@@ -1404,7 +1404,7 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCCData, d_id: i32, w_id: i
 // MySQL Schema and Loading (for comparison)
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn create_tpcc_schema_mysql(conn: &mut PooledConn) {
     // Drop tables if they exist (in reverse dependency order)
     let drop_tables = [
@@ -1593,7 +1593,7 @@ fn create_tpcc_schema_mysql(conn: &mut PooledConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
     conn.query_drop("CREATE INDEX idx_customer_name ON customer (c_w_id, c_d_id, c_last, c_first)")
         .unwrap();
@@ -1605,7 +1605,7 @@ fn create_tpcc_indexes_mysql(conn: &mut PooledConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn load_item_mysql(conn: &mut PooledConn, data: &mut TPCCData) {
     let num_items = data.num_items();
     for i_id in 1..=num_items {
@@ -1618,7 +1618,7 @@ fn load_item_mysql(conn: &mut PooledConn, data: &mut TPCCData) {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
     let warehouse = data.gen_warehouse(w_id);
     conn.exec_drop(
@@ -1638,7 +1638,7 @@ fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn load_stock_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
     use mysql::Value;
 
@@ -1673,7 +1673,7 @@ fn load_stock_mysql(conn: &mut PooledConn, data: &mut TPCCData, w_id: i32) {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn load_district_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     use mysql::Value;
 
@@ -1695,7 +1695,7 @@ fn load_district_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_
         .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     use mysql::Value;
 
@@ -1748,7 +1748,7 @@ fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCCData, d_id: i32, w_id: i32) {
     use mysql::Value;
 

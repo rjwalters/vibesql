@@ -917,12 +917,12 @@ impl<'a> TPCCExecutor for VibesqlTransactionExecutor<'a> {
 }
 
 /// TPC-C transaction executor for SQLite
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 pub struct SqliteTransactionExecutor<'a> {
     pub conn: &'a rusqlite::Connection,
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 impl<'a> SqliteTransactionExecutor<'a> {
     pub fn new(conn: &'a rusqlite::Connection) -> Self {
         Self { conn }
@@ -1125,7 +1125,7 @@ impl<'a> SqliteTransactionExecutor<'a> {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 impl<'a> TPCCExecutor for SqliteTransactionExecutor<'a> {
     fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
         self.new_order(input)
@@ -1149,12 +1149,12 @@ impl<'a> TPCCExecutor for SqliteTransactionExecutor<'a> {
 }
 
 /// TPC-C transaction executor for DuckDB
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 pub struct DuckdbTransactionExecutor<'a> {
     pub conn: &'a duckdb::Connection,
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 impl<'a> DuckdbTransactionExecutor<'a> {
     pub fn new(conn: &'a duckdb::Connection) -> Self {
         Self { conn }
@@ -1357,7 +1357,7 @@ impl<'a> DuckdbTransactionExecutor<'a> {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 impl<'a> TPCCExecutor for DuckdbTransactionExecutor<'a> {
     fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
         self.new_order(input)
@@ -1381,12 +1381,12 @@ impl<'a> TPCCExecutor for DuckdbTransactionExecutor<'a> {
 }
 
 /// TPC-C transaction executor for MySQL
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 pub struct MysqlTransactionExecutor<'a> {
     pub conn: &'a mut mysql::PooledConn,
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 impl<'a> MysqlTransactionExecutor<'a> {
     pub fn new(conn: &'a mut mysql::PooledConn) -> Self {
         Self { conn }
@@ -1651,7 +1651,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 impl<'a> TPCCExecutor for MysqlTransactionExecutor<'a> {
     fn new_order(&self, _input: &NewOrderInput) -> TransactionResult {
         // This trait requires &self but MySQL needs &mut self for queries
