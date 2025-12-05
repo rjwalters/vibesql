@@ -21,6 +21,7 @@ pub mod query_buffer_pool;
 pub mod row;
 pub mod statistics;
 pub mod table;
+pub mod wal;
 
 pub use backend::{StorageBackend, StorageFile};
 pub use blob::{BlobId, BlobMetadata, BlobStorageConfig, BlobStorageService};
