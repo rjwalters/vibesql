@@ -128,6 +128,7 @@ fn main() {
         eprintln!("\nArguments:");
         eprintln!("  QUERY    Optional query to run (Q1-Q22). If not specified, runs all queries.");
         eprintln!("\nEnvironment Variables:");
+        eprintln!("  SCALE_FACTOR              Scale factor for data size (default: 0.01)");
         eprintln!("  QUERY_TIMEOUT_SECS        Timeout per query in seconds (default: 30)");
         eprintln!("  QUERY_FILTER              Comma-separated list of queries (e.g., Q1,Q6,Q9)");
         eprintln!("  JOIN_REORDER_VERBOSE      Enable verbose join reordering logs");
