@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::combine_with_and,
     schema::CombinedSchema, timeout::TimeoutContext,
 };
-use super::from_iterator::FromIterator;
+use super::{cte::CteResult, from_iterator::FromIterator};
 
 mod expression_mapper;
 pub(crate) mod hash_join;
@@ -230,14 +231,23 @@ fn combine_rows(left_row: &vibesql_storage::Row, right_row: &vibesql_storage::Ro
 ///
 /// This is used to filter rows produced by hash join with additional conditions
 /// from the WHERE clause that weren't used in the hash join itself.
+///
+/// Issue #3562: Added cte_results parameter so IN subqueries in filter expressions
+/// can resolve CTE references.
 fn apply_post_join_filter(
     result: FromResult,
     filter_expr: &vibesql_ast::Expression,
     database: &vibesql_storage::Database,
+    cte_results: &HashMap<String, CteResult>,
 ) -> Result<FromResult, ExecutorError> {
     // Extract schema before moving result
     let schema = result.schema.clone();
-    let evaluator = CombinedExpressionEvaluator::with_database(&schema, database);
+    // Issue #3562: Use evaluator with CTE context if CTEs exist
+    let evaluator = if cte_results.is_empty() {
+        CombinedExpressionEvaluator::with_database(&schema, database)
+    } else {
+        CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_results)
+    };
 
     // Filter rows based on the expression
     let mut filtered_rows = Vec::new();
@@ -279,6 +289,9 @@ fn apply_post_join_filter(
 /// Note: This function combines rows from left and right according to the join type
 /// and join condition. For queries with many tables and large intermediate results,
 /// consider applying WHERE filters earlier to reduce memory usage.
+///
+/// Issue #3562: Added cte_results parameter so post-join filters with IN subqueries
+/// can resolve CTE references.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn nested_loop_join(
     left: FromResult,
@@ -289,6 +302,7 @@ pub(super) fn nested_loop_join(
     database: &vibesql_storage::Database,
     additional_equijoins: &[vibesql_ast::Expression],
     timeout_ctx: &TimeoutContext,
+    cte_results: &HashMap<String, CteResult>,
 ) -> Result<FromResult, ExecutorError> {
     // Try to use hash join for INNER JOINs with simple equi-join conditions
     if let vibesql_ast::JoinType::Inner = join_type {
@@ -346,7 +360,7 @@ pub(super) fn nested_loop_join(
                     // Apply remaining conditions as post-join filter
                     if !multi_result.remaining_conditions.is_empty() {
                         if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
-                            result = apply_post_join_filter(result, &filter_expr, database)?;
+                            result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                         }
                     }
 
@@ -393,7 +407,7 @@ pub(super) fn nested_loop_join(
                 // Apply remaining conditions as post-join filter
                 if !multi_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database)?;
+                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -447,7 +461,7 @@ pub(super) fn nested_loop_join(
                 // Apply remaining OR conditions as post-join filter
                 if !or_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(or_result.remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database)?;
+                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -555,7 +569,7 @@ pub(super) fn nested_loop_join(
 
                 if !remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database)?;
+                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -618,7 +632,7 @@ pub(super) fn nested_loop_join(
 
                 if !remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database)?;
+                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -700,7 +714,7 @@ pub(super) fn nested_loop_join(
                 // Apply remaining conditions from compound AND as post-join filter
                 if !compound_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(compound_result.remaining_conditions) {
-                        result = apply_post_join_filter(result, &filter_expr, database)?;
+                        result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }
                 }
 
@@ -871,7 +885,7 @@ pub(super) fn nested_loop_join(
 
                     if !remaining_conditions.is_empty() {
                         if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                            result = apply_post_join_filter(result, &filter_expr, database)?;
+                            result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                         }
                     }
 
@@ -904,7 +918,7 @@ pub(super) fn nested_loop_join(
 
                     if !remaining_conditions.is_empty() {
                         if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                            result = apply_post_join_filter(result, &filter_expr, database)?;
+                            result = apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                         }
                     }
 

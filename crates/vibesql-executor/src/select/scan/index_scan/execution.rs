@@ -2,10 +2,12 @@
 //!
 //! Executes index scans to retrieve rows from tables using indexes.
 
+use std::collections::HashMap;
+
 use vibesql_ast::Expression;
 use vibesql_storage::{Database, Row};
 
-use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema};
+use crate::{errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult};
 
 use super::predicate::{
     build_residual_where_clause, extract_composite_predicates_with_in, extract_index_predicate,
@@ -34,6 +36,9 @@ use super::predicate::{
 /// For ORDER BY with LIMIT queries:
 /// - Without pushdown: Fetch 30 rows, reverse, take 1 = O(30)
 /// - With pushdown: Scan from end, stop after 1 = O(1)
+///
+/// # Arguments
+/// * `cte_results` - CTE context for IN subqueries that may reference CTEs (Issue #3562)
 #[allow(private_interfaces)]
 pub(crate) fn execute_index_scan(
     table_name: &str,
@@ -43,6 +48,7 @@ pub(crate) fn execute_index_scan(
     sorted_columns: Option<Vec<(String, vibesql_ast::OrderDirection)>>,
     limit: Option<usize>,
     database: &Database,
+    cte_results: &HashMap<String, CteResult>,
 ) -> Result<super::super::FromResult, ExecutorError> {
     // Get table and index
     let table = database
@@ -359,12 +365,14 @@ pub(crate) fn execute_index_scan(
             .map_err(ExecutorError::InvalidWhereClause)?;
 
         // Filter with zero-copy references
+        // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
         apply_where_filter_zerocopy(
             row_refs,
             &schema,
             &predicate_plan,
             table_name,
             database,
+            cte_results,
         )?
     } else {
         row_refs
@@ -418,12 +426,16 @@ pub(crate) fn execute_index_scan(
 ///
 /// For simple predicates (col = literal, col > literal, etc.), uses a compiled fast path
 /// that bypasses CSE overhead entirely, providing 10-50x improvement for OLTP workloads.
+///
+/// # Arguments
+/// * `cte_results` - CTE context for IN subqueries that may reference CTEs (Issue #3562)
 fn apply_where_filter_zerocopy<'a>(
     row_refs: Vec<&'a Row>,
     schema: &CombinedSchema,
     predicate_plan: &PredicatePlan,
     table_name: &str,
     database: &vibesql_storage::Database,
+    cte_results: &HashMap<String, CteResult>,
 ) -> Result<Vec<&'a Row>, ExecutorError> {
     use crate::evaluator::compiled::CompiledPredicate;
     use crate::evaluator::CombinedExpressionEvaluator;
@@ -455,7 +467,12 @@ fn apply_where_filter_zerocopy<'a>(
     }
 
     // Fallback: Create evaluator for filtering complex predicates
-    let evaluator = CombinedExpressionEvaluator::with_database(schema, database);
+    // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+    let evaluator = if cte_results.is_empty() {
+        CombinedExpressionEvaluator::with_database(schema, database)
+    } else {
+        CombinedExpressionEvaluator::with_database_and_cte(schema, database, cte_results)
+    };
 
     // Check if we should use parallel filtering
     #[cfg(feature = "parallel")]
@@ -557,8 +574,9 @@ fn apply_where_filter_zerocopy_parallel<'a>(
     // Clone expression for thread-safe sharing
     let where_expr_arc = Arc::new(combined_where);
 
-    // Extract evaluator components for parallel execution
-    let (schema, database, outer_row, outer_schema, window_mapping, enable_cse) =
+    // Extract evaluator components for parallel execution (including CTE context)
+    // Issue #3562: Now includes cte_context for IN subqueries referencing CTEs
+    let (schema, database, outer_row, outer_schema, window_mapping, cte_context, enable_cse) =
         evaluator.get_parallel_components();
 
     // Use rayon's parallel iterator for filtering
@@ -572,6 +590,7 @@ fn apply_where_filter_zerocopy_parallel<'a>(
                 outer_row,
                 outer_schema,
                 window_mapping,
+                cte_context,
                 enable_cse,
             );
 

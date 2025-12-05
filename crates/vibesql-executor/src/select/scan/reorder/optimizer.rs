@@ -290,6 +290,7 @@ where
             let left_rows = prev_result.data.as_slice().len();
             let right_rows = table_result.data.as_slice().len();
             let join_start = std::time::Instant::now();
+            // Issue #3562: Pass CTE context so post-join filters with IN subqueries can resolve CTEs
             result = Some(nested_loop_join(
                 prev_result,
                 table_result,
@@ -299,6 +300,7 @@ where
                 database,
                 &applicable_conditions, // Pass only the applicable conditions for this join
                 &timeout_ctx,
+                cte_results,
             )?);
             let join_time = join_start.elapsed();
             let result_rows = result.as_ref().map(|r| r.data.as_slice().len()).unwrap_or(0);

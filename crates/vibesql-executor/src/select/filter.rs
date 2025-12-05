@@ -268,8 +268,9 @@ pub(super) fn apply_where_filter_combined_parallel<'a>(
     // Clone the expression for thread-safe sharing
     let where_expr_arc = Arc::new(where_expr.clone());
 
-    // Extract evaluator components before parallel execution
-    let (schema, database, outer_row, outer_schema, window_mapping, enable_cse) =
+    // Extract evaluator components before parallel execution (including CTE context)
+    // Issue #3562: Now includes cte_context for IN subqueries referencing CTEs
+    let (schema, database, outer_row, outer_schema, window_mapping, cte_context, enable_cse) =
         evaluator.get_parallel_components();
 
     // Use rayon's parallel iterator for filtering
@@ -283,6 +284,7 @@ pub(super) fn apply_where_filter_combined_parallel<'a>(
                 outer_row,
                 outer_schema,
                 window_mapping,
+                cte_context,
                 enable_cse,
             );
 
