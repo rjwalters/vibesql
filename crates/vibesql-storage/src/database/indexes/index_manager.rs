@@ -151,6 +151,21 @@ impl IndexManager {
         self.indexes.contains_key(&normalized)
     }
 
+    /// Check if any indexes exist for a specific table
+    ///
+    /// This is an O(n) operation over all indexes but is useful for
+    /// optimizing bulk insert operations when no indexes need updating.
+    pub fn has_indexes_for_table(&self, table_name: &str) -> bool {
+        let search_name_upper = table_name.to_uppercase();
+        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
+
+        self.indexes.values().any(|metadata| {
+            let stored_name_upper = metadata.table_name.to_uppercase();
+            let stored_table_only = stored_name_upper.rsplit('.').next().unwrap_or(&stored_name_upper);
+            stored_table_only == search_table_only
+        })
+    }
+
     /// Get index metadata
     pub fn get_index(&self, index_name: &str) -> Option<&IndexMetadata> {
         let normalized = normalize_index_name(index_name);
