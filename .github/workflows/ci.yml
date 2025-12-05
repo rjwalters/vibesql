@@ -21,28 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Free disk space
-        run: |
-          # Maximum cleanup to free disk space for large Rust builds
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /opt/hostedtoolcache/go
-          sudo rm -rf /opt/hostedtoolcache/Ruby
-          sudo rm -rf /opt/hostedtoolcache/node
-          sudo rm -rf /opt/microsoft
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk
-          sudo rm -rf /opt/hostedtoolcache/PyPy
-          sudo rm -rf /opt/hostedtoolcache/Python
-          sudo rm -rf /var/log/*
-          sudo rm -rf /var/cache/apt/archives/*
-          sudo docker image prune --all --force
-          sudo docker system prune --all --force --volumes
-          sudo docker volume prune --all --force
-          df -h
+      - uses: ./.github/actions/free-disk-space
 
       - uses: actions/checkout@v6
         with:
@@ -75,33 +54,12 @@ jobs:
   # TPC-H Quick Benchmarks
   # ============================================================================
   tpch:
-     runs-on: ubuntu-latest
+    runs-on: ubuntu-latest
      timeout-minutes: 30
      needs: test
      continue-on-error: true
      steps:
-       - name: Free disk space
-         run: |
-           # Maximum cleanup to free disk space for large Rust builds
-           sudo rm -rf /usr/share/dotnet
-           sudo rm -rf /usr/local/lib/android
-           sudo rm -rf /opt/ghc
-           sudo rm -rf /opt/hostedtoolcache/CodeQL
-           sudo rm -rf /opt/hostedtoolcache/go
-           sudo rm -rf /opt/hostedtoolcache/Ruby
-           sudo rm -rf /opt/hostedtoolcache/node
-           sudo rm -rf /opt/microsoft
-           sudo rm -rf /usr/local/share/boost
-           sudo rm -rf /usr/share/swift
-           sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk
-           sudo rm -rf /opt/hostedtoolcache/PyPy
-           sudo rm -rf /opt/hostedtoolcache/Python
-           sudo rm -rf /var/log/*
-           sudo rm -rf /var/cache/apt/archives/*
-           sudo docker image prune --all --force
-           sudo docker system prune --all --force --volumes
-           sudo docker volume prune --all --force
-           df -h
+       - uses: ./.github/actions/free-disk-space
 
       - uses: actions/checkout@v6
         with:
@@ -141,28 +99,7 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-       run: |
-         # Maximum cleanup to free disk space for large Rust builds
-         sudo rm -rf /usr/share/dotnet
-         sudo rm -rf /usr/local/lib/android
-         sudo rm -rf /opt/ghc
-         sudo rm -rf /opt/hostedtoolcache/CodeQL
-         sudo rm -rf /opt/hostedtoolcache/go
-         sudo rm -rf /opt/hostedtoolcache/Ruby
-         sudo rm -rf /opt/hostedtoolcache/node
-         sudo rm -rf /opt/microsoft
-         sudo rm -rf /usr/local/share/boost
-         sudo rm -rf /usr/share/swift
-         sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk
-         sudo rm -rf /opt/hostedtoolcache/PyPy
-         sudo rm -rf /opt/hostedtoolcache/Python
-         sudo rm -rf /var/log/*
-         sudo rm -rf /var/cache/apt/archives/*
-         sudo docker image prune --all --force
-         sudo docker system prune --all --force --volumes
-         sudo docker volume prune --all --force
-         df -h
+      - uses: ./.github/actions/free-disk-space
 
       - uses: actions/checkout@v6
         with:
@@ -214,28 +151,7 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-       run: |
-         # Maximum cleanup to free disk space for large Rust builds
-         sudo rm -rf /usr/share/dotnet
-         sudo rm -rf /usr/local/lib/android
-         sudo rm -rf /opt/ghc
-         sudo rm -rf /opt/hostedtoolcache/CodeQL
-         sudo rm -rf /opt/hostedtoolcache/go
-         sudo rm -rf /opt/hostedtoolcache/Ruby
-         sudo rm -rf /opt/hostedtoolcache/node
-         sudo rm -rf /opt/microsoft
-         sudo rm -rf /usr/local/share/boost
-         sudo rm -rf /usr/share/swift
-         sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk
-         sudo rm -rf /opt/hostedtoolcache/PyPy
-         sudo rm -rf /opt/hostedtoolcache/Python
-         sudo rm -rf /var/log/*
-         sudo rm -rf /var/cache/apt/archives/*
-         sudo docker image prune --all --force
-         sudo docker system prune --all --force --volumes
-         sudo docker volume prune --all --force
-         df -h
+      - uses: ./.github/actions/free-disk-space
 
       - uses: actions/checkout@v6
         with:
@@ -290,28 +206,7 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-       run: |
-         # Maximum cleanup to free disk space for large Rust builds
-         sudo rm -rf /usr/share/dotnet
-         sudo rm -rf /usr/local/lib/android
-         sudo rm -rf /opt/ghc
-         sudo rm -rf /opt/hostedtoolcache/CodeQL
-         sudo rm -rf /opt/hostedtoolcache/go
-         sudo rm -rf /opt/hostedtoolcache/Ruby
-         sudo rm -rf /opt/hostedtoolcache/node
-         sudo rm -rf /opt/microsoft
-         sudo rm -rf /usr/local/share/boost
-         sudo rm -rf /usr/share/swift
-         sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk
-         sudo rm -rf /opt/hostedtoolcache/PyPy
-         sudo rm -rf /opt/hostedtoolcache/Python
-         sudo rm -rf /var/log/*
-         sudo rm -rf /var/cache/apt/archives/*
-         sudo docker image prune --all --force
-         sudo docker system prune --all --force --volumes
-         sudo docker volume prune --all --force
-         df -h
+      - uses: ./.github/actions/free-disk-space
 
       - uses: actions/checkout@v6
         with:
@@ -356,28 +251,7 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-       run: |
-         # Maximum cleanup to free disk space for large Rust builds
-         sudo rm -rf /usr/share/dotnet
-         sudo rm -rf /usr/local/lib/android
-         sudo rm -rf /opt/ghc
-         sudo rm -rf /opt/hostedtoolcache/CodeQL
-         sudo rm -rf /opt/hostedtoolcache/go
-         sudo rm -rf /opt/hostedtoolcache/Ruby
-         sudo rm -rf /opt/hostedtoolcache/node
-         sudo rm -rf /opt/microsoft
-         sudo rm -rf /usr/local/share/boost
-         sudo rm -rf /usr/share/swift
-         sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk
-         sudo rm -rf /opt/hostedtoolcache/PyPy
-         sudo rm -rf /opt/hostedtoolcache/Python
-         sudo rm -rf /var/log/*
-         sudo rm -rf /var/cache/apt/archives/*
-         sudo docker image prune --all --force
-         sudo docker system prune --all --force --volumes
-         sudo docker volume prune --all --force
-         df -h
+      - uses: ./.github/actions/free-disk-space
 
       - uses: actions/checkout@v6
         with:
