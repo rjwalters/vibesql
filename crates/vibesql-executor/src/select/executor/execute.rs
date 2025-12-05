@@ -157,6 +157,108 @@ impl SelectExecutor<'_> {
         Ok(rows.into_iter())
     }
 
+    /// Execute a SELECT statement using the fast path directly
+    ///
+    /// This method is used by prepared statements with cached SimpleFastPath plans.
+    /// It bypasses the `is_simple_point_query()` check because the eligibility was
+    /// already determined at prepare time.
+    ///
+    /// # Performance
+    ///
+    /// For repeated execution of prepared statements, this saves the cost of
+    /// re-checking fast path eligibility on every execution (~5-10µs per query).
+    pub fn execute_fast_path_with_columns(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+    ) -> Result<SelectResult, ExecutorError> {
+        // Reset arena for fresh query execution
+        if self.subquery_depth == 0 {
+            self.reset_arena();
+        }
+
+        // Check timeout before starting execution
+        self.check_timeout()?;
+
+        // Execute via fast path directly (skip is_simple_point_query check)
+        let rows = self.execute_fast_path(stmt)?;
+
+        // Derive column names from the SELECT list
+        // For fast path queries, we don't have a FromResult, so pass None
+        // The column derivation will use the SELECT list expressions directly
+        let columns = self.derive_fast_path_column_names(stmt)?;
+
+        Ok(SelectResult { columns, rows })
+    }
+
+    /// Derive column names for fast path execution
+    ///
+    /// For fast path queries, we derive column names directly from the SELECT list
+    /// and table schema without going through the full FROM clause execution.
+    fn derive_fast_path_column_names(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+    ) -> Result<Vec<String>, ExecutorError> {
+        use vibesql_ast::{FromClause, SelectItem};
+
+        // Get table name and schema for column resolution
+        let (table_name, table_alias) = match &stmt.from {
+            Some(FromClause::Table { name, alias, .. }) => (name.as_str(), alias.as_deref()),
+            _ => {
+                return Err(ExecutorError::Other(
+                    "Fast path requires simple table FROM clause".to_string(),
+                ))
+            }
+        };
+
+        let table = self.database.get_table(table_name).ok_or_else(|| {
+            ExecutorError::TableNotFound(table_name.to_string())
+        })?;
+
+        let mut columns = Vec::with_capacity(stmt.select_list.len());
+
+        for item in &stmt.select_list {
+            match item {
+                SelectItem::Wildcard { .. } => {
+                    // Add all columns from the table
+                    for col in &table.schema.columns {
+                        columns.push(col.name.clone());
+                    }
+                }
+                SelectItem::QualifiedWildcard { qualifier, .. } => {
+                    // Check if qualifier matches table name or alias
+                    let effective_name = table_alias.unwrap_or(table_name);
+                    if qualifier.eq_ignore_ascii_case(effective_name)
+                        || qualifier.eq_ignore_ascii_case(table_name)
+                    {
+                        for col in &table.schema.columns {
+                            columns.push(col.name.clone());
+                        }
+                    }
+                }
+                SelectItem::Expression { expr, alias: col_alias } => {
+                    // Use alias if provided, otherwise derive from expression
+                    let col_name = if let Some(a) = col_alias {
+                        a.clone()
+                    } else {
+                        self.derive_column_name_from_expr(expr)
+                    };
+                    columns.push(col_name);
+                }
+            }
+        }
+
+        Ok(columns)
+    }
+
+    /// Derive a column name from an expression
+    fn derive_column_name_from_expr(&self, expr: &vibesql_ast::Expression) -> String {
+        match expr {
+            vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+            vibesql_ast::Expression::Literal(val) => format!("{}", val),
+            _ => "?column?".to_string(),
+        }
+    }
+
     /// Execute a SELECT statement and return both columns and rows
     pub fn execute_with_columns(
         &self,

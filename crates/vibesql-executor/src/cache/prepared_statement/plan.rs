@@ -43,6 +43,11 @@ pub enum CachedPlan {
     /// SELECT [cols] FROM table WHERE pk_col = ? [AND pk_col2 = ? ...]
     PkPointLookup(PkPointLookupPlan),
 
+    /// Simple fast-path eligible query
+    /// Caches the result of is_simple_point_query() check to avoid
+    /// recomputing it on every execution.
+    SimpleFastPath(SimpleFastPathPlan),
+
     /// Query doesn't match any fast-path pattern
     /// Fall back to standard execution
     Standard,
@@ -53,6 +58,18 @@ impl CachedPlan {
     pub fn is_fast_path(&self) -> bool {
         !matches!(self, CachedPlan::Standard)
     }
+}
+
+/// Cached plan for simple fast-path eligible queries
+///
+/// This caches the result of `is_simple_point_query()` to avoid
+/// recomputing it on every execution. Provides moderate speedup for
+/// queries that pass fast-path validation but don't match the
+/// specialized PkPointLookup pattern.
+#[derive(Debug, Clone)]
+pub struct SimpleFastPathPlan {
+    /// Table name (normalized to uppercase for case-insensitive matching)
+    pub table_name: String,
 }
 
 /// Cached plan for primary key point lookup queries
@@ -146,14 +163,30 @@ pub fn analyze_for_plan(stmt: &Statement) -> CachedPlan {
 
 /// Analyze a SELECT statement for caching opportunities
 fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
+    // First, try to create a PkPointLookup plan for the most optimized path
+    if let Some(plan) = try_analyze_pk_lookup(stmt) {
+        return CachedPlan::PkPointLookup(plan);
+    }
+
+    // Next, check if the query is eligible for the fast path
+    // This caches the result of is_simple_point_query() to avoid recomputing it every execution
+    if crate::select::is_simple_point_query(stmt) {
+        if let Some(table_name) = extract_single_table_name(stmt) {
+            return CachedPlan::SimpleFastPath(SimpleFastPathPlan {
+                table_name: table_name.to_uppercase(),
+            });
+        }
+    }
+
+    CachedPlan::Standard
+}
+
+/// Try to analyze a SELECT for PK point lookup optimization
+fn try_analyze_pk_lookup(stmt: &SelectStmt) -> Option<PkPointLookupPlan> {
     // Must have exactly one table in FROM (no joins, no subqueries)
     let table_name = match &stmt.from {
         Some(FromClause::Table { name, alias: None, .. }) => name.clone(),
-        Some(FromClause::Table { name: _, alias: Some(_), .. }) => {
-            // Aliased tables are slightly more complex, skip for now
-            return CachedPlan::Standard;
-        }
-        _ => return CachedPlan::Standard,
+        _ => return None,
     };
 
     // No complex clauses
@@ -168,26 +201,20 @@ fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
         || stmt.into_table.is_some()
         || stmt.into_variables.is_some()
     {
-        return CachedPlan::Standard;
+        return None;
     }
 
     // Check SELECT list - must be wildcard or simple column references
-    let projection = match analyze_select_list(&stmt.select_list) {
-        Some(p) => p,
-        None => return CachedPlan::Standard,
-    };
+    let projection = analyze_select_list(&stmt.select_list)?;
 
     // Must have a WHERE clause with PK equality predicates
-    let where_clause = match &stmt.where_clause {
-        Some(w) => w,
-        None => return CachedPlan::Standard,
-    };
+    let where_clause = stmt.where_clause.as_ref()?;
 
     // Extract parameter-to-column mappings from WHERE clause
-    let param_mappings = match extract_pk_param_mappings(where_clause) {
-        Some(m) if !m.is_empty() => m,
-        _ => return CachedPlan::Standard,
-    };
+    let param_mappings = extract_pk_param_mappings(where_clause)?;
+    if param_mappings.is_empty() {
+        return None;
+    }
 
     // Build the plan
     // Note: We don't validate PK columns here because we don't have DB access.
@@ -199,13 +226,21 @@ fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
         .map(|(pk_idx, (param_idx, _))| (*param_idx, pk_idx))
         .collect();
 
-    CachedPlan::PkPointLookup(PkPointLookupPlan {
+    Some(PkPointLookupPlan {
         table_name: table_name.to_uppercase(),
         pk_columns,
         param_to_pk_col,
         projection,
         resolved: Arc::new(OnceLock::new()),
     })
+}
+
+/// Extract the single table name from a simple FROM clause
+fn extract_single_table_name(stmt: &SelectStmt) -> Option<String> {
+    match &stmt.from {
+        Some(FromClause::Table { name, .. }) => Some(name.clone()),
+        _ => None,
+    }
 }
 
 /// Analyze SELECT list and return projection plan if it's simple
@@ -401,8 +436,10 @@ mod tests {
     }
 
     #[test]
-    fn test_not_cacheable_literal() {
+    fn test_literal_gets_simple_fast_path() {
+        // Queries with literals don't get PkPointLookup (requires placeholders),
+        // but they do get SimpleFastPath since they pass is_simple_point_query()
         let plan = parse_to_plan("SELECT * FROM users WHERE id = 1");
-        assert!(matches!(plan, CachedPlan::Standard));
+        assert!(matches!(plan, CachedPlan::SimpleFastPath(_)));
     }
 }
