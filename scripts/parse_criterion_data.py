@@ -244,10 +244,109 @@ def update_sysbench_results(criterion_data: Dict, output_path: Path):
     print(f"  Written {len(benchmarks)} benchmarks to {output_path}")
 
 
+def find_tpcds_benchmarks(criterion_dir: Path) -> Dict[str, Dict[str, Dict]]:
+    """Find all TPC-DS benchmark results from tpcds_queries_comparison group."""
+    results = {}
+
+    # Look for tpcds_queries_comparison group
+    comparison_dir = criterion_dir / 'tpcds_queries_comparison'
+    if comparison_dir.exists():
+        for db_dir in comparison_dir.iterdir():
+            if not db_dir.is_dir():
+                continue
+            database = db_dir.name
+            if database not in ['vibesql', 'sqlite', 'duckdb', 'mysql']:
+                continue
+
+            for query_dir in db_dir.iterdir():
+                if query_dir.is_dir():
+                    estimates_path = query_dir / 'new' / 'estimates.json'
+                    if estimates_path.exists():
+                        query = query_dir.name
+                        stats = parse_criterion_estimates(estimates_path)
+                        if stats:
+                            if query not in results:
+                                results[query] = {}
+                            results[query][database] = stats
+
+    # Also check for tpcds_queries (vibesql-only)
+    queries_dir = criterion_dir / 'tpcds_queries'
+    if queries_dir.exists():
+        for db_dir in queries_dir.iterdir():
+            if not db_dir.is_dir():
+                continue
+            database = db_dir.name
+            if database not in ['vibesql', 'sqlite', 'duckdb', 'mysql']:
+                continue
+
+            for query_dir in db_dir.iterdir():
+                if query_dir.is_dir():
+                    estimates_path = query_dir / 'new' / 'estimates.json'
+                    if estimates_path.exists():
+                        query = query_dir.name
+                        stats = parse_criterion_estimates(estimates_path)
+                        if stats:
+                            if query not in results:
+                                results[query] = {}
+                            # Only add if not already present from comparison data
+                            if database not in results[query]:
+                                results[query][database] = stats
+
+    return results
+
+
+def update_tpcds_results(criterion_data: Dict, output_path: Path):
+    """Update the tpcds_results.json with Criterion data."""
+    benchmarks = []
+
+    # Sort queries by number (Q1, Q2, ... Q99)
+    def query_sort_key(q):
+        match = re.search(r'Q(\d+)', q)
+        return int(match.group(1)) if match else 0
+
+    sorted_queries = sorted(criterion_data.keys(), key=query_sort_key)
+
+    for query in sorted_queries:
+        databases = criterion_data[query]
+
+        # Add each database's results
+        for database in ['vibesql', 'sqlite', 'duckdb', 'mysql']:
+            if database in databases:
+                name = f"tpcds_{query.lower()}_{database}"
+                stats = databases[database].copy()
+                stats['status'] = 'passed'
+                stats['total'] = stats['mean']
+                stats['rows'] = 0
+                benchmarks.append({
+                    "name": name,
+                    "stats": stats
+                })
+
+    result = {
+        "benchmarks": benchmarks,
+        "metadata": {
+            "suite": "tpcds",
+            "timestamp": datetime.utcnow().isoformat(),
+            "git_commit": "criterion_parsed",
+            "scale_factor": "0.001",
+            "total_queries": len(sorted_queries),
+            "passed_queries": len(sorted_queries),
+            "note": "TPC-DS benchmark data parsed from Criterion results."
+        }
+    }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, 'w') as f:
+        json.dump(result, f, indent=2)
+
+    print(f"  Written {len(benchmarks)} benchmarks to {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Parse Criterion benchmark data")
     parser.add_argument('--all', action='store_true', help="Parse all benchmark types")
     parser.add_argument('--tpch', action='store_true', help="Parse TPC-H benchmarks")
+    parser.add_argument('--tpcds', action='store_true', help="Parse TPC-DS benchmarks")
     parser.add_argument('--sysbench', action='store_true', help="Parse Sysbench benchmarks")
     parser.add_argument('--output-dir', type=str, default=None,
                         help="Output directory (default: web-demo/public/benchmarks)")
@@ -255,7 +354,7 @@ def main():
 
     args = parser.parse_args()
 
-    if not (args.all or args.tpch or args.sysbench):
+    if not (args.all or args.tpch or args.tpcds or args.sysbench):
         args.all = True
 
     repo_root = get_repo_root()
@@ -288,6 +387,22 @@ def main():
             update_tpch_benchmark_results(tpch_data, output_dir / 'benchmark_results.json')
         else:
             print("  No TPC-H data found")
+        print()
+
+    if args.all or args.tpcds:
+        print("Parsing TPC-DS benchmarks...")
+        tpcds_data = find_tpcds_benchmarks(criterion_dir)
+
+        if tpcds_data:
+            print(f"  Found {len(tpcds_data)} TPC-DS queries")
+            for query, databases in sorted(tpcds_data.items(), key=lambda x: int(re.search(r'Q(\d+)', x[0]).group(1)) if re.search(r'Q(\d+)', x[0]) else 0):
+                dbs = ', '.join(sorted(databases.keys()))
+                if args.verbose:
+                    print(f"    {query}: {dbs}")
+
+            update_tpcds_results(tpcds_data, output_dir / 'tpcds_results.json')
+        else:
+            print("  No TPC-DS data found")
         print()
 
     if args.all or args.sysbench:

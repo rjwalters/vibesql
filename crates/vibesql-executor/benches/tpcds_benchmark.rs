@@ -563,6 +563,236 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
 /// These queries take >100ms per iteration, so 100 samples would exceed the 10s target
 const SLOW_QUERIES: &[&str] = &["Q2", "Q6", "Q57", "Q59", "Q69", "Q91", "Q93"];
 
+/// TPC-DS queries with comparison benchmarks (SQLite, DuckDB, MySQL if enabled)
+#[cfg(feature = "sqlite-comparison")]
+fn bench_tpcds_queries_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tpcds_queries_comparison");
+    group.measurement_time(Duration::from_secs(10));
+
+    // Use cached databases (None in --list mode)
+    let Some(vibesql_db) = get_vibesql_db() else {
+        // In list mode, just register benchmarks without validation
+        for (name, _sql) in TPCDS_QUERIES {
+            if SLOW_QUERIES.contains(name) {
+                continue;
+            }
+            group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+            #[cfg(feature = "duckdb-comparison")]
+            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+        }
+        group.finish();
+        return;
+    };
+
+    let sqlite_conn = get_sqlite_conn();
+    #[cfg(feature = "duckdb-comparison")]
+    let duckdb_conn = get_duckdb_conn();
+    #[cfg(feature = "mysql-comparison")]
+    let mysql_conn = get_mysql_conn();
+
+    for (name, sql) in TPCDS_QUERIES {
+        // Skip slow queries - they have their own benchmark group
+        if SLOW_QUERIES.contains(name) {
+            continue;
+        }
+
+        let query_name = format!("comparison_{}", name);
+
+        // Check memory pressure before executing query
+        if let Some(reason) = check_memory_before_query(&query_name) {
+            record_query_result(QueryResult::Skipped { name: query_name, reason });
+            continue;
+        }
+
+        // Only benchmark if VibeSQL can parse and execute the query
+        match try_vibesql_query(vibesql_db, sql) {
+            Ok(row_count) => {
+                record_query_result(QueryResult::Passed { name: query_name.clone(), row_count });
+            }
+            Err(e) => {
+                eprintln!("[SKIP] {}: {}", name, e);
+                record_query_result(QueryResult::Skipped {
+                    name: query_name,
+                    reason: e.to_string(),
+                });
+                continue;
+            }
+        }
+
+        group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+            b.iter(|| {
+                let count = benchmark_vibesql_query(vibesql_db, sql);
+                black_box(count);
+            });
+        });
+
+        // SQLite benchmark (only if enabled)
+        if let Some(sqlite) = sqlite_conn {
+            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                b.iter(|| {
+                    let conn = sqlite.lock().unwrap();
+                    let count = benchmark_sqlite_query(&conn, sql);
+                    black_box(count);
+                });
+            });
+        }
+
+        // DuckDB benchmark (only if enabled)
+        #[cfg(feature = "duckdb-comparison")]
+        if let Some(duckdb) = duckdb_conn {
+            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                b.iter(|| {
+                    let conn = duckdb.lock().unwrap();
+                    let count = benchmark_duckdb_query(&conn, sql);
+                    black_box(count);
+                });
+            });
+        }
+
+        // MySQL benchmark (only if enabled)
+        #[cfg(feature = "mysql-comparison")]
+        if let Some(mysql) = mysql_conn {
+            group.bench_function(BenchmarkId::new("mysql", *name), |b| {
+                b.iter(|| {
+                    let mut conn = mysql.lock().unwrap();
+                    let count = benchmark_mysql_query(&mut conn, sql);
+                    black_box(count);
+                });
+            });
+        }
+    }
+
+    group.finish();
+
+    // Release memory between benchmark groups to prevent OOM
+    clear_in_subquery_cache();
+    hint_memory_release();
+}
+
+/// TPC-DS slow queries with comparison benchmarks (reduced sample size)
+#[cfg(feature = "sqlite-comparison")]
+fn bench_tpcds_slow_queries_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tpcds_queries_comparison");
+    group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10); // Reduced: these queries take >100ms per iteration
+
+    // Use cached databases (None in --list mode)
+    let Some(vibesql_db) = get_vibesql_db() else {
+        // In list mode, just register benchmarks without validation
+        for (name, _sql) in TPCDS_QUERIES {
+            if !SLOW_QUERIES.contains(name) {
+                continue;
+            }
+            group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+            #[cfg(feature = "duckdb-comparison")]
+            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                b.iter(|| black_box(0));
+            });
+        }
+        group.finish();
+        return;
+    };
+
+    let sqlite_conn = get_sqlite_conn();
+    #[cfg(feature = "duckdb-comparison")]
+    let duckdb_conn = get_duckdb_conn();
+    #[cfg(feature = "mysql-comparison")]
+    let mysql_conn = get_mysql_conn();
+
+    for (name, sql) in TPCDS_QUERIES {
+        // Only benchmark slow queries in this group
+        if !SLOW_QUERIES.contains(name) {
+            continue;
+        }
+
+        let query_name = format!("comparison_{}", name);
+
+        // Check memory pressure before executing query
+        if let Some(reason) = check_memory_before_query(&query_name) {
+            record_query_result(QueryResult::Skipped { name: query_name, reason });
+            continue;
+        }
+
+        // Only benchmark if VibeSQL can parse and execute the query
+        match try_vibesql_query(vibesql_db, sql) {
+            Ok(row_count) => {
+                record_query_result(QueryResult::Passed { name: query_name.clone(), row_count });
+            }
+            Err(e) => {
+                eprintln!("[SKIP] {}: {}", name, e);
+                record_query_result(QueryResult::Skipped {
+                    name: query_name,
+                    reason: e.to_string(),
+                });
+                continue;
+            }
+        }
+
+        group.bench_function(BenchmarkId::new("vibesql", *name), |b| {
+            b.iter(|| {
+                let count = benchmark_vibesql_query(vibesql_db, sql);
+                black_box(count);
+            });
+        });
+
+        // SQLite benchmark (only if enabled)
+        if let Some(sqlite) = sqlite_conn {
+            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                b.iter(|| {
+                    let conn = sqlite.lock().unwrap();
+                    let count = benchmark_sqlite_query(&conn, sql);
+                    black_box(count);
+                });
+            });
+        }
+
+        // DuckDB benchmark (only if enabled)
+        #[cfg(feature = "duckdb-comparison")]
+        if let Some(duckdb) = duckdb_conn {
+            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                b.iter(|| {
+                    let conn = duckdb.lock().unwrap();
+                    let count = benchmark_duckdb_query(&conn, sql);
+                    black_box(count);
+                });
+            });
+        }
+
+        // MySQL benchmark (only if enabled)
+        #[cfg(feature = "mysql-comparison")]
+        if let Some(mysql) = mysql_conn {
+            group.bench_function(BenchmarkId::new("mysql", *name), |b| {
+                b.iter(|| {
+                    let mut conn = mysql.lock().unwrap();
+                    let count = benchmark_mysql_query(&mut conn, sql);
+                    black_box(count);
+                });
+            });
+        }
+    }
+
+    group.finish();
+
+    // Release memory before printing summary
+    clear_in_subquery_cache();
+    hint_memory_release();
+
+    // Print summary at the end
+    print_query_summary();
+}
+
 fn bench_tpcds_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_queries");
     group.measurement_time(Duration::from_secs(10));
@@ -700,8 +930,8 @@ criterion_group!(benches, bench_sanity_queries, bench_tpcds_queries, bench_tpcds
 criterion_group!(
     benches,
     bench_sanity_queries_comparison,
-    bench_tpcds_queries,
-    bench_tpcds_slow_queries,
+    bench_tpcds_queries_comparison,
+    bench_tpcds_slow_queries_comparison,
 );
 
 criterion_main!(benches);
