@@ -51,7 +51,7 @@ sha2 = "0.10"
 base64 = "0.22"
 hmac = "0.12"
 pbkdf2 = "0.12"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 
 # Configuration and error handling
 toml = "0.9"
@@ -87,7 +87,7 @@ tempfile = "3"
 tokio = { version = "1.0", features = ["full", "test-util"] }
 tokio-test = "0.4"
 tokio-postgres = "0.7"
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", features = ["stream"] }
 
 [[bench]]
