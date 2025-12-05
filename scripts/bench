@@ -673,10 +673,11 @@ def ensure_python_bindings():
         print(f"⚠ Failed to build Python bindings: {result.stderr}")
         return False
 
-    # Find and install the wheel
+    # Find and install the wheel (select most recent by mtime)
     wheels = list(Path("target/wheels").glob("vibesql-*.whl"))
     if wheels:
-        wheel_path = wheels[0]
+        wheel_path = max(wheels, key=lambda w: w.stat().st_mtime)
+        print(f"  Installing wheel: {wheel_path.name}")
         result = subprocess.run(
             ["pip3", "install", "--force-reinstall", "--quiet", str(wheel_path)],
             cwd=Path(__file__).parent.parent
