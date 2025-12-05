@@ -20,6 +20,12 @@ runs:
     - name: Setup sccache
       uses: mozilla-actions/sccache-action@v0.0.6
 
+    - name: Enable sccache GHA cache
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
     - name: Setup Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
