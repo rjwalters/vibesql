@@ -10,11 +10,11 @@ keywords = ["sql", "database", "executor", "query"]
 categories = ["database"]
 
 [dependencies]
-vibesql-types = { version = "0.1.1", path = "../vibesql-types" }
-vibesql-ast = { version = "0.1.1", path = "../vibesql-ast" }
-vibesql-catalog = { version = "0.1.1", path = "../vibesql-catalog" }
-vibesql-storage = { version = "0.1.1", path = "../vibesql-storage" }
-vibesql-parser = { version = "0.1.1", path = "../vibesql-parser" }
+vibesql-types = { version = "0.1.2", path = "../vibesql-types" }
+vibesql-ast = { version = "0.1.2", path = "../vibesql-ast" }
+vibesql-catalog = { version = "0.1.2", path = "../vibesql-catalog" }
+vibesql-storage = { version = "0.1.2", path = "../vibesql-storage" }
+vibesql-parser = { version = "0.1.2", path = "../vibesql-parser" }
 chrono = "0.4"
 rayon = { version = "1.10", optional = true }
 indexmap = "2.0"
@@ -52,7 +52,7 @@ tikv-jemallocator = { version = "0.6", optional = true }
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 
 [dev-dependencies]
-vibesql-parser = { version = "0.1.1", path = "../vibesql-parser" }
+vibesql-parser = { version = "0.1.2", path = "../vibesql-parser" }
 criterion = { version = "0.8", features = ["html_reports"] }
 rand = "0.9"
 rand_chacha = "0.9"

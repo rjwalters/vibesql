@@ -10,8 +10,8 @@ keywords = ["sql", "parser", "database"]
 categories = ["database", "parser-implementations"]
 
 [dependencies]
-vibesql-ast = { version = "0.1.1", path = "../vibesql-ast" }
-vibesql-types = { version = "0.1.1", path = "../vibesql-types" }
+vibesql-ast = { version = "0.1.2", path = "../vibesql-ast" }
+vibesql-types = { version = "0.1.2", path = "../vibesql-types" }
 phf = { version = "0.13", features = ["macros"] }
 bumpalo = { version = "3.16", features = ["collections"] }
 

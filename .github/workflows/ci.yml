@@ -21,19 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Free disk space
-        run: |
-          # Remove large pre-installed software to free disk space
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          df -h
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -43,9 +35,20 @@ jobs:
       - name: Run unit tests
         run: cargo test --release --no-default-features --features parallel,spatial -- --skip run_sqllogictest_suite
 
+      - name: Clean build artifacts to save disk space
+        run: |
+          cargo clean
+          rm -rf target/release/deps
+          df -h
+
       - name: Run integration tests
         run: cargo test --release --no-default-features --features parallel,spatial --test '*' -- --skip run_sqllogictest_suite
         continue-on-error: false
+
+      - name: Final cleanup
+        run: |
+          cargo clean
+          df -h
 
   # ============================================================================
   # TPC-H Quick Benchmarks
@@ -56,18 +59,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          df -h
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -103,18 +99,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          df -h
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -162,18 +151,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          df -h
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -224,18 +206,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          df -h
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -276,18 +251,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          df -h
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust

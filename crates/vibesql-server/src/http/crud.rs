@@ -891,7 +891,7 @@ mod tests {
         assert_eq!(json_to_sql_literal(&JsonValue::Bool(true)), "TRUE");
         assert_eq!(json_to_sql_literal(&JsonValue::Bool(false)), "FALSE");
         assert_eq!(json_to_sql_literal(&json!(42)), "42");
-        assert_eq!(json_to_sql_literal(&json!(3.14)), "3.14");
+        assert_eq!(json_to_sql_literal(&json!(3.25)), "3.25");
         assert_eq!(json_to_sql_literal(&json!("hello")), "'hello'");
         assert_eq!(json_to_sql_literal(&json!("it's")), "'it''s'");
     }
