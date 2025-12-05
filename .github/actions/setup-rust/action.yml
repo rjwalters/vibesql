@@ -25,6 +25,11 @@ runs:
       run: |
         echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
         echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+        # Test if sccache can start - if not, disable it to prevent build failures
+        if ! timeout 10 sccache --start-server 2>/dev/null; then
+          echo "::warning::sccache failed to start, falling back to normal compilation"
+          echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
+        fi
 
     - name: Setup Rust toolchain
       uses: dtolnay/rust-toolchain@stable
