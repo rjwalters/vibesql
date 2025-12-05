@@ -96,8 +96,8 @@ run_standard_mode() {
 
     # Run benchmark
     echo -e "${YELLOW}Running benchmark...${NC}"
-    # Find the benchmark binary (exclude .d and .o files)
-    BENCH_BIN=$(find ./target/release/deps -maxdepth 1 -name "${BENCH_NAME}-*" -type f ! -name "*.d" ! -name "*.o" | head -1)
+    # Find the benchmark binary (exclude .d and .o files, get most recently modified)
+    BENCH_BIN=$(find ./target/release/deps -maxdepth 1 -name "${BENCH_NAME}-*" -type f ! -name "*.d" ! -name "*.o" -exec ls -t {} + | head -1)
     if [ -z "$BENCH_BIN" ]; then
         echo -e "${RED}Error: Benchmark binary not found${NC}"
         exit 1

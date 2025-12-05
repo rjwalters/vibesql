@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-fast benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -88,6 +88,7 @@ help:
 	@echo "Benchmark targets:"
 	@echo "  make benchmark           - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
 	@echo "  make benchmark-quick     - Quick CI-friendly subset (VibeSQL only)"
+	@echo "  make benchmark-fast      - Ultra-fast pipeline debugging (~30s, validates data flow)"
 	@echo "  make benchmark-tpch      - Run TPC-H (all 4 engines: VibeSQL, SQLite, DuckDB, MySQL)"
 	@echo "  make benchmark-tpch-quick - Run TPC-H (VibeSQL only - fast iteration)"
 	@echo "  make benchmark-tpch-profile - Run TPC-H profiling (detailed timing breakdown)"
@@ -266,6 +267,12 @@ benchmark:
 # Quick benchmark subset for CI (fast, no comparisons)
 benchmark-quick:
 	@./scripts/bench --quick
+
+# Ultra-fast benchmark for pipeline debugging (~30s total)
+# Purpose: Validate data collection, storage, and analysis pipeline
+# Runs minimal queries with short durations to test the full flow
+benchmark-fast:
+	@./scripts/bench --fast --all
 
 #
 # Individual Benchmark Targets
