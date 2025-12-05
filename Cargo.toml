@@ -409,9 +409,9 @@ path = "tests/parser/error_handling.rs"
 name = "dialect_tests"
 path = "tests/dialect/mod.rs"
 
-# Release profile with debug symbols for profiling
+# Release profile optimized for CI
 [profile.release]
-debug = true              # Enable debug symbols for flamegraph profiling
+debug = false             # Disable debug symbols to reduce binary size in CI
 
 # Custom release profile optimized for WASM size
 [profile.wasm-release]
