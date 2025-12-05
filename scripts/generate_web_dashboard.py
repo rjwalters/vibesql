@@ -198,6 +198,7 @@ def query_tpch_results(cursor: Any) -> Dict[str, Any]:
         SELECT run_id, run_timestamp, git_commit, git_branch, passed_queries, total_queries
         FROM benchmark_runs
         WHERE benchmark_suite = 'tpch'
+          AND git_branch = 'main'
         ORDER BY run_id DESC
         LIMIT 1
     """)
@@ -305,6 +306,7 @@ def query_tpcds_results(cursor: Any) -> Dict[str, Any]:
         SELECT run_id, run_timestamp, git_commit, passed_queries, total_queries
         FROM benchmark_runs
         WHERE benchmark_suite = 'tpcds'
+          AND git_branch = 'main'
         ORDER BY run_id DESC
         LIMIT 1
     """)
@@ -366,6 +368,7 @@ def query_tpcc_results(cursor: Any) -> Dict[str, Any]:
         SELECT run_id, run_timestamp, git_commit
         FROM benchmark_runs
         WHERE benchmark_suite = 'tpcc'
+          AND git_branch = 'main'
         ORDER BY run_id DESC
         LIMIT 1
     """)
@@ -421,6 +424,7 @@ def query_sysbench_results(cursor: Any) -> Dict[str, Any]:
         SELECT run_id, run_timestamp, git_commit
         FROM benchmark_runs
         WHERE benchmark_suite = 'sysbench'
+          AND git_branch = 'main'
         ORDER BY run_id DESC
         LIMIT 1
     """)
