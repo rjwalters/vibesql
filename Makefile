@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-fast benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-fast benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -132,10 +132,18 @@ help:
 # Build Targets
 #
 
+# Strip macOS quarantine attribute from built binaries
+# macOS quarantines downloaded/compiled binaries. This removes the attribute so they can run.
+strip-quarantine:
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		find target -type f -perm +111 -exec xattr -d com.apple.quarantine {} \; 2>/dev/null || true; \
+	fi
+
 # Build all Rust crates in release mode (excludes Python bindings which require maturin)
 build:
 	@echo "Building VibeSQL (release mode)..."
 	cargo build --release --workspace --exclude vibesql-python-bindings
+	@$(MAKE) strip-quarantine
 
 # Build WebAssembly bindings for web demo
 build-wasm:
@@ -164,18 +172,24 @@ test: test-workspace analyze-tests
 test-unit:
 	@echo "Running unit tests..."
 	@echo "This runs library tests across all workspace crates"
+	cargo test --release --workspace --lib --no-run
+	@$(MAKE) strip-quarantine
 	cargo test --release --workspace --lib
 
 # Run all workspace tests (unit + integration)
 test-workspace:
 	@echo "Running workspace tests (unit + integration)..."
 	@echo "This includes 2,991 unit tests + 739 sqltest conformance tests"
+	cargo test --release --workspace --no-run
+	@$(MAKE) strip-quarantine
 	cargo test --release --workspace
 
 # Run only ignored/slow tests (disk-backed indexes, unimplemented features, etc.)
 test-ignored:
 	@echo "Running ignored tests only..."
 	@echo "These are slow tests that are skipped during normal test runs"
+	cargo test --release --workspace --no-run
+	@$(MAKE) strip-quarantine
 	cargo test --release --workspace -- --ignored
 
 # Run SQLLogicTest suite (parallel mode recommended)
