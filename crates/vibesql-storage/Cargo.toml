@@ -13,6 +13,9 @@ categories = ["database"]
 default = ["compression"]
 # zstd compression for binary persistence (disabled in WASM where browsers provide compression)
 compression = ["zstd"]
+# Force in-memory indexes regardless of table size (for benchmarks)
+# This avoids the slow disk-backed index creation for ephemeral benchmark data
+in-memory-indexes = []
 # OpenDAL for multi-backend storage support (base feature)
 opendal = ["dep:opendal", "dep:tokio"]
 # Storage backend features - each enables opendal with the specific service
