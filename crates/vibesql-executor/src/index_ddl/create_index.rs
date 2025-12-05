@@ -149,6 +149,14 @@ impl CreateIndexExecutor {
         // Create the index based on type
         match &stmt.index_type {
             vibesql_ast::IndexType::BTree { unique } => {
+                // Compute column indices early (before mutable borrows)
+                let column_indices: Vec<u32> = stmt
+                    .columns
+                    .iter()
+                    .filter_map(|col| table_schema.get_column_index(&col.column_name))
+                    .map(|idx| idx as u32)
+                    .collect();
+
                 // Add to catalog first (use unqualified table name as stored in catalog)
                 let index_metadata = vibesql_catalog::IndexMetadata::new(
                     index_name.clone(),
@@ -180,6 +188,15 @@ impl CreateIndexExecutor {
                     *unique,
                     stmt.columns.clone(),
                 )?;
+
+                // Emit WAL entry for persistence
+                database.emit_wal_create_index(
+                    index_name_to_id(index_name),
+                    index_name,
+                    &qualified_table_name,
+                    column_indices,
+                    *unique,
+                );
 
                 Ok(format!(
                     "Index '{}' created successfully on table '{}'",
@@ -254,6 +271,15 @@ impl CreateIndexExecutor {
                 };
 
                 database.create_spatial_index(metadata, spatial_index)?;
+
+                // Emit WAL entry for persistence (spatial indexes are never unique)
+                database.emit_wal_create_index(
+                    index_name_to_id(index_name),
+                    index_name,
+                    &qualified_table_name,
+                    vec![col_idx as u32],
+                    false,
+                );
 
                 Ok(format!(
                     "Spatial index '{}' created successfully on table '{}'",
@@ -333,6 +359,15 @@ impl CreateIndexExecutor {
                     *lists as usize,
                     *metric,
                 )?;
+
+                // Emit WAL entry for persistence (IVFFlat indexes are never unique)
+                database.emit_wal_create_index(
+                    index_name_to_id(index_name),
+                    index_name,
+                    &qualified_table_name,
+                    vec![col_idx as u32],
+                    false,
+                );
 
                 Ok(format!(
                     "IVFFlat index '{}' created successfully on table '{}' column '{}'",
@@ -418,6 +453,15 @@ impl CreateIndexExecutor {
                     *metric,
                 )?;
 
+                // Emit WAL entry for persistence (HNSW indexes are never unique)
+                database.emit_wal_create_index(
+                    index_name_to_id(index_name),
+                    index_name,
+                    &qualified_table_name,
+                    vec![col_idx as u32],
+                    false,
+                );
+
                 Ok(format!(
                     "HNSW index '{}' created successfully on table '{}' column '{}'",
                     index_name, qualified_table_name, column_name
@@ -425,6 +469,14 @@ impl CreateIndexExecutor {
             }
         }
     }
+}
+
+/// Compute an index ID from index name using hash (for consistent mapping)
+fn index_name_to_id(name: &str) -> u32 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut hasher);
+    hasher.finish() as u32
 }
 
 #[cfg(test)]
