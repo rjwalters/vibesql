@@ -152,7 +152,8 @@ pub(super) fn build_reordered_schema(
 
         if let Some(schema) = table_schema {
             let col_count = schema.columns.len();
-            new_table_schemas.insert(table_name.clone(), (current_position, schema));
+            // Use lowercase for consistent case-insensitive lookups
+            new_table_schemas.insert(table_name.to_lowercase(), (current_position, schema));
             current_position += col_count;
         }
     }

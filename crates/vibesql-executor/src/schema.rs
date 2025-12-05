@@ -12,10 +12,12 @@ pub struct CombinedSchema {
 
 impl CombinedSchema {
     /// Create a new combined schema from a single table
+    ///
+    /// Note: Table name is normalized to lowercase for case-insensitive lookups
     pub fn from_table(table_name: String, schema: vibesql_catalog::TableSchema) -> Self {
         let total_columns = schema.columns.len();
         let mut table_schemas = HashMap::new();
-        // Use lowercase table name for consistent lookups in predicate decomposition
+        // Use lowercase table name for consistent case-insensitive lookups
         table_schemas.insert(table_name.to_lowercase(), (0, schema));
         CombinedSchema { table_schemas, total_columns }
     }
@@ -108,17 +110,27 @@ impl SchemaBuilder {
     }
 
     /// Create a schema builder initialized with an existing CombinedSchema
+    ///
+    /// Note: Table names are normalized to lowercase for case-insensitive lookups
     pub fn from_schema(schema: CombinedSchema) -> Self {
         let column_offset = schema.total_columns;
-        SchemaBuilder { table_schemas: schema.table_schemas, column_offset }
+        // Normalize all table names to lowercase for case-insensitive lookups
+        let table_schemas = schema
+            .table_schemas
+            .into_iter()
+            .map(|(name, value)| (name.to_lowercase(), value))
+            .collect();
+        SchemaBuilder { table_schemas, column_offset }
     }
 
     /// Add a table to the schema
     ///
     /// This is an O(1) operation - columns are not copied, just indexed
+    /// Note: Table names are normalized to lowercase for case-insensitive lookups
     pub fn add_table(&mut self, name: String, schema: vibesql_catalog::TableSchema) -> &mut Self {
         let num_columns = schema.columns.len();
-        self.table_schemas.insert(name, (self.column_offset, schema));
+        // Use lowercase for consistent case-insensitive lookups
+        self.table_schemas.insert(name.to_lowercase(), (self.column_offset, schema));
         self.column_offset += num_columns;
         self
     }

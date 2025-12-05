@@ -113,9 +113,10 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
         let mut right_total = 0;
 
         // Add all right-side tables with adjusted start indices
+        // Use lowercase for consistent case-insensitive lookups
         for (table_name, (start_idx, schema)) in right_schema.table_schemas.iter() {
             let adjusted_start = left_total + start_idx;
-            table_schemas.insert(table_name.clone(), (adjusted_start, schema.clone()));
+            table_schemas.insert(table_name.to_lowercase(), (adjusted_start, schema.clone()));
             right_total += schema.columns.len();
         }
 
