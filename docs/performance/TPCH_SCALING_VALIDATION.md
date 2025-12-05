@@ -83,17 +83,33 @@ Validate TPC-H query correctness and performance at larger scale factors to ensu
 ## Scale Factor 1.0 Results (100x Baseline)
 
 **Status**: In Progress
-**Database Load Time**: *Loading...*
+**Database Load Time**: >25 minutes (still loading)
 **Pass Rate**: *Pending*
+**Memory Usage**: ~5.8GB during data loading
 
-*Results will be added when benchmark completes*
+### Significant Finding: Data Loading Bottleneck
+
+**CRITICAL**: SF=1.0 data loading is taking >25 minutes of CPU time (vs 1.9s for SF=0.1).
+
+This represents a **>780x slowdown** for 10x more data, indicating a severe O(n^2+) scaling issue in the data loading/insertion code path.
+
+| Scale Factor | Load Time | Rows (lineitem) | Time per 1K rows |
+|--------------|-----------|-----------------|------------------|
+| SF=0.01 | 185ms | ~60K | 3.1ms |
+| SF=0.1 | 1.9s | ~600K | 3.2ms |
+| SF=1.0 | >25min | ~6M | >250ms |
+
+**Root Cause Hypothesis**: The data loading likely triggers index maintenance or constraint checking that scales poorly with table size.
+
+*Query results will be added when data loading completes*
 
 ### Expected Challenges at SF=1.0
 
-Based on SF=0.1 results:
-1. Q9 will likely need >5min timeout or may OOM
-2. Q18 could take >1min
-3. Memory pressure may become an issue with 6M lineitem rows
+Based on SF=0.1 results and loading observations:
+1. **Data loading is the primary bottleneck** - 25+ minutes just to load data
+2. Q9 will likely need >5min timeout or may OOM
+3. Q18 could take >1min
+4. Memory pressure is manageable (~5.8GB for loading)
 
 ## Comparison with Baselines
 
@@ -106,11 +122,11 @@ From TPCH_DUCKDB_COMPARISON.md, VibeSQL is:
 
 ### Scaling Characteristics
 
-| Characteristic | SF=0.01 | SF=0.1 | Expected SF=1.0 |
-|---------------|---------|--------|-----------------|
-| DB Load Time | 185ms | 1.9s | ~20s |
-| Total Runtime | ~17s | ~18s | ~3-5min |
-| Memory Usage | ~200MB | ~2GB | ~15-20GB |
+| Characteristic | SF=0.01 | SF=0.1 | SF=1.0 (observed) |
+|---------------|---------|--------|-------------------|
+| DB Load Time | 185ms | 1.9s | >25min (CRITICAL) |
+| Total Runtime | ~17s | ~18s | *pending* |
+| Memory Usage | ~200MB | ~2GB | ~5.8GB |
 
 ## Memory-Intensive Queries
 
@@ -162,17 +178,19 @@ ORDER BY nation, o_year DESC
 
 ### Key Takeaways
 
-1. **Q21 is fixed**: Major improvement from 14.8s to 716ms
-2. **Q9 is the new bottleneck**: Needs investigation for O(n^2) scaling
-3. **Q18 scales poorly**: 11.5x for 10x data suggests algorithmic issues
-4. **Overall health is good**: 21/22 queries pass at 10x scale
+1. **Data loading has severe scaling issues**: SF=1.0 takes >25min to load (vs 1.9s for SF=0.1)
+2. **Q21 is fixed**: Major improvement from 14.8s to 716ms
+3. **Q9 is the new query bottleneck**: Needs investigation for O(n^2) scaling
+4. **Q18 scales poorly**: 11.5x for 10x data suggests algorithmic issues
+5. **Overall health at SF=0.1 is good**: 21/22 queries pass at 10x scale
 
 ### Recommended Actions
 
-1. **Immediate**: Profile Q9 to identify the scaling bottleneck
-2. **High Priority**: Optimize Q9 join ordering for larger datasets
-3. **Medium Priority**: Investigate Q18 intermediate result handling
-4. **Future**: Add SF=0.1 and SF=1.0 to CI test suite (with longer timeouts)
+1. **CRITICAL**: Profile data loading to identify the O(n^2+) bottleneck at SF=1.0
+2. **High Priority**: Profile Q9 to identify the query scaling bottleneck
+3. **High Priority**: Optimize Q9 join ordering for larger datasets
+4. **Medium Priority**: Investigate Q18 intermediate result handling
+5. **Future**: Add SF=0.1 and SF=1.0 to CI test suite (with longer timeouts)
 
 ## Test Commands
 
