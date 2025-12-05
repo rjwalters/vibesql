@@ -127,12 +127,10 @@ impl JoinOrderContext {
     /// - Selectivity accounts for the FK multiplicity rather than assuming uniform distribution
     ///
     /// **Important**: For composite join keys (multiple edges between same table pair),
-    /// this function multiplies all individual selectivities together. This prevents
-    /// memory explosions in queries like TPC-H Q9 where partsupp has TWO join conditions:
-    /// - ps_suppkey = l_suppkey (selectivity ~0.01)
-    /// - ps_partkey = l_partkey (selectivity ~0.05)
-    ///
-    /// Combined: 0.01 × 0.05 = 0.0005 (much more selective!)
+    /// this function uses the MAXIMUM selectivity instead of multiplying them together.
+    /// Multiplying assumes column independence, which is incorrect for composite FK-PK
+    /// relationships like TPC-H Q9's partsupp-lineitem join on (partkey, suppkey).
+    /// Using MAX prevents catastrophic underestimation of result cardinality.
     ///
     /// # Parameters
     /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation")
@@ -240,25 +238,64 @@ impl JoinOrderContext {
         }
 
         // Now, combine selectivities for table pairs with multiple edges
-        // Group by (table1, table2) and multiply selectivities
+        //
+        // IMPORTANT: For composite keys (multiple edges between same table pair), we use
+        // MAX selectivity instead of multiplying them. Multiplying assumes column independence,
+        // which is incorrect for composite FK-PK relationships:
+        //
+        // Example: partsupp-lineitem join on (partkey, suppkey):
+        // - partsupp has composite PK (ps_partkey, ps_suppkey) = 80K unique combinations
+        // - lineitem has FK (l_partkey, l_suppkey) referencing partsupp
+        // - Each lineitem matches exactly ONE partsupp row
+        //
+        // With independence (WRONG):
+        //   selectivity = 0.000126 * 0.001 = 0.000000126
+        //   result = 80K * 600K * 0.000000126 = 6 rows (catastrophically wrong!)
+        //
+        // With MAX selectivity (CORRECT):
+        //   selectivity = max(0.000126, 0.001) = 0.001
+        //   result = 80K * 600K * 0.001 = 48M rows (still overestimates, but safe)
+        //
+        // The overestimate is acceptable because:
+        // 1. It prevents memory explosions from underestimation
+        // 2. Cost model will still prefer filtered tables earlier in join order
+        // 3. Downstream joins will reduce cardinality as filters apply
         let mut combined_selectivities = HashMap::new();
+        let mut edge_counts: HashMap<(String, String), usize> = HashMap::new();
 
         for ((left_table, right_table), selectivity) in individual_selectivities {
-            // Update forward direction
+            // Update forward direction - use MAX for composite keys
             let forward_key = (left_table.clone(), right_table.clone());
-            let current = combined_selectivities.get(&forward_key).copied().unwrap_or(1.0);
-            combined_selectivities.insert(forward_key.clone(), current * selectivity);
+            let current: f64 = combined_selectivities.get(&forward_key).copied().unwrap_or(0.0);
+            let count = edge_counts.entry(forward_key.clone()).or_insert(0);
+            *count += 1;
+
+            // For first edge, just use the selectivity
+            // For subsequent edges (composite key), use MAX instead of product
+            let new_selectivity = if current == 0.0 {
+                selectivity
+            } else {
+                // Composite key detected: use MAX to avoid catastrophic underestimation
+                // The max selectivity is the most conservative (least selective) estimate
+                current.max(selectivity)
+            };
+            combined_selectivities.insert(forward_key.clone(), new_selectivity);
 
             // Update reverse direction
             let reverse_key = (right_table.clone(), left_table.clone());
-            let current = combined_selectivities.get(&reverse_key).copied().unwrap_or(1.0);
-            combined_selectivities.insert(reverse_key, current * selectivity);
+            let current_rev: f64 = combined_selectivities.get(&reverse_key).copied().unwrap_or(0.0);
+            let new_selectivity_rev = if current_rev == 0.0 {
+                selectivity
+            } else {
+                current_rev.max(selectivity)
+            };
+            combined_selectivities.insert(reverse_key, new_selectivity_rev);
 
             // Debug logging for composite keys
-            if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && current != 1.0 {
+            if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && current != 0.0 {
                 eprintln!(
-                    "[JOIN_REORDER] Composite key detected: {}-{} combined selectivity: {:.6} -> {:.6}",
-                    left_table, right_table, current, current * selectivity
+                    "[JOIN_REORDER] Composite key detected: {}-{} combined selectivity: {:.6} -> {:.6} (using MAX, not product)",
+                    left_table, right_table, current, new_selectivity
                 );
             }
         }
