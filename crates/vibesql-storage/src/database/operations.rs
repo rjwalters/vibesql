@@ -4,6 +4,7 @@
 
 use super::indexes::IndexManager;
 use crate::index::{extract_mbr_from_sql_value, SpatialIndex};
+use crate::progress::ProgressTracker;
 use crate::{Row, StorageError, Table};
 use std::collections::HashMap;
 use vibesql_ast::IndexColumn;
@@ -628,8 +629,14 @@ impl Operations {
 
         // Extract vectors from the table
         // Note: SqlValue::Vector stores f32, but IVFFlat uses f64 for precision in clustering
+        let rows = table.scan();
+        let total_rows = rows.len();
         let mut vectors: Vec<(usize, Vec<f64>)> = Vec::new();
-        for (row_idx, row) in table.scan().iter().enumerate() {
+        let mut progress = ProgressTracker::new(
+            format!("Creating IVFFlat index '{}'", index_name),
+            Some(total_rows),
+        );
+        for (row_idx, row) in rows.iter().enumerate() {
             if col_idx < row.values.len() {
                 if let vibesql_types::SqlValue::Vector(vec_data) = &row.values[col_idx] {
                     // Convert f32 vector to f64 for IVFFlat processing
@@ -637,7 +644,9 @@ impl Operations {
                     vectors.push((row_idx, vec_f64));
                 }
             }
+            progress.update(row_idx + 1);
         }
+        progress.finish();
 
         // Create the IVFFlat index with the extracted vectors
         self.index_manager.create_ivfflat_index_with_vectors(
@@ -732,8 +741,14 @@ impl Operations {
 
         // Extract vectors from the table
         // Note: SqlValue::Vector stores f32, but HNSW uses f64 for precision
+        let rows = table.scan();
+        let total_rows = rows.len();
         let mut vectors: Vec<(usize, Vec<f64>)> = Vec::new();
-        for (row_idx, row) in table.scan().iter().enumerate() {
+        let mut progress = ProgressTracker::new(
+            format!("Creating HNSW index '{}'", index_name),
+            Some(total_rows),
+        );
+        for (row_idx, row) in rows.iter().enumerate() {
             if col_idx < row.values.len() {
                 if let vibesql_types::SqlValue::Vector(vec_data) = &row.values[col_idx] {
                     // Convert f32 vector to f64 for HNSW processing
@@ -741,7 +756,9 @@ impl Operations {
                     vectors.push((row_idx, vec_f64));
                 }
             }
+            progress.update(row_idx + 1);
         }
+        progress.finish();
 
         // Create the HNSW index with the extracted vectors
         self.index_manager.create_hnsw_index_with_vectors(
