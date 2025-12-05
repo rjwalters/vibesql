@@ -50,7 +50,7 @@ use vibesql_types::SqlValue;
 
 use crate::cache::{
     ArenaParseError, ArenaPreparedStatement, CachedPlan, PkPointLookupPlan, PreparedStatement,
-    PreparedStatementCache, PreparedStatementError, ProjectionPlan,
+    PreparedStatementCache, PreparedStatementError, ProjectionPlan, ResolvedProjection,
 };
 use crate::errors::ExecutorError;
 use crate::{DeleteExecutor, InsertExecutor, SelectExecutor, SelectResult, UpdateExecutor};
@@ -280,8 +280,8 @@ impl<'a> Session<'a> {
             _ => return Ok(None), // PK structure changed - fall back
         };
 
-        // Build PK values in the correct order
-        let mut pk_values = Vec::with_capacity(plan.pk_columns.len());
+        // Verify column mappings and extract parameter values
+        // Use borrowing to avoid cloning when possible
         for (param_idx, pk_col_idx) in &plan.param_to_pk_col {
             if *param_idx >= params.len() || *pk_col_idx >= plan.pk_columns.len() {
                 return Ok(None); // Invalid mapping - fall back
@@ -293,72 +293,107 @@ impl<'a> Session<'a> {
             if !expected_col.eq_ignore_ascii_case(actual_col) {
                 return Ok(None); // Column mismatch - fall back
             }
-
-            pk_values.push(params[*param_idx].clone());
         }
 
-        // Perform the PK lookup
-        let row = if pk_values.len() == 1 {
+        // Get or resolve projection info (cached after first execution)
+        let resolved = match plan.get_or_resolve(|proj| {
+            self.resolve_projection(proj, &table.schema.columns)
+        }) {
+            Some(r) => r,
+            None => return Ok(None), // Resolution failed - fall back
+        };
+
+        // Perform the PK lookup using borrowed parameter
+        // For single-column PK, we can pass the reference directly
+        let row = if plan.param_to_pk_col.len() == 1 {
+            let (param_idx, _) = plan.param_to_pk_col[0];
             self.db
-                .get_row_by_pk(&plan.table_name, &pk_values[0])
+                .get_row_by_pk(&plan.table_name, &params[param_idx])
                 .map_err(|e| SessionError::Execution(ExecutorError::StorageError(e.to_string())))?
         } else {
+            // For composite PK, we need to collect values
+            let pk_values: Vec<SqlValue> = plan
+                .param_to_pk_col
+                .iter()
+                .map(|(param_idx, _)| params[*param_idx].clone())
+                .collect();
             self.db
                 .get_row_by_composite_pk(&plan.table_name, &pk_values)
                 .map_err(|e| SessionError::Execution(ExecutorError::StorageError(e.to_string())))?
         };
 
+        // Build result with cached column names
+        let columns: Vec<String> = resolved.column_names.iter().cloned().collect();
+
         let rows = match row {
-            Some(r) => vec![r.clone()],
+            Some(r) => {
+                // Project directly from source row without cloning entire row first
+                if resolved.column_indices.is_empty() {
+                    // Wildcard - clone entire row
+                    vec![r.clone()]
+                } else {
+                    // Specific columns - only clone needed values
+                    let projected_values: Vec<SqlValue> = resolved
+                        .column_indices
+                        .iter()
+                        .map(|&i| r.values[i].clone())
+                        .collect();
+                    vec![Row::new(projected_values)]
+                }
+            }
             None => vec![],
         };
 
-        // Apply projection if needed
-        let (columns, result_rows) = match &plan.projection {
+        Ok(Some(PreparedExecutionResult::Select(SelectResult {
+            columns,
+            rows,
+        })))
+    }
+
+    /// Resolve projection plan to column indices and names
+    ///
+    /// This is called once per plan and the result is cached.
+    fn resolve_projection(
+        &self,
+        proj: &ProjectionPlan,
+        schema_columns: &[vibesql_catalog::ColumnSchema],
+    ) -> Option<ResolvedProjection> {
+        match proj {
             ProjectionPlan::Wildcard => {
-                // Return all columns
-                let columns: Vec<String> =
-                    table.schema.columns.iter().map(|c| c.name.clone()).collect();
-                (columns, rows)
+                // For wildcard, indices are empty (we clone entire row)
+                // but we cache the column names
+                let column_names: Arc<[String]> = schema_columns
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect();
+                Some(ResolvedProjection {
+                    column_indices: vec![],
+                    column_names,
+                })
             }
             ProjectionPlan::Columns(projections) => {
-                // Build column indices for projection
                 let mut col_indices = Vec::with_capacity(projections.len());
                 let mut column_names = Vec::with_capacity(projections.len());
 
                 for proj in projections {
-                    let idx = table
-                        .schema
-                        .columns
+                    let idx = schema_columns
                         .iter()
-                        .position(|c| c.name.eq_ignore_ascii_case(&proj.column_name));
+                        .position(|c| c.name.eq_ignore_ascii_case(&proj.column_name))?;
 
-                    match idx {
-                        Some(i) => {
-                            col_indices.push(i);
-                            column_names.push(
-                                proj.alias.clone().unwrap_or_else(|| proj.column_name.clone()),
-                            );
-                        }
-                        None => return Ok(None), // Column not found - fall back
-                    }
+                    col_indices.push(idx);
+                    column_names.push(
+                        proj.alias
+                            .clone()
+                            .unwrap_or_else(|| proj.column_name.clone()),
+                    );
                 }
 
-                // Project rows
-                let projected_rows: Vec<Row> = rows
-                    .into_iter()
-                    .map(|row| {
-                        let projected_values: Vec<SqlValue> =
-                            col_indices.iter().map(|&i| row.values[i].clone()).collect();
-                        Row::new(projected_values)
-                    })
-                    .collect();
-
-                (column_names, projected_rows)
+                Some(ResolvedProjection {
+                    column_indices: col_indices,
+                    column_names: column_names.into(),
+                })
             }
-        };
-
-        Ok(Some(PreparedExecutionResult::Select(SelectResult { columns, rows: result_rows })))
+        }
     }
 
     /// Execute a bound statement (internal helper)
