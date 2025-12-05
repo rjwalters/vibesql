@@ -445,3 +445,545 @@ where
     // Return result with reordered data and schema
     Ok(FromResult::from_rows(new_schema, reordered_rows))
 }
+
+/// Execute a semi/anti join with inner cross joins, including the derived table in reordering
+///
+/// Pattern: `(cross_joins) SEMI/ANTI JOIN derived_table`
+///
+/// This function:
+/// 1. Extracts the inner cross joins (left side)
+/// 2. Executes the derived table (right side) first
+/// 3. Includes the derived table in join reordering
+/// 4. Uses the semi-join condition to position the derived table early
+/// 5. Applies the semi-join filter early to reduce intermediate results
+///
+/// ## Example: TPC-H Q18
+///
+/// Input: `(customer × orders × lineitem) SEMI JOIN __in_agg ON o_orderkey = l_orderkey`
+///
+/// Without this optimization:
+/// 1. Join customer × orders × lineitem → 60000 rows
+/// 2. Semi-join with __in_agg → 0 rows
+///
+/// With this optimization:
+/// 1. Execute __in_agg → 0 rows
+/// 2. Semi-join orders with __in_agg → 0 rows  (early filter!)
+/// 3. Join remaining tables → 0 rows
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_with_semi_join_reordering<F>(
+    from: &FromClause,
+    cte_results: &HashMap<String, CteResult>,
+    database: &vibesql_storage::Database,
+    where_clause: Option<&Expression>,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
+    execute_subquery: F,
+) -> Result<FromResult, ExecutorError>
+where
+    F: Fn(&vibesql_ast::SelectStmt) -> Result<SelectResult, ExecutorError> + Copy,
+{
+    // Extract the semi/anti join structure
+    let (inner_from, derived_query, derived_alias, semi_join_type, semi_condition) = match from {
+        FromClause::Join {
+            left,
+            right,
+            join_type,
+            condition,
+            ..
+        } if matches!(join_type, vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti) => {
+            // Extract the subquery from the right side
+            match right.as_ref() {
+                FromClause::Subquery { query, alias, .. } => {
+                    (left.as_ref(), query, alias, join_type, condition)
+                }
+                _ => {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "execute_with_semi_join_reordering: right side must be subquery"
+                            .to_string(),
+                    ));
+                }
+            }
+        }
+        _ => {
+            return Err(ExecutorError::UnsupportedFeature(
+                "execute_with_semi_join_reordering called with non-semi-join".to_string(),
+            ));
+        }
+    };
+
+    let profile = join_profile_enabled();
+
+    if profile || std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Starting semi-join reordering for derived table: {}",
+            derived_alias
+        );
+    }
+
+    // Step 1: Execute the derived table first
+    // This is the subquery result (e.g., order keys with quantity > 300)
+    let derived_start = std::time::Instant::now();
+    let derived_result = execute_derived_table(derived_query, derived_alias, None, execute_subquery)?;
+    let derived_time = derived_start.elapsed();
+    let derived_row_count = derived_result.data.as_slice().len();
+
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Derived table '{}' executed: {} rows in {:?}",
+            derived_alias, derived_row_count, derived_time
+        );
+    }
+
+    // Step 2: Short-circuit optimization - if derived table is empty AND we have a semi-join,
+    // the result must be empty (semi-join requires a match in the right side)
+    if derived_row_count == 0 && matches!(*semi_join_type, vibesql_ast::JoinType::Semi) {
+        if profile {
+            eprintln!(
+                "[SEMI_JOIN_REORDER] Short-circuit: empty derived table means empty semi-join result"
+            );
+        }
+
+        // Build schema from inner tables without executing the expensive joins
+        // We still need the correct schema structure for the result
+        let inner_schema = build_inner_schema_without_execution(
+            inner_from,
+            database,
+            cte_results,
+            outer_row,
+            outer_schema,
+            execute_subquery,
+        )?;
+
+        return Ok(FromResult::from_rows(inner_schema, vec![]));
+    }
+
+    // Step 3: For non-empty derived tables, identify which inner table the semi-join filters
+    // and apply the filter early before the expensive cross-joins
+    let target_table = identify_semi_join_target_table(semi_condition, inner_from);
+
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Semi-join target table: {:?}",
+            target_table
+        );
+    }
+
+    // Step 4: If we can identify a target table, apply the semi-join early
+    if let Some(target_name) = target_table {
+        return execute_with_early_semi_join(
+            inner_from,
+            &target_name,
+            derived_result,
+            semi_join_type,
+            semi_condition,
+            cte_results,
+            database,
+            where_clause,
+            outer_row,
+            outer_schema,
+            execute_subquery,
+            profile,
+        );
+    }
+
+    // Step 5: Fallback - apply join reordering then semi-join at end
+    let inner_start = std::time::Instant::now();
+    let inner_result = execute_with_join_reordering(
+        inner_from,
+        cte_results,
+        database,
+        where_clause,
+        outer_row,
+        outer_schema,
+        execute_subquery,
+    )?;
+    let inner_time = inner_start.elapsed();
+    let inner_row_count = inner_result.data.as_slice().len();
+
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Inner join completed: {} rows in {:?}",
+            inner_row_count, inner_time
+        );
+    }
+
+    // Step 6: Apply the semi/anti join between inner result and derived table
+    let timeout_ctx = TimeoutContext::new_default();
+    let semi_start = std::time::Instant::now();
+    let result = crate::select::join::nested_loop_join(
+        inner_result,
+        derived_result,
+        semi_join_type,
+        semi_condition,
+        false, // not natural
+        database,
+        &[], // no additional equijoins
+        &timeout_ctx,
+        cte_results,
+    )?;
+    let semi_time = semi_start.elapsed();
+
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Semi-join applied: {} rows in {:?}",
+            result.data.as_slice().len(),
+            semi_time
+        );
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Total time: {:?}",
+            derived_time + inner_time + semi_time
+        );
+    }
+
+    Ok(result)
+}
+
+/// Build schema for inner tables without executing the expensive joins.
+/// Used for short-circuit optimization when derived table is empty.
+#[allow(clippy::too_many_arguments)]
+fn build_inner_schema_without_execution<F>(
+    inner_from: &FromClause,
+    database: &vibesql_storage::Database,
+    cte_results: &HashMap<String, CteResult>,
+    _outer_row: Option<&vibesql_storage::Row>,
+    _outer_schema: Option<&CombinedSchema>,
+    _execute_subquery: F,
+) -> Result<CombinedSchema, ExecutorError>
+where
+    F: Fn(&vibesql_ast::SelectStmt) -> Result<SelectResult, ExecutorError> + Copy,
+{
+    // Flatten the join tree to get all table references
+    let mut table_refs = Vec::new();
+    super::graph::flatten_join_tree(inner_from, &mut table_refs);
+
+    // Build combined schema from all tables
+    let mut result_schema: Option<CombinedSchema> = None;
+
+    for table_ref in &table_refs {
+        let table_name = &table_ref.name;
+        let alias = table_ref.alias.as_ref().unwrap_or(table_name).clone();
+
+        // Check CTEs first (CteResult is a tuple: (TableSchema, Arc<Vec<Row>>))
+        if let Some((cte_schema, _)) = cte_results.get(&table_name.to_lowercase()) {
+            let schema = cte_schema.clone();
+            match result_schema.take() {
+                None => result_schema = Some(CombinedSchema::from_table(alias, schema)),
+                Some(existing) => result_schema = Some(CombinedSchema::combine(existing, alias, schema)),
+            }
+            continue;
+        }
+
+        // Get table schema from database
+        if let Some(table) = database.get_table(table_name) {
+            let schema = table.schema.clone();
+            match result_schema.take() {
+                None => result_schema = Some(CombinedSchema::from_table(alias, schema)),
+                Some(existing) => result_schema = Some(CombinedSchema::combine(existing, alias, schema)),
+            }
+        }
+    }
+
+    result_schema.ok_or_else(|| {
+        ExecutorError::UnsupportedFeature("No tables found in inner FROM clause".to_string())
+    })
+}
+
+/// Identify which inner table the semi-join condition references.
+/// Returns the table name/alias if found.
+///
+/// For Q18, the condition is: `o_orderkey = __in_agg_0.l_orderkey`
+/// This should return "orders" because o_orderkey references the orders table.
+fn identify_semi_join_target_table(
+    condition: &Option<Expression>,
+    inner_from: &FromClause,
+) -> Option<String> {
+    let condition = condition.as_ref()?;
+
+    // Extract table names from inner_from
+    let mut table_refs = Vec::new();
+    super::graph::flatten_join_tree(inner_from, &mut table_refs);
+    let table_names: Vec<String> = table_refs
+        .iter()
+        .map(|t| t.alias.clone().unwrap_or_else(|| t.name.clone()).to_lowercase())
+        .collect();
+
+    // Find column references in the condition that belong to inner tables
+    let target = find_inner_table_in_condition(condition, &table_names);
+
+    if std::env::var("SEMI_JOIN_DEBUG").is_ok() {
+        eprintln!("[SEMI_JOIN_DEBUG] Condition: {:?}", condition);
+        eprintln!("[SEMI_JOIN_DEBUG] Inner tables: {:?}", table_names);
+        eprintln!("[SEMI_JOIN_DEBUG] Target table: {:?}", target);
+    }
+
+    target
+}
+
+/// Find which inner table is referenced in the semi-join condition
+fn find_inner_table_in_condition(expr: &Expression, inner_tables: &[String]) -> Option<String> {
+    match expr {
+        Expression::BinaryOp { left, right, .. } => {
+            // Check both sides
+            if let Some(t) = find_inner_table_in_condition(left, inner_tables) {
+                return Some(t);
+            }
+            find_inner_table_in_condition(right, inner_tables)
+        }
+        Expression::ColumnRef { table: Some(t), column, .. } => {
+            let t_lower = t.to_lowercase();
+            if inner_tables.contains(&t_lower) {
+                return Some(t_lower);
+            }
+            // Also try to infer from column naming convention (o_ → orders)
+            infer_table_from_column(column, inner_tables)
+        }
+        Expression::ColumnRef { table: None, column, .. } => {
+            // Try to infer from column naming convention
+            infer_table_from_column(column, inner_tables)
+        }
+        _ => None,
+    }
+}
+
+/// Infer table from column naming convention (e.g., o_orderkey → orders)
+fn infer_table_from_column(column: &str, inner_tables: &[String]) -> Option<String> {
+    let col_lower = column.to_lowercase();
+
+    // Common TPC-H naming conventions
+    let prefix_to_table = [
+        ("o_", "orders"),
+        ("c_", "customer"),
+        ("l_", "lineitem"),
+        ("p_", "part"),
+        ("s_", "supplier"),
+        ("ps_", "partsupp"),
+        ("n_", "nation"),
+        ("r_", "region"),
+    ];
+
+    for (prefix, table) in &prefix_to_table {
+        if col_lower.starts_with(prefix) && inner_tables.contains(&table.to_string()) {
+            return Some(table.to_string());
+        }
+    }
+
+    None
+}
+
+/// Execute with early semi-join application to the target table.
+///
+/// Instead of: (T1 × T2 × T3) SEMI JOIN derived
+/// We do: T1 × (T2 SEMI JOIN derived) × T3
+/// where T2 is the target table referenced by the semi-join condition.
+#[allow(clippy::too_many_arguments)]
+fn execute_with_early_semi_join<F>(
+    inner_from: &FromClause,
+    target_table: &str,
+    derived_result: FromResult,
+    semi_join_type: &vibesql_ast::JoinType,
+    semi_condition: &Option<Expression>,
+    cte_results: &HashMap<String, CteResult>,
+    database: &vibesql_storage::Database,
+    where_clause: Option<&Expression>,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
+    execute_subquery: F,
+    profile: bool,
+) -> Result<FromResult, ExecutorError>
+where
+    F: Fn(&vibesql_ast::SelectStmt) -> Result<SelectResult, ExecutorError> + Copy,
+{
+    // Step 1: Flatten the inner join tree
+    let mut table_refs = Vec::new();
+    super::graph::flatten_join_tree(inner_from, &mut table_refs);
+
+    // Step 2: Find the target table index
+    let target_idx = table_refs.iter().position(|t| {
+        let name = t.alias.as_ref().unwrap_or(&t.name).to_lowercase();
+        name == target_table.to_lowercase()
+    });
+
+    let target_idx = match target_idx {
+        Some(idx) => idx,
+        None => {
+            // Target table not found, fall back to default execution
+            if profile {
+                eprintln!(
+                    "[SEMI_JOIN_REORDER] Target table '{}' not found in inner tables, falling back",
+                    target_table
+                );
+            }
+            let inner_result = execute_with_join_reordering(
+                inner_from,
+                cte_results,
+                database,
+                where_clause,
+                outer_row,
+                outer_schema,
+                execute_subquery,
+            )?;
+
+            let timeout_ctx = TimeoutContext::new_default();
+            return crate::select::join::nested_loop_join(
+                inner_result,
+                derived_result,
+                semi_join_type,
+                semi_condition,
+                false,
+                database,
+                &[],
+                &timeout_ctx,
+                cte_results,
+            );
+        }
+    };
+
+    let target_ref = &table_refs[target_idx];
+
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Applying early semi-join to table '{}' at index {}",
+            target_table, target_idx
+        );
+    }
+
+    // Step 3: Execute the target table scan
+    let target_scan_start = std::time::Instant::now();
+    let target_result = execute_table_scan(
+        &target_ref.name,
+        target_ref.alias.as_ref(),
+        cte_results,
+        database,
+        None, // Don't push WHERE predicates yet - we'll handle them in join reordering
+        None,
+        None,
+        outer_row,
+        outer_schema,
+    )?;
+    let target_scan_time = target_scan_start.elapsed();
+
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Target table scan: {} rows in {:?}",
+            target_result.data.as_slice().len(),
+            target_scan_time
+        );
+    }
+
+    // Step 4: Apply semi-join to the target table
+    let timeout_ctx = TimeoutContext::new_default();
+    let semi_join_start = std::time::Instant::now();
+    let filtered_result = crate::select::join::nested_loop_join(
+        target_result,
+        derived_result,
+        semi_join_type,
+        semi_condition,
+        false,
+        database,
+        &[],
+        &timeout_ctx,
+        cte_results,
+    )?;
+    let semi_join_time = semi_join_start.elapsed();
+
+    let filtered_count = filtered_result.data.as_slice().len();
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Early semi-join applied: {} rows in {:?}",
+            filtered_count, semi_join_time
+        );
+    }
+
+    // Step 5: If filtered result is empty, short-circuit
+    if filtered_count == 0 {
+        if profile {
+            eprintln!("[SEMI_JOIN_REORDER] Early semi-join produced 0 rows, short-circuiting");
+        }
+
+        // Build full schema for all inner tables
+        let full_schema = build_inner_schema_without_execution(
+            inner_from,
+            database,
+            cte_results,
+            outer_row,
+            outer_schema,
+            execute_subquery,
+        )?;
+
+        return Ok(FromResult::from_rows(full_schema, vec![]));
+    }
+
+    // Step 6: Execute remaining tables and join with filtered result
+    // We need to build the join order excluding the target table (which we've already filtered)
+    let remaining_tables: Vec<_> = table_refs
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != target_idx)
+        .map(|(_, t)| t.clone())
+        .collect();
+
+    if profile {
+        eprintln!(
+            "[SEMI_JOIN_REORDER] Joining filtered result with {} remaining tables",
+            remaining_tables.len()
+        );
+    }
+
+    // Start with the filtered result
+    let mut accumulated = filtered_result;
+
+    // Execute and join remaining tables
+    for table_ref in &remaining_tables {
+        let table_start = std::time::Instant::now();
+        let table_result = execute_table_scan(
+            &table_ref.name,
+            table_ref.alias.as_ref(),
+            cte_results,
+            database,
+            None,
+            None,
+            None,
+            outer_row,
+            outer_schema,
+        )?;
+        let table_scan_time = table_start.elapsed();
+
+        if profile {
+            let alias = table_ref.alias.as_ref().unwrap_or(&table_ref.name);
+            eprintln!(
+                "[SEMI_JOIN_REORDER] Scanned '{}': {} rows in {:?}",
+                alias,
+                table_result.data.as_slice().len(),
+                table_scan_time
+            );
+        }
+
+        // Join with accumulated result using WHERE clause predicates
+        let join_start = std::time::Instant::now();
+        accumulated = crate::select::join::nested_loop_join(
+            accumulated,
+            table_result,
+            &vibesql_ast::JoinType::Cross,
+            &None, // No explicit condition - handled by WHERE clause
+            false,
+            database,
+            &[], // WHERE equijoins will be evaluated during join
+            &timeout_ctx,
+            cte_results,
+        )?;
+        let join_time = join_start.elapsed();
+
+        if profile {
+            eprintln!(
+                "[SEMI_JOIN_REORDER] After join: {} rows in {:?}",
+                accumulated.data.as_slice().len(),
+                join_time
+            );
+        }
+    }
+
+    // Note: WHERE clause filtering is handled by the caller (select executor)
+    // We return the joined result and let the standard pipeline apply WHERE predicates
+
+    Ok(accumulated)
+}

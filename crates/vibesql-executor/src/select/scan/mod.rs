@@ -90,6 +90,39 @@ where
                 execute_subquery,
             );
         }
+
+        // #3627: Handle SEMI/ANTI join at outer level with inner cross joins
+        // Pattern: (cross_joins) SEMI/ANTI JOIN derived_table
+        // This enables join reordering for the inner tables while applying
+        // the semi-join filter early via the semi-join optimization path
+        if let vibesql_ast::FromClause::Join {
+            left,
+            right,
+            join_type: vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti,
+            ..
+        } = from
+        {
+            // Check if the LEFT side (inner tables) can benefit from reordering
+            let inner_table_count = reorder::count_tables_in_from(left);
+            if reorder::should_apply_join_reordering(inner_table_count)
+                && reorder::all_joins_are_cross(left)
+            {
+                // The inner join can be reordered, and we have a semi/anti join
+                // with a derived table. Use the extended optimization that includes
+                // the derived table in the join reordering.
+                if let vibesql_ast::FromClause::Subquery { .. } = right.as_ref() {
+                    return reorder::execute_with_semi_join_reordering(
+                        from,
+                        cte_results,
+                        database,
+                        where_clause,
+                        outer_row,
+                        outer_schema,
+                        execute_subquery,
+                    );
+                }
+            }
+        }
     }
 
     // Fall back to standard execution (recursive left-deep joins)
