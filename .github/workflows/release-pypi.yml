@@ -58,6 +58,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Disable sccache wrapper (not installed on runners)
+      - name: Disable sccache
+        run: echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
+        shell: bash
+
       # Install cross-compilation tools for Linux aarch64
       - name: Install cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -95,6 +100,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Disable sccache wrapper (not installed on runners)
+      - name: Disable sccache
+        run: echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
 
       - name: Install maturin
         run: pip install maturin
