@@ -226,8 +226,19 @@ impl Operations {
         // Record start index for return value
         let start_index = table.row_count();
 
-        // Clone rows for index updates (needed since insert_batch consumes them)
-        let rows_for_indexes = rows.clone();
+        // Check if we have any user-defined or spatial indexes for this table
+        // Only clone rows if we actually need them for index updates
+        let has_btree_indexes = self.index_manager.has_indexes_for_table(table_name);
+        let has_spatial_indexes = self.has_spatial_indexes_for_table(table_name);
+        let needs_index_updates = has_btree_indexes || has_spatial_indexes;
+
+        // Conditionally clone rows only if index updates are needed
+        // This avoids expensive cloning during bulk data loading when no indexes exist
+        let rows_for_indexes = if needs_index_updates {
+            Some(rows.clone())
+        } else {
+            None
+        };
 
         // Use optimized batch insert
         let count = table.insert_batch(rows)?;
@@ -235,9 +246,9 @@ impl Operations {
         // Generate row indices for return
         let row_indices: Vec<usize> = (start_index..start_index + count).collect();
 
-        // Update user-defined indexes for all inserted rows
-        if let Some(schema) = table_schema {
-            for (i, row) in rows_for_indexes.iter().enumerate() {
+        // Update user-defined indexes for all inserted rows (only if we cloned)
+        if let (Some(schema), Some(rows_ref)) = (table_schema, rows_for_indexes) {
+            for (i, row) in rows_ref.iter().enumerate() {
                 let row_index = start_index + i;
                 self.index_manager.add_to_indexes_for_insert(table_name, schema, row, row_index);
                 // Update spatial indexes
@@ -902,6 +913,14 @@ impl Operations {
     /// List all spatial indexes
     pub fn list_spatial_indexes(&self) -> Vec<String> {
         self.spatial_indexes.keys().cloned().collect()
+    }
+
+    /// Check if any spatial indexes exist for a specific table
+    ///
+    /// This is an O(n) operation over all spatial indexes but is useful for
+    /// optimizing bulk insert operations when no indexes need updating.
+    fn has_spatial_indexes_for_table(&self, table_name: &str) -> bool {
+        self.spatial_indexes.values().any(|(metadata, _)| metadata.table_name == table_name)
     }
 
     /// Update spatial indexes for insert operation

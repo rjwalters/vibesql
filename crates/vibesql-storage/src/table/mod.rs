@@ -330,15 +330,20 @@ impl Table {
         // Phase 2: Pre-allocate capacity for rows vector
         self.rows.reserve(row_count);
 
+        // Record starting index for incremental index updates
+        let start_index = self.rows.len();
+
         // Phase 3: Insert all rows into storage
         for row in normalized_rows {
             self.rows.push(row);
         }
 
-        // Phase 4: Rebuild indexes from scratch (more efficient for large batches)
-        // For small batches, incremental would be faster, but rebuild is simpler
-        // and the threshold here (any batch) ensures consistency
-        self.indexes.rebuild(&self.schema, &self.rows);
+        // Phase 4: Incrementally update indexes for only the new rows
+        // This is O(batch_size) instead of O(total_rows), avoiding O(n²) behavior
+        // when doing multiple batch inserts
+        for (i, row) in self.rows[start_index..].iter().enumerate() {
+            self.indexes.update_for_insert(&self.schema, row, start_index + i);
+        }
 
         // Phase 5: Update append mode tracker with last inserted row
         // (We only track the final state, not intermediate states)
