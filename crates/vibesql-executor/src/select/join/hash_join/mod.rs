@@ -36,15 +36,47 @@ pub(super) use build::build_existence_hash_table_parallel;
 // Re-export FromResult type for use in submodules
 pub(super) use super::FromResult;
 
-/// Helper function to combine two rows without unnecessary cloning
-/// Only creates a single combined row, avoiding intermediate clones
-#[inline]
-pub(super) fn combine_rows(
-    left_row: &vibesql_storage::Row,
-    right_row: &vibesql_storage::Row,
-) -> vibesql_storage::Row {
-    let mut combined_values = Vec::with_capacity(left_row.values.len() + right_row.values.len());
-    combined_values.extend_from_slice(&left_row.values);
-    combined_values.extend_from_slice(&right_row.values);
-    vibesql_storage::Row::new(combined_values)
+/// Batch combine rows from join index pairs with optimized allocation
+///
+/// This function reduces allocation overhead by:
+/// 1. Pre-allocating the result vector with exact capacity
+/// 2. Pre-computing combined row size to avoid repeated capacity calculations
+///
+/// For large join results (e.g., 60K rows in TPC-H Q19), this provides
+/// significant performance improvement over per-row allocations.
+pub(super) fn batch_combine_rows(
+    build_rows: &[vibesql_storage::Row],
+    probe_rows: &[vibesql_storage::Row],
+    join_pairs: &[(usize, usize)],
+    left_is_build: bool,
+) -> Vec<vibesql_storage::Row> {
+    if join_pairs.is_empty() {
+        return Vec::new();
+    }
+
+    // Pre-allocate result vector with exact capacity
+    let mut result_rows = Vec::with_capacity(join_pairs.len());
+
+    // Calculate combined row size from first pair for consistent allocation
+    let (first_build_idx, first_probe_idx) = join_pairs[0];
+    let combined_size =
+        build_rows[first_build_idx].values.len() + probe_rows[first_probe_idx].values.len();
+
+    for &(build_idx, probe_idx) in join_pairs {
+        // Pre-allocate combined values vector with exact size
+        let mut combined_values = Vec::with_capacity(combined_size);
+
+        // Combine rows in correct order (left first, then right)
+        if left_is_build {
+            combined_values.extend_from_slice(&build_rows[build_idx].values);
+            combined_values.extend_from_slice(&probe_rows[probe_idx].values);
+        } else {
+            combined_values.extend_from_slice(&probe_rows[probe_idx].values);
+            combined_values.extend_from_slice(&build_rows[build_idx].values);
+        }
+
+        result_rows.push(vibesql_storage::Row::new(combined_values));
+    }
+
+    result_rows
 }

@@ -4,6 +4,7 @@
 
 use super::indexes::IndexManager;
 use crate::index::{extract_mbr_from_sql_value, SpatialIndex};
+use crate::progress::ProgressTracker;
 use crate::{Row, StorageError, Table};
 use std::collections::HashMap;
 use vibesql_ast::IndexColumn;
@@ -225,8 +226,19 @@ impl Operations {
         // Record start index for return value
         let start_index = table.row_count();
 
-        // Clone rows for index updates (needed since insert_batch consumes them)
-        let rows_for_indexes = rows.clone();
+        // Check if we have any user-defined or spatial indexes for this table
+        // Only clone rows if we actually need them for index updates
+        let has_btree_indexes = self.index_manager.has_indexes_for_table(table_name);
+        let has_spatial_indexes = self.has_spatial_indexes_for_table(table_name);
+        let needs_index_updates = has_btree_indexes || has_spatial_indexes;
+
+        // Conditionally clone rows only if index updates are needed
+        // This avoids expensive cloning during bulk data loading when no indexes exist
+        let rows_for_indexes = if needs_index_updates {
+            Some(rows.clone())
+        } else {
+            None
+        };
 
         // Use optimized batch insert
         let count = table.insert_batch(rows)?;
@@ -234,9 +246,9 @@ impl Operations {
         // Generate row indices for return
         let row_indices: Vec<usize> = (start_index..start_index + count).collect();
 
-        // Update user-defined indexes for all inserted rows
-        if let Some(schema) = table_schema {
-            for (i, row) in rows_for_indexes.iter().enumerate() {
+        // Update user-defined indexes for all inserted rows (only if we cloned)
+        if let (Some(schema), Some(rows_ref)) = (table_schema, rows_for_indexes) {
+            for (i, row) in rows_ref.iter().enumerate() {
                 let row_index = start_index + i;
                 self.index_manager.add_to_indexes_for_insert(table_name, schema, row, row_index);
                 // Update spatial indexes
@@ -416,13 +428,13 @@ impl Operations {
         // Validate prefix lengths against column types and widths
         Self::validate_prefix_lengths(table_schema, &columns)?;
 
-        let table_rows: Vec<Row> = table.scan().to_vec();
-
+        // Pass table rows directly by reference - avoid cloning all rows
+        // This is critical for performance at scale (O(n) clone was causing major slowdown)
         self.index_manager.create_index(
             index_name,
             table_name,
             table_schema,
-            &table_rows,
+            table.scan(),
             unique,
             columns,
         )
@@ -628,8 +640,14 @@ impl Operations {
 
         // Extract vectors from the table
         // Note: SqlValue::Vector stores f32, but IVFFlat uses f64 for precision in clustering
+        let rows = table.scan();
+        let total_rows = rows.len();
         let mut vectors: Vec<(usize, Vec<f64>)> = Vec::new();
-        for (row_idx, row) in table.scan().iter().enumerate() {
+        let mut progress = ProgressTracker::new(
+            format!("Creating IVFFlat index '{}'", index_name),
+            Some(total_rows),
+        );
+        for (row_idx, row) in rows.iter().enumerate() {
             if col_idx < row.values.len() {
                 if let vibesql_types::SqlValue::Vector(vec_data) = &row.values[col_idx] {
                     // Convert f32 vector to f64 for IVFFlat processing
@@ -637,7 +655,9 @@ impl Operations {
                     vectors.push((row_idx, vec_f64));
                 }
             }
+            progress.update(row_idx + 1);
         }
+        progress.finish();
 
         // Create the IVFFlat index with the extracted vectors
         self.index_manager.create_ivfflat_index_with_vectors(
@@ -732,8 +752,14 @@ impl Operations {
 
         // Extract vectors from the table
         // Note: SqlValue::Vector stores f32, but HNSW uses f64 for precision
+        let rows = table.scan();
+        let total_rows = rows.len();
         let mut vectors: Vec<(usize, Vec<f64>)> = Vec::new();
-        for (row_idx, row) in table.scan().iter().enumerate() {
+        let mut progress = ProgressTracker::new(
+            format!("Creating HNSW index '{}'", index_name),
+            Some(total_rows),
+        );
+        for (row_idx, row) in rows.iter().enumerate() {
             if col_idx < row.values.len() {
                 if let vibesql_types::SqlValue::Vector(vec_data) = &row.values[col_idx] {
                     // Convert f32 vector to f64 for HNSW processing
@@ -741,7 +767,9 @@ impl Operations {
                     vectors.push((row_idx, vec_f64));
                 }
             }
+            progress.update(row_idx + 1);
         }
+        progress.finish();
 
         // Create the HNSW index with the extracted vectors
         self.index_manager.create_hnsw_index_with_vectors(
@@ -885,6 +913,14 @@ impl Operations {
     /// List all spatial indexes
     pub fn list_spatial_indexes(&self) -> Vec<String> {
         self.spatial_indexes.keys().cloned().collect()
+    }
+
+    /// Check if any spatial indexes exist for a specific table
+    ///
+    /// This is an O(n) operation over all spatial indexes but is useful for
+    /// optimizing bulk insert operations when no indexes need updating.
+    fn has_spatial_indexes_for_table(&self, table_name: &str) -> bool {
+        self.spatial_indexes.values().any(|(metadata, _)| metadata.table_name == table_name)
     }
 
     /// Update spatial indexes for insert operation

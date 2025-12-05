@@ -412,7 +412,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build release binary
-        run: cargo build --release --package vibesql
+        run: cargo build --release --package vibesql-cli
 
       - name: Build WASM bindings
         run: |

@@ -244,11 +244,27 @@ impl<'a> Session<'a> {
         }
 
         // Try fast-path execution using cached plan
-        if let CachedPlan::PkPointLookup(plan) = stmt.cached_plan() {
-            if let Some(result) = self.try_execute_pk_lookup(plan, params)? {
-                return Ok(result);
+        match stmt.cached_plan() {
+            CachedPlan::PkPointLookup(plan) => {
+                if let Some(result) = self.try_execute_pk_lookup(plan, params)? {
+                    return Ok(result);
+                }
+                // Fall through to standard execution if fast path fails
             }
-            // Fall through to standard execution if fast path fails
+            CachedPlan::SimpleFastPath(_plan) => {
+                // SimpleFastPath caches the result of is_simple_point_query()
+                // Use execute_fast_path_with_columns to bypass the check
+                let bound_stmt = stmt.bind(params)?;
+                if let Statement::Select(select_stmt) = &bound_stmt {
+                    let executor = SelectExecutor::new(self.db);
+                    let result = executor.execute_fast_path_with_columns(select_stmt)?;
+                    return Ok(PreparedExecutionResult::Select(result));
+                }
+                // Fall through for non-SELECT (shouldn't happen for SimpleFastPath)
+            }
+            CachedPlan::Standard => {
+                // Fall through to standard execution
+            }
         }
 
         // Bind parameters to get executable statement

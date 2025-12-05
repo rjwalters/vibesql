@@ -147,6 +147,20 @@ jobs:
           name: ci-footprint-results
           path: artifacts/
 
+      - name: Download TPC-H artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: ci-tpch-results
+          path: artifacts/
+
+      - name: Download Sysbench artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: ci-sysbench-results
+          path: artifacts/
+
       # ============================================================================
       # Download Historical Data from Pages
       # ============================================================================

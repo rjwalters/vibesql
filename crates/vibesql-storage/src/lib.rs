@@ -17,6 +17,7 @@ pub mod error;
 pub mod index;
 pub mod page;
 pub mod persistence;
+pub mod progress;
 pub mod query_buffer_pool;
 pub mod row;
 pub mod statistics;

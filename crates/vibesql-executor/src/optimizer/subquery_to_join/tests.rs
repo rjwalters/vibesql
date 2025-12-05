@@ -79,8 +79,8 @@ fn test_not_in_subquery_to_anti_join() {
 fn test_complex_subquery_unchanged() {
     let mut stmt = simple_select("orders", "o_orderkey");
     let mut subquery = simple_select("lineitem", "l_orderkey");
-    // Add GROUP BY to make it complex
-    subquery.group_by = Some(GroupByClause::Simple(vec![column_ref("l_orderkey")]));
+    // Add LIMIT to make it complex (LIMIT subqueries can't be safely transformed)
+    subquery.limit = Some(10);
 
     stmt.where_clause = Some(Expression::In {
         expr: Box::new(column_ref("o_orderkey")),
@@ -90,11 +90,55 @@ fn test_complex_subquery_unchanged() {
 
     let transformed = transform_subqueries_to_joins(&stmt);
 
-    // Should be unchanged because subquery is complex
-    assert!(transformed.where_clause.is_some(), "Complex subquery should remain in WHERE");
+    // Should be unchanged because subquery has LIMIT
+    assert!(transformed.where_clause.is_some(), "Complex subquery with LIMIT should remain in WHERE");
     match transformed.from {
         Some(FromClause::Table { .. }) => {} // Good, no join created
-        _ => panic!("Complex subquery should not create JOIN"),
+        _ => panic!("Complex subquery with LIMIT should not create JOIN"),
+    }
+}
+
+#[test]
+fn test_aggregate_subquery_transforms_to_derived_table() {
+    // Test TPC-H Q18-like pattern: IN subquery with GROUP BY/HAVING
+    let mut stmt = simple_select("orders", "o_orderkey");
+    let mut subquery = simple_select("lineitem", "l_orderkey");
+    // Add GROUP BY and HAVING - this should now be transformed using derived table
+    subquery.group_by = Some(GroupByClause::Simple(vec![column_ref("l_orderkey")]));
+    subquery.having = Some(Expression::BinaryOp {
+        op: BinaryOperator::GreaterThan,
+        left: Box::new(Expression::AggregateFunction {
+            name: "SUM".to_string(),
+            distinct: false,
+            args: vec![column_ref("l_quantity")],
+        }),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(300))),
+    });
+
+    stmt.where_clause = Some(Expression::In {
+        expr: Box::new(column_ref("o_orderkey")),
+        subquery: Box::new(subquery),
+        negated: false,
+    });
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // Should be transformed: WHERE clause removed (IN -> semi-join)
+    assert!(transformed.where_clause.is_none(), "Aggregate IN subquery should be transformed");
+
+    // Check that we got a SEMI JOIN with a derived table (Subquery)
+    match transformed.from {
+        Some(FromClause::Join { join_type, right, .. }) => {
+            assert!(matches!(join_type, JoinType::Semi), "Should be SEMI join");
+            // Right side should be a Subquery (derived table)
+            match right.as_ref() {
+                FromClause::Subquery { alias, .. } => {
+                    assert!(alias.starts_with("__in_agg_"), "Should have __in_agg_ alias");
+                }
+                _ => panic!("Expected Subquery (derived table) on right side of JOIN"),
+            }
+        }
+        _ => panic!("Expected SEMI JOIN in FROM clause"),
     }
 }
 

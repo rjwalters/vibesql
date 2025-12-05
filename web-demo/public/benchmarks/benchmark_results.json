@@ -1,429 +1,509 @@
 {
   "benchmarks": [
     {
+      "name": "tpch_q1_pricing_summary_report_vibesql",
+      "stats": {
+        "mean": 0.0086891093075,
+        "stddev": 0.00015910965593143145,
+        "min": 0.008254653842124999,
+        "max": 0.009123564772875,
+        "rounds": 100
+      }
+    },
+    {
+      "name": "tpch_q1_pricing_summary_report_sqlite",
+      "stats": {
+        "mean": 0.032946003655,
+        "stddev": 0.0013639108202663213,
+        "min": 0.03129870347225,
+        "max": 0.03459330383775,
+        "rounds": 100
+      }
+    },
+    {
+      "name": "tpch_q1_pricing_summary_report_duckdb",
+      "stats": {
+        "mean": 0.0016846622152006155,
+        "stddev": 0.00017020130476869274,
+        "min": 0.0016004291044405847,
+        "max": 0.0017688953259606464,
+        "rounds": 100
+      }
+    },
+    {
       "name": "tpch_q2_minimum_cost_supplier_vibesql",
       "stats": {
-        "mean": 0.0033883999999999997,
-        "stddev": 0.0,
-        "min": 0.0032189799999999998,
-        "max": 0.0035578199999999997,
+        "mean": 0.004703509730909092,
+        "stddev": 0.0002864956430218909,
+        "min": 0.004468334244363637,
+        "max": 0.0049386852174545465,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q2_minimum_cost_supplier_sqlite",
       "stats": {
-        "mean": 0.00091724,
-        "stddev": 0.0,
-        "min": 0.000871378,
-        "max": 0.0009631020000000001,
+        "mean": 0.0009770317812726635,
+        "stddev": 2.2060802785247338e-05,
+        "min": 0.0009281801922090303,
+        "max": 0.0010258833703362968,
+        "rounds": 100
+      }
+    },
+    {
+      "name": "tpch_q2_minimum_cost_supplier_duckdb",
+      "stats": {
+        "mean": 0.004962634025833335,
+        "stddev": 0.0009663232517507321,
+        "min": 0.0047145023245416685,
+        "max": 0.005210765727125002,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q3_shipping_priority_vibesql",
       "stats": {
-        "mean": 0.083415,
-        "stddev": 0.0,
-        "min": 0.07924425,
-        "max": 0.08758575,
+        "mean": 0.10629549834,
+        "stddev": 0.025064470690013135,
+        "min": 0.100980723423,
+        "max": 0.111610273257,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q3_shipping_priority_sqlite",
       "stats": {
-        "mean": 0.0061731,
-        "stddev": 0.0,
-        "min": 0.005864444999999999,
-        "max": 0.0064817550000000005,
+        "mean": 0.00635235828,
+        "stddev": 0.00010719717863095368,
+        "min": 0.0060347403660000005,
+        "max": 0.006669976194,
+        "rounds": 100
+      }
+    },
+    {
+      "name": "tpch_q3_shipping_priority_duckdb",
+      "stats": {
+        "mean": 0.001522837733920635,
+        "stddev": 0.00014811261871207614,
+        "min": 0.0014466958472246032,
+        "max": 0.0015989796206166667,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q4_order_priority_checking_vibesql",
       "stats": {
-        "mean": 0.025608,
-        "stddev": 0.0,
-        "min": 0.024327599999999998,
-        "max": 0.0268884,
+        "mean": 0.025568389165,
+        "stddev": 0.00037187625454175653,
+        "min": 0.02428996970675,
+        "max": 0.02684680862325,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q4_order_priority_checking_sqlite",
       "stats": {
-        "mean": 0.00085472,
-        "stddev": 0.0,
-        "min": 0.000811984,
-        "max": 0.000897456,
+        "mean": 0.0008602841377668854,
+        "stddev": 1.3166182515428498e-05,
+        "min": 0.000817269930878541,
+        "max": 0.0009032983446552297,
+        "rounds": 100
+      }
+    },
+    {
+      "name": "tpch_q4_order_priority_checking_duckdb",
+      "stats": {
+        "mean": 0.001730803135270042,
+        "stddev": 0.00015208158740149977,
+        "min": 0.00164426297850654,
+        "max": 0.0018173432920335442,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q5_local_supplier_volume_vibesql",
       "stats": {
-        "mean": 0.033811,
-        "stddev": 0.0,
-        "min": 0.03212045,
-        "max": 0.03550155,
+        "mean": 0.034702130225,
+        "stddev": 0.0005068198233294689,
+        "min": 0.03296702371375,
+        "max": 0.03643723673625,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q5_local_supplier_volume_sqlite",
       "stats": {
-        "mean": 0.0046859,
-        "stddev": 0.0,
-        "min": 0.004451605,
-        "max": 0.004920195,
+        "mean": 0.004800533970000001,
+        "stddev": 6.824767117069685e-05,
+        "min": 0.004560507271500001,
+        "max": 0.005040560668500001,
+        "rounds": 100
+      }
+    },
+    {
+      "name": "tpch_q5_local_supplier_volume_duckdb",
+      "stats": {
+        "mean": 0.0017496947436445524,
+        "stddev": 0.0001492932545943127,
+        "min": 0.0016622100064623247,
+        "max": 0.00183717948082678,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q6_forecasting_revenue_change_vibesql",
       "stats": {
-        "mean": 0.0007321399999999999,
-        "stddev": 0.0,
-        "min": 0.0006955329999999999,
-        "max": 0.000768747,
+        "mean": 0.0007637985402081628,
+        "stddev": 1.8251095006592663e-05,
+        "min": 0.0007256086131977546,
+        "max": 0.000801988467218571,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q6_forecasting_revenue_change_sqlite",
       "stats": {
-        "mean": 0.0029424,
-        "stddev": 0.0,
-        "min": 0.00279528,
-        "max": 0.00308952,
+        "mean": 0.0030564689000000004,
+        "stddev": 6.0658257918927034e-05,
+        "min": 0.002903645455,
+        "max": 0.0032092923450000007,
+        "rounds": 100
+      }
+    },
+    {
+      "name": "tpch_q6_forecasting_revenue_change_duckdb",
+      "stats": {
+        "mean": 0.0003004798928622958,
+        "stddev": 5.5031447393086034e-05,
+        "min": 0.000285455898219181,
+        "max": 0.0003155038875054106,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q7_volume_shipping_vibesql",
       "stats": {
-        "mean": 0.17423,
-        "stddev": 0.0,
-        "min": 0.16551849999999999,
-        "max": 0.1829415,
+        "mean": 0.17468570968,
+        "stddev": 0.0030564244887822905,
+        "min": 0.16595142419599998,
+        "max": 0.183419995164,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q7_volume_shipping_sqlite",
       "stats": {
-        "mean": 0.0072536,
-        "stddev": 0.0,
-        "min": 0.006890919999999999,
-        "max": 0.0076162800000000004,
+        "mean": 0.007353404345714287,
+        "stddev": 0.00012321894564532536,
+        "min": 0.006985734128428572,
+        "max": 0.007721074563000002,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q8_national_market_share_vibesql",
       "stats": {
-        "mean": 0.022798,
-        "stddev": 0.0,
-        "min": 0.0216581,
-        "max": 0.023937899999999998,
+        "mean": 0.022797545983333337,
+        "stddev": 0.00032976174269687663,
+        "min": 0.02165766868416667,
+        "max": 0.023937423282500005,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q8_national_market_share_sqlite",
       "stats": {
-        "mean": 0.0058465,
-        "stddev": 0.0,
-        "min": 0.005554175,
-        "max": 0.0061388250000000005,
+        "mean": 0.005846473832222223,
+        "stddev": 0.00012080628547303479,
+        "min": 0.005554150140611112,
+        "max": 0.006138797523833334,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q9_product_type_profit_measure_vibesql",
       "stats": {
-        "mean": 0.14467,
-        "stddev": 0.0,
-        "min": 0.1374365,
-        "max": 0.1519035,
+        "mean": 0.14467259543,
+        "stddev": 0.022731246756514313,
+        "min": 0.1374389656585,
+        "max": 0.1519062252015,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q9_product_type_profit_measure_sqlite",
       "stats": {
-        "mean": 0.014031,
-        "stddev": 0.0,
-        "min": 0.01332945,
-        "max": 0.01473255,
+        "mean": 0.014030808422,
+        "stddev": 0.005623089525578401,
+        "min": 0.013329268000899999,
+        "max": 0.0147323488431,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q10_returned_item_reporting_vibesql",
       "stats": {
-        "mean": 0.088775,
-        "stddev": 0.0,
-        "min": 0.08433625,
-        "max": 0.09321375000000001,
+        "mean": 0.08877535124,
+        "stddev": 0.00643556362396504,
+        "min": 0.084336583678,
+        "max": 0.09321411880199999,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q10_returned_item_reporting_sqlite",
       "stats": {
-        "mean": 0.004267699999999999,
-        "stddev": 0.0,
-        "min": 0.004054314999999999,
-        "max": 0.004481084999999999,
+        "mean": 0.004267686147500001,
+        "stddev": 0.00010128530788546345,
+        "min": 0.0040543018401250006,
+        "max": 0.004481070454875001,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q11_important_stock_identification_vibesql",
       "stats": {
-        "mean": 0.013273,
-        "stddev": 0.0,
-        "min": 0.01260935,
-        "max": 0.01393665,
+        "mean": 0.0132732415675,
+        "stddev": 0.00025327293063568085,
+        "min": 0.012609579489125,
+        "max": 0.013936903645875,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q11_important_stock_identification_sqlite",
       "stats": {
-        "mean": 0.0021988,
-        "stddev": 0.0,
-        "min": 0.0020888599999999997,
-        "max": 0.00230874,
+        "mean": 0.0021987715395652163,
+        "stddev": 3.7462384152447145e-05,
+        "min": 0.0020888329625869556,
+        "max": 0.002308710116543477,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q12_shipping_modes_priority_vibesql",
       "stats": {
-        "mean": 0.053117,
-        "stddev": 0.0,
-        "min": 0.050461149999999996,
-        "max": 0.05577285,
+        "mean": 0.05311722293,
+        "stddev": 0.0008631704224547033,
+        "min": 0.0504613617835,
+        "max": 0.0557730840765,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q12_shipping_modes_priority_sqlite",
       "stats": {
-        "mean": 0.0035751,
-        "stddev": 0.0,
-        "min": 0.003396345,
-        "max": 0.003753855,
+        "mean": 0.003575100593571428,
+        "stddev": 5.222971747926949e-05,
+        "min": 0.0033963455638928563,
+        "max": 0.0037538556232499997,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q13_customer_distribution_vibesql",
       "stats": {
-        "mean": 0.048796,
-        "stddev": 0.0,
-        "min": 0.0463562,
-        "max": 0.0512358,
+        "mean": 0.048795953950000005,
+        "stddev": 0.0013058402349416917,
+        "min": 0.0463561562525,
+        "max": 0.05123575164750001,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q13_customer_distribution_sqlite",
       "stats": {
-        "mean": 0.0091676,
-        "stddev": 0.0,
-        "min": 0.00870922,
-        "max": 0.00962598,
+        "mean": 0.009167606874999998,
+        "stddev": 0.00013365988571881695,
+        "min": 0.008709226531249998,
+        "max": 0.009625987218749998,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q14_promotion_effect_vibesql",
       "stats": {
-        "mean": 0.041086,
-        "stddev": 0.0,
-        "min": 0.039031699999999996,
-        "max": 0.0431403,
+        "mean": 0.041086067905,
+        "stddev": 0.0005525908792201254,
+        "min": 0.03903176450975,
+        "max": 0.04314037130025,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q14_promotion_effect_sqlite",
       "stats": {
-        "mean": 0.0028622,
-        "stddev": 0.0,
-        "min": 0.00271909,
-        "max": 0.00300531,
+        "mean": 0.0028622458750000006,
+        "stddev": 5.216593188656919e-05,
+        "min": 0.0027191335812500007,
+        "max": 0.0030053581687500006,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q15_top_supplier_vibesql",
       "stats": {
-        "mean": 0.0021227999999999998,
-        "stddev": 0.0,
-        "min": 0.0020166599999999995,
-        "max": 0.00222894,
+        "mean": 0.002122791796086956,
+        "stddev": 7.330653172350962e-05,
+        "min": 0.002016652206282608,
+        "max": 0.002228931385891304,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q15_top_supplier_sqlite",
       "stats": {
-        "mean": 0.0029462,
-        "stddev": 0.0,
-        "min": 0.0027988899999999996,
-        "max": 0.0030935100000000003,
+        "mean": 0.0029462068900000006,
+        "stddev": 4.65534071957109e-05,
+        "min": 0.0027988965455000006,
+        "max": 0.0030935172345000006,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q16_parts_supplier_relationship_vibesql",
       "stats": {
-        "mean": 0.011555999999999999,
-        "stddev": 0.0,
-        "min": 0.010978199999999999,
-        "max": 0.012133799999999998,
+        "mean": 0.011556343158000004,
+        "stddev": 0.0001557244089479272,
+        "min": 0.010978526000100004,
+        "max": 0.012134160315900004,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q16_parts_supplier_relationship_sqlite",
       "stats": {
-        "mean": 0.0013759,
-        "stddev": 0.0,
-        "min": 0.001307105,
-        "max": 0.001444695,
+        "mean": 0.001386120572124177,
+        "stddev": 4.111271622238933e-05,
+        "min": 0.0013168145435179682,
+        "max": 0.001455426600730386,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q17_small-quantity-order_revenue_vibesql",
       "stats": {
-        "mean": 0.026907,
-        "stddev": 0.0,
-        "min": 0.025561649999999998,
-        "max": 0.028252350000000002,
+        "mean": 0.026907050235,
+        "stddev": 0.00044370499444020136,
+        "min": 0.02556169772325,
+        "max": 0.02825240274675,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q17_small-quantity-order_revenue_sqlite",
       "stats": {
-        "mean": 0.008594200000000001,
-        "stddev": 0.0,
-        "min": 0.008164490000000002,
-        "max": 0.009023910000000001,
+        "mean": 0.008594227361666672,
+        "stddev": 0.0001341965772220784,
+        "min": 0.008164515993583338,
+        "max": 0.009023938729750006,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q18_large_volume_customer_vibesql",
       "stats": {
-        "mean": 0.10836,
-        "stddev": 0.0,
-        "min": 0.10294199999999999,
-        "max": 0.113778,
+        "mean": 0.10836423171,
+        "stddev": 0.0009425630812105993,
+        "min": 0.10294602012449999,
+        "max": 0.1137824432955,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q18_large_volume_customer_sqlite",
       "stats": {
-        "mean": 0.0047006,
-        "stddev": 0.0,
-        "min": 0.00446557,
-        "max": 0.00493563,
+        "mean": 0.004700633031818182,
+        "stddev": 7.82642195126329e-05,
+        "min": 0.004465601380227273,
+        "max": 0.004935664683409091,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q19_discounted_revenue_vibesql",
       "stats": {
-        "mean": 0.11026999999999999,
-        "stddev": 0.0,
-        "min": 0.10475649999999999,
-        "max": 0.1157835,
+        "mean": 0.1102720671,
+        "stddev": 0.003500504771710433,
+        "min": 0.10475846374499999,
+        "max": 0.115785670455,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q19_discounted_revenue_sqlite",
       "stats": {
-        "mean": 0.0090638,
-        "stddev": 0.0,
-        "min": 0.00861061,
-        "max": 0.009516990000000001,
+        "mean": 0.00906382423666667,
+        "stddev": 0.00014462849273555524,
+        "min": 0.008610633024833336,
+        "max": 0.009517015448500005,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q20_potential_part_promotion_vibesql",
       "stats": {
-        "mean": 0.039937,
-        "stddev": 0.0,
-        "min": 0.03794015,
-        "max": 0.04193385,
+        "mean": 0.039936507505,
+        "stddev": 0.00035509291146460035,
+        "min": 0.03793968212975,
+        "max": 0.04193333288025001,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q20_potential_part_promotion_sqlite",
       "stats": {
-        "mean": 0.1315,
-        "stddev": 0.0,
-        "min": 0.124925,
-        "max": 0.138075,
+        "mean": 0.13150414535,
+        "stddev": 0.001284717382514842,
+        "min": 0.12492893808249998,
+        "max": 0.13807935261749998,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q21_suppliers_who_kept_orders_waiting_vibesql",
       "stats": {
-        "mean": 0.071919,
-        "stddev": 0.0,
-        "min": 0.06832305,
-        "max": 0.07551495,
+        "mean": 0.07191947122,
+        "stddev": 0.0012759811435359002,
+        "min": 0.068323497659,
+        "max": 0.075515444781,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q21_suppliers_who_kept_orders_waiting_sqlite",
       "stats": {
-        "mean": 0.023056999999999998,
-        "stddev": 0.0,
-        "min": 0.021904149999999997,
-        "max": 0.024209849999999998,
+        "mean": 0.023057336956666674,
+        "stddev": 0.0002853196797818478,
+        "min": 0.02190447010883334,
+        "max": 0.024210203804500008,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q22_global_sales_opportunity_vibesql",
       "stats": {
-        "mean": 0.0056109,
-        "stddev": 0.0,
-        "min": 0.005330355,
-        "max": 0.005891445,
+        "mean": 0.005610850955000001,
+        "stddev": 0.00016860222723585468,
+        "min": 0.00533030840725,
+        "max": 0.005891393502750001,
         "rounds": 100
       }
     },
     {
       "name": "tpch_q22_global_sales_opportunity_sqlite",
       "stats": {
-        "mean": 0.0032298,
-        "stddev": 0.0,
-        "min": 0.00306831,
-        "max": 0.0033912900000000004,
+        "mean": 0.00322975552125,
+        "stddev": 6.121527675827037e-05,
+        "min": 0.0030682677451875,
+        "max": 0.0033912432973125,
         "rounds": 100
       }
     }
   ],
-  "datetime": "2025-12-05T17:32:07.982821Z",
+  "datetime": "2025-12-05T23:36:29.281988Z",
   "machine_info": {
-    "note": "GitHub Actions runner (ubuntu-latest)",
+    "note": "Local development machine (parsed from Criterion)",
     "benchmark_type": "TPC-H Decision Support Queries",
     "scale_factor": "SF 0.01 (~60,000 rows)"
   }

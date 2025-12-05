@@ -16,6 +16,7 @@ use super::index_metadata::{
 use super::ivfflat::IVFFlatIndex;
 use crate::btree::{BTreeIndex, Key};
 use crate::page::PageManager;
+use crate::progress::ProgressTracker;
 use crate::{Row, StorageError};
 
 /// Apply prefix truncation to a SqlValue if prefix_length is specified
@@ -121,6 +122,10 @@ impl IndexManager {
             // The BTreeIndex has native duplicate key support via Vec<RowId> per key,
             // so we don't need to extend keys with row_id for non-unique indexes
             let mut sorted_entries: Vec<(Key, usize)> = Vec::new();
+            let mut progress = ProgressTracker::new(
+                format!("Creating index '{}'", index_name),
+                Some(table_rows.len()),
+            );
             for (row_idx, row) in table_rows.iter().enumerate() {
                 let key_values: Vec<SqlValue> = column_indices
                     .iter()
@@ -133,7 +138,9 @@ impl IndexManager {
                     })
                     .collect();
                 sorted_entries.push((key_values, row_idx));
+                progress.update(row_idx + 1);
             }
+            progress.finish();
             // Sort by key for bulk_load
             sorted_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -169,8 +176,16 @@ impl IndexManager {
 
             (data, 0, disk_bytes, crate::database::IndexBackend::DiskBacked)
         } else {
-            // Build the index data in-memory for small tables
-            let mut index_data_map: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+            // Build the index data in-memory using bulk-load optimization
+            // This is significantly faster than incremental BTreeMap insertion for large tables
+            // because sorted insertion has better cache locality and fewer tree rebalances
+            let mut progress = ProgressTracker::new(
+                format!("Creating index '{}'", index_name),
+                Some(table_rows.len()),
+            );
+
+            // Phase 1: Extract all (key, row_idx) pairs
+            let mut entries: Vec<(Vec<SqlValue>, usize)> = Vec::with_capacity(table_rows.len());
             for (row_idx, row) in table_rows.iter().enumerate() {
                 let key_values: Vec<SqlValue> = column_indices
                     .iter()
@@ -182,8 +197,20 @@ impl IndexManager {
                         super::index_operations::normalize_for_comparison(&truncated)
                     })
                     .collect();
-                index_data_map.entry(key_values).or_default().push(row_idx);
+                entries.push((key_values, row_idx));
+                progress.update(row_idx + 1);
             }
+
+            // Phase 2: Sort by key for optimal BTreeMap construction
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+            // Phase 3: Group entries by key and build BTreeMap
+            // Using sorted iteration results in more balanced tree construction
+            let mut index_data_map: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+            for (key, row_idx) in entries {
+                index_data_map.entry(key).or_default().push(row_idx);
+            }
+            progress.finish();
 
             // Estimate memory usage
             let key_size = std::mem::size_of::<Vec<SqlValue>>(); // Rough estimate

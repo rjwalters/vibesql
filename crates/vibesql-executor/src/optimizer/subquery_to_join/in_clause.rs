@@ -22,6 +22,19 @@
 //! -- After:
 //! SELECT orders.* FROM orders ANTI JOIN lineitem ON o_orderkey = l_orderkey
 //! ```
+//!
+//! ### Aggregate IN → SEMI JOIN with Derived Table (TPC-H Q18)
+//! ```sql
+//! -- Before:
+//! SELECT * FROM orders WHERE o_orderkey IN (
+//!     SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300
+//! )
+//!
+//! -- After:
+//! SELECT orders.* FROM orders SEMI JOIN (
+//!     SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300
+//! ) AS __in_agg ON o_orderkey = __in_agg.l_orderkey
+//! ```
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
@@ -40,17 +53,6 @@ pub(super) fn try_convert_in_to_join(
     subquery: &SelectStmt,
     negated: bool,
 ) -> Option<InToJoinResult> {
-    // Only handle simple subqueries:
-    // - Single table in FROM clause
-    // - Single column in SELECT list
-    // - No GROUP BY, HAVING, LIMIT, etc.
-
-    // Check for simple single-table subquery
-    let (table_name, table_alias) = match &subquery.from {
-        Some(FromClause::Table { name, alias, .. }) => (name.clone(), alias.clone()),
-        _ => return None, // Complex FROM clause, skip
-    };
-
     // Must have exactly one column in SELECT list
     if subquery.select_list.len() != 1 {
         return None;
@@ -61,15 +63,24 @@ pub(super) fn try_convert_in_to_join(
         _ => return None,
     };
 
-    // Skip if subquery has complex features
-    if subquery.group_by.is_some()
-        || subquery.having.is_some()
-        || subquery.limit.is_some()
-        || subquery.offset.is_some()
-        || subquery.set_operation.is_some()
-    {
+    // Skip if subquery has LIMIT, OFFSET, or set operations (can't safely convert)
+    if subquery.limit.is_some() || subquery.offset.is_some() || subquery.set_operation.is_some() {
         return None;
     }
+
+    // Check if this is an aggregate subquery (GROUP BY or HAVING)
+    // These need to be wrapped in a derived table for the semi-join
+    let is_aggregate_subquery = subquery.group_by.is_some() || subquery.having.is_some();
+
+    if is_aggregate_subquery {
+        return try_convert_aggregate_in_to_join(from, expr, subquery, &subquery_column, negated);
+    }
+
+    // Simple subquery path: requires single table in FROM clause
+    let (table_name, table_alias) = match &subquery.from {
+        Some(FromClause::Table { name, alias, .. }) => (name.clone(), alias.clone()),
+        _ => return None, // Complex FROM clause for non-aggregate, skip
+    };
 
     // Detect self-join: check if subquery table name conflicts with outer query tables
     let needs_alias = is_self_join(from, &table_name, &table_alias);
@@ -165,6 +176,89 @@ pub(super) fn try_convert_in_to_join(
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
         eprintln!("[SUBQUERY_TRANSFORM] Final condition: {:?}", final_condition);
+        eprintln!("[SUBQUERY_TRANSFORM] New FROM: {:?}", new_from);
+    }
+
+    Some(InToJoinResult { from: new_from })
+}
+
+/// Convert an IN subquery with GROUP BY/HAVING to a SEMI/ANTI join with derived table
+///
+/// For aggregate subqueries like:
+/// ```sql
+/// WHERE o_orderkey IN (
+///     SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300
+/// )
+/// ```
+///
+/// We convert to:
+/// ```sql
+/// SEMI JOIN (
+///     SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300
+/// ) AS __in_agg ON o_orderkey = __in_agg.l_orderkey
+/// ```
+///
+/// This is more efficient than row-by-row IN evaluation because:
+/// 1. The subquery is executed once (not per row)
+/// 2. The join uses hash-based semi-join (O(1) probe per row)
+fn try_convert_aggregate_in_to_join(
+    from: &FromClause,
+    outer_expr: &Expression,
+    subquery: &SelectStmt,
+    subquery_column: &Expression,
+    negated: bool,
+) -> Option<InToJoinResult> {
+    // Extract the column name from the subquery's select list for the join condition
+    // The column must be a simple column reference for us to build the join condition
+    let column_name = match subquery_column {
+        Expression::ColumnRef { column, .. } => column.clone(),
+        // For aggregate subqueries, we could also handle expressions by giving them an alias,
+        // but for now we only support simple column references
+        _ => return None,
+    };
+
+    // Use a counter to generate unique aliases for nested cases
+    // Thread-local counter ensures uniqueness within a query optimization pass
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let alias = format!("__in_agg_{}", COUNTER.fetch_add(1, Ordering::Relaxed));
+
+    if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+        eprintln!(
+            "[SUBQUERY_TRANSFORM] Converting aggregate IN subquery to derived table semi-join"
+        );
+        eprintln!("[SUBQUERY_TRANSFORM] Derived table alias: {}", alias);
+        eprintln!("[SUBQUERY_TRANSFORM] Column for join: {}", column_name);
+    }
+
+    // Create the derived table from the subquery
+    let right_from = FromClause::Subquery {
+        query: Box::new(subquery.clone()),
+        alias: alias.clone(),
+        column_aliases: None,
+    };
+
+    // Create the join condition: outer_expr = __in_agg.column_name
+    let join_condition = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(outer_expr.clone()),
+        right: Box::new(Expression::ColumnRef { table: Some(alias.clone()), column: column_name }),
+    };
+
+    // Create SEMI or ANTI join based on negation
+    let join_type = if negated { JoinType::Anti } else { JoinType::Semi };
+
+    // Create the join
+    let new_from = FromClause::Join {
+        left: Box::new(from.clone()),
+        right: Box::new(right_from),
+        join_type,
+        condition: Some(join_condition.clone()),
+        natural: false,
+    };
+
+    if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
+        eprintln!("[SUBQUERY_TRANSFORM] Final condition: {:?}", join_condition);
         eprintln!("[SUBQUERY_TRANSFORM] New FROM: {:?}", new_from);
     }
 
