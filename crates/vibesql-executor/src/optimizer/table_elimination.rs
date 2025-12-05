@@ -72,6 +72,16 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         .map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase())
         .collect();
 
+    // Don't apply when query has global aggregates (like COUNT(*)) without GROUP BY.
+    // Such aggregates operate over the entire Cartesian product, so eliminating tables
+    // would change the result (e.g., COUNT(*) on cross join should count all product rows).
+    if stmt.group_by.is_none() && has_global_aggregates(&stmt.select_list, &table_names) {
+        if verbose {
+            eprintln!("[TABLE_ELIM_OPT] Skipping: query has global aggregates without GROUP BY");
+        }
+        return stmt.clone();
+    }
+
     // Collect unqualified column names from SELECT for later checking
     let unqualified_columns = collect_unqualified_columns(&stmt.select_list);
 
@@ -98,13 +108,40 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         eprintln!("[TABLE_ELIM_OPT] Tables in SELECT: {:?}", select_tables);
     }
 
-    // Find tables in equijoins (WHERE clause predicates)
+    // Safety check: If there are unqualified columns that don't match ANY known table prefix,
+    // we can't reliably determine which table they belong to. Skip optimization to be safe.
+    // This handles CTEs and other cases where derived prefixes don't match actual column names.
+    if !unqualified_columns.is_empty() {
+        let known_prefixes: Vec<_> = table_column_prefixes.values().collect();
+        let has_unknown_columns = unqualified_columns.iter().any(|col| {
+            let col_lower = col.to_lowercase();
+            !known_prefixes.iter().any(|prefix| col_lower.starts_with(*prefix))
+        });
+        if has_unknown_columns {
+            if verbose {
+                eprintln!(
+                    "[TABLE_ELIM_OPT] Skipping: unqualified columns don't match any known prefix"
+                );
+            }
+            return stmt.clone();
+        }
+    }
+
+    // Find tables in equijoins (WHERE clause predicates AND JOIN ON conditions)
     // Uses prefix matching to detect joins with unqualified column refs
-    let equijoin_tables = if let Some(where_expr) = &stmt.where_clause {
+    let mut equijoin_tables = if let Some(where_expr) = &stmt.where_clause {
         extract_equijoin_tables(where_expr, &table_names, &table_column_prefixes)
     } else {
         HashSet::new()
     };
+
+    // Also extract tables from JOIN ON conditions in the FROM clause (#3572)
+    // This ensures we don't eliminate tables that are part of explicit JOIN conditions
+    if let Some(from_clause) = &stmt.from {
+        let on_condition_tables =
+            extract_equijoin_tables_from_joins(from_clause, &table_names, &table_column_prefixes);
+        equijoin_tables.extend(on_condition_tables);
+    }
 
     if verbose {
         eprintln!("[TABLE_ELIM_OPT] Tables in equijoins: {:?}", equijoin_tables);
@@ -308,6 +345,92 @@ fn extract_tables_from_select(
     tables
 }
 
+/// Check if the SELECT list contains "global" aggregate functions.
+///
+/// A global aggregate is one that:
+/// 1. Is an aggregate function (COUNT, SUM, MIN, MAX, AVG, etc.)
+/// 2. Does NOT reference any specific table columns (e.g., COUNT(*), MIN(42))
+///
+/// When such aggregates exist without GROUP BY, they operate over the entire
+/// result set (including Cartesian products from cross joins). Eliminating tables
+/// would incorrectly reduce the number of rows being aggregated.
+fn has_global_aggregates(select_list: &[SelectItem], table_names: &HashSet<String>) -> bool {
+    for item in select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            if expr_has_global_aggregate(expr, table_names) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursively check if an expression contains a global aggregate
+fn expr_has_global_aggregate(expr: &Expression, table_names: &HashSet<String>) -> bool {
+    match expr {
+        Expression::AggregateFunction { args, .. } => {
+            // Check if this aggregate references any table columns
+            let mut referenced_tables = HashSet::new();
+            for arg in args {
+                extract_tables_from_expr(arg, &mut referenced_tables);
+            }
+            // Also check for unqualified column references
+            let mut has_column_ref = false;
+            for arg in args {
+                if has_any_column_ref(arg) {
+                    has_column_ref = true;
+                    break;
+                }
+            }
+            // Global if no table refs AND no column refs (e.g., COUNT(*) or MIN(42))
+            referenced_tables.is_empty() && !has_column_ref
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            expr_has_global_aggregate(left, table_names)
+                || expr_has_global_aggregate(right, table_names)
+        }
+        Expression::UnaryOp { expr, .. } => expr_has_global_aggregate(expr, table_names),
+        Expression::Function { args, .. } => {
+            args.iter().any(|a| expr_has_global_aggregate(a, table_names))
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand
+                .as_ref()
+                .is_some_and(|o| expr_has_global_aggregate(o, table_names))
+                || when_clauses.iter().any(|c| {
+                    c.conditions
+                        .iter()
+                        .any(|cond| expr_has_global_aggregate(cond, table_names))
+                        || expr_has_global_aggregate(&c.result, table_names)
+                })
+                || else_result
+                    .as_ref()
+                    .is_some_and(|e| expr_has_global_aggregate(e, table_names))
+        }
+        _ => false,
+    }
+}
+
+/// Check if expression contains any column reference (qualified or unqualified)
+/// Note: The special "*" wildcard (used in COUNT(*)) is NOT considered a real column reference
+fn has_any_column_ref(expr: &Expression) -> bool {
+    match expr {
+        Expression::ColumnRef { column, .. } => {
+            // The special "*" wildcard in COUNT(*) is not a real column reference
+            column != "*"
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            has_any_column_ref(left) || has_any_column_ref(right)
+        }
+        Expression::UnaryOp { expr, .. } => has_any_column_ref(expr),
+        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+            args.iter().any(has_any_column_ref)
+        }
+        Expression::Cast { expr, .. } => has_any_column_ref(expr),
+        _ => false,
+    }
+}
+
 /// Check if expression contains any unqualified column references
 fn has_unqualified_column_ref(expr: &Expression) -> bool {
     match expr {
@@ -381,6 +504,47 @@ fn extract_tables_from_expr(expr: &Expression, tables: &mut HashSet<String>) {
             extract_tables_from_expr(expr, tables);
         }
         _ => {}
+    }
+}
+
+/// Extract tables that participate in equijoin conditions from JOIN ON clauses (#3572)
+///
+/// Recursively walks the FROM clause tree and extracts tables referenced in ON conditions.
+/// This ensures tables joined via explicit ON conditions are not incorrectly eliminated.
+fn extract_equijoin_tables_from_joins(
+    from: &FromClause,
+    table_names: &HashSet<String>,
+    table_prefixes: &HashMap<String, String>,
+) -> HashSet<String> {
+    let mut tables = HashSet::new();
+    extract_join_on_tables(from, &mut tables, table_names, table_prefixes);
+    tables
+}
+
+fn extract_join_on_tables(
+    from: &FromClause,
+    tables: &mut HashSet<String>,
+    table_names: &HashSet<String>,
+    table_prefixes: &HashMap<String, String>,
+) {
+    match from {
+        FromClause::Table { .. } => {
+            // Leaf node - no ON conditions
+        }
+        FromClause::Join { left, right, condition, .. } => {
+            // Recursively process left and right subtrees
+            extract_join_on_tables(left, tables, table_names, table_prefixes);
+            extract_join_on_tables(right, tables, table_names, table_prefixes);
+
+            // Extract tables from this join's ON condition
+            if let Some(cond) = condition {
+                let on_tables = extract_equijoin_tables(cond, table_names, table_prefixes);
+                tables.extend(on_tables);
+            }
+        }
+        FromClause::Subquery { .. } => {
+            // Subqueries are opaque - don't examine their internals
+        }
     }
 }
 
@@ -737,7 +901,10 @@ fn collect_unqualified_columns(select_list: &[SelectItem]) -> HashSet<String> {
 fn collect_unqualified_columns_from_expr(expr: &Expression, columns: &mut HashSet<String>) {
     match expr {
         Expression::ColumnRef { table: None, column } => {
-            columns.insert(column.to_lowercase());
+            // Skip the special "*" wildcard (used in COUNT(*))
+            if column != "*" {
+                columns.insert(column.to_lowercase());
+            }
         }
         Expression::BinaryOp { left, right, .. } => {
             collect_unqualified_columns_from_expr(left, columns);
