@@ -67,12 +67,17 @@
 // When corruption is detected, recovery can truncate the WAL at the last
 // valid entry using `find_recovery_point()`.
 
+pub mod engine;
 pub mod entry;
 pub mod format;
 pub mod reader;
 pub mod writer;
 
 // Re-export main types
+pub use engine::{
+    FlushNotifier, PersistenceConfig, PersistenceEngine, PersistenceStats, WalMessage,
+    DEFAULT_CHANNEL_CAPACITY, DEFAULT_FLUSH_COUNT, DEFAULT_FLUSH_INTERVAL_MS,
+};
 pub use entry::{Lsn, WalEntry, WalOp, WalOpTag};
 pub use format::{WalHeader, WAL_HEADER_SIZE, WAL_MAGIC, WAL_VERSION};
 pub use reader::{find_recovery_point, ReadResult, RecoveryInfo, WalIterator, WalReader};
