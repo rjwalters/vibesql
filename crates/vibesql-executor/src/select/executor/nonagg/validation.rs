@@ -9,20 +9,25 @@
 
 #![allow(clippy::needless_return, clippy::collapsible_if)]
 
-use crate::{errors::ExecutorError, schema::CombinedSchema};
+use std::collections::HashMap;
+use crate::{errors::ExecutorError, schema::CombinedSchema, select::cte::CteResult};
 
 /// Validate IN subqueries in WHERE clause before row iteration
 /// This ensures schema validation happens even when there are no rows to process
+///
+/// Issue #3562: Added CTE context so CTEs can be resolved in IN subqueries
 pub(super) fn validate_where_clause_subqueries(
     expr: &vibesql_ast::Expression,
     database: &vibesql_storage::Database,
+    cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<(), ExecutorError> {
     use vibesql_ast::Expression;
 
     match expr {
         Expression::In { subquery, .. } => {
             // Validate that the subquery returns exactly 1 column (scalar subquery requirement)
-            let column_count = compute_select_list_column_count(subquery, database)?;
+            // Issue #3562: Pass CTE context so CTEs can be resolved
+            let column_count = compute_select_list_column_count(subquery, database, cte_results)?;
             if column_count != 1 {
                 return Err(ExecutorError::SubqueryColumnCountMismatch {
                     expected: 1,
@@ -33,37 +38,37 @@ pub(super) fn validate_where_clause_subqueries(
         }
         // Recurse into binary operations
         Expression::BinaryOp { left, right, .. } => {
-            validate_where_clause_subqueries(left, database)?;
-            validate_where_clause_subqueries(right, database)
+            validate_where_clause_subqueries(left, database, cte_results)?;
+            validate_where_clause_subqueries(right, database, cte_results)
         }
         // Recurse into unary operations
-        Expression::UnaryOp { expr, .. } => validate_where_clause_subqueries(expr, database),
+        Expression::UnaryOp { expr, .. } => validate_where_clause_subqueries(expr, database, cte_results),
         // Recurse into other composite expressions
-        Expression::IsNull { expr, .. } => validate_where_clause_subqueries(expr, database),
+        Expression::IsNull { expr, .. } => validate_where_clause_subqueries(expr, database, cte_results),
         Expression::InList { expr, values, .. } => {
-            validate_where_clause_subqueries(expr, database)?;
+            validate_where_clause_subqueries(expr, database, cte_results)?;
             for val in values {
-                validate_where_clause_subqueries(val, database)?;
+                validate_where_clause_subqueries(val, database, cte_results)?;
             }
             Ok(())
         }
         Expression::Between { expr, low, high, .. } => {
-            validate_where_clause_subqueries(expr, database)?;
-            validate_where_clause_subqueries(low, database)?;
-            validate_where_clause_subqueries(high, database)
+            validate_where_clause_subqueries(expr, database, cte_results)?;
+            validate_where_clause_subqueries(low, database, cte_results)?;
+            validate_where_clause_subqueries(high, database, cte_results)
         }
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                validate_where_clause_subqueries(op, database)?;
+                validate_where_clause_subqueries(op, database, cte_results)?;
             }
             for when_clause in when_clauses {
                 for cond in &when_clause.conditions {
-                    validate_where_clause_subqueries(cond, database)?;
+                    validate_where_clause_subqueries(cond, database, cte_results)?;
                 }
-                validate_where_clause_subqueries(&when_clause.result, database)?;
+                validate_where_clause_subqueries(&when_clause.result, database, cte_results)?;
             }
             if let Some(else_res) = else_result {
-                validate_where_clause_subqueries(else_res, database)?;
+                validate_where_clause_subqueries(else_res, database, cte_results)?;
             }
             Ok(())
         }
@@ -74,9 +79,12 @@ pub(super) fn validate_where_clause_subqueries(
 
 /// Compute the number of columns in a SELECT statement's result
 /// Handles wildcards by expanding them using table schemas from the database
+///
+/// Issue #3562: Added CTE context so wildcards can be expanded for CTE references
 fn compute_select_list_column_count(
     stmt: &vibesql_ast::SelectStmt,
     database: &vibesql_storage::Database,
+    cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
     let mut count = 0;
 
@@ -85,7 +93,7 @@ fn compute_select_list_column_count(
             vibesql_ast::SelectItem::Wildcard { .. } => {
                 // Expand * to count all columns from all tables in FROM clause
                 if let Some(from) = &stmt.from {
-                    count += count_columns_in_from_clause(from, database)?;
+                    count += count_columns_in_from_clause(from, database, cte_results)?;
                 } else {
                     // SELECT * without FROM is an error (should be caught earlier)
                     return Err(ExecutorError::UnsupportedFeature(
@@ -95,6 +103,17 @@ fn compute_select_list_column_count(
             }
             vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
                 // Expand table.* to count columns from that specific table
+                // Issue #3562: Check CTEs first before database tables
+                if let Some(cte_ctx) = cte_results {
+                    if let Some((schema, _)) = cte_ctx.get(qualifier)
+                        .or_else(|| cte_ctx.iter()
+                            .find(|(k, _)| k.eq_ignore_ascii_case(qualifier))
+                            .map(|(_, v)| v))
+                    {
+                        count += schema.columns.len();
+                        continue;
+                    }
+                }
                 let tbl = database
                     .get_table(qualifier)
                     .ok_or_else(|| ExecutorError::TableNotFound(qualifier.clone()))?;
@@ -111,20 +130,33 @@ fn compute_select_list_column_count(
 }
 
 /// Count total columns in a FROM clause (handles joins and multiple tables)
+///
+/// Issue #3562: Added CTE context so CTEs can be resolved in FROM clause
 fn count_columns_in_from_clause(
     from: &vibesql_ast::FromClause,
     database: &vibesql_storage::Database,
+    cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
     match from {
         vibesql_ast::FromClause::Table { name, .. } => {
+            // Issue #3562: Check CTEs first before database tables
+            if let Some(cte_ctx) = cte_results {
+                if let Some((schema, _)) = cte_ctx.get(name)
+                    .or_else(|| cte_ctx.iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                        .map(|(_, v)| v))
+                {
+                    return Ok(schema.columns.len());
+                }
+            }
             let table = database
                 .get_table(name)
                 .ok_or_else(|| ExecutorError::TableNotFound(name.clone()))?;
             Ok(table.schema.columns.len())
         }
         vibesql_ast::FromClause::Join { left, right, .. } => {
-            let left_count = count_columns_in_from_clause(left, database)?;
-            let right_count = count_columns_in_from_clause(right, database)?;
+            let left_count = count_columns_in_from_clause(left, database, cte_results)?;
+            let right_count = count_columns_in_from_clause(right, database, cte_results)?;
             Ok(left_count + right_count)
         }
         vibesql_ast::FromClause::Subquery { .. } => {

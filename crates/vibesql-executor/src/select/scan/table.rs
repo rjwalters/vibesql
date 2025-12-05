@@ -75,7 +75,7 @@ pub(crate) fn execute_table_scan(
 
             // Must clone rows for filtering (copy-on-write semantics)
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
-            // Pass CTE context for WHERE clauses with IN subqueries referencing CTEs (#3563)
+            // Issue #3562: Pass CTE context so IN subqueries can reference other CTEs
             let rows = apply_table_local_predicates(
                 cte_rows.as_ref().clone(),
                 schema.clone(),
@@ -84,7 +84,7 @@ pub(crate) fn execute_table_scan(
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
-                Some(cte_results),
+                Some(cte_results),  // CTE context for IN subqueries referencing CTEs
             )?;
             return Ok(super::FromResult::from_rows(schema, rows));
         }
@@ -176,7 +176,7 @@ pub(crate) fn execute_table_scan(
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
-            // Pass CTE context for WHERE clauses with IN subqueries referencing CTEs (#3563)
+            // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
             rows = apply_table_local_predicates(
                 rows,
                 schema.clone(),
@@ -185,7 +185,7 @@ pub(crate) fn execute_table_scan(
                 database,
                 None,  // No outer context for non-correlated predicate pushdown
                 None,
-                Some(cte_results),
+                Some(cte_results),  // CTE context for IN subqueries referencing CTEs
             )?;
         }
 
@@ -197,7 +197,8 @@ pub(crate) fn execute_table_scan(
 
     // First, try primary key point lookup for O(1) access (TPC-C optimization #3221)
     // This handles queries like: SELECT ... FROM stock WHERE s_w_id = 1 AND s_i_id = 123
-    if let Some(result) = try_primary_key_lookup(table_name, alias, where_clause, database)? {
+    // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+    if let Some(result) = try_primary_key_lookup(table_name, alias, where_clause, database, cte_results)? {
         return Ok(result);
     }
 
@@ -208,7 +209,8 @@ pub(crate) fn execute_table_scan(
             eprintln!("[TABLE_SCAN] Using index scan: table={}, index={}", table_name, index_name);
         }
         // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
-        return super::index_scan::execute_index_scan(table_name, &index_name, alias, where_clause, sorted_columns, limit, database);
+        // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+        return super::index_scan::execute_index_scan(table_name, &index_name, alias, where_clause, sorted_columns, limit, database, cte_results);
     }
 
     // Debug: Log when table scan is used instead of index
@@ -296,7 +298,7 @@ pub(crate) fn execute_table_scan(
             }
             // Fall back to generic predicate evaluation for complex expressions
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
-            // Pass CTE context for WHERE clauses with IN subqueries referencing CTEs (#3563)
+            // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
             let filtered_rows = apply_table_local_predicates_ref(
                 row_slice,
                 schema.clone(),
@@ -305,7 +307,7 @@ pub(crate) fn execute_table_scan(
                 database,
                 None,  // No outer context for predicate pushdown
                 None,
-                Some(cte_results),
+                Some(cte_results),  // CTE context for IN subqueries referencing CTEs
             )?;
             return Ok(super::FromResult::from_rows(schema, filtered_rows));
         }
@@ -377,11 +379,15 @@ fn filter_with_simd_columnar(
 /// - `Ok(Some(result))` - Point lookup succeeded, result contains the matching row (or empty if no match)
 /// - `Ok(None)` - Cannot use primary key lookup (fall back to other methods)
 /// - `Err(...)` - An error occurred
+///
+/// # Arguments
+/// * `cte_results` - CTE context for IN subqueries that may reference CTEs (Issue #3562)
 fn try_primary_key_lookup(
     table_name: &str,
     alias: Option<&String>,
     where_clause: Option<&vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
+    cte_results: &HashMap<String, CteResult>,
 ) -> Result<Option<super::FromResult>, ExecutorError> {
     // Need a WHERE clause to extract predicates
     let where_expr = match where_clause {
@@ -435,7 +441,12 @@ fn try_primary_key_lookup(
                 let row = &all_rows[row_idx];
 
                 // Evaluate the full WHERE clause on this row
-                let evaluator = CombinedExpressionEvaluator::with_database(&schema, database);
+                // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+                let evaluator = if cte_results.is_empty() {
+                    CombinedExpressionEvaluator::with_database(&schema, database)
+                } else {
+                    CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_results)
+                };
                 match evaluator.eval(where_expr, row) {
                     Ok(vibesql_types::SqlValue::Boolean(true)) => vec![row.clone()],
                     Ok(_) => vec![], // Row doesn't match full WHERE clause (false or NULL)

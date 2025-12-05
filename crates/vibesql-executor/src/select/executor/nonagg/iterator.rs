@@ -89,8 +89,9 @@ impl SelectExecutor<'_> {
 
         // Validate WHERE clause subqueries upfront (before row iteration)
         // This ensures schema validation happens even for empty result sets
+        // Issue #3562: Pass CTE context so CTEs can be resolved in IN subqueries
         if let Some(where_expr) = &stmt.where_clause {
-            validate_where_clause_subqueries(where_expr, self.database)?;
+            validate_where_clause_subqueries(where_expr, self.database, cte_ctx)?;
         }
 
         // Stage 1: Table scan

@@ -167,6 +167,7 @@ where
     // Note: Using default timeout context - proper timeout propagation from SelectExecutor
     // is a future improvement (see issue #2631 for context)
     let timeout_ctx = TimeoutContext::new_default();
+    // Issue #3562: Pass CTE context so post-join filters with IN subqueries can resolve CTEs
     let result = nested_loop_join(
         left_result,
         right_result,
@@ -176,6 +177,7 @@ where
         database,
         &equijoin_predicates,
         &timeout_ctx,
+        cte_results,
     )?;
     Ok(result)
 }

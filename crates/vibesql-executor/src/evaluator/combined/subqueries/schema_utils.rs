@@ -3,7 +3,9 @@
 //! This module provides utilities to compute and validate the schema of
 //! subquery results, particularly for handling wildcards and column counts.
 
+use std::collections::HashMap;
 use crate::errors::ExecutorError;
+use crate::select::cte::CteResult;
 
 /// Build a merged outer schema that includes all parent scopes
 ///
@@ -79,9 +81,12 @@ pub(super) fn build_merged_outer_row<'a>(
 
 /// Compute the number of columns in a SELECT statement's result
 /// Handles wildcards by expanding them using table schemas from the database
+///
+/// Issue #3562: Added CTE context so wildcards can be expanded for CTE references
 pub(super) fn compute_select_list_column_count(
     stmt: &vibesql_ast::SelectStmt,
     database: &vibesql_storage::Database,
+    cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
     let mut count = 0;
 
@@ -90,7 +95,7 @@ pub(super) fn compute_select_list_column_count(
             vibesql_ast::SelectItem::Wildcard { .. } => {
                 // Expand * to count all columns from all tables in FROM clause
                 if let Some(from) = &stmt.from {
-                    count += count_columns_in_from_clause(from, database)?;
+                    count += count_columns_in_from_clause(from, database, cte_results)?;
                 } else {
                     // SELECT * without FROM is an error (should be caught earlier)
                     return Err(ExecutorError::UnsupportedFeature(
@@ -100,6 +105,17 @@ pub(super) fn compute_select_list_column_count(
             }
             vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
                 // Expand table.* to count columns from that specific table
+                // Issue #3562: Check CTEs first before database tables
+                if let Some(cte_ctx) = cte_results {
+                    if let Some((schema, _)) = cte_ctx.get(qualifier)
+                        .or_else(|| cte_ctx.iter()
+                            .find(|(k, _)| k.eq_ignore_ascii_case(qualifier))
+                            .map(|(_, v)| v))
+                    {
+                        count += schema.columns.len();
+                        continue;
+                    }
+                }
                 let tbl = database
                     .get_table(qualifier)
                     .ok_or_else(|| ExecutorError::TableNotFound(qualifier.clone()))?;
@@ -116,20 +132,33 @@ pub(super) fn compute_select_list_column_count(
 }
 
 /// Count total columns in a FROM clause (handles joins and multiple tables)
+///
+/// Issue #3562: Added CTE context so CTEs can be resolved in FROM clause
 fn count_columns_in_from_clause(
     from: &vibesql_ast::FromClause,
     database: &vibesql_storage::Database,
+    cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
     match from {
         vibesql_ast::FromClause::Table { name, .. } => {
+            // Issue #3562: Check CTEs first before database tables
+            if let Some(cte_ctx) = cte_results {
+                if let Some((schema, _)) = cte_ctx.get(name)
+                    .or_else(|| cte_ctx.iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                        .map(|(_, v)| v))
+                {
+                    return Ok(schema.columns.len());
+                }
+            }
             let table = database
                 .get_table(name)
                 .ok_or_else(|| ExecutorError::TableNotFound(name.clone()))?;
             Ok(table.schema.columns.len())
         }
         vibesql_ast::FromClause::Join { left, right, .. } => {
-            let left_count = count_columns_in_from_clause(left, database)?;
-            let right_count = count_columns_in_from_clause(right, database)?;
+            let left_count = count_columns_in_from_clause(left, database, cte_results)?;
+            let right_count = count_columns_in_from_clause(right, database, cte_results)?;
             Ok(left_count + right_count)
         }
         vibesql_ast::FromClause::Subquery { .. } => {

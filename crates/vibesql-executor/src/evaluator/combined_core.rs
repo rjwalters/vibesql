@@ -332,7 +332,10 @@ impl<'a> CombinedExpressionEvaluator<'a> {
     }
 
     /// Get evaluator components for parallel execution
-    /// Returns (schema, database, outer_row, outer_schema, window_mapping, enable_cse)
+    /// Returns (schema, database, outer_row, outer_schema, window_mapping, cte_context, enable_cse)
+    ///
+    /// Issue #3562: Now includes cte_context to enable IN subqueries referencing CTEs
+    /// during parallel predicate evaluation.
     pub(crate) fn get_parallel_components(&self) -> super::parallel::ParallelComponents<'a> {
         (
             self.schema,
@@ -340,18 +343,23 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             self.outer_row,
             self.outer_schema,
             self.window_mapping,
+            self.cte_context,
             self.enable_cse,
         )
     }
 
     /// Create evaluator from parallel components
     /// Creates a fresh evaluator with independent caches for thread-safe parallel execution
+    ///
+    /// Issue #3562: Now accepts cte_context to enable IN subqueries referencing CTEs
+    /// during parallel predicate evaluation.
     pub(crate) fn from_parallel_components(
         schema: &'a CombinedSchema,
         database: Option<&'a vibesql_storage::Database>,
         outer_row: Option<&'a vibesql_storage::Row>,
         outer_schema: Option<&'a CombinedSchema>,
         window_mapping: Option<&'a HashMap<WindowFunctionKey, usize>>,
+        cte_context: Option<&'a std::collections::HashMap<String, super::super::select::cte::CteResult>>,
         enable_cse: bool,
     ) -> Self {
         CombinedExpressionEvaluator {
@@ -361,7 +369,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_schema,
             window_mapping,
             procedural_context: None,
-            cte_context: None,
+            cte_context,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             depth: 0,

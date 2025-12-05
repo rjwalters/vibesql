@@ -192,10 +192,11 @@ impl CombinedExpressionEvaluator<'_> {
             };
 
             // Validate column count
+            // Issue #3562: Pass CTE context so CTEs can be resolved when computing column count
             let column_count = if !rows.is_empty() {
                 rows[0].values.len()
             } else {
-                compute_select_list_column_count(subquery, database)?
+                compute_select_list_column_count(subquery, database, self.cte_context)?
             };
 
             if column_count != 1 {
@@ -254,10 +255,11 @@ impl CombinedExpressionEvaluator<'_> {
         let rows = select_executor.execute(subquery)?;
 
         // Validate column count for correlated subqueries
+        // Issue #3562: Pass CTE context so CTEs can be resolved when computing column count
         let column_count = if !rows.is_empty() {
             rows[0].values.len()
         } else {
-            compute_select_list_column_count(subquery, database)?
+            compute_select_list_column_count(subquery, database, self.cte_context)?
         };
 
         if column_count != 1 {
