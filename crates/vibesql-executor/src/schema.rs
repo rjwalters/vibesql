@@ -148,3 +148,380 @@ impl Default for SchemaBuilder {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_catalog::ColumnSchema;
+    use vibesql_types::DataType;
+
+    /// Helper to create a simple table schema with the given columns
+    fn table_schema_with_columns(table_name: &str, columns: Vec<(&str, DataType)>) -> vibesql_catalog::TableSchema {
+        let cols: Vec<ColumnSchema> = columns
+            .into_iter()
+            .map(|(name, data_type)| ColumnSchema::new(name.to_string(), data_type, true))
+            .collect();
+        vibesql_catalog::TableSchema::new(table_name.to_string(), cols)
+    }
+
+    /// Helper to create a table schema with a single column
+    fn table_schema_with_column(table_name: &str, column_name: &str) -> vibesql_catalog::TableSchema {
+        table_schema_with_columns(table_name, vec![(column_name, DataType::Integer)])
+    }
+
+    // ==========================================================================
+    // CombinedSchema::from_table - Case-Insensitive Table Name Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_from_table_uppercase_insertion_case_insensitive_lookup() {
+        // Insert with uppercase table name
+        let schema = CombinedSchema::from_table(
+            "ITEM".to_string(),
+            table_schema_with_column("ITEM", "price"),
+        );
+
+        // All case variations should find the column
+        assert!(schema.get_column_index(Some("ITEM"), "price").is_some(), "ITEM should find price");
+        assert!(schema.get_column_index(Some("item"), "price").is_some(), "item should find price");
+        assert!(schema.get_column_index(Some("Item"), "price").is_some(), "Item should find price");
+        assert!(schema.get_column_index(Some("iTEM"), "price").is_some(), "iTEM should find price");
+    }
+
+    #[test]
+    fn test_from_table_lowercase_insertion_case_insensitive_lookup() {
+        // Insert with lowercase table name
+        let schema = CombinedSchema::from_table(
+            "item".to_string(),
+            table_schema_with_column("item", "price"),
+        );
+
+        // All case variations should find the column
+        assert!(schema.get_column_index(Some("ITEM"), "price").is_some());
+        assert!(schema.get_column_index(Some("item"), "price").is_some());
+        assert!(schema.get_column_index(Some("Item"), "price").is_some());
+    }
+
+    #[test]
+    fn test_from_table_mixedcase_insertion_case_insensitive_lookup() {
+        // Insert with mixed case table name
+        let schema = CombinedSchema::from_table(
+            "MyTable".to_string(),
+            table_schema_with_column("MyTable", "id"),
+        );
+
+        // All case variations should find the column
+        assert!(schema.get_column_index(Some("MYTABLE"), "id").is_some());
+        assert!(schema.get_column_index(Some("mytable"), "id").is_some());
+        assert!(schema.get_column_index(Some("MyTable"), "id").is_some());
+        assert!(schema.get_column_index(Some("myTable"), "id").is_some());
+    }
+
+    // ==========================================================================
+    // CombinedSchema::from_derived_table - Case-Insensitive Alias Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_from_derived_table_case_insensitive_alias() {
+        // Derived table with uppercase alias
+        let schema = CombinedSchema::from_derived_table(
+            "SUBQ".to_string(),
+            vec!["col1".to_string(), "col2".to_string()],
+            vec![DataType::Integer, DataType::Varchar { max_length: None }],
+        );
+
+        // All alias case variations should work
+        assert!(schema.get_column_index(Some("SUBQ"), "col1").is_some());
+        assert!(schema.get_column_index(Some("subq"), "col1").is_some());
+        assert!(schema.get_column_index(Some("Subq"), "col1").is_some());
+    }
+
+    // ==========================================================================
+    // CombinedSchema::combine - Multi-Table Case-Insensitive Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_combine_case_insensitive_both_tables() {
+        // Create left schema with uppercase
+        let left = CombinedSchema::from_table(
+            "ORDERS".to_string(),
+            table_schema_with_columns("ORDERS", vec![("order_id", DataType::Integer), ("customer_id", DataType::Integer)]),
+        );
+
+        // Combine with right table using different case
+        let combined = CombinedSchema::combine(
+            left,
+            "Items".to_string(),
+            table_schema_with_columns("Items", vec![("item_id", DataType::Integer), ("price", DataType::DoublePrecision)]),
+        );
+
+        // Verify left table columns accessible with any case
+        assert!(combined.get_column_index(Some("orders"), "order_id").is_some());
+        assert!(combined.get_column_index(Some("ORDERS"), "order_id").is_some());
+        assert!(combined.get_column_index(Some("Orders"), "customer_id").is_some());
+
+        // Verify right table columns accessible with any case
+        assert!(combined.get_column_index(Some("items"), "item_id").is_some());
+        assert!(combined.get_column_index(Some("ITEMS"), "item_id").is_some());
+        assert!(combined.get_column_index(Some("Items"), "price").is_some());
+
+        // Verify correct indices (left table starts at 0, right at 2)
+        assert_eq!(combined.get_column_index(Some("orders"), "order_id"), Some(0));
+        assert_eq!(combined.get_column_index(Some("orders"), "customer_id"), Some(1));
+        assert_eq!(combined.get_column_index(Some("items"), "item_id"), Some(2));
+        assert_eq!(combined.get_column_index(Some("items"), "price"), Some(3));
+    }
+
+    #[test]
+    fn test_combine_multiple_joins_case_insensitive() {
+        // Simulate a 3-way join: orders JOIN customers JOIN items
+        let orders = CombinedSchema::from_table(
+            "O".to_string(), // short alias
+            table_schema_with_column("O", "order_id"),
+        );
+
+        let with_customers = CombinedSchema::combine(
+            orders,
+            "C".to_string(),
+            table_schema_with_column("C", "customer_id"),
+        );
+
+        let with_items = CombinedSchema::combine(
+            with_customers,
+            "I".to_string(),
+            table_schema_with_column("I", "item_id"),
+        );
+
+        // All aliases should be case-insensitive
+        assert!(with_items.get_column_index(Some("o"), "order_id").is_some());
+        assert!(with_items.get_column_index(Some("O"), "order_id").is_some());
+        assert!(with_items.get_column_index(Some("c"), "customer_id").is_some());
+        assert!(with_items.get_column_index(Some("C"), "customer_id").is_some());
+        assert!(with_items.get_column_index(Some("i"), "item_id").is_some());
+        assert!(with_items.get_column_index(Some("I"), "item_id").is_some());
+    }
+
+    // ==========================================================================
+    // CombinedSchema::get_column_index - Unqualified Column Lookup
+    // ==========================================================================
+
+    #[test]
+    fn test_unqualified_column_lookup_no_ambiguity() {
+        let schema = CombinedSchema::from_table(
+            "USERS".to_string(),
+            table_schema_with_columns("USERS", vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: None })]),
+        );
+
+        // Unqualified lookup should work
+        assert!(schema.get_column_index(None, "id").is_some());
+        assert!(schema.get_column_index(None, "name").is_some());
+        assert!(schema.get_column_index(None, "missing").is_none());
+    }
+
+    #[test]
+    fn test_column_case_insensitive_lookup() {
+        let schema = CombinedSchema::from_table(
+            "users".to_string(),
+            table_schema_with_column("users", "UserName"),
+        );
+
+        // Column name lookup should also be case-insensitive (via TableSchema)
+        assert!(schema.get_column_index(Some("users"), "UserName").is_some());
+        assert!(schema.get_column_index(Some("users"), "username").is_some());
+        assert!(schema.get_column_index(Some("users"), "USERNAME").is_some());
+    }
+
+    // ==========================================================================
+    // SchemaBuilder - Case-Insensitive Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_schema_builder_add_table_case_insensitive() {
+        let mut builder = SchemaBuilder::new();
+
+        // Add tables with different case
+        builder.add_table(
+            "ORDERS".to_string(),
+            table_schema_with_column("ORDERS", "order_id"),
+        );
+        builder.add_table(
+            "Items".to_string(),
+            table_schema_with_column("Items", "item_id"),
+        );
+
+        let schema = builder.build();
+
+        // All case variations should work
+        assert!(schema.get_column_index(Some("orders"), "order_id").is_some());
+        assert!(schema.get_column_index(Some("ORDERS"), "order_id").is_some());
+        assert!(schema.get_column_index(Some("items"), "item_id").is_some());
+        assert!(schema.get_column_index(Some("ITEMS"), "item_id").is_some());
+    }
+
+    #[test]
+    fn test_schema_builder_from_schema_preserves_case_insensitivity() {
+        // Create initial schema with uppercase table name
+        let initial = CombinedSchema::from_table(
+            "PRODUCTS".to_string(),
+            table_schema_with_columns("PRODUCTS", vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: None })]),
+        );
+
+        // Verify initial schema works
+        assert!(initial.get_column_index(Some("products"), "id").is_some());
+
+        // Create builder from schema and add another table
+        let mut builder = SchemaBuilder::from_schema(initial);
+        builder.add_table(
+            "Categories".to_string(),
+            table_schema_with_column("Categories", "cat_id"),
+        );
+
+        let final_schema = builder.build();
+
+        // Original table should still be case-insensitive
+        assert!(final_schema.get_column_index(Some("products"), "id").is_some());
+        assert!(final_schema.get_column_index(Some("PRODUCTS"), "id").is_some());
+        assert!(final_schema.get_column_index(Some("Products"), "name").is_some());
+
+        // New table should also be case-insensitive
+        assert!(final_schema.get_column_index(Some("categories"), "cat_id").is_some());
+        assert!(final_schema.get_column_index(Some("CATEGORIES"), "cat_id").is_some());
+    }
+
+    #[test]
+    fn test_schema_builder_from_schema_multiple_tables() {
+        // Create combined schema with multiple tables
+        let orders = CombinedSchema::from_table(
+            "Orders".to_string(),
+            table_schema_with_column("Orders", "order_id"),
+        );
+        let combined = CombinedSchema::combine(
+            orders,
+            "Items".to_string(),
+            table_schema_with_column("Items", "item_id"),
+        );
+
+        // Create builder from combined schema
+        let mut builder = SchemaBuilder::from_schema(combined);
+        builder.add_table(
+            "CUSTOMERS".to_string(),
+            table_schema_with_column("CUSTOMERS", "cust_id"),
+        );
+
+        let final_schema = builder.build();
+
+        // All tables should be case-insensitive
+        assert!(final_schema.get_column_index(Some("orders"), "order_id").is_some());
+        assert!(final_schema.get_column_index(Some("ORDERS"), "order_id").is_some());
+        assert!(final_schema.get_column_index(Some("items"), "item_id").is_some());
+        assert!(final_schema.get_column_index(Some("ITEMS"), "item_id").is_some());
+        assert!(final_schema.get_column_index(Some("customers"), "cust_id").is_some());
+        assert!(final_schema.get_column_index(Some("CUSTOMERS"), "cust_id").is_some());
+
+        // Verify column offsets are correct
+        assert_eq!(final_schema.get_column_index(Some("orders"), "order_id"), Some(0));
+        assert_eq!(final_schema.get_column_index(Some("items"), "item_id"), Some(1));
+        assert_eq!(final_schema.get_column_index(Some("customers"), "cust_id"), Some(2));
+    }
+
+    // ==========================================================================
+    // Regression Tests for Issue #3633
+    // ==========================================================================
+
+    #[test]
+    fn test_issue_3633_correlated_subquery_alias_case() {
+        // This test verifies the fix for issue #3633 where correlated subqueries
+        // with uppercase aliases (like "J") couldn't find columns because the
+        // parser uses uppercase but the schema stored lowercase.
+
+        // Simulate the scenario: outer query has table with alias "J"
+        let schema = CombinedSchema::from_table(
+            "J".to_string(), // Parser often uppercases aliases
+            table_schema_with_columns("items", vec![("price", DataType::DoublePrecision), ("quantity", DataType::Integer)]),
+        );
+
+        // The correlated subquery should be able to reference J.price
+        // regardless of case used by the parser/resolver
+        assert!(schema.get_column_index(Some("J"), "price").is_some(),
+            "Uppercase J should find price (parser case)");
+        assert!(schema.get_column_index(Some("j"), "price").is_some(),
+            "Lowercase j should find price (normalized case)");
+    }
+
+    #[test]
+    fn test_issue_3633_multi_table_join_with_aliases() {
+        // Simulates: SELECT * FROM orders O JOIN items I ON O.id = I.order_id
+        let orders = CombinedSchema::from_table(
+            "O".to_string(),
+            table_schema_with_columns("orders", vec![("id", DataType::Integer), ("date", DataType::Date)]),
+        );
+
+        let combined = CombinedSchema::combine(
+            orders,
+            "I".to_string(),
+            table_schema_with_columns("items", vec![("order_id", DataType::Integer), ("amount", DataType::DoublePrecision)]),
+        );
+
+        // Both O and I aliases should work case-insensitively
+        // This is critical for correlated subqueries that reference outer aliases
+        assert_eq!(combined.get_column_index(Some("O"), "id"), Some(0));
+        assert_eq!(combined.get_column_index(Some("o"), "id"), Some(0));
+        assert_eq!(combined.get_column_index(Some("O"), "date"), Some(1));
+        assert_eq!(combined.get_column_index(Some("I"), "order_id"), Some(2));
+        assert_eq!(combined.get_column_index(Some("i"), "order_id"), Some(2));
+        assert_eq!(combined.get_column_index(Some("I"), "amount"), Some(3));
+    }
+
+    // ==========================================================================
+    // Edge Cases
+    // ==========================================================================
+
+    #[test]
+    fn test_nonexistent_table_returns_none() {
+        let schema = CombinedSchema::from_table(
+            "users".to_string(),
+            table_schema_with_column("users", "id"),
+        );
+
+        assert!(schema.get_column_index(Some("nonexistent"), "id").is_none());
+        assert!(schema.get_column_index(Some("NONEXISTENT"), "id").is_none());
+    }
+
+    #[test]
+    fn test_nonexistent_column_returns_none() {
+        let schema = CombinedSchema::from_table(
+            "users".to_string(),
+            table_schema_with_column("users", "id"),
+        );
+
+        assert!(schema.get_column_index(Some("users"), "nonexistent").is_none());
+        assert!(schema.get_column_index(Some("USERS"), "nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_empty_table_name() {
+        let schema = CombinedSchema::from_table(
+            "".to_string(),
+            table_schema_with_column("", "id"),
+        );
+
+        // Empty string table should still work
+        assert!(schema.get_column_index(Some(""), "id").is_some());
+    }
+
+    #[test]
+    fn test_total_columns_tracking() {
+        let mut builder = SchemaBuilder::new();
+        builder.add_table(
+            "t1".to_string(),
+            table_schema_with_columns("t1", vec![("a", DataType::Integer), ("b", DataType::Integer)]),
+        );
+        builder.add_table(
+            "t2".to_string(),
+            table_schema_with_columns("t2", vec![("c", DataType::Integer)]),
+        );
+
+        let schema = builder.build();
+        assert_eq!(schema.total_columns, 3);
+    }
+}
