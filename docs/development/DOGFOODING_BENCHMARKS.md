@@ -255,28 +255,78 @@ Add to CI pipeline:
 # Track Q1 performance over time
 ./scripts/query_benchmark_results.py --trend Q1
 
-# Compare Q6 to baseline
-sqlite3 ~/.vibesql/test_results/sqllogictest_results.vbsql "
-SELECT * FROM query_performance_trend WHERE query_name = 'Q6' ORDER BY timestamp
+# Compare Q6 to baseline (using VibeSQL Python bindings)
+python3 -c "
+from scripts.vibesql_db import get_connection
+db, cursor = get_connection()
+cursor.execute('''
+    SELECT * FROM query_performance_trend
+    WHERE query_name = 'Q6'
+    ORDER BY timestamp
+''')
+for row in cursor.fetchall():
+    print(row)
 "
 ```
+
+### Updating Tracking Issues
+
+When updating performance tracking issues (like Phase 8 tracking), always filter by `main` branch:
+
+```python
+# Get accurate main-branch benchmark results
+from scripts.vibesql_db import get_connection
+
+db, cursor = get_connection()
+
+# Query TPC-H results from main branch only
+cursor.execute("""
+    SELECT run_id, run_timestamp, git_commit, passed_queries, total_queries
+    FROM benchmark_runs
+    WHERE benchmark_suite = 'tpch'
+      AND git_branch = 'main'
+    ORDER BY run_id DESC
+    LIMIT 1
+""")
+run = cursor.fetchone()
+print(f"TPC-H: {run}")
+
+# Get individual query times
+cursor.execute(f"""
+    SELECT query_name, execution_time_ms, status
+    FROM benchmark_results
+    WHERE run_id = {run[0]}
+    ORDER BY query_name
+""")
+for row in cursor.fetchall():
+    print(f"  {row}")
+```
+
+**Important**: The web dashboard (`generate_web_dashboard.py`) filters by `git_branch = 'main'`
+to ensure consistent reporting. Always use main-branch data when updating tracking issues.
 
 ### Export Results
 
 ```bash
-# Export to CSV
-sqlite3 -csv ~/.vibesql/test_results/sqllogictest_results.vbsql "
-SELECT * FROM query_performance_trend
-" > performance_trend.csv
+# Generate web dashboard (filters by main branch)
+./scripts/generate_web_dashboard.py
 
-# Export to JSON
-sqlite3 ~/.vibesql/test_results/sqllogictest_results.vbsql "
-SELECT json_group_array(json_object(
-    'query_name', query_name,
-    'timestamp', timestamp,
-    'execution_time_ms', execution_time_ms
-)) FROM query_performance_trend
-" > performance_trend.json
+# Export results via Python (dogfooding VibeSQL)
+python3 -c "
+from scripts.vibesql_db import get_connection
+import json
+
+db, cursor = get_connection()
+cursor.execute('''
+    SELECT query_name, run_timestamp, execution_time_ms
+    FROM benchmark_results br
+    JOIN benchmark_runs r ON br.run_id = r.run_id
+    WHERE r.git_branch = 'main' AND br.status = 'passed'
+    ORDER BY r.run_timestamp DESC
+''')
+results = [{'query': r[0], 'timestamp': r[1], 'ms': r[2]} for r in cursor.fetchall()]
+print(json.dumps(results, indent=2))
+"
 ```
 
 ## Troubleshooting
@@ -295,8 +345,13 @@ make benchmark-tpch
 
 ### No results in queries
 ```bash
-# Check if database has data
-sqlite3 ~/.vibesql/test_results/sqllogictest_results.vbsql "SELECT COUNT(*) FROM benchmark_runs"
+# Check if database has data (using VibeSQL Python bindings)
+python3 -c "
+from scripts.vibesql_db import get_connection
+db, cursor = get_connection()
+cursor.execute('SELECT COUNT(*) FROM benchmark_runs')
+print('Benchmark runs:', cursor.fetchone()[0])
+"
 
 # Run benchmarks to populate
 make benchmark-tpch
