@@ -39,6 +39,7 @@ class BenchConfig:
     duration: Optional[int] = None     # Benchmark duration in seconds
     scale: Optional[float] = None      # Scale factor
     output: Optional[str] = None       # Output file path
+    fast: bool = False                 # Fast mode for pipeline debugging
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -54,6 +55,8 @@ Examples:
   ./scripts/bench --test=tpcc --engine=mysql      Run TPC-C with MySQL
   ./scripts/bench --test=all                      Run all benchmarks
   ./scripts/bench --quick                         Quick CI-friendly subset
+  ./scripts/bench --fast                          Ultra-fast pipeline debugging (~30s)
+  ./scripts/bench --fast --all                    Fast mode for ALL benchmarks
   ./scripts/bench --test=tpch --query=Q1,Q6       Run only Q1 and Q6 queries
   ./scripts/bench --test=tpcds --query=Q4,Q11     Run specific TPC-DS queries
   ./scripts/bench --test=tpcc --txn=new-order     Run only new-order transactions
@@ -135,6 +138,12 @@ Transaction Filter (--txn):
     )
 
     parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Ultra-fast mode for pipeline debugging (~30s total). Runs minimal queries/duration to validate data collection and storage."
+    )
+
+    parser.add_argument(
         "--all",
         action="store_true",
         help="Equivalent to: --test=all (all benchmarks)"
@@ -177,12 +186,33 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
     """Build BenchConfig from parsed arguments."""
     test = args.test if not args.all else "all"
     engines = parse_engines(args.engine)
-    
+
     # Quick mode: limit to VibeSQL only, no comparisons
     if args.quick:
         engines = ["vibesql"]
         args.timeout = args.timeout or 10  # Shorter timeout
-    
+
+    # Fast mode: ultra-minimal settings for pipeline debugging (~30s total)
+    # Purpose: Validate data collection, storage, and analysis pipeline
+    if args.fast:
+        engines = ["vibesql"]
+        args.timeout = args.timeout or 5      # 5s timeout per query
+        args.duration = args.duration or 3    # 3s duration for TPC-C/Sysbench
+        args.scale = args.scale or 0.001      # Minimal scale factor
+        # Limit to fastest queries unless explicitly specified
+        if not args.query:
+            args.query = "Q1,Q6"  # TPC-H fastest queries
+        test = args.test if not args.all else "all"
+        print("\n" + "=" * 60, flush=True)
+        print("FAST MODE - Pipeline Debugging", flush=True)
+        print("=" * 60, flush=True)
+        print("Purpose: Validate benchmark → storage → analysis pipeline", flush=True)
+        print(f"  Timeout:  {args.timeout}s per query", flush=True)
+        print(f"  Duration: {args.duration}s (TPC-C/Sysbench)", flush=True)
+        print(f"  Scale:    {args.scale}", flush=True)
+        print(f"  Queries:  {args.query}", flush=True)
+        print("=" * 60 + "\n", flush=True)
+
     config = BenchConfig(
         test=test,
         engines=engines,
@@ -192,8 +222,9 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
         duration=args.duration,
         scale=args.scale,
         output=args.output,
+        fast=args.fast,
     )
-    
+
     return config
 
 
@@ -338,8 +369,10 @@ def run_tpcc(config: BenchConfig) -> int:
     # Set up environment
     env = os.environ.copy()
     duration = config.duration or 60
+    # Scale warmup proportionally: 10s for 60s duration, 1s for 3s (fast mode)
+    warmup = max(1, duration // 6)
     env["TPCC_DURATION_SECS"] = str(duration)
-    env["TPCC_WARMUP_SECS"] = "10"
+    env["TPCC_WARMUP_SECS"] = str(warmup)
     env["TPCC_SCALE_FACTOR"] = str(config.scale or 1)
     
     # Try to start MySQL if needed
@@ -485,9 +518,20 @@ def run_sysbench(config: BenchConfig) -> int:
     
     # Run benchmark
     print("Running Sysbench OLTP...")
+
+    # Build command with Criterion parameters
+    cmd = [
+        "cargo", "bench", "--package", "vibesql-executor", "--bench", "sysbench_oltp",
+        "--features", "benchmark-comparison", "--", "--noplot"
+    ]
+
+    # In fast mode (duration < 10), use minimal Criterion settings
+    if config.duration and config.duration < 10:
+        cmd.extend(["--sample-size", "5", "--measurement-time", "1"])
+        print(f"  Using fast Criterion settings (sample-size=5, measurement-time=1)")
+
     result = subprocess.run(
-        ["cargo", "bench", "--package", "vibesql-executor", "--bench", "sysbench_oltp",
-         "--features", "benchmark-comparison", "--", "--noplot"],
+        cmd,
         cwd=Path(__file__).parent.parent,
         env=env,
         stdout=subprocess.PIPE,
@@ -517,13 +561,18 @@ def run_all(config: BenchConfig) -> int:
     print("\n" + "=" * 60)
     print("Running ALL BENCHMARKS")
     print("=" * 60)
-    
+
     results = {}
-    
-    for test in ["tpch", "tpcc", "tpcds", "sysbench"]:
+
+    # In fast mode, skip TPC-DS (it doesn't support query filtering and takes too long)
+    benchmarks = ["tpch", "tpcc", "sysbench"] if config.fast else ["tpch", "tpcc", "tpcds", "sysbench"]
+    if config.fast:
+        print("Note: Skipping TPC-DS in fast mode (no query filter support)")
+
+    for test in benchmarks:
         config.test = test
         print(f"\n[{test.upper()}] Starting...")
-        
+
         if test == "tpch":
             ret = run_tpch(config)
         elif test == "tpcc":
@@ -534,9 +583,9 @@ def run_all(config: BenchConfig) -> int:
             ret = run_sysbench(config)
         else:
             ret = 1
-        
+
         results[test] = "✓" if ret == 0 else "✗"
-        
+
         if ret != 0:
             print(f"⚠ {test.upper()} had issues, continuing...")
     

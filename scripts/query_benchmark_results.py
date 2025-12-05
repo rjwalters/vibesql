@@ -52,12 +52,12 @@ def query_latest(cursor: Any):
 
     # Direct query instead of view (VibeSQL doesn't support views)
     # Note: Using run_timestamp column (timestamp is reserved)
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL, use MAX(run_id) subquery instead
     query = """
         SELECT run_id, run_timestamp, benchmark_suite, git_commit, git_branch,
                total_queries, passed_queries, failed_queries, timeout_queries, notes
         FROM benchmark_runs
-        ORDER BY run_id DESC
-        LIMIT 1
+        WHERE run_id = (SELECT MAX(run_id) FROM benchmark_runs)
     """
     results = execute_query(cursor, query)
 
@@ -77,29 +77,31 @@ def query_trend(cursor: Any, query_name: Optional[str] = None):
     """Show performance trend for queries."""
     print("=== Performance Trend ===\n")
 
-    # Direct query without views
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Fetch all results and sort in Python
     if query_name:
         query = f"""
             SELECT br.query_name, r.run_timestamp, br.total_time_ms, br.execution_time_ms, br.status
             FROM benchmark_results br
             JOIN benchmark_runs r ON br.run_id = r.run_id
             WHERE br.query_name = '{query_name}'
-            ORDER BY r.run_timestamp DESC
-            LIMIT 10
         """
         headers = ["Query", "Timestamp", "Total (ms)", "Exec (ms)", "Status"]
+        results = execute_query(cursor, query)
+        # Sort by timestamp DESC, take last 10
+        results = sorted(results, key=lambda x: x[1] or '', reverse=True)[:10]
     else:
         query = """
             SELECT br.query_name, r.run_timestamp, br.total_time_ms, br.execution_time_ms, br.status
             FROM benchmark_results br
             JOIN benchmark_runs r ON br.run_id = r.run_id
             WHERE r.benchmark_suite = 'tpch'
-            ORDER BY r.run_timestamp DESC, br.query_name
-            LIMIT 20
         """
         headers = ["Query", "Timestamp", "Total (ms)", "Exec (ms)", "Status"]
+        results = execute_query(cursor, query)
+        # Sort by timestamp DESC then query_name, take last 20
+        results = sorted(results, key=lambda x: (x[1] or '', x[0] or ''), reverse=True)[:20]
 
-    results = execute_query(cursor, query)
     format_table(headers, results)
 
 
@@ -108,16 +110,17 @@ def query_regressions(cursor: Any):
     print("=== Performance Regressions (>10% slower) ===\n")
     print("(Note: Regression detection requires historical comparison - showing recent results instead)")
 
-    # Show recent failed or slow queries
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Fetch all and sort in Python
     query = """
         SELECT br.query_name, r.run_timestamp, br.execution_time_ms, br.status, br.error_message
         FROM benchmark_results br
         JOIN benchmark_runs r ON br.run_id = r.run_id
         WHERE br.status != 'passed' OR br.execution_time_ms > 1000
-        ORDER BY r.run_timestamp DESC
-        LIMIT 10
     """
     results = execute_query(cursor, query)
+    # Sort by timestamp DESC, take last 10
+    results = sorted(results, key=lambda x: x[1] or '', reverse=True)[:10]
 
     headers = ["Query", "Timestamp", "Exec (ms)", "Status", "Error"]
     format_table(headers, results)
@@ -128,16 +131,17 @@ def query_improvements(cursor: Any):
     print("=== Performance Improvements ===\n")
     print("(Note: Improvement detection requires historical comparison - showing fastest queries instead)")
 
-    # Show fastest passing queries
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Fetch all and sort in Python
     query = """
         SELECT br.query_name, r.run_timestamp, br.execution_time_ms, br.total_time_ms
         FROM benchmark_results br
         JOIN benchmark_runs r ON br.run_id = r.run_id
         WHERE br.status = 'passed' AND br.execution_time_ms IS NOT NULL
-        ORDER BY br.execution_time_ms ASC
-        LIMIT 10
     """
     results = execute_query(cursor, query)
+    # Sort by execution_time ASC, take first 10
+    results = sorted(results, key=lambda x: x[2] or float('inf'))[:10]
 
     headers = ["Query", "Timestamp", "Exec (ms)", "Total (ms)"]
     format_table(headers, results)
@@ -147,7 +151,8 @@ def query_stats(cursor: Any):
     """Show statistics for each TPC-H query across all runs."""
     print("=== TPC-H Query Statistics (All Runs) ===\n")
 
-    # Calculate stats per query (VibeSQL supports basic aggregates)
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Remove ORDER BY from SQL and sort in Python
     query = """
         SELECT br.query_name,
                COUNT(*) as total_runs,
@@ -161,9 +166,10 @@ def query_stats(cursor: Any):
         JOIN benchmark_runs r ON br.run_id = r.run_id
         WHERE r.benchmark_suite = 'tpch'
         GROUP BY br.query_name
-        ORDER BY br.query_name
     """
     results = execute_query(cursor, query)
+    # Sort by query_name
+    results = sorted(results, key=lambda x: x[0] or '')
 
     # Calculate variability manually
     formatted_results = []
@@ -190,26 +196,27 @@ def query_comparison(cursor: Any):
     """Compare latest run to baseline (first run)."""
     print("=== Benchmark Comparison (Latest vs First Run) ===\n")
 
-    # Get first run results
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Use MIN/MAX subqueries to get first and latest run_ids
+
+    # Get first run results (earliest run_id for tpch)
     query_first = """
         SELECT br.query_name, br.execution_time_ms
         FROM benchmark_results br
         JOIN benchmark_runs r ON br.run_id = r.run_id
         WHERE r.benchmark_suite = 'tpch' AND br.status = 'passed'
-        ORDER BY r.run_id ASC
-        LIMIT 22
+          AND r.run_id = (SELECT MIN(run_id) FROM benchmark_runs WHERE benchmark_suite = 'tpch')
     """
     first_results = execute_query(cursor, query_first)
     baseline = {row[0]: row[1] for row in first_results}
 
-    # Get latest run results
+    # Get latest run results (latest run_id for tpch)
     query_latest = """
         SELECT br.query_name, br.execution_time_ms
         FROM benchmark_results br
         JOIN benchmark_runs r ON br.run_id = r.run_id
         WHERE r.benchmark_suite = 'tpch' AND br.status = 'passed'
-        ORDER BY r.run_id DESC
-        LIMIT 22
+          AND r.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'tpch')
     """
     latest_results = execute_query(cursor, query_latest)
     current = {row[0]: row[1] for row in latest_results}
@@ -248,21 +255,22 @@ def query_history(cursor: Any):
     """Show all benchmark runs."""
     print("=== Benchmark Run History ===\n")
 
-    # Note: Using run_timestamp column (timestamp is reserved in VibeSQL)
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Fetch all and sort in Python
     query = """
         SELECT run_id, run_timestamp, benchmark_suite, git_commit, git_branch,
                total_queries, passed_queries, failed_queries, timeout_queries
         FROM benchmark_runs
-        ORDER BY run_id DESC
-        LIMIT 20
     """
     results = execute_query(cursor, query)
+    # Sort by run_id DESC, take last 20
+    results = sorted(results, key=lambda x: x[0] or 0, reverse=True)[:20]
 
     # Calculate pass rate manually
     formatted_results = []
     for row in results:
         run_id, ts, suite, commit, branch, total, passed, failed, timeout = row
-        pass_rate = round(passed * 100.0 / total, 1) if total and total > 0 else 0
+        pass_rate = round(passed * 100.0 / total, 1) if total and total > 0 and passed is not None else 0
         formatted_results.append((run_id, ts, suite, commit, branch, total, passed, failed, timeout, pass_rate))
 
     headers = ["Run ID", "Timestamp", "Suite", "Commit", "Branch", "Total", "Passed", "Failed", "Timeout", "Pass %"]
@@ -273,7 +281,8 @@ def query_tpcc(cursor: Any):
     """Show latest TPC-C benchmark results."""
     print("=== Latest TPC-C Benchmark Results ===\n")
 
-    # Get latest TPC-C run
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Use MAX subquery to get latest TPC-C run
     query = """
         SELECT tc.database_engine, tc.transaction_type, tc.transaction_count,
                tc.transactions_per_second, tc.avg_latency_us,
@@ -281,8 +290,7 @@ def query_tpcc(cursor: Any):
         FROM tpcc_results tc
         JOIN benchmark_runs r ON tc.run_id = r.run_id
         WHERE r.benchmark_suite = 'tpcc'
-        ORDER BY r.run_id DESC
-        LIMIT 20
+          AND r.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'tpcc')
     """
     try:
         results = execute_query(cursor, query)
@@ -311,14 +319,15 @@ def query_sysbench(cursor: Any):
     """Show latest Sysbench OLTP benchmark results."""
     print("=== Latest Sysbench OLTP Results ===\n")
 
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Use MAX subquery to get latest Sysbench run
     query = """
         SELECT sb.database_engine, sb.test_name, sb.table_size,
                sb.mean_time_ns, sb.std_dev_ns, sb.iterations
         FROM sysbench_results sb
         JOIN benchmark_runs r ON sb.run_id = r.run_id
         WHERE r.benchmark_suite = 'sysbench'
-        ORDER BY r.run_id DESC
-        LIMIT 20
+          AND r.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'sysbench')
     """
     try:
         results = execute_query(cursor, query)
@@ -347,20 +356,23 @@ def query_tpcds(cursor: Any):
     """Show latest TPC-DS benchmark results."""
     print("=== Latest TPC-DS Benchmark Results ===\n")
 
-    # Get latest TPC-DS run results
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Use MAX subquery to get latest TPC-DS run
     query = """
         SELECT br.query_name, br.status, br.execution_time_ms, br.total_time_ms
         FROM benchmark_results br
         JOIN benchmark_runs r ON br.run_id = r.run_id
         WHERE r.benchmark_suite = 'tpcds'
-        ORDER BY r.run_id DESC, br.query_name
-        LIMIT 99
+          AND r.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'tpcds')
     """
     try:
         results = execute_query(cursor, query)
         if not results:
             print("No TPC-DS results found. Run 'make benchmark-tpcds' first.")
             return
+
+        # Sort by query_name in Python (workaround for ORDER BY bug)
+        results = sorted(results, key=lambda x: x[0] or '')
 
         # Format results
         formatted_results = []
@@ -378,6 +390,8 @@ def query_tpcds(cursor: Any):
         print(f"No TPC-DS results found. Run 'make benchmark-tpcds' first. ({e})")
 
     print("\n=== TPC-DS Query Statistics (All Runs) ===\n")
+    # WORKAROUND: ORDER BY returns empty results in VibeSQL (#3602)
+    # Remove ORDER BY from SQL and sort in Python
     query = """
         SELECT br.query_name,
                COUNT(*) as total_runs,
@@ -391,11 +405,12 @@ def query_tpcds(cursor: Any):
         JOIN benchmark_runs r ON br.run_id = r.run_id
         WHERE r.benchmark_suite = 'tpcds'
         GROUP BY br.query_name
-        ORDER BY br.query_name
     """
     try:
         results = execute_query(cursor, query)
         if results:
+            # Sort by query_name in Python
+            results = sorted(results, key=lambda x: x[0] or '')
             # Calculate variability manually
             formatted_results = []
             for row in results:

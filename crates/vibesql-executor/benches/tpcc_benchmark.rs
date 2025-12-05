@@ -255,7 +255,7 @@ fn run_benchmark<E: TPCCExecutor>(
 }
 
 /// Run MySQL benchmark separately since it requires &mut self for queries
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn run_mysql_benchmark(
     conn: &mut mysql::PooledConn,
     transaction_type: TransactionType,
@@ -486,7 +486,11 @@ fn main() {
     // Comparison benchmarks (if feature enabled)
     #[cfg(feature = "benchmark-comparison")]
     {
-        use tpcc::schema::{load_duckdb, load_mysql, load_sqlite};
+        use tpcc::schema::load_sqlite;
+        #[cfg(feature = "duckdb-comparison")]
+        use tpcc::schema::load_duckdb;
+        #[cfg(feature = "mysql-comparison")]
+        use tpcc::schema::load_mysql;
 
         // SQLite benchmark
         eprintln!("\n\n--- SQLite Benchmark ---");
@@ -506,25 +510,32 @@ fn main() {
         );
         print_results(&sqlite_results, transaction_type);
 
-        // DuckDB benchmark
-        eprintln!("\n\n--- DuckDB Benchmark ---");
-        eprintln!("Loading DuckDB database...");
-        let duckdb_load_start = Instant::now();
-        let duckdb_conn = load_duckdb(scale_factor);
-        eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
+        // DuckDB benchmark (requires duckdb-comparison feature)
+        #[cfg(feature = "duckdb-comparison")]
+        let duckdb_results = {
+            eprintln!("\n\n--- DuckDB Benchmark ---");
+            eprintln!("Loading DuckDB database...");
+            let duckdb_load_start = Instant::now();
+            let duckdb_conn = load_duckdb(scale_factor);
+            eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
 
-        let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
-        let duckdb_results = run_benchmark(
-            &duckdb_executor,
-            transaction_type,
-            num_warehouses,
-            duration,
-            warmup,
-            true,
-        );
-        print_results(&duckdb_results, transaction_type);
+            let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
+            let duckdb_results = run_benchmark(
+                &duckdb_executor,
+                transaction_type,
+                num_warehouses,
+                duration,
+                warmup,
+                true,
+            );
+            print_results(&duckdb_results, transaction_type);
+            Some(duckdb_results)
+        };
+        #[cfg(not(feature = "duckdb-comparison"))]
+        let duckdb_results: Option<TPCCBenchmarkResults> = None;
 
-        // MySQL benchmark (if MYSQL_URL is set)
+        // MySQL benchmark (requires mysql-comparison feature and MYSQL_URL env var)
+        #[cfg(feature = "mysql-comparison")]
         let mysql_results = if let Some(mut mysql_conn) = load_mysql(scale_factor) {
             eprintln!("\n\n--- MySQL Benchmark ---");
             eprintln!("MySQL connected and loaded");
@@ -545,6 +556,8 @@ fn main() {
             eprintln!("Skipping MySQL (set MYSQL_URL env var to enable)");
             None
         };
+        #[cfg(not(feature = "mysql-comparison"))]
+        let mysql_results: Option<TPCCBenchmarkResults> = None;
 
         // Summary comparison
         eprintln!("\n\n=== Comparison Summary ===");
@@ -577,12 +590,14 @@ fn main() {
             sqlite_results.transactions_per_second,
             compute_avg(&sqlite_results)
         );
-        eprintln!(
-            "{:<12} {:>12.2} {:>12.2}",
-            "DuckDB",
-            duckdb_results.transactions_per_second,
-            compute_avg(&duckdb_results)
-        );
+        if let Some(ref duckdb_res) = duckdb_results {
+            eprintln!(
+                "{:<12} {:>12.2} {:>12.2}",
+                "DuckDB",
+                duckdb_res.transactions_per_second,
+                compute_avg(duckdb_res)
+            );
+        }
         if let Some(ref mysql_res) = mysql_results {
             eprintln!(
                 "{:<12} {:>12.2} {:>12.2}",
