@@ -248,11 +248,21 @@ mod tests {
 
     fn create_test_router() -> Router {
         let db = Arc::new(Database::new());
-        create_storage_router(db)
+        let config = BlobStorageConfig {
+            backend: "memory".to_string(),
+            config: serde_json::json!({}),
+        };
+        let state = StorageState::with_config(config, db);
+
+        Router::new()
+            .route("/upload", post(upload_blob))
+            .route("/{blob_id}", get(download_blob))
+            .route("/{blob_id}", delete(delete_blob))
+            .route("/{blob_id}/metadata", get(get_blob_metadata))
+            .with_state(state)
     }
 
     #[tokio::test]
-    #[ignore = "requires opendal feature with storage backend configured"]
     async fn test_upload_blob_success() {
         // Test that blob upload succeeds and returns CREATED status
         let router = create_test_router();
@@ -320,8 +330,7 @@ mod tests {
             .unwrap();
 
         let response = router.oneshot(request).await.unwrap();
-        // Delete returns 500 for non-existent blobs since storage table may not exist
-        // Future improvement: return 204 for idempotent behavior
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Delete is idempotent - deleting non-existent blob returns 204
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 }

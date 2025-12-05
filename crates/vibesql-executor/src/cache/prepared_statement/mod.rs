@@ -37,7 +37,7 @@ pub mod arena_prepared;
 mod bind;
 pub mod plan;
 
-pub use plan::{CachedPlan, ColumnProjection, PkPointLookupPlan, ProjectionPlan};
+pub use plan::{CachedPlan, ColumnProjection, PkPointLookupPlan, ProjectionPlan, ResolvedProjection};
 
 /// A prepared statement with cached AST and optional execution plan
 #[derive(Debug, Clone)]

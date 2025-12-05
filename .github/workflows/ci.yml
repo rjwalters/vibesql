@@ -52,7 +52,7 @@ jobs:
   # ============================================================================
   tpch:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: test
     continue-on-error: true
     steps:
@@ -99,7 +99,7 @@ jobs:
   # ============================================================================
   sysbench:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: test
     continue-on-error: true
     steps:

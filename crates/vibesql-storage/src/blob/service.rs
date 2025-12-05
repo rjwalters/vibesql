@@ -286,9 +286,11 @@ impl BlobStorageService {
         let path = id.to_path();
 
         if let Some(ref op) = self.operator {
-            op.is_exist(&path)
-                .await
-                .map_err(|e| StorageError::Other(format!("Failed to check blob existence: {}", e)))
+            match op.stat(&path).await {
+                Ok(_) => Ok(true),
+                Err(e) if e.kind() == opendal::ErrorKind::NotFound => Ok(false),
+                Err(e) => Err(StorageError::Other(format!("Failed to check blob existence: {}", e))),
+            }
         } else {
             Err(StorageError::Other(
                 "Storage operator not initialized. Check your configuration.".to_string(),

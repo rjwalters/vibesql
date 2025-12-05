@@ -68,11 +68,18 @@ default = ["parallel", "spatial"]
 parallel = ["rayon"]
 # Spatial/geospatial query support (optional, reduces binary size)
 spatial = ["geo", "wkt", "rstar"]
-# Enable this feature for benchmarks that compare against other SQL engines
+# Individual comparison features - use these for granular control
+# IMPORTANT: DuckDB linking causes significant binary bloat (73MB vs 15MB) which
+# affects CPU cache locality and slows down ALL benchmarks, even VibeSQL-only ones.
+# For fair OLTP comparisons (Sysbench, TPC-C), use sqlite-comparison only.
+sqlite-comparison = ["rusqlite"]
+duckdb-comparison = ["duckdb"]
+mysql-comparison = ["mysql"]
+# Enable this feature for benchmarks that compare against SQLite (lightweight, fair OLTP comparison)
 # Usage: cargo bench --features benchmark-comparison
+# For DuckDB comparisons (OLAP), use: cargo bench --features benchmark-comparison,duckdb-comparison
 # MySQL requires MYSQL_URL env var (e.g., mysql://root:password@localhost:3306/tpch)
-# Includes native-columnar for optimal single-table aggregation performance (Q1, Q6, etc.)
-benchmark-comparison = ["rusqlite", "duckdb", "mysql", "native-columnar"]
+benchmark-comparison = ["sqlite-comparison", "native-columnar"]
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
 # Enable detailed profiling output for TPC-C transactions

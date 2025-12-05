@@ -16,18 +16,19 @@ use super::data::SysbenchData;
 pub const INSERT_SQL: &str = "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)";
 
 /// Insert statement for SQLite/DuckDB (numbered parameters)
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(any(feature = "sqlite-comparison", feature = "duckdb-comparison"))]
 pub const INSERT_SQL_NUMBERED: &str =
     "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)";
+
 use vibesql_storage::Database as VibeDB;
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::prelude::*;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::{Pool, PooledConn};
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 use rusqlite::Connection as SqliteConn;
 
 // =============================================================================
@@ -60,7 +61,7 @@ pub fn load_vibesql(table_size: usize) -> VibeDB {
 }
 
 /// Load SQLite with sysbench schema and data
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 pub fn load_sqlite(table_size: usize) -> SqliteConn {
     let conn = SqliteConn::open_in_memory().unwrap();
     let mut data = SysbenchData::new(table_size);
@@ -78,7 +79,7 @@ pub fn load_sqlite(table_size: usize) -> SqliteConn {
 }
 
 /// Load DuckDB with sysbench schema and data
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 pub fn load_duckdb(table_size: usize) -> DuckDBConn {
     let conn = DuckDBConn::open_in_memory().unwrap();
     let mut data = SysbenchData::new(table_size);
@@ -98,7 +99,7 @@ pub fn load_duckdb(table_size: usize) -> DuckDBConn {
 /// Load MySQL with sysbench schema and data
 /// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/sysbench)
 /// Returns None if MYSQL_URL is not set or connection fails
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 pub fn load_mysql(table_size: usize) -> Option<PooledConn> {
     let url = std::env::var("MYSQL_URL").ok()?;
     let pool = Pool::new(url.as_str()).ok()?;
@@ -213,7 +214,7 @@ fn load_sbtest_vibesql(db: &mut VibeDB, data: &mut SysbenchData) {
 // Schema Creation - SQLite
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn create_sbtest_schema_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         r#"
@@ -229,7 +230,7 @@ fn create_sbtest_schema_sqlite(conn: &SqliteConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn load_sbtest_sqlite(conn: &SqliteConn, data: &mut SysbenchData) {
     let mut stmt =
         conn.prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)").unwrap();
@@ -243,7 +244,7 @@ fn load_sbtest_sqlite(conn: &SqliteConn, data: &mut SysbenchData) {
 // Schema Creation - DuckDB
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         r#"
@@ -259,7 +260,7 @@ fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
     .unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn load_sbtest_duckdb(conn: &DuckDBConn, data: &mut SysbenchData) {
     let mut stmt =
         conn.prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)").unwrap();
@@ -273,7 +274,7 @@ fn load_sbtest_duckdb(conn: &DuckDBConn, data: &mut SysbenchData) {
 // Schema Creation - MySQL
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn create_sbtest_schema_mysql(conn: &mut PooledConn) {
     // Drop table if exists
     conn.query_drop("DROP TABLE IF EXISTS sbtest1").unwrap();
@@ -294,7 +295,7 @@ fn create_sbtest_schema_mysql(conn: &mut PooledConn) {
     conn.query_drop("CREATE INDEX k_1 ON sbtest1(k)").unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn load_sbtest_mysql(conn: &mut PooledConn, data: &mut SysbenchData) {
     while let Some((id, k, c, padding)) = data.next_row() {
         conn.exec_drop(
