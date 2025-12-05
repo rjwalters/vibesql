@@ -176,10 +176,14 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Get scale factor from env (default 0.01)
+    let scale_factor: f64 =
+        env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01);
+
     // Load database
-    eprintln!("\nLoading TPC-H database (SF 0.01)...");
+    eprintln!("\nLoading TPC-H database (SF {})...", scale_factor);
     let load_start = Instant::now();
-    let db = load_vibesql(0.01);
+    let db = load_vibesql(scale_factor);
     eprintln!("Database loaded in {:?}", load_start.elapsed());
 
     // Run selected queries
