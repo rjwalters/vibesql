@@ -83,7 +83,8 @@ def run_tpch_benchmarks(quick: bool = False) -> Dict:
         sys.exit(1)
 
     print("✅ Benchmarks completed")
-    return parse_criterion_output(result.stderr)
+    # Criterion writes timing output to stdout, not stderr
+    return parse_criterion_output(result.stdout)
 
 
 def parse_criterion_output(output: str) -> Dict:
