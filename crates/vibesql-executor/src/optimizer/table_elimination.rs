@@ -200,9 +200,13 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
             );
         }
 
-        // Table can be eliminated if not in SELECT and not in equijoin
-        if !in_select && !in_equijoin {
-            let filter = local_predicates.get(&table_key).cloned();
+        // Table can be eliminated if:
+        // 1. Not in SELECT list
+        // 2. Not in any equijoin condition
+        // 3. HAS a local predicate/filter (otherwise it's an intentional cross join
+        //    that multiplies rows, and we must preserve that row count)
+        let filter = local_predicates.get(&table_key).cloned();
+        if !in_select && !in_equijoin && filter.is_some() {
             if verbose {
                 eprintln!(
                     "[TABLE_ELIM_OPT] ✓ Eliminating table '{}' with filter: {:?}",
@@ -215,6 +219,12 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
                 filter,
             });
         } else {
+            if verbose && !in_select && !in_equijoin && filter.is_none() {
+                eprintln!(
+                    "[TABLE_ELIM_OPT] ✗ Keeping table '{}': no filter (cross join multiplies rows)",
+                    table_key
+                );
+            }
             kept_tables.push(table);
         }
     }
@@ -1493,6 +1503,54 @@ mod tests {
             let result = eliminate_unused_tables(&stmt);
             // Both tables should be kept due to SELECT *
             assert!(matches!(result.from, Some(FromClause::Join { .. })));
+        }
+
+        #[test]
+        fn cross_join_without_filter_preserved() {
+            // Regression test: tables in cross joins without filters should NOT be eliminated
+            // because cross joins multiply rows intentionally.
+            // Example: SELECT 86 * - cor0.col2 FROM tab1, tab2 AS cor0
+            // This should return 9 rows (3x3), not 3 rows.
+            let stmt = SelectStmt {
+                with_clause: None,
+                distinct: false,
+                // SELECT only references cor0.col2
+                select_list: vec![SelectItem::Expression {
+                    expr: Expression::BinaryOp {
+                        op: BinaryOperator::Multiply,
+                        left: Box::new(Expression::Literal(SqlValue::Integer(86))),
+                        right: Box::new(Expression::UnaryOp {
+                            op: vibesql_ast::UnaryOperator::Minus,
+                            expr: Box::new(make_column_ref(Some("cor0"), "col2")),
+                        }),
+                    },
+                    alias: Some("col0".to_string()),
+                }],
+                into_table: None,
+                into_variables: None,
+                // Cross join - tab1 is NOT referenced but has no filter
+                from: Some(make_cross_join(
+                    make_table("tab1", None),
+                    make_table("tab2", Some("cor0")),
+                )),
+                // No WHERE clause
+                where_clause: None,
+                group_by: None,
+                having: None,
+                order_by: None,
+                limit: None,
+                offset: None,
+                set_operation: None,
+            };
+
+            let result = eliminate_unused_tables(&stmt);
+            // Both tables should be kept - tab1 has no filter, so cross join
+            // must be preserved to maintain correct row count
+            assert!(
+                matches!(result.from, Some(FromClause::Join { .. })),
+                "Expected cross join to be preserved, got {:?}",
+                result.from
+            );
         }
 
         #[test]
