@@ -1494,6 +1494,53 @@ mod tests {
             // Both tables should be kept due to SELECT *
             assert!(matches!(result.from, Some(FromClause::Join { .. })));
         }
+
+        #[test]
+        fn all_tables_eliminable_keeps_unchanged() {
+            // Regression test: when ALL tables could be eliminated,
+            // we should keep them all to preserve FROM clause.
+            // This ensures WHERE clauses like NULL IS NOT NULL work correctly.
+            // Example: SELECT - 0 FROM tab0, tab0 cor0 WHERE NULL IS NOT NULL
+            let stmt = SelectStmt {
+                with_clause: None,
+                distinct: false,
+                // SELECT with literal (no column refs)
+                select_list: vec![SelectItem::Expression {
+                    expr: Expression::UnaryOp {
+                        op: vibesql_ast::UnaryOperator::Minus,
+                        expr: Box::new(Expression::Literal(SqlValue::Integer(0))),
+                    },
+                    alias: Some("col3".to_string()),
+                }],
+                into_table: None,
+                into_variables: None,
+                // Cross join of same table
+                from: Some(make_cross_join(
+                    make_table("tab0", None),
+                    make_table("tab0", Some("cor0")),
+                )),
+                // WHERE clause with no column refs (NULL IS NOT NULL)
+                where_clause: Some(Expression::IsNull {
+                    expr: Box::new(Expression::Literal(SqlValue::Null)),
+                    negated: true,
+                }),
+                group_by: None,
+                having: None,
+                order_by: None,
+                limit: None,
+                offset: None,
+                set_operation: None,
+            };
+
+            let result = eliminate_unused_tables(&stmt);
+            // Both tables should be kept (not eliminated) because eliminating
+            // both would leave no FROM clause
+            assert!(
+                matches!(result.from, Some(FromClause::Join { .. })),
+                "Expected FROM clause to be preserved, got {:?}",
+                result.from
+            );
+        }
     }
 
     mod helper_function_tests {
