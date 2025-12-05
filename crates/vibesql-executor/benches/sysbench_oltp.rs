@@ -78,12 +78,14 @@ use vibesql_executor::{PreparedStatement, PreparedStatementCache, Session, Sessi
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::SqlValue;
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "benchmark-comparison")]
-use sysbench::schema::{load_duckdb, load_sqlite};
+#[cfg(feature = "duckdb-comparison")]
+use sysbench::schema::load_duckdb;
+#[cfg(feature = "sqlite-comparison")]
+use sysbench::schema::load_sqlite;
 
 // =============================================================================
 // Prepared Statement Holder for VibeSQL
@@ -373,7 +375,7 @@ fn sqlite_distinct_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
 // Helper Functions - DuckDB
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_point_select(conn: &DuckDBConn, id: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
     let mut rows = stmt.query([id]).unwrap();
@@ -384,31 +386,31 @@ fn duckdb_point_select(conn: &DuckDBConn, id: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_insert(conn: &DuckDBConn, id: i64, k: i64, c: &str, pad: &str) {
     let mut stmt = conn.prepare_cached(sysbench::INSERT_SQL_NUMBERED).unwrap();
     stmt.execute(duckdb::params![id, k, c, pad]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_update_non_index(conn: &DuckDBConn, id: i64, c: &str) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
     stmt.execute(duckdb::params![c, id]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_update_index(conn: &DuckDBConn, id: i64) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
     stmt.execute(duckdb::params![id]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_delete(conn: &DuckDBConn, id: i64) {
     let mut stmt = conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
     stmt.execute(duckdb::params![id]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_simple_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
@@ -419,7 +421,7 @@ fn duckdb_simple_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_sum_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
@@ -431,7 +433,7 @@ fn duckdb_sum_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_order_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap();
@@ -443,7 +445,7 @@ fn duckdb_order_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_distinct_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt = conn
         .prepare_cached("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
@@ -540,7 +542,7 @@ fn benchmark_point_select_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_point_select_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_point_select");
     group.measurement_time(Duration::from_secs(10));
@@ -625,7 +627,7 @@ fn benchmark_insert_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_insert_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_insert");
     group.measurement_time(Duration::from_secs(10));
@@ -719,7 +721,7 @@ fn benchmark_delete_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_delete_duckdb(c: &mut Criterion) {
     use criterion::BatchSize;
 
@@ -790,7 +792,7 @@ fn benchmark_update_index_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_update_index_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_update_index");
     group.measurement_time(Duration::from_secs(10));
@@ -859,7 +861,7 @@ fn benchmark_update_non_index_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_update_non_index_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_update_non_index");
     group.measurement_time(Duration::from_secs(10));
@@ -981,7 +983,7 @@ fn benchmark_write_only_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_write_only_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_write_only");
     group.measurement_time(Duration::from_secs(10));
@@ -1104,7 +1106,7 @@ fn benchmark_read_write_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_read_write_duckdb(c: &mut Criterion) {
     let mut group = c.benchmark_group("sysbench_read_write");
     group.measurement_time(Duration::from_secs(10));
@@ -1230,7 +1232,7 @@ fn benchmark_oltp_read_only_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_oltp_read_only_duckdb(c: &mut Criterion) {
     let conn = load_duckdb(TABLE_SIZE);
     let mut data = SysbenchData::new(TABLE_SIZE);
@@ -1323,7 +1325,7 @@ fn benchmark_select_random_points_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_select_random_points_duckdb(c: &mut Criterion) {
     let conn = load_duckdb(TABLE_SIZE);
     let mut data = SysbenchData::new(TABLE_SIZE);
@@ -1389,7 +1391,7 @@ fn benchmark_select_random_ranges_sqlite(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_select_random_ranges_duckdb(c: &mut Criterion) {
     let conn = load_duckdb(TABLE_SIZE);
     let mut data = SysbenchData::new(TABLE_SIZE);
@@ -1411,7 +1413,8 @@ fn benchmark_select_random_ranges_duckdb(c: &mut Criterion) {
 // Criterion Benchmark Groups
 // =============================================================================
 
-#[cfg(not(feature = "benchmark-comparison"))]
+// Case 1: No comparison features - VibeSQL only
+#[cfg(not(feature = "sqlite-comparison"))]
 criterion_group!(
     benches,
     benchmark_point_select_vibesql,
@@ -1427,7 +1430,35 @@ criterion_group!(
     benchmark_select_random_ranges_vibesql,
 );
 
-#[cfg(feature = "benchmark-comparison")]
+// Case 2: SQLite comparison enabled, but not DuckDB - VibeSQL + SQLite
+#[cfg(all(feature = "sqlite-comparison", not(feature = "duckdb-comparison")))]
+criterion_group!(
+    benches,
+    benchmark_point_select_vibesql,
+    benchmark_point_select_sqlite,
+    benchmark_insert_vibesql,
+    benchmark_insert_sqlite,
+    benchmark_delete_vibesql,
+    benchmark_delete_sqlite,
+    benchmark_update_index_vibesql,
+    benchmark_update_index_sqlite,
+    benchmark_update_non_index_vibesql,
+    benchmark_update_non_index_sqlite,
+    benchmark_write_only_vibesql,
+    benchmark_write_only_sqlite,
+    benchmark_read_write_vibesql,
+    benchmark_read_write_sqlite,
+    // Read-only benchmarks
+    benchmark_oltp_read_only_vibesql,
+    benchmark_oltp_read_only_sqlite,
+    benchmark_select_random_points_vibesql,
+    benchmark_select_random_points_sqlite,
+    benchmark_select_random_ranges_vibesql,
+    benchmark_select_random_ranges_sqlite,
+);
+
+// Case 3: Both SQLite and DuckDB comparison enabled - VibeSQL + SQLite + DuckDB
+#[cfg(all(feature = "sqlite-comparison", feature = "duckdb-comparison"))]
 criterion_group!(
     benches,
     benchmark_point_select_vibesql,

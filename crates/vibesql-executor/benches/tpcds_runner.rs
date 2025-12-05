@@ -45,9 +45,9 @@ use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::QueryBufferPool;
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 use tpcds::schema::load_duckdb;
 
 /// Queries known to be extremely slow or memory-intensive
@@ -65,7 +65,7 @@ const DEFAULT_BATCH_SIZE: usize = 10;
 const DEFAULT_MEMORY_WARN_MB: f64 = 6000.0;
 
 /// Get expected row counts from DuckDB for validation
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn get_expected_row_counts(
     duckdb: &DuckDBConn,
     queries: &[(&str, &str)],
@@ -123,10 +123,10 @@ fn main() {
     // Check for validation mode
     let validate_mode = std::env::var("VALIDATE").is_ok();
 
-    #[cfg(not(feature = "benchmark-comparison"))]
+    #[cfg(not(feature = "duckdb-comparison"))]
     if validate_mode {
-        eprintln!("ERROR: VALIDATE=1 requires --features benchmark-comparison");
-        eprintln!("Usage: VALIDATE=1 cargo run --release --bench tpcds_runner --features benchmark-comparison");
+        eprintln!("ERROR: VALIDATE=1 requires --features duckdb-comparison");
+        eprintln!("Usage: VALIDATE=1 cargo run --release --bench tpcds_runner --features duckdb-comparison");
         std::process::exit(1);
     }
 
@@ -162,7 +162,7 @@ fn main() {
     println!("VibeSQL data loaded in {:?}", load_time);
 
     // Load DuckDB and get expected row counts in validation mode
-    #[cfg(feature = "benchmark-comparison")]
+    #[cfg(feature = "duckdb-comparison")]
     let expected_rows: HashMap<String, usize> = if validate_mode {
         println!("Loading DuckDB for validation...");
         let duckdb_start = Instant::now();
@@ -182,7 +182,7 @@ fn main() {
         HashMap::new()
     };
 
-    #[cfg(not(feature = "benchmark-comparison"))]
+    #[cfg(not(feature = "duckdb-comparison"))]
     let expected_rows: HashMap<String, usize> = HashMap::new();
 
     // Report post-load memory

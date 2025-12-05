@@ -26,5 +26,9 @@ pub use memory::{get_memory_usage, hint_memory_release, MemoryStats, MemoryTrack
 pub use queries::*;
 pub use schema::load_vibesql;
 
-#[cfg(feature = "benchmark-comparison")]
-pub use schema::{load_duckdb, load_sqlite};
+#[cfg(feature = "sqlite-comparison")]
+pub use schema::load_sqlite;
+#[cfg(feature = "duckdb-comparison")]
+pub use schema::load_duckdb;
+#[cfg(feature = "mysql-comparison")]
+pub use schema::load_mysql;

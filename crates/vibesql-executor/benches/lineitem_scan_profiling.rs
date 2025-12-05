@@ -84,7 +84,7 @@ fn benchmark_vibesql(c: &mut Criterion, group_name: &str, sql: &str) {
 // DuckDB Benchmark Functions
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_duckdb(c: &mut Criterion, group_name: &str, sql: &str) {
     let mut group = c.benchmark_group(group_name);
     group.measurement_time(Duration::from_secs(5));
@@ -151,42 +151,42 @@ fn bench_date_limit_100_vibesql(c: &mut Criterion) {
     benchmark_vibesql(c, "lineitem_date_limit_100", LINEITEM_DATE_LIMIT_100);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_full_scan_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_full_scan", LINEITEM_FULL_SCAN);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_count_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_count", LINEITEM_COUNT);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_date_filter_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_date_filter", LINEITEM_DATE_FILTER);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_date_count_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_date_count", LINEITEM_DATE_COUNT);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_single_column_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_single_column", LINEITEM_SINGLE_COLUMN);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_two_columns_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_two_columns", LINEITEM_TWO_COLUMNS);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_limit_100_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_limit_100", LINEITEM_LIMIT_100);
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn bench_date_limit_100_duckdb(c: &mut Criterion) {
     benchmark_duckdb(c, "lineitem_date_limit_100", LINEITEM_DATE_LIMIT_100);
 }
@@ -195,7 +195,7 @@ fn bench_date_limit_100_duckdb(c: &mut Criterion) {
 // Criterion Benchmark Groups
 // =============================================================================
 
-#[cfg(not(feature = "benchmark-comparison"))]
+#[cfg(not(feature = "duckdb-comparison"))]
 criterion_group!(
     benches,
     bench_full_scan_vibesql,
@@ -208,7 +208,7 @@ criterion_group!(
     bench_date_limit_100_vibesql
 );
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 criterion_group!(
     benches,
     bench_full_scan_vibesql,

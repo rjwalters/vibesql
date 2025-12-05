@@ -95,5 +95,7 @@ pub use data::TPCEData;
 pub use schema::load_vibesql;
 pub use transactions::*;
 
-#[cfg(feature = "benchmark-comparison")]
-pub use schema::{load_duckdb, load_sqlite};
+#[cfg(feature = "sqlite-comparison")]
+pub use schema::load_sqlite;
+#[cfg(feature = "duckdb-comparison")]
+pub use schema::load_duckdb;

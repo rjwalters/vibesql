@@ -158,13 +158,13 @@ fn print_query_summary() {
     }
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::prelude::*;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 use mysql::PooledConn as MySqlConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 use rusqlite::Connection as SqliteConn;
 
 use std::time::Duration;
@@ -197,13 +197,13 @@ use tpcds::schema::*;
 const SCALE_FACTOR: f64 = 0.001;
 
 /// Check which comparison engine to use (for memory-conscious sequential execution)
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(any(feature = "sqlite-comparison", feature = "duckdb-comparison", feature = "mysql-comparison"))]
 fn get_comparison_engine() -> Option<String> {
     std::env::var("TPCDS_ENGINE").ok()
 }
 
 /// Check if SQLite comparison should be enabled
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_enabled() -> bool {
     match get_comparison_engine() {
         None => true,                         // Default: all engines
@@ -214,7 +214,7 @@ fn sqlite_enabled() -> bool {
 }
 
 /// Check if DuckDB comparison should be enabled
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn duckdb_enabled() -> bool {
     match get_comparison_engine() {
         None => true,                         // Default: all engines
@@ -225,7 +225,7 @@ fn duckdb_enabled() -> bool {
 }
 
 /// Check if MySQL comparison should be enabled
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn mysql_enabled() -> bool {
     match get_comparison_engine() {
         Some(ref e) if e == "mysql" => true, // MySQL only
@@ -253,10 +253,10 @@ fn get_vibesql_db() -> Option<&'static VibeDB> {
     }))
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 static SQLITE_CONN: OnceLock<Mutex<SqliteConn>> = OnceLock::new();
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn get_sqlite_conn() -> Option<&'static Mutex<SqliteConn>> {
     if !sqlite_enabled() {
         return None;
@@ -270,10 +270,10 @@ fn get_sqlite_conn() -> Option<&'static Mutex<SqliteConn>> {
     }))
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 static DUCKDB_CONN: OnceLock<Mutex<DuckDBConn>> = OnceLock::new();
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn get_duckdb_conn() -> Option<&'static Mutex<DuckDBConn>> {
     if !duckdb_enabled() {
         return None;
@@ -287,10 +287,10 @@ fn get_duckdb_conn() -> Option<&'static Mutex<DuckDBConn>> {
     }))
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 static MYSQL_CONN: OnceLock<Option<Mutex<MySqlConn>>> = OnceLock::new();
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn get_mysql_conn() -> Option<&'static Mutex<MySqlConn>> {
     if !mysql_enabled() {
         return None;
@@ -364,7 +364,7 @@ fn benchmark_vibesql_query(db: &VibeDB, sql: &str) -> usize {
 }
 
 /// Helper function to benchmark a query on SQLite
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn benchmark_sqlite_query(conn: &SqliteConn, sql: &str) -> usize {
     let mut stmt = conn.prepare(sql).unwrap();
     let mut rows = stmt.query([]).unwrap();
@@ -376,7 +376,7 @@ fn benchmark_sqlite_query(conn: &SqliteConn, sql: &str) -> usize {
 }
 
 /// Helper function to benchmark a query on DuckDB
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "duckdb-comparison")]
 fn benchmark_duckdb_query(conn: &DuckDBConn, sql: &str) -> usize {
     let mut stmt = conn.prepare(sql).unwrap();
     let mut rows = stmt.query([]).unwrap();
@@ -388,7 +388,7 @@ fn benchmark_duckdb_query(conn: &DuckDBConn, sql: &str) -> usize {
 }
 
 /// Helper function to benchmark a query on MySQL
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "mysql-comparison")]
 fn benchmark_mysql_query(conn: &mut MySqlConn, sql: &str) -> usize {
     let result: Vec<mysql::Row> = conn.query(sql).unwrap();
     result.len()
@@ -451,7 +451,7 @@ fn bench_sanity_queries(c: &mut Criterion) {
     hint_memory_release();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn bench_sanity_queries_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_sanity_comparison");
     group.measurement_time(Duration::from_secs(5));
@@ -466,9 +466,11 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
             group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
                 b.iter(|| black_box(0));
             });
+            #[cfg(feature = "duckdb-comparison")]
             group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
                 b.iter(|| black_box(0));
             });
+            #[cfg(feature = "mysql-comparison")]
             group.bench_function(BenchmarkId::new("mysql", *name), |b| {
                 b.iter(|| black_box(0));
             });
@@ -478,7 +480,9 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
     };
 
     let sqlite_conn = get_sqlite_conn(); // Returns None if SQLite disabled
+    #[cfg(feature = "duckdb-comparison")]
     let duckdb_conn = get_duckdb_conn(); // Returns None if DuckDB disabled
+    #[cfg(feature = "mysql-comparison")]
     let mysql_conn = get_mysql_conn(); // Returns None if MySQL disabled or unavailable
 
     // Log which engines are enabled
@@ -520,6 +524,7 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
         }
 
         // DuckDB benchmark (only if enabled)
+        #[cfg(feature = "duckdb-comparison")]
         if let Some(duckdb) = duckdb_conn {
             group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
                 b.iter(|| {
@@ -531,6 +536,7 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
         }
 
         // MySQL benchmark (only if enabled)
+        #[cfg(feature = "mysql-comparison")]
         if let Some(mysql) = mysql_conn {
             group.bench_function(BenchmarkId::new("mysql", *name), |b| {
                 b.iter(|| {
@@ -687,10 +693,10 @@ fn bench_tpcds_slow_queries(c: &mut Criterion) {
 // Criterion Configuration
 // =============================================================================
 
-#[cfg(not(feature = "benchmark-comparison"))]
+#[cfg(not(feature = "sqlite-comparison"))]
 criterion_group!(benches, bench_sanity_queries, bench_tpcds_queries, bench_tpcds_slow_queries,);
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 criterion_group!(
     benches,
     bench_sanity_queries_comparison,
