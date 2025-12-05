@@ -21,11 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: ./.github/actions/free-disk-space
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -59,11 +59,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - uses: ./.github/actions/free-disk-space
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -99,11 +99,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - uses: ./.github/actions/free-disk-space
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -151,11 +151,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - uses: ./.github/actions/free-disk-space
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -206,11 +206,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - uses: ./.github/actions/free-disk-space
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -251,11 +251,11 @@ jobs:
     needs: test
     continue-on-error: true
     steps:
-      - uses: ./.github/actions/free-disk-space
-
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
