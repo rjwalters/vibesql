@@ -33,6 +33,7 @@
 //! - The table is dropped
 //! - Indexes are added/removed
 
+use std::sync::{Arc, OnceLock};
 use vibesql_ast::{Expression, FromClause, SelectItem, SelectStmt, Statement};
 
 /// Cached execution plan for a prepared statement
@@ -69,6 +70,50 @@ pub struct PkPointLookupPlan {
 
     /// Projection type
     pub projection: ProjectionPlan,
+
+    /// Lazily-cached resolved projection (column indices and output names)
+    /// Populated on first execution to avoid repeated schema lookups
+    resolved: Arc<OnceLock<ResolvedProjection>>,
+}
+
+/// Resolved projection information cached after first execution
+///
+/// This avoids repeated O(n) column name lookups on every query.
+#[derive(Debug, Clone)]
+pub struct ResolvedProjection {
+    /// Column indices in the source table for projection
+    pub column_indices: Vec<usize>,
+    /// Output column names (may include aliases)
+    pub column_names: Arc<[String]>,
+}
+
+impl PkPointLookupPlan {
+    /// Get or initialize the resolved projection for this plan
+    ///
+    /// The resolver function is called only on the first invocation and takes
+    /// the projection plan to resolve column names to indices.
+    pub fn get_or_resolve<F>(&self, resolver: F) -> Option<&ResolvedProjection>
+    where
+        F: FnOnce(&ProjectionPlan) -> Option<ResolvedProjection>,
+    {
+        self.resolved.get_or_init(|| {
+            // We need to handle the case where resolution fails
+            // Using a sentinel value or Option would complicate the API
+            // Instead, if resolution fails, we return a "failed" marker
+            resolver(&self.projection).unwrap_or(ResolvedProjection {
+                column_indices: vec![],
+                column_names: Arc::from([]),
+            })
+        });
+
+        // Check if we got a valid resolution (non-empty)
+        self.resolved.get().filter(|r| !r.column_names.is_empty() || matches!(self.projection, ProjectionPlan::Wildcard))
+    }
+
+    /// Check if projection has been resolved
+    pub fn is_resolved(&self) -> bool {
+        self.resolved.get().is_some()
+    }
 }
 
 /// How to project columns from the result
@@ -159,6 +204,7 @@ fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
         pk_columns,
         param_to_pk_col,
         projection,
+        resolved: Arc::new(OnceLock::new()),
     })
 }
 
