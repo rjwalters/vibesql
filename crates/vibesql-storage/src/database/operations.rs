@@ -417,13 +417,13 @@ impl Operations {
         // Validate prefix lengths against column types and widths
         Self::validate_prefix_lengths(table_schema, &columns)?;
 
-        let table_rows: Vec<Row> = table.scan().to_vec();
-
+        // Pass table rows directly by reference - avoid cloning all rows
+        // This is critical for performance at scale (O(n) clone was causing major slowdown)
         self.index_manager.create_index(
             index_name,
             table_name,
             table_schema,
-            &table_rows,
+            table.scan(),
             unique,
             columns,
         )
