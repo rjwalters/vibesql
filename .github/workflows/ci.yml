@@ -23,11 +23,17 @@ jobs:
     steps:
       - name: Free disk space
         run: |
-          # Remove large pre-installed software to free disk space
+          # Aggressive cleanup to free disk space for large Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
           sudo docker image prune --all --force
           df -h
 
@@ -58,10 +64,17 @@ jobs:
     steps:
       - name: Free disk space
         run: |
+          # Aggressive cleanup to free disk space for large Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
           sudo docker image prune --all --force
           df -h
 
@@ -105,10 +118,17 @@ jobs:
     steps:
       - name: Free disk space
         run: |
+          # Aggressive cleanup to free disk space for large Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
           sudo docker image prune --all --force
           df -h
 
@@ -164,10 +184,17 @@ jobs:
     steps:
       - name: Free disk space
         run: |
+          # Aggressive cleanup to free disk space for large Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
           sudo docker image prune --all --force
           df -h
 
@@ -226,10 +253,17 @@ jobs:
     steps:
       - name: Free disk space
         run: |
+          # Aggressive cleanup to free disk space for large Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
           sudo docker image prune --all --force
           df -h
 
@@ -278,10 +312,17 @@ jobs:
     steps:
       - name: Free disk space
         run: |
+          # Aggressive cleanup to free disk space for large Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
           sudo docker image prune --all --force
           df -h
 
