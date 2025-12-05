@@ -140,6 +140,13 @@ jobs:
           name: ${{ inputs.benchmark-artifact-name }}
           path: artifacts/
 
+      - name: Download footprint artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: ci-footprint-results
+          path: artifacts/
+
       # ============================================================================
       # Download Historical Data from Pages
       # ============================================================================
@@ -338,6 +345,15 @@ jobs:
             echo "✓ Copied sysbench_results.json"
           else
             echo "⚠️  No Sysbench results found in artifacts"
+          fi
+
+          # Copy Footprint benchmark results
+          FOOTPRINT_RESULT=$(find artifacts -name "footprint_results.json" 2>/dev/null | head -1)
+          if [ -n "$FOOTPRINT_RESULT" ] && [ -f "$FOOTPRINT_RESULT" ]; then
+            cp "$FOOTPRINT_RESULT" deploy/benchmarks/footprint_results.json
+            echo "✓ Copied footprint_results.json"
+          else
+            echo "⚠️  No Footprint results found in artifacts"
           fi
 
           # Copy merged punchlist results

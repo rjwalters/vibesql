@@ -381,7 +381,106 @@ jobs:
           fi
 
   # ============================================================================
-  # JOB 7: Python Benchmarks
+  # JOB 7: Footprint Benchmark (binary/WASM sizes, startup time, memory)
+  # ============================================================================
+  footprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust for native + WASM
+        uses: ./.github/actions/setup-rust
+        with:
+          targets: wasm32-unknown-unknown
+          cache-key-suffix: footprint
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build release binary
+        run: cargo build --release --package vibesql
+
+      - name: Build WASM bindings
+        run: |
+          mkdir -p web-demo/public/pkg
+          wasm-pack build --target web --out-dir ${{ github.workspace }}/web-demo/public/pkg crates/vibesql-wasm-bindings --release
+
+      - name: Install DuckDB CLI
+        run: |
+          wget -q https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-amd64.zip
+          unzip -q duckdb_cli-linux-amd64.zip
+          sudo mv duckdb /usr/local/bin/
+          duckdb --version
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Run footprint benchmark
+        run: |
+          python3 scripts/benchmark_footprint.py --output footprint_results.json --runs 5
+          cat footprint_results.json
+
+      - name: Upload footprint results
+        if: always() && hashFiles('footprint_results.json') != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: ci-footprint-results
+          path: footprint_results.json
+          retention-days: 90
+
+      - name: Display footprint results
+        if: always()
+        run: |
+          echo "## Footprint Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Binary sizes, startup time, and memory usage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f footprint_results.json ]; then
+            python3 << 'PYEOF' >> $GITHUB_STEP_SUMMARY
+          import json
+          with open('footprint_results.json') as f:
+              data = json.load(f)
+          print('| Database | Binary Size | Startup Time | Peak Memory |')
+          print('|----------|-------------|--------------|-------------|')
+          for b in data.get('benchmarks', []):
+              db = b['database']
+              size_mb = b['binary_size_bytes'] / (1024*1024)
+              startup_ms = b['startup_time_ms']
+              memory_mb = b['peak_memory_kb'] / 1024
+              if b['available']:
+                  print(f'| {db} | {size_mb:.2f} MB | {startup_ms:.2f} ms | {memory_mb:.1f} MB |')
+              else:
+                  print(f'| {db} | N/A | N/A | N/A |')
+          # Show WASM size if available
+          vibesql = next((b for b in data.get('benchmarks', []) if b['database'] == 'vibesql'), None)
+          if vibesql and vibesql.get('wasm_size_bytes'):
+              wasm_mb = vibesql['wasm_size_bytes'] / (1024*1024)
+              wasm_gzip_mb = vibesql.get('wasm_size_gzip_bytes', 0) / (1024*1024) if vibesql.get('wasm_size_gzip_bytes') else 0
+              print('')
+              print(f'**WASM Size:** {wasm_mb:.2f} MB (gzip: {wasm_gzip_mb:.2f} MB)')
+          PYEOF
+          else
+            echo "No footprint results generated" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # JOB 8: Python Benchmarks
   # ============================================================================
   python-benchmarks:
     runs-on: ubuntu-latest
