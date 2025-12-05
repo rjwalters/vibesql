@@ -261,14 +261,11 @@ impl JoinOrderContext {
         // 2. Cost model will still prefer filtered tables earlier in join order
         // 3. Downstream joins will reduce cardinality as filters apply
         let mut combined_selectivities = HashMap::new();
-        let mut edge_counts: HashMap<(String, String), usize> = HashMap::new();
 
         for ((left_table, right_table), selectivity) in individual_selectivities {
             // Update forward direction - use MAX for composite keys
             let forward_key = (left_table.clone(), right_table.clone());
             let current: f64 = combined_selectivities.get(&forward_key).copied().unwrap_or(0.0);
-            let count = edge_counts.entry(forward_key.clone()).or_insert(0);
-            *count += 1;
 
             // For first edge, just use the selectivity
             // For subsequent edges (composite key), use MAX instead of product
