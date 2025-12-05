@@ -66,7 +66,11 @@ def query_latest(cursor: Any):
         formatted_results = []
         for row in results:
             run_id, ts, suite, commit, branch, total, passed, failed, timeout, notes = row
-            pass_rate = round(passed * 100.0 / total, 1) if total and total > 0 else 0
+            # Handle None values for passed/total (some benchmark types don't track these)
+            if passed is not None and total is not None and total > 0:
+                pass_rate = round(passed * 100.0 / total, 1)
+            else:
+                pass_rate = None
             formatted_results.append((run_id, ts, suite, commit, branch, total, passed, failed, timeout, pass_rate, notes))
 
         headers = ["Run ID", "Timestamp", "Suite", "Commit", "Branch", "Total", "Passed", "Failed", "Timeout", "Pass Rate", "Notes"]
