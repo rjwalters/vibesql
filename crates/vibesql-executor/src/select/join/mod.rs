@@ -600,7 +600,93 @@ pub(super) fn nested_loop_join(
             }
         }
 
-        // Phase 3.4: If no ON condition hash join, try WHERE clause equijoins
+        // Phase 3.4: Try multi-column hash join from WHERE clause conditions
+        // When there are multiple equijoin conditions (e.g., ps_suppkey = l_suppkey AND ps_partkey = l_partkey),
+        // using composite key hash join is critical for performance. Single-key hash join with post-filter
+        // can cause catastrophic performance issues (48B cartesian products in Q9 at SF=0.1).
+        if additional_equijoins.len() >= 2 {
+            // Collect all valid equi-join conditions
+            let mut left_col_indices = Vec::new();
+            let mut right_col_indices = Vec::new();
+            let mut used_indices = Vec::new();
+
+            for (idx, equijoin) in additional_equijoins.iter().enumerate() {
+                if let Some(equi_join_info) =
+                    join_analyzer::analyze_equi_join(equijoin, &temp_schema, left_col_count)
+                {
+                    left_col_indices.push(equi_join_info.left_col_idx);
+                    right_col_indices.push(equi_join_info.right_col_idx);
+                    used_indices.push(idx);
+                }
+            }
+
+            // If we found 2+ equi-join conditions, use multi-column hash join
+            if left_col_indices.len() >= 2 {
+                // Save schemas for NATURAL JOIN processing before moving left/right
+                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                    (Some(left.schema.clone()), Some(right.schema.clone()))
+                } else {
+                    (None, None)
+                };
+
+                let mut result = hash_join_inner_multi(
+                    left,
+                    right,
+                    &left_col_indices,
+                    &right_col_indices,
+                )?;
+
+                // Apply remaining conditions (non-equijoins) as post-join filters
+                let remaining_conditions: Vec<_> = additional_equijoins
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !used_indices.contains(i))
+                    .map(|(_, e)| e.clone())
+                    .collect();
+
+                if !remaining_conditions.is_empty() {
+                    if let Some(filter_expr) = combine_with_and(remaining_conditions) {
+                        result =
+                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                    }
+                }
+
+                // For NATURAL JOIN, remove duplicate columns from the result
+                if natural {
+                    if let (Some(left_schema), Some(right_schema_orig)) =
+                        (left_schema_for_natural, right_schema_for_natural)
+                    {
+                        let right_schema_for_removal = CombinedSchema {
+                            table_schemas: vec![(
+                                right_table_name_for_natural.clone(),
+                                (
+                                    0,
+                                    right_schema_orig
+                                        .table_schemas
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                ),
+                            )]
+                            .into_iter()
+                            .collect(),
+                            total_columns: right_schema_orig.total_columns,
+                        };
+                        result = remove_duplicate_columns_for_natural_join(
+                            result,
+                            &left_schema,
+                            &right_schema_for_removal,
+                        )?;
+                    }
+                }
+
+                return Ok(result);
+            }
+        }
+
+        // Phase 3.5: If no multi-column hash join, try single-column WHERE clause equijoins
         // Iterate through all additional equijoins to find one suitable for hash join
         for (idx, equijoin) in additional_equijoins.iter().enumerate() {
             if let Some(equi_join_info) =
@@ -671,7 +757,7 @@ pub(super) fn nested_loop_join(
             }
         }
 
-        // Phase 3.5: Try arithmetic equijoins from WHERE clause for hash join
+        // Phase 3.6: Try arithmetic equijoins from WHERE clause for hash join
         // For expressions like `col1 = col2 - 53` in WHERE clause with Inner joins
         // This enables hash join for derived table joins with arithmetic conditions (TPC-DS Q2)
         for (idx, equijoin) in additional_equijoins.iter().enumerate() {
