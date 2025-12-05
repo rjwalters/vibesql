@@ -1,0 +1,1 @@
+SELECT CASE WHEN id = 1 THEN first ELSE other END FROM t1

@@ -1,0 +1,1 @@
+SELECT LENGTH(name) FROM t1

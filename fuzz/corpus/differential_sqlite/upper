@@ -1,0 +1,1 @@
+SELECT UPPER(name) FROM t1

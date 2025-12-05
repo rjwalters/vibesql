@@ -1,0 +1,1 @@
+SELECT MAX(id), MIN(id) FROM t1

@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting benchmark benchmark-quick benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -74,6 +74,16 @@ help:
 	@echo "  make test-ignored       - Run only ignored/slow tests (disk-backed indexes, etc.)"
 	@echo "  make test-sqllogictest  - Run SQLLogicTest standalone (with JSON output)"
 	@echo "  make test-sqllogictest-halting - Run SQLLogicTest, stop on first failure"
+	@echo ""
+	@echo "Fuzzing targets:"
+	@echo "  make fuzz               - Run all fuzz targets (5 min each)"
+	@echo "  make fuzz-parser        - Fuzz SQL parser"
+	@echo "  make fuzz-expr          - Fuzz expression evaluation contexts"
+	@echo "  make fuzz-type-convert  - Fuzz CAST type conversion"
+	@echo "  make fuzz-query         - Fuzz query execution (parser + executor)"
+	@echo "  make fuzz-type-coercion - Fuzz type coercion and comparison"
+	@echo "  make fuzz-differential  - Fuzz with SQLite differential testing"
+	@echo "  make fuzz-list          - List available fuzz targets"
 	@echo ""
 	@echo "Benchmark targets:"
 	@echo "  make benchmark           - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
@@ -179,6 +189,64 @@ test-sqllogictest-halting:
 	@echo "Running SQLLogicTest suite (fail-fast mode)..."
 	@echo "Will stop on first test file failure for easier debugging"
 	./scripts/sqllogictest run --fail-fast
+
+#
+# Fuzzing Targets
+#
+# Requires: rustup install nightly && cargo +nightly install cargo-fuzz
+# See fuzz/README.md for detailed usage
+#
+
+# Default fuzz duration (in seconds)
+FUZZ_DURATION ?= 300
+
+# Run all fuzz targets
+fuzz:
+	@echo "Running all fuzz targets ($(FUZZ_DURATION)s each)..."
+	@echo "Targets: sql_parser, expr_eval, type_convert, query_executor, type_coercion, differential_sqlite"
+	@echo ""
+	cd fuzz && cargo +nightly fuzz run sql_parser -- -dict=dictionaries/sql.dict -max_total_time=$(FUZZ_DURATION)
+	cd fuzz && cargo +nightly fuzz run expr_eval -- -max_total_time=$(FUZZ_DURATION)
+	cd fuzz && cargo +nightly fuzz run type_convert -- -max_total_time=$(FUZZ_DURATION)
+	cd fuzz && cargo +nightly fuzz run query_executor -- -dict=dictionaries/sql.dict -max_total_time=$(FUZZ_DURATION)
+	cd fuzz && cargo +nightly fuzz run type_coercion -- -max_total_time=$(FUZZ_DURATION)
+	cd fuzz && cargo +nightly fuzz run differential_sqlite -- -dict=dictionaries/sql.dict -max_total_time=$(FUZZ_DURATION)
+
+# Fuzz SQL parser
+fuzz-parser:
+	@echo "Fuzzing SQL parser..."
+	cd fuzz && cargo +nightly fuzz run sql_parser -- -dict=dictionaries/sql.dict
+
+# Fuzz expression evaluation
+fuzz-expr:
+	@echo "Fuzzing expression evaluation..."
+	cd fuzz && cargo +nightly fuzz run expr_eval
+
+# Fuzz CAST type conversion
+fuzz-type-convert:
+	@echo "Fuzzing CAST type conversion..."
+	cd fuzz && cargo +nightly fuzz run type_convert
+
+# Fuzz query execution (parser + planner + executor)
+fuzz-query:
+	@echo "Fuzzing query execution..."
+	cd fuzz && cargo +nightly fuzz run query_executor -- -dict=dictionaries/sql.dict
+
+# Fuzz type coercion and comparison
+fuzz-type-coercion:
+	@echo "Fuzzing type coercion..."
+	cd fuzz && cargo +nightly fuzz run type_coercion
+
+# Fuzz with SQLite differential testing
+fuzz-differential:
+	@echo "Fuzzing with SQLite differential testing..."
+	cd fuzz && cargo +nightly fuzz run differential_sqlite -- -dict=dictionaries/sql.dict
+
+# List available fuzz targets
+fuzz-list:
+	@echo "Available fuzz targets:"
+	@echo ""
+	@cd fuzz && cargo +nightly fuzz list 2>/dev/null || echo "  (install cargo-fuzz: cargo +nightly install cargo-fuzz)"
 
 #
 # Benchmark Targets
