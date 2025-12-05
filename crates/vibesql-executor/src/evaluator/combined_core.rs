@@ -341,6 +341,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
     ///
     /// Issue #3562: Now includes cte_context to enable IN subqueries referencing CTEs
     /// during parallel predicate evaluation.
+    #[cfg(feature = "parallel")]
     pub(crate) fn get_parallel_components(&self) -> super::parallel::ParallelComponents<'a> {
         (
             self.schema,
@@ -358,6 +359,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
     ///
     /// Issue #3562: Now accepts cte_context to enable IN subqueries referencing CTEs
     /// during parallel predicate evaluation.
+    #[cfg(feature = "parallel")]
     pub(crate) fn from_parallel_components(
         schema: &'a CombinedSchema,
         database: Option<&'a vibesql_storage::Database>,

@@ -23,6 +23,7 @@ use super::parallel::ParallelConfig;
 /// Fast truthy evaluation optimized for hot path (Combined evaluator version)
 ///
 /// Inlined aggressively and optimized for the common case (Boolean values).
+#[cfg(feature = "parallel")]
 #[inline(always)]
 fn is_truthy_combined(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorError> {
     use vibesql_types::SqlValue;
@@ -326,11 +327,10 @@ pub(crate) fn apply_where_filter_combined_auto<'a>(
         return Ok(rows);
     }
 
-    let row_count = rows.len();
-
     // For very large datasets, use parallel execution
     #[cfg(feature = "parallel")]
     {
+        let row_count = rows.len();
         let config = ParallelConfig::global();
         if config.should_parallelize_scan(row_count) {
             return apply_where_filter_combined_parallel(rows, where_expr, evaluator, executor);
