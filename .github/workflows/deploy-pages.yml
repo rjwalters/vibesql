@@ -3,16 +3,6 @@ name: Deploy to GitHub Pages
 on:
   workflow_call:
     inputs:
-      artifact-name:
-        description: 'Name of the artifact containing test results/data to deploy (optional)'
-        type: string
-        required: false
-        default: ''
-      benchmark-artifact-name:
-        description: 'Name of the artifact containing benchmark results (optional)'
-        type: string
-        required: false
-        default: ''
       rebuild-web-demo:
         description: 'Whether to rebuild the web demo from scratch'
         type: boolean
@@ -38,7 +28,7 @@ permissions:
   id-token: write
 
 # CRITICAL: Single concurrency group for ALL Pages deployments
-# This prevents race conditions from ci-and-deploy, boost, and manual redeploys
+# This prevents race conditions from ci-and-deploy and manual redeploys
 concurrency:
   group: pages-deployment
   cancel-in-progress: false  # Queue deployments, don't cancel
@@ -52,7 +42,9 @@ jobs:
           submodules: recursive
 
       # ============================================================================
-      # Build Web Demo (if requested)
+      # Build Web Demo
+      # Benchmark data is committed in web-demo/public/benchmarks/ and included
+      # automatically in the build.
       # ============================================================================
       - name: Setup Rust for WASM
         if: inputs.rebuild-web-demo || github.event_name == 'workflow_dispatch'
@@ -98,303 +90,23 @@ jobs:
           pnpm run build
 
       # ============================================================================
-      # Download Existing Pages Site (to preserve all files)
-      # ============================================================================
-      - name: Download current Pages site
-        if: inputs.rebuild-web-demo == false
-        continue-on-error: true
-        run: |
-          echo "Downloading current Pages site to preserve existing files..."
-          mkdir -p pages-temp
-
-          # Download the entire site
-          wget -r -np -nH -E -k --cut-dirs=1 \
-            -A "*.html,*.js,*.wasm,*.css,*.json,*.svg,*.png,*.jpg,*.jpeg,*.gif,*.woff,*.woff2,*.ttf,*.eot,*.ico,*.md" \
-            --reject "*.html.tmp,*.html?*" \
-            -P pages-temp \
-            https://rjwalters.github.io/vibesql/ || echo "No existing site found"
-
-          # Explicitly download /pkg/ directory
-          mkdir -p pages-temp/pkg
-          wget -q -P pages-temp/pkg \
-            https://rjwalters.github.io/vibesql/pkg/vibesql_wasm_bg.wasm \
-            https://rjwalters.github.io/vibesql/pkg/vibesql_wasm.js \
-            https://rjwalters.github.io/vibesql/pkg/package.json || echo "No pkg directory found"
-
-      # ============================================================================
-      # Download Artifacts from Triggering Workflow
-      # ============================================================================
-      - name: Download test artifacts
-        if: inputs.artifact-name != ''
-        continue-on-error: true
-        uses: actions/download-artifact@v6
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: artifacts/
-
-      - name: Download benchmark artifacts
-        if: inputs.benchmark-artifact-name != ''
-        continue-on-error: true
-        uses: actions/download-artifact@v6
-        with:
-          name: ${{ inputs.benchmark-artifact-name }}
-          path: artifacts/
-
-      - name: Download footprint artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v6
-        with:
-          name: ci-footprint-results
-          path: artifacts/
-
-      - name: Download TPC-H artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v6
-        with:
-          name: ci-tpch-results
-          path: artifacts/
-
-      - name: Download Sysbench artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v6
-        with:
-          name: ci-sysbench-results
-          path: artifacts/
-
-      # ============================================================================
-      # Download Historical Data from Pages
-      # ============================================================================
-      - name: Download historical punchlist results
-        continue-on-error: true
-        run: |
-          echo "Downloading historical SQLLogicTest punchlist results..."
-          mkdir -p historical
-
-          if curl -sL https://rjwalters.github.io/vibesql/badges/sqllogictest_punchlist.json \
-            -o historical/sqllogictest_punchlist.json 2>/dev/null; then
-            if jq empty historical/sqllogictest_punchlist.json 2>/dev/null; then
-              echo "✓ Downloaded existing punchlist results"
-              jq '.summary' historical/sqllogictest_punchlist.json || echo "{}"
-            else
-              echo "Invalid JSON - will use artifact"
-              rm -f historical/sqllogictest_punchlist.json
-            fi
-          else
-            echo "No existing punchlist results - will use artifact"
-          fi
-
-      - name: Download historical benchmark data
-        continue-on-error: true
-        run: |
-          echo "Downloading historical benchmark data..."
-          mkdir -p historical
-
-          if curl -sL https://rjwalters.github.io/vibesql/benchmarks/benchmark_history.json \
-            -o historical/benchmark_history.json; then
-            echo "✓ Downloaded benchmark history"
-          else
-            echo "No existing benchmark history found"
-          fi
-
-      - name: Download historical dashboard data
-        continue-on-error: true
-        run: |
-          echo "Downloading historical dashboard data..."
-          mkdir -p historical
-
-          if curl -sL https://rjwalters.github.io/vibesql/data/dashboard.json \
-            -o historical/dashboard.json 2>/dev/null; then
-            if jq empty historical/dashboard.json 2>/dev/null; then
-              echo "✓ Downloaded existing dashboard data"
-              jq -r '.generated_at // "unknown"' historical/dashboard.json || echo "unknown"
-            else
-              echo "Invalid JSON - will start fresh"
-              rm -f historical/dashboard.json
-            fi
-          else
-            echo "No existing dashboard data - will generate fresh"
-          fi
-
-      # ============================================================================
-      # Merge Data (if we have new test results)
-      # ============================================================================
-      - name: Setup Python for punchlist
-        if: inputs.artifact-name != ''
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
-      - name: Use punchlist results from artifact
-        if: inputs.artifact-name != ''
-        continue-on-error: true
-        run: |
-          # Find punchlist files in artifacts (generated by CI)
-          PUNCHLIST_RESULT=$(find artifacts -name "sqllogictest_punchlist.json" | head -1)
-          PUNCHLIST_SUMMARY=$(find artifacts -name "sqllogictest_summary.json" | head -1)
-
-          mkdir -p merged
-          if [ -n "$PUNCHLIST_RESULT" ] && [ -f "$PUNCHLIST_RESULT" ]; then
-            echo "Using punchlist from artifact: $PUNCHLIST_RESULT"
-            cp "$PUNCHLIST_RESULT" merged/sqllogictest_punchlist.json
-            echo "Punchlist summary:"
-            if [ -n "$PUNCHLIST_SUMMARY" ] && [ -f "$PUNCHLIST_SUMMARY" ]; then
-              cp "$PUNCHLIST_SUMMARY" merged/sqllogictest_summary.json
-              jq '.summary' "$PUNCHLIST_SUMMARY" || echo "{}"
-            fi
-          elif [ -f historical/sqllogictest_punchlist.json ]; then
-            echo "No new punchlist in artifacts - using historical"
-            cp historical/sqllogictest_punchlist.json merged/sqllogictest_punchlist.json
-          else
-            echo "No punchlist available - will generate from scratch"
-            # This will be handled by badge generation
-          fi
-
-      - name: Update benchmark history
-        if: inputs.artifact-name != ''
-        continue-on-error: true
-        run: |
-          # Find benchmark results in artifacts
-          BENCHMARK_RESULT=$(find artifacts -name "benchmark_results.json" | head -1)
-
-          if [ -n "$BENCHMARK_RESULT" ] && [ -f "$BENCHMARK_RESULT" ]; then
-            echo "Updating benchmark history..."
-            python3 benchmarks/update_history.py \
-              "$BENCHMARK_RESULT" \
-              historical/benchmark_history.json \
-              ${{ github.sha }} || echo "Benchmark history update failed"
-          else
-            echo "No benchmark results in artifacts"
-          fi
-
-      - name: Generate dashboard data
-        continue-on-error: true
-        run: |
-          echo "Generating performance dashboard data..."
-          mkdir -p merged
-
-          # Find benchmark database in artifacts
-          BENCHMARK_DB=$(find artifacts -name "*.vbsql" | head -1)
-
-          if [ -n "$BENCHMARK_DB" ] && [ -f "$BENCHMARK_DB" ]; then
-            echo "Using benchmark database from artifacts: $BENCHMARK_DB"
-            python3 scripts/generate_web_dashboard.py \
-              --db "$BENCHMARK_DB" \
-              --previous https://rjwalters.github.io/vibesql/data/dashboard.json \
-              --output merged/dashboard.json \
-              --verbose || echo "Dashboard generation failed"
-          elif [ -f historical/dashboard.json ]; then
-            echo "No new benchmark data - using historical dashboard"
-            cp historical/dashboard.json merged/dashboard.json
-          else
-            echo "No benchmark data available - skipping dashboard generation"
-          fi
-
-          # Show summary if generated
-          if [ -f merged/dashboard.json ]; then
-            echo "Dashboard generated successfully:"
-            jq -r '"  Timestamp: \(.generated_at // \"unknown\")"' merged/dashboard.json || true
-            jq -r '"  Data points: \(.timeline | length // 0)"' merged/dashboard.json 2>/dev/null || true
-          fi
-
-      # ============================================================================
-      # Generate Badges
-      # ============================================================================
-      - name: Generate badge JSON
-        run: |
-          mkdir -p badges
-
-          # Find test results (from artifacts or historical)
-          SQLTEST_RESULTS=$(find artifacts -name "sqltest_results.json" 2>/dev/null | head -1)
-          if [ -z "$SQLTEST_RESULTS" ]; then
-            # Try downloading from Pages as fallback
-            curl -sL https://rjwalters.github.io/vibesql/badges/sqltest_results.json \
-              -o badges/sqltest_results.json 2>/dev/null || echo "{}" > badges/sqltest_results.json
-            SQLTEST_RESULTS="badges/sqltest_results.json"
-          fi
-
-          # Use merged punchlist results
-          SQLLOGICTEST_PUNCHLIST="merged/sqllogictest_punchlist.json"
-          if [ ! -f "$SQLLOGICTEST_PUNCHLIST" ]; then
-            SQLLOGICTEST_PUNCHLIST="historical/sqllogictest_punchlist.json"
-          fi
-
-          # Generate badges using the new script
-          ./.github/scripts/generate_badges.sh badges "$SQLTEST_RESULTS" "$SQLLOGICTEST_PUNCHLIST"
-
-      # ============================================================================
       # Prepare Deployment Directory
       # ============================================================================
       - name: Prepare deployment
         run: |
           mkdir -p deploy
 
-          # If we rebuilt web demo, use that
           if [ -d web-demo/dist ]; then
             echo "Using freshly built web demo"
-            WEB_DEMO_SOURCE="web-demo/dist"
-          # Otherwise use downloaded Pages site
-          elif [ -d pages-temp ]; then
-            echo "Using existing Pages site"
-            WEB_DEMO_SOURCE="pages-temp"
+            cp -r web-demo/dist/* deploy/
           else
-            echo "ERROR: No web demo source found!"
+            echo "ERROR: No web demo build found!"
             exit 1
           fi
 
-          # Prepare deployment using the new script
-          # NOTE: Don't pass benchmark_results.json from artifacts - the Python pytest-benchmark
-          # output uses a different format than the TPC-H comparison data the frontend expects.
-          # The web-demo build already includes correctly formatted TPC-H benchmark data.
-          ./.github/scripts/prepare_deployment.sh \
-            deploy \
-            "$WEB_DEMO_SOURCE" \
-            badges \
-            "" \
-            "historical/benchmark_history.json"
-
-          # Copy Sysbench benchmark results
-          SYSBENCH_RESULT=$(find artifacts -name "sysbench_results.json" 2>/dev/null | head -1)
-          if [ -n "$SYSBENCH_RESULT" ] && [ -f "$SYSBENCH_RESULT" ]; then
-            cp "$SYSBENCH_RESULT" deploy/benchmarks/sysbench_results.json
-            echo "✓ Copied sysbench_results.json"
-          else
-            echo "⚠️  No Sysbench results found in artifacts"
-          fi
-
-          # Copy Footprint benchmark results
-          FOOTPRINT_RESULT=$(find artifacts -name "footprint_results.json" 2>/dev/null | head -1)
-          if [ -n "$FOOTPRINT_RESULT" ] && [ -f "$FOOTPRINT_RESULT" ]; then
-            cp "$FOOTPRINT_RESULT" deploy/benchmarks/footprint_results.json
-            echo "✓ Copied footprint_results.json"
-          else
-            echo "⚠️  No Footprint results found in artifacts"
-          fi
-
-          # Copy merged punchlist results
-          if [ -f merged/sqllogictest_punchlist.json ]; then
-            cp merged/sqllogictest_punchlist.json deploy/badges/
-            echo "✓ Copied merged punchlist results"
-          fi
-
-          # Copy SQLLogicTest data for web demo
-          mkdir -p deploy/data
-          if [ -f merged/sqllogictest_punchlist.json ]; then
-            cp merged/sqllogictest_punchlist.json deploy/data/
-            echo "✓ Copied SQLLogicTest punchlist data"
-          fi
-          if [ -f merged/sqllogictest_summary.json ]; then
-            cp merged/sqllogictest_summary.json deploy/data/
-            echo "✓ Copied SQLLogicTest summary data"
-          fi
-
-          # Copy dashboard data for performance trends
-          if [ -f merged/dashboard.json ]; then
-            cp merged/dashboard.json deploy/data/
-            echo "✓ Copied dashboard data"
-          elif [ -f historical/dashboard.json ]; then
-            cp historical/dashboard.json deploy/data/
-            echo "✓ Copied historical dashboard data (no new data)"
-          fi
+          # Show what benchmark files are included
+          echo "Benchmark files included:"
+          ls -la deploy/benchmarks/ || echo "No benchmarks directory"
 
       # ============================================================================
       # Deploy to GitHub Pages
@@ -417,21 +129,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**URL:** https://rjwalters.github.io/vibesql/" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Rebuilt web demo:** ${{ inputs.rebuild-web-demo || github.event_name == 'workflow_dispatch' }}" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f deploy/badges/sqllogictest_punchlist.json ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### SQLLogicTest Punchlist Status" >> $GITHUB_STEP_SUMMARY
-            echo '```json' >> $GITHUB_STEP_SUMMARY
-            jq '.summary' deploy/badges/sqllogictest_punchlist.json >> $GITHUB_STEP_SUMMARY || echo "{}"
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ -f deploy/data/dashboard.json ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Performance Dashboard" >> $GITHUB_STEP_SUMMARY
-            echo "- **Timestamp:** $(jq -r '.generated_at // "unknown"' deploy/data/dashboard.json)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Data points:** $(jq -r '.timeline | length // 0' deploy/data/dashboard.json 2>/dev/null || echo 0)" >> $GITHUB_STEP_SUMMARY
-            echo "- **TPC-H queries:** $(jq -r '.summary.tpch.queries_passing // 0' deploy/data/dashboard.json)/$(jq -r '.summary.tpch.queries_total // 0' deploy/data/dashboard.json)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Dashboard URL:** https://rjwalters.github.io/vibesql/dashboard" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Benchmark Data" >> $GITHUB_STEP_SUMMARY
+          echo "Benchmark results are committed to \`web-demo/public/benchmarks/\`" >> $GITHUB_STEP_SUMMARY
+          echo "and included automatically in the build." >> $GITHUB_STEP_SUMMARY
