@@ -36,7 +36,7 @@
     "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^0.34.0"
+    "vitest": "^2.0.0"
   },
   "peerDependencies": {
     "@vibesql/client": "workspace:*",
