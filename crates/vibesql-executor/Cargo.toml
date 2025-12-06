@@ -15,6 +15,7 @@ vibesql-ast = { version = "0.1.2", path = "../vibesql-ast" }
 vibesql-catalog = { version = "0.1.2", path = "../vibesql-catalog" }
 vibesql-storage = { version = "0.1.2", path = "../vibesql-storage" }
 vibesql-parser = { version = "0.1.2", path = "../vibesql-parser" }
+vibesql-l10n = { version = "0.1.2", path = "../vibesql-l10n" }
 chrono = "0.4"
 rayon = { version = "1.10", optional = true }
 indexmap = "2.0"

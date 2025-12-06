@@ -31,6 +31,7 @@ storage-all = ["storage-fs", "storage-s3", "storage-gcs", "storage-azure", "stor
 vibesql-types = { version = "0.1.2", path = "../vibesql-types" }
 vibesql-catalog = { version = "0.1.2", path = "../vibesql-catalog" }
 vibesql-ast = { version = "0.1.2", path = "../vibesql-ast" }
+vibesql-l10n = { version = "0.1.2", path = "../vibesql-l10n" }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
