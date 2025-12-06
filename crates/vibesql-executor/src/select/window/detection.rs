@@ -19,12 +19,15 @@ pub(in crate::select) fn expression_has_window_function(expr: &Expression) -> bo
         }
         Expression::UnaryOp { expr, .. } => expression_has_window_function(expr),
         Expression::Function { args, .. } => args.iter().any(expression_has_window_function),
-        Expression::Case { when_clauses, else_result, .. } => {
-            when_clauses.iter().any(|when_clause| {
-                when_clause.conditions.iter().any(expression_has_window_function)
-                    || expression_has_window_function(&when_clause.result)
-            }) || else_result.as_ref().is_some_and(|e| expression_has_window_function(e))
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| expression_has_window_function(e))
+                || when_clauses.iter().any(|when_clause| {
+                    when_clause.conditions.iter().any(expression_has_window_function)
+                        || expression_has_window_function(&when_clause.result)
+                })
+                || else_result.as_ref().is_some_and(|e| expression_has_window_function(e))
         }
+        Expression::IsNull { expr, .. } => expression_has_window_function(expr),
         _ => false,
     }
 }
