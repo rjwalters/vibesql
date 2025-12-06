@@ -38,7 +38,33 @@ Historical record of achieving 100% Core SQL:1999 conformance (739/739 tests) in
 
 ---
 
-### 3. MAJOR_SIMPLIFICATIONS.md (14K)
+### 3. Audit Reports (Added 2025-12-05)
+
+**benchmark-optimization-audit.md**
+- Audit of codebase for benchmark-specific optimizations (Issue #3155)
+- Confirms no benchmark cheating - all optimizations are general-purpose
+- Documents that TPC references in code are for documentation, not special-casing
+
+**DIALECT_AUDIT_REPORT.md**
+- Audit of test suite for dialect-specific behavior (Issue #2675)
+- Analysis of MySQL vs SQLite behavior in tests
+- Confirms test infrastructure handles dialect switching correctly
+
+**PERF_OPTIMIZATION_PLAN.md**
+- Historical optimization plan for closing 100-200x performance gap vs DuckDB
+- Documents columnar hash join and expression specialization strategies
+- Superseded by current `docs/performance/OPTIMIZATION.md`
+
+**SQLLOGICTEST_ROADMAP_ARCHIVED.md**
+- Original roadmap showing 13.5% pass rate and path to 100%
+- Achieved 100% conformance (623/623 files) - November 2025
+- Kept for historical reference of the methodology used
+
+**Why preserved**: Completed audits and achieved milestones provide valuable historical context
+
+---
+
+### 4. MAJOR_SIMPLIFICATIONS.md (14K)
 **Date**: October-November 2025
 
 Documents major architectural simplifications made during development:
@@ -75,6 +101,6 @@ For current project documentation, see:
 
 ---
 
-**Last Cleanup**: 2025-11-18
-**Files Retained**: 5 high-value historical documents
-**Storage**: ~65K (down from ~450K, 85% reduction)
+**Last Cleanup**: 2025-12-05
+**Files Retained**: 9 high-value historical documents
+**Storage**: ~100K
