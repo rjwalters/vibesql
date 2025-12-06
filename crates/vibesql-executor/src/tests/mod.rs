@@ -63,6 +63,7 @@ mod comparison_ops;
 mod count_star_fast_path;
 mod create_table_constraints;
 mod create_table_tests;
+mod covering_index_tests;
 mod cte_scalar_subquery_tests;
 mod error_display;
 mod expression_eval;

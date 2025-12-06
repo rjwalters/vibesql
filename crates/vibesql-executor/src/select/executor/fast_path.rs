@@ -66,7 +66,11 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::builder::SelectExecutor;
-use crate::{errors::ExecutorError, schema::CombinedSchema};
+use crate::{
+    errors::ExecutorError,
+    schema::CombinedSchema,
+    select::scan::index_scan::covering::{check_covering_index, try_covering_index_scan},
+};
 
 /// Check if a query is a simple point-lookup that can use the fast path
 ///
@@ -367,6 +371,12 @@ impl SelectExecutor<'_> {
 
         // Try secondary index lookup path next
         if let Some(result) = self.try_secondary_index_lookup_fast(table_name, alias, stmt)? {
+            return Ok(result);
+        }
+
+        // Try covering index scan (index-only scan) for queries where all SELECT columns
+        // are in the index key - eliminates table fetches entirely
+        if let Some(result) = self.try_covering_index_scan_fast(table_name, alias, stmt)? {
             return Ok(result);
         }
 
@@ -1017,6 +1027,122 @@ impl SelectExecutor<'_> {
 
         // No suitable index found
         Ok(None)
+    }
+
+    /// Try covering index scan (index-only scan) for queries where all needed columns
+    /// are in the index key.
+    ///
+    /// Returns Some(rows) if covering scan was successful, None if standard path needed.
+    ///
+    /// This optimization is critical for queries like TPC-C Stock-Level:
+    /// `SELECT s_i_id FROM stock WHERE s_w_id = 1 AND s_quantity < 10`
+    /// with index `idx_stock_quantity(s_w_id, s_quantity, s_i_id)`
+    ///
+    /// # Performance
+    /// - Without covering scan: O(log n + k) index lookup + k table fetches
+    /// - With covering scan: O(log n + k) index lookup only (no table access)
+    ///
+    /// For Stock-Level with ~300 matching rows, this eliminates 300 random table fetches.
+    fn try_covering_index_scan_fast(
+        &self,
+        table_name: &str,
+        alias: Option<&String>,
+        stmt: &SelectStmt,
+    ) -> Result<Option<Vec<Row>>, ExecutorError> {
+        // Need a WHERE clause (covering scans use index predicates)
+        let where_clause = match &stmt.where_clause {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        // Get table to verify it exists
+        let table = match self.database.get_table(table_name) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Extract needed columns from SELECT list
+        let needed_columns = match self.extract_select_columns(&stmt.select_list, &table.schema) {
+            Some(cols) => cols,
+            None => return Ok(None), // Complex SELECT (*, expressions, etc.) - can't use covering
+        };
+
+        // Get all secondary indexes for this table
+        let index_names = self.database.list_indexes_for_table(table_name);
+        if index_names.is_empty() {
+            return Ok(None);
+        }
+
+        // Try each index to find one that covers all needed columns
+        for index_name in &index_names {
+            // Get index metadata
+            let metadata = match self.database.get_index(index_name) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            // Get index column names
+            let index_column_names: Vec<&str> =
+                metadata.columns.iter().map(|c| c.column_name.as_str()).collect();
+
+            // Check if this index covers all needed columns
+            if check_covering_index(&index_column_names, &needed_columns).is_none() {
+                continue; // Index doesn't cover all needed columns
+            }
+
+            // Try to use covering scan
+            let from_result = try_covering_index_scan(
+                table_name,
+                index_name,
+                alias,
+                Some(where_clause),
+                &needed_columns,
+                self.database,
+                &HashMap::new(), // No CTEs in fast path
+            )?;
+
+            if let Some(result) = from_result {
+                // Covering scan succeeded - extract rows
+                let rows = result.into_rows();
+
+                // Apply LIMIT/OFFSET
+                let limited_rows =
+                    crate::select::helpers::apply_limit_offset(rows, stmt.limit, stmt.offset);
+
+                return Ok(Some(limited_rows));
+            }
+        }
+
+        // No suitable covering index found
+        Ok(None)
+    }
+
+    /// Extract simple column names from SELECT list
+    ///
+    /// Returns Some(column_names) if SELECT list contains only simple column references,
+    /// None otherwise (e.g., SELECT *, SELECT col + 1, SELECT func(col), etc.)
+    fn extract_select_columns(
+        &self,
+        select_list: &[SelectItem],
+        _table_schema: &vibesql_catalog::TableSchema,
+    ) -> Option<Vec<String>> {
+        let mut columns = Vec::new();
+
+        for item in select_list {
+            match item {
+                SelectItem::Expression { expr: Expression::ColumnRef { column, .. }, .. } => {
+                    columns.push(column.clone());
+                }
+                // Wildcards or complex expressions can't use covering scan
+                _ => return None,
+            }
+        }
+
+        if columns.is_empty() {
+            None
+        } else {
+            Some(columns)
+        }
     }
 
     /// Extract equality predicate values for given columns from WHERE clause
