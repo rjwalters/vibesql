@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - 完全符合 SQL:1999 标准的数据库
 cli-help-hint = 输入 \help 获取帮助，\quit 退出
 cli-goodbye = 再见！
+locale-changed = 语言已更改为 { $locale }
 
 # =============================================================================
 # 命令帮助文本（Clap 参数）

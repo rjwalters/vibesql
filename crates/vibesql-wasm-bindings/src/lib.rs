@@ -54,6 +54,19 @@ pub fn get_locale() -> String {
     vibesql_l10n::current_locale().to_string()
 }
 
+/// Gets a localized "language changed" message for the current locale.
+///
+/// This message confirms the locale change in the user's new language.
+/// Example: "Language changed to Japanese" (in Japanese: "言語を日本語に変更しました")
+#[cfg(feature = "i18n")]
+#[wasm_bindgen]
+pub fn get_locale_changed_message(locale_name: &str) -> String {
+    use vibesql_l10n::fluent::FluentArgs;
+    let mut args = FluentArgs::new();
+    args.set("locale", locale_name);
+    vibesql_l10n::format("locale-changed", Some(&args))
+}
+
 /// Result of a query execution
 #[derive(Serialize, Deserialize)]
 #[wasm_bindgen(getter_with_clone)]

@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - SQL:1999 FULL準拠データベース
 cli-help-hint = \helpでヘルプを表示、\quitで終了
 cli-goodbye = さようなら！
+locale-changed = 言語を{ $locale }に変更しました
 
 # =============================================================================
 # コマンドヘルプテキスト（Clap引数）

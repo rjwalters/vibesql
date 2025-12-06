@@ -1,4 +1,5 @@
 import type { WasmModule, Database } from './types'
+import type { LocaleInfo } from '../locale'
 
 let wasmModule: WasmModule | null = null
 let db: Database | null = null
@@ -117,4 +118,40 @@ export function isUsingOpfs(): boolean {
  */
 export function getStorageMode(): string {
   return usingOpfs ? 'OPFS (Persistent)' : 'Memory (Temporary)'
+}
+
+/**
+ * Set the locale for localized error messages.
+ *
+ * @param locale - Locale code (e.g., 'en-US', 'ja', 'es')
+ * @returns true if locale was set, false if i18n not available
+ */
+export function setLocale(locale: string): boolean {
+  if (wasmModule?.set_locale) {
+    wasmModule.set_locale(locale)
+    return true
+  }
+  return false
+}
+
+/**
+ * Get a localized "language changed" confirmation message.
+ *
+ * @param localeInfo - The locale info with native name
+ * @returns Localized message like "Language changed to 日本語" or null if i18n not available
+ */
+export function getLocaleChangedMessage(localeInfo: LocaleInfo): string | null {
+  if (wasmModule?.get_locale_changed_message) {
+    return wasmModule.get_locale_changed_message(localeInfo.nativeName)
+  }
+  return null
+}
+
+/**
+ * Check if i18n (internationalization) is available in the WASM module.
+ *
+ * @returns true if i18n functions are available
+ */
+export function isI18nAvailable(): boolean {
+  return wasmModule?.set_locale !== undefined
 }

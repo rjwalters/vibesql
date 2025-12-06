@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - Banco de Dados com Conformidade COMPLETA ao SQL:1999
 cli-help-hint = Digite \help para ajuda, \quit para sair
 cli-goodbye = Até logo!
+locale-changed = Idioma alterado para { $locale }
 
 # =============================================================================
 # Texto de Ajuda dos Comandos (Argumentos Clap)

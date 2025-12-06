@@ -1,5 +1,5 @@
 import './styles/main.css'
-import { getStorageMode, isOpfsSupported } from './db/wasm'
+import { getStorageMode, isOpfsSupported, setLocale, getLocaleChangedMessage } from './db/wasm'
 import { NavigationComponent } from './components/Navigation'
 import { ExamplesComponent } from './components/Examples'
 import type { ExampleSelectEvent } from './components/Examples'
@@ -10,7 +10,7 @@ import { initShowcase } from './showcase'
 import { sampleDatabases } from './data/sample-databases'
 import { initializeApp, setupThemeSync } from './app/initialization'
 import { createExecutionHandler } from './app/query-executor'
-import { initLocale } from './locale'
+import { initLocale, SUPPORTED_LOCALES } from './locale'
 
 async function bootstrap(): Promise<void> {
   // Initialize loading progress indicator
@@ -31,6 +31,24 @@ async function bootstrap(): Promise<void> {
 
     // Initialize locale system
     const locale = initLocale()
+
+    // Wire up locale changes to WASM module and show confirmation
+    locale.onChange(localeCode => {
+      // Update WASM locale for localized error messages
+      setLocale(localeCode)
+
+      // Get localized confirmation message
+      const localeInfo = SUPPORTED_LOCALES.find(l => l.code === localeCode)
+      if (localeInfo) {
+        const message = getLocaleChangedMessage(localeInfo)
+        if (message) {
+          showLocaleToast(message)
+        }
+      }
+    })
+
+    // Set initial locale in WASM module
+    setLocale(locale.current)
 
     // Setup theme synchronization with editor
     setupThemeSync(app.theme, mode => app.editor.applyTheme(mode))
@@ -153,6 +171,39 @@ async function bootstrap(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error)
     progress.errorStep('ui', `Initialization failed: ${message}`)
   }
+}
+
+/**
+ * Show a toast notification for locale changes
+ */
+function showLocaleToast(message: string): void {
+  // Remove any existing toast
+  const existingToast = document.getElementById('locale-toast')
+  if (existingToast) {
+    existingToast.remove()
+  }
+
+  // Create toast element
+  const toast = document.createElement('div')
+  toast.id = 'locale-toast'
+  toast.className =
+    'fixed bottom-4 right-4 bg-blue-600 dark:bg-blue-500 text-white px-4 py-3 rounded-lg shadow-lg z-50 transform transition-all duration-300 translate-y-0 opacity-100'
+  toast.innerHTML = `
+    <div class="flex items-center gap-2">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path>
+      </svg>
+      <span>${message}</span>
+    </div>
+  `
+
+  document.body.appendChild(toast)
+
+  // Auto-dismiss after 3 seconds
+  setTimeout(() => {
+    toast.classList.add('translate-y-4', 'opacity-0')
+    setTimeout(() => toast.remove(), 300)
+  }, 3000)
 }
 
 // Start the application when DOM is ready

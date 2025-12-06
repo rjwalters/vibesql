@@ -71,4 +71,7 @@ export interface WasmModule {
 
   /** Get the current locale (optional, requires i18n feature) */
   get_locale?: () => string
+
+  /** Get a localized "language changed" confirmation message (optional, requires i18n feature) */
+  get_locale_changed_message?: (localeName: string) => string
 }
