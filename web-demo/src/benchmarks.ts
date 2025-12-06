@@ -19,6 +19,58 @@ declare const Chart: any;
  */
 type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench-embedded' | 'sysbench-server' | 'footprint-embedded' | 'footprint-server';
 
+// ============================================================================
+// HTML Template Helpers
+// ============================================================================
+
+const HARDWARE = 'Mac Studio M3 Ultra (28 cores, 96GB RAM)';
+
+/** Generate a methodology detail list item */
+const li = (label: string, value: string): string =>
+  `<li><strong>${label}:</strong> ${value}</li>`;
+
+/** Generate a bullet list for discussions */
+const bullet = (label: string, desc: string): string =>
+  `<li><strong>${label}:</strong> ${desc}</li>`;
+
+/** Generate methodology section with title, description, details list, and optional notes */
+const methodology = (
+  title: string,
+  description: string,
+  details: string[],
+  notes?: string[]
+): string => `
+  <h3 class="text-lg font-semibold text-foreground mb-2">${title}</h3>
+  <p class="text-muted mb-4">${description}</p>
+  <ul class="space-y-2 text-muted">
+    ${li('Hardware', HARDWARE)}
+    ${details.join('\n    ')}
+  </ul>
+  ${notes?.map(note => `
+  <p class="mt-4 text-muted text-sm">${note}</p>`).join('') ?? ''}
+`;
+
+/** Generate discussion section with multiple subsections */
+const discussion = (sections: { title: string; content: string }[]): string => `
+  <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
+  ${sections.map(({ title, content }) => `
+  <h4 class="text-md font-medium text-foreground mt-4 mb-2">${title}</h4>
+  ${content}`).join('')}
+`;
+
+/** Generate a paragraph */
+const p = (text: string): string =>
+  `<p class="text-muted mb-2">${text}</p>`;
+
+/** Generate a bullet list for discussion items */
+const bullets = (items: string[]): string =>
+  `<ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
+    ${items.join('\n    ')}
+  </ul>`;
+
+// ============================================================================
+// Suite Configuration
+// ============================================================================
 
 /**
  * Suite configuration
@@ -66,68 +118,54 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'q21': 'Suppliers Who Kept Orders Waiting - Multi-table EXISTS',
       'q22': 'Global Sales Opportunity - SUBSTR with NOT EXISTS subquery',
     },
-    methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">TPC-H Decision Support Benchmark</h3>
-      <p class="text-muted mb-4">
-        These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>,
+    methodology: methodology(
+      'TPC-H Decision Support Benchmark',
+      `These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>,
         which simulates real-world decision support workloads with complex analytical queries
-        involving aggregations, joins, subqueries, and sorting.
-      </p>
-
-      <ul class="space-y-2 text-muted">
-        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
-        <li><strong>Benchmark Framework:</strong> Criterion.rs (Rust native benchmarking)</li>
-        <li><strong>Scale Factor:</strong> SF 0.01 (~60,000 rows across 8 tables)</li>
-        <li><strong>Data:</strong> Deterministic TPC-H compliant dataset</li>
-        <li><strong>Databases Tested:</strong> VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs)</li>
-        <li><strong>Execution Mode:</strong> All databases run in-memory (no disk I/O)</li>
-        <li><strong>Measurement:</strong> Native Rust API calls (no Python/FFI overhead)</li>
-      </ul>
-
-      <p class="mt-4 text-muted">
-        All benchmarks measure end-to-end query execution time including parsing,
+        involving aggregations, joins, subqueries, and sorting.`,
+      [
+        li('Benchmark Framework', 'Criterion.rs (Rust native benchmarking)'),
+        li('Scale Factor', 'SF 0.01 (~60,000 rows across 8 tables)'),
+        li('Data', 'Deterministic TPC-H compliant dataset'),
+        li('Databases Tested', 'VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs)'),
+        li('Execution Mode', 'All databases run in-memory (no disk I/O)'),
+        li('Measurement', 'Native Rust API calls (no Python/FFI overhead)'),
+      ],
+      [
+        `All benchmarks measure end-to-end query execution time including parsing,
         planning, execution, and result materialization. This represents <strong>real-world
-        SQL engine performance</strong> for analytical workloads. Results are automatically
-        updated on every commit to the main branch.
-      </p>
-
-      <p class="mt-2 text-muted text-sm">
-        <strong>Note:</strong> TPC-H queries test different aspects of SQL performance:
+        SQL engine performance</strong> for analytical workloads.`,
+        `<strong>Note:</strong> TPC-H queries test different aspects of SQL performance:
         simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15),
-        and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
-      </p>
-    `,
-    discussion: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Where VibeSQL Excels</h4>
-      <p class="text-muted mb-2">
-        VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20)
-        where our columnar execution engine and SIMD-accelerated aggregations shine. These queries
-        involve filtering large tables and computing aggregates without complex join patterns.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Current Optimization Targets</h4>
-      <p class="text-muted mb-2">
-        Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck
-        is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's
-        decades-refined B-tree joins. Specific areas under active development:
-      </p>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li><strong>Join ordering:</strong> Improved cardinality estimation for better join order selection</li>
-        <li><strong>Hash table sizing:</strong> Adaptive hash table growth and spill-to-disk for large joins</li>
-        <li><strong>Vectorized joins:</strong> Batch processing in the join inner loop to improve cache utilization</li>
-        <li><strong>Index-nested-loop joins:</strong> Leveraging B-tree indexes when beneficial</li>
-      </ul>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Path to Leadership</h4>
-      <p class="text-muted mb-2">
-        VibeSQL's architecture is designed for modern hardware with features like columnar storage,
-        vectorized execution, and lock-free concurrency. As these optimizations mature, we expect
-        VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design
-        supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.
-      </p>
-    `,
+        and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.`,
+      ]
+    ),
+    discussion: discussion([
+      {
+        title: 'Where VibeSQL Excels',
+        content: p(`VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20)
+          where our columnar execution engine and SIMD-accelerated aggregations shine. These queries
+          involve filtering large tables and computing aggregates without complex join patterns.`),
+      },
+      {
+        title: 'Current Optimization Targets',
+        content: p(`Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck
+          is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's
+          decades-refined B-tree joins. Specific areas under active development:`) + bullets([
+          bullet('Join ordering', 'Improved cardinality estimation for better join order selection'),
+          bullet('Hash table sizing', 'Adaptive hash table growth and spill-to-disk for large joins'),
+          bullet('Vectorized joins', 'Batch processing in the join inner loop to improve cache utilization'),
+          bullet('Index-nested-loop joins', 'Leveraging B-tree indexes when beneficial'),
+        ]),
+      },
+      {
+        title: 'Path to Leadership',
+        content: p(`VibeSQL's architecture is designed for modern hardware with features like columnar storage,
+          vectorized execution, and lock-free concurrency. As these optimizations mature, we expect
+          VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design
+          supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.`),
+      },
+    ]),
   },
   tpcds: {
     id: 'tpcds',
@@ -235,61 +273,48 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'q98': 'Q98 - Store sales category analysis',
       'q99': 'Q99 - Multi-channel shipping analysis',
     },
-    methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">TPC-DS Decision Support Benchmark</h3>
-      <p class="text-muted mb-4">
-        <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model
+    methodology: methodology(
+      'TPC-DS Decision Support Benchmark',
+      `<strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model
         a modern decision support system with significantly more complex query patterns
-        including multiple fact tables, snow-flake schema, and advanced SQL features.
-      </p>
-
-      <ul class="space-y-2 text-muted">
-        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
-        <li><strong>Schema:</strong> 24 tables with star/snowflake schema design</li>
-        <li><strong>Query Count:</strong> 99 queries (currently 88/99 passing)</li>
-        <li><strong>Scale Factor:</strong> SF 0.01</li>
-        <li><strong>Query Types:</strong> Reporting, ad-hoc, data mining patterns</li>
-        <li><strong>SQL Features:</strong> Window functions, CTEs, complex subqueries, ROLLUP/CUBE</li>
-      </ul>
-
-      <p class="mt-4 text-muted">
-        TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features
+        including multiple fact tables, snow-flake schema, and advanced SQL features.`,
+      [
+        li('Schema', '24 tables with star/snowflake schema design'),
+        li('Query Count', '99 queries (currently 88/99 passing)'),
+        li('Scale Factor', 'SF 0.01'),
+        li('Query Types', 'Reporting, ad-hoc, data mining patterns'),
+        li('SQL Features', 'Window functions, CTEs, complex subqueries, ROLLUP/CUBE'),
+      ],
+      [
+        `TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features
         like window functions, common table expressions (WITH clause), and complex join patterns
-        across multiple fact and dimension tables.
-      </p>
-
-      <p class="mt-2 text-muted text-sm">
-        <strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or
-        specific date arithmetic functions not yet implemented.
-      </p>
-    `,
-    discussion: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">SQL:1999 Feature Coverage</h4>
-      <p class="text-muted mb-2">
-        TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>,
-        demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with
-        complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Complex Query Optimization</h4>
-      <p class="text-muted mb-2">
-        TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:
-      </p>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li><strong>CTE materialization:</strong> Intelligent decision between materialized and inline CTEs</li>
-        <li><strong>Subquery decorrelation:</strong> Converting correlated subqueries to joins when beneficial</li>
-        <li><strong>Star schema optimization:</strong> Fact-dimension join ordering for analytical patterns</li>
-      </ul>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Toward 99/99</h4>
-      <p class="text-muted mb-2">
-        INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set
-        operations fit naturally into our existing query algebra and will be implemented as hash-based
-        operators similar to our DISTINCT processing.
-      </p>
-    `,
+        across multiple fact and dimension tables.`,
+        `<strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or
+        specific date arithmetic functions not yet implemented.`,
+      ]
+    ),
+    discussion: discussion([
+      {
+        title: 'SQL:1999 Feature Coverage',
+        content: p(`TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>,
+          demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with
+          complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.`),
+      },
+      {
+        title: 'Complex Query Optimization',
+        content: p('TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:') + bullets([
+          bullet('CTE materialization', 'Intelligent decision between materialized and inline CTEs'),
+          bullet('Subquery decorrelation', 'Converting correlated subqueries to joins when beneficial'),
+          bullet('Star schema optimization', 'Fact-dimension join ordering for analytical patterns'),
+        ]),
+      },
+      {
+        title: 'Toward 99/99',
+        content: p(`INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set
+          operations fit naturally into our existing query algebra and will be implemented as hash-based
+          operators similar to our DISTINCT processing.`),
+      },
+    ]),
   },
   tpcc: {
     id: 'tpcc',
@@ -303,59 +328,49 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'delivery': 'Delivery - Batch processing of pending orders',
       'stock_level': 'Stock Level - Count items below threshold in recent orders',
     },
-    methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">TPC-C Online Transaction Processing Benchmark</h3>
-      <p class="text-muted mb-4">
-        The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment
+    methodology: methodology(
+      'TPC-C Online Transaction Processing Benchmark',
+      `The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment
         with a mix of complex transactions including order entry, payment processing,
-        order status queries, delivery processing, and stock level monitoring.
-      </p>
-
-      <ul class="space-y-2 text-muted">
-        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
-        <li><strong>Workload:</strong> OLTP (Online Transaction Processing)</li>
-        <li><strong>Transaction Mix:</strong> 45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level</li>
-        <li><strong>Warehouses:</strong> 1 warehouse (scaled for in-memory testing)</li>
-        <li><strong>Concurrency:</strong> Single-threaded baseline measurements</li>
-        <li><strong>ACID Compliance:</strong> Full transaction isolation testing</li>
-      </ul>
-
-      <p class="mt-4 text-muted">
-        TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle
+        order status queries, delivery processing, and stock level monitoring.`,
+      [
+        li('Workload', 'OLTP (Online Transaction Processing)'),
+        li('Transaction Mix', '45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level'),
+        li('Warehouses', '1 warehouse (scaled for in-memory testing)'),
+        li('Concurrency', 'Single-threaded baseline measurements'),
+        li('ACID Compliance', 'Full transaction isolation testing'),
+      ],
+      [
+        `TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle
         concurrent transactions with complex business logic. This benchmark is critical for
-        evaluating <strong>transactional workload performance</strong>.
-      </p>
-
-      <p class="mt-2 text-muted text-sm">
-        <strong>Note:</strong> Results show average transaction latency. Lower is better.
-        TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
-      </p>
-    `,
-    discussion: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">42x Faster Than SQLite</h4>
-      <p class="text-muted mb-2">
-        VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS,
-        a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids
-        SQLite's coarse-grained locking on every write operation.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Why VibeSQL Dominates OLTP</h4>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li><strong>Lock-free reads:</strong> MVCC allows readers and writers to proceed concurrently without blocking</li>
-        <li><strong>Optimistic concurrency:</strong> Transactions only conflict at commit time, not during execution</li>
-        <li><strong>In-memory B-tree:</strong> Purpose-built index structure optimized for in-memory workloads</li>
-        <li><strong>Prepared statement caching:</strong> Query plans are compiled once and reused</li>
-      </ul>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Scaling Further</h4>
-      <p class="text-muted mb-2">
-        Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction
-        processing, and we expect near-linear scaling as we add parallel execution support. Our goal is
-        to achieve 500K+ TPS on modern multi-core hardware.
-      </p>
-    `,
+        evaluating <strong>transactional workload performance</strong>.`,
+        `<strong>Note:</strong> Results show average transaction latency. Lower is better.
+        TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.`,
+      ]
+    ),
+    discussion: discussion([
+      {
+        title: '42x Faster Than SQLite',
+        content: p(`VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS,
+          a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids
+          SQLite's coarse-grained locking on every write operation.`),
+      },
+      {
+        title: 'Why VibeSQL Dominates OLTP',
+        content: bullets([
+          bullet('Lock-free reads', 'MVCC allows readers and writers to proceed concurrently without blocking'),
+          bullet('Optimistic concurrency', 'Transactions only conflict at commit time, not during execution'),
+          bullet('In-memory B-tree', 'Purpose-built index structure optimized for in-memory workloads'),
+          bullet('Prepared statement caching', 'Query plans are compiled once and reused'),
+        ]),
+      },
+      {
+        title: 'Scaling Further',
+        content: p(`Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction
+          processing, and we expect near-linear scaling as we add parallel execution support. Our goal is
+          to achieve 500K+ TPS on modern multi-core hardware.`),
+      },
+    ]),
   },
   'sysbench-embedded': {
     id: 'sysbench-embedded',
@@ -370,59 +385,51 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'delete': 'Delete - Remove rows by primary key',
       'range_queries': 'Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans',
     },
-    methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Sysbench Micro-Benchmarks (Embedded)</h3>
-      <p class="text-muted mb-4">
-        <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific
+    methodology: methodology(
+      'Sysbench Micro-Benchmarks (Embedded)',
+      `<strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific
         database operations. These tests measure raw performance for fundamental operations
-        without the complexity of full transaction workloads.
-      </p>
-
-      <ul class="space-y-2 text-muted">
-        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
-        <li><strong>Mode:</strong> Embedded (in-process, zero network overhead)</li>
-        <li><strong>Workload Types:</strong> Point queries, range scans, updates, inserts, deletes</li>
-        <li><strong>Table Size:</strong> 10,000 rows per table</li>
-        <li><strong>Index Types:</strong> Primary key and secondary indexes</li>
-        <li><strong>Operations:</strong> Single-statement operations (no multi-statement transactions)</li>
-        <li><strong>Databases:</strong> VibeSQL, SQLite, DuckDB</li>
-      </ul>
-
-      <p class="mt-4 text-muted">
-        Embedded mode runs the database in-process with zero network overhead, ideal for
-        single-process applications where minimal latency is critical.
-      </p>
-    `,
-    discussion: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Point Lookups: VibeSQL Leads</h4>
-      <p class="text-muted mb-2">
-        VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly
-        outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with
-        minimal pointer chasing and cache-friendly node layouts.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Index Updates: 2x Faster</h4>
-      <p class="text-muted mb-2">
-        VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design
-        allows in-place index updates without write-ahead logging overhead for each operation.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Areas for Improvement</h4>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li><strong>Bulk inserts:</strong> SQLite's batch insert path is highly optimized; we're adding batched B-tree operations</li>
-        <li><strong>Non-indexed updates:</strong> Full table scans for non-indexed columns need predicate pushdown optimization</li>
-        <li><strong>Deletes:</strong> Our tombstone-based deletion has cleanup overhead; compaction improvements are planned</li>
-      </ul>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">DuckDB Comparison</h4>
-      <p class="text-muted mb-2">
-        DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower
-        results here reflect architectural choices (columnar storage, vectorized execution) that
-        trade single-row latency for bulk throughput. VibeSQL targets both use cases.
-      </p>
-    `,
+        without the complexity of full transaction workloads.`,
+      [
+        li('Mode', 'Embedded (in-process, zero network overhead)'),
+        li('Workload Types', 'Point queries, range scans, updates, inserts, deletes'),
+        li('Table Size', '10,000 rows per table'),
+        li('Index Types', 'Primary key and secondary indexes'),
+        li('Operations', 'Single-statement operations (no multi-statement transactions)'),
+        li('Databases', 'VibeSQL, SQLite, DuckDB'),
+      ],
+      [
+        `Embedded mode runs the database in-process with zero network overhead, ideal for
+        single-process applications where minimal latency is critical.`,
+      ]
+    ),
+    discussion: discussion([
+      {
+        title: 'Point Lookups: VibeSQL Leads',
+        content: p(`VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly
+          outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with
+          minimal pointer chasing and cache-friendly node layouts.`),
+      },
+      {
+        title: 'Index Updates: 2x Faster',
+        content: p(`VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design
+          allows in-place index updates without write-ahead logging overhead for each operation.`),
+      },
+      {
+        title: 'Areas for Improvement',
+        content: bullets([
+          bullet('Bulk inserts', "SQLite's batch insert path is highly optimized; we're adding batched B-tree operations"),
+          bullet('Non-indexed updates', 'Full table scans for non-indexed columns need predicate pushdown optimization'),
+          bullet('Deletes', 'Our tombstone-based deletion has cleanup overhead; compaction improvements are planned'),
+        ]),
+      },
+      {
+        title: 'DuckDB Comparison',
+        content: p(`DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower
+          results here reflect architectural choices (columnar storage, vectorized execution) that
+          trade single-row latency for bulk throughput. VibeSQL targets both use cases.`),
+      },
+    ]),
   },
   'sysbench-server': {
     id: 'sysbench-server',
@@ -437,51 +444,44 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'delete': 'Delete - Remove rows by primary key',
       'range_queries': 'Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans',
     },
-    methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Sysbench Micro-Benchmarks (Server)</h3>
-      <p class="text-muted mb-4">
-        <strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol)
-        against MySQL, measuring performance for multi-client database deployments.
-      </p>
-
-      <ul class="space-y-2 text-muted">
-        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
-        <li><strong>Mode:</strong> Server (PostgreSQL wire protocol)</li>
-        <li><strong>Workload Types:</strong> Point queries, range scans, updates, inserts, deletes</li>
-        <li><strong>Table Size:</strong> 10,000 rows per table</li>
-        <li><strong>Protocol Overhead:</strong> ~10-50µs per query for wire protocol handling</li>
-        <li><strong>Databases:</strong> VibeSQL Server, MySQL</li>
-      </ul>
-
-      <p class="mt-4 text-muted">
-        Server mode uses the PostgreSQL wire protocol, enabling multi-client access and
-        compatibility with existing PostgreSQL tooling and drivers.
-      </p>
-    `,
-    discussion: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">PostgreSQL Wire Protocol</h4>
-      <p class="text-muted mb-2">
-        VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with
-        existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query
-        compared to embedded mode, but enables multi-client deployments.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">MySQL Comparison</h4>
-      <p class="text-muted mb-2">
-        Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement
-        for traditional client-server databases. Results vary by operation type, with VibeSQL
-        showing advantages in read-heavy workloads.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Server Roadmap</h4>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li><strong>Connection pooling:</strong> Reduce connection establishment overhead for high-throughput scenarios</li>
-        <li><strong>Prepared statement caching:</strong> Server-side caching of query plans across connections</li>
-        <li><strong>Extended query protocol:</strong> Full PostgreSQL extended query protocol support for batch operations</li>
-      </ul>
-    `,
+    methodology: methodology(
+      'Sysbench Micro-Benchmarks (Server)',
+      `<strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol)
+        against MySQL, measuring performance for multi-client database deployments.`,
+      [
+        li('Mode', 'Server (PostgreSQL wire protocol)'),
+        li('Workload Types', 'Point queries, range scans, updates, inserts, deletes'),
+        li('Table Size', '10,000 rows per table'),
+        li('Protocol Overhead', '~10-50µs per query for wire protocol handling'),
+        li('Databases', 'VibeSQL Server, MySQL'),
+      ],
+      [
+        `Server mode uses the PostgreSQL wire protocol, enabling multi-client access and
+        compatibility with existing PostgreSQL tooling and drivers.`,
+      ]
+    ),
+    discussion: discussion([
+      {
+        title: 'PostgreSQL Wire Protocol',
+        content: p(`VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with
+          existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query
+          compared to embedded mode, but enables multi-client deployments.`),
+      },
+      {
+        title: 'MySQL Comparison',
+        content: p(`Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement
+          for traditional client-server databases. Results vary by operation type, with VibeSQL
+          showing advantages in read-heavy workloads.`),
+      },
+      {
+        title: 'Server Roadmap',
+        content: bullets([
+          bullet('Connection pooling', 'Reduce connection establishment overhead for high-throughput scenarios'),
+          bullet('Prepared statement caching', 'Server-side caching of query plans across connections'),
+          bullet('Extended query protocol', 'Full PostgreSQL extended query protocol support for batch operations'),
+        ]),
+      },
+    ]),
   },
   'footprint-embedded': {
     id: 'footprint-embedded',
@@ -493,57 +493,49 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'startup_time': 'Startup Time - Time to cold-start and execute first query',
       'peak_memory': 'Peak Memory - Maximum resident set size during initialization',
     },
-    methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Native Binary Footprint</h3>
-      <p class="text-muted mb-4">
-        <strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries,
-        comparing binary size, cold startup time, and peak memory usage.
-      </p>
-
-      <ul class="space-y-2 text-muted">
-        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
-        <li><strong>Binary Size:</strong> Size of the compiled native binary in bytes (stripped release build)</li>
-        <li><strong>Startup Time:</strong> Time from process start to first query result (CREATE TABLE, INSERT, SELECT)</li>
-        <li><strong>Peak Memory:</strong> Maximum resident set size (RSS) during cold startup</li>
-        <li><strong>Databases:</strong> VibeSQL, SQLite, DuckDB</li>
-      </ul>
-
-      <p class="mt-4 text-muted">
-        Native binary footprint is critical for <strong>embedded and edge deployments</strong> where
-        binary size, startup latency, and memory consumption directly impact deployment feasibility.
-      </p>
-    `,
-    discussion: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Binary Size: Middle Ground</h4>
-      <p class="text-muted mb-2">
-        VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects
-        our choice to include advanced features (window functions, CTEs, columnar execution) while
-        keeping the binary manageable for embedded deployments.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Startup: Fastest Cold Start</h4>
-      <p class="text-muted mb-2">
-        VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and
-        significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only
-        essential metadata structures on startup.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Memory Efficiency</h4>
-      <p class="text-muted mb-2">
-        Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB.
-        The difference from SQLite reflects our more sophisticated query optimizer and columnar
-        execution infrastructure that's allocated upfront.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Size Reduction Roadmap</h4>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li><strong>Feature flags:</strong> Compile-time feature selection to exclude unused functionality</li>
-        <li><strong>LTO optimization:</strong> Whole-program link-time optimization for dead code elimination</li>
-        <li><strong>Modular builds:</strong> Separate core engine from optional features (e.g., window functions)</li>
-      </ul>
-    `,
+    methodology: methodology(
+      'Native Binary Footprint',
+      `<strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries,
+        comparing binary size, cold startup time, and peak memory usage.`,
+      [
+        li('Binary Size', 'Size of the compiled native binary in bytes (stripped release build)'),
+        li('Startup Time', 'Time from process start to first query result (CREATE TABLE, INSERT, SELECT)'),
+        li('Peak Memory', 'Maximum resident set size (RSS) during cold startup'),
+        li('Databases', 'VibeSQL, SQLite, DuckDB'),
+      ],
+      [
+        `Native binary footprint is critical for <strong>embedded and edge deployments</strong> where
+        binary size, startup latency, and memory consumption directly impact deployment feasibility.`,
+      ]
+    ),
+    discussion: discussion([
+      {
+        title: 'Binary Size: Middle Ground',
+        content: p(`VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects
+          our choice to include advanced features (window functions, CTEs, columnar execution) while
+          keeping the binary manageable for embedded deployments.`),
+      },
+      {
+        title: 'Startup: Fastest Cold Start',
+        content: p(`VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and
+          significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only
+          essential metadata structures on startup.`),
+      },
+      {
+        title: 'Memory Efficiency',
+        content: p(`Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB.
+          The difference from SQLite reflects our more sophisticated query optimizer and columnar
+          execution infrastructure that's allocated upfront.`),
+      },
+      {
+        title: 'Size Reduction Roadmap',
+        content: bullets([
+          bullet('Feature flags', 'Compile-time feature selection to exclude unused functionality'),
+          bullet('LTO optimization', 'Whole-program link-time optimization for dead code elimination'),
+          bullet('Modular builds', 'Separate core engine from optional features (e.g., window functions)'),
+        ]),
+      },
+    ]),
   },
   'footprint-server': {
     id: 'footprint-server',
@@ -554,62 +546,54 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'wasm_size': 'WASM Size - Size of the WebAssembly module for browser deployment',
       'wasm_gzip': 'WASM (gzip) - Compressed size for web delivery',
     },
-    methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">WASM Footprint</h3>
-      <p class="text-muted mb-4">
-        <strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment,
-        critical for web applications where download size impacts user experience.
-      </p>
-
-      <ul class="space-y-2 text-muted">
-        <li><strong>WASM Size:</strong> Size of the raw WebAssembly module</li>
-        <li><strong>WASM (gzip):</strong> Compressed size for HTTP delivery (browsers auto-decompress)</li>
-        <li><strong>WASM (brotli):</strong> Brotli-compressed size for optimal web delivery</li>
-      </ul>
-
-      <p class="mt-4 text-muted">
-        WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts
-        time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.
-      </p>
-
-      <p class="mt-2 text-muted text-sm">
-        <strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining
-        full SQL:1999 compliance in the browser.
-      </p>
-    `,
-    discussion: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">WASM: 2.2MB Compressed</h4>
-      <p class="text-muted mb-2">
-        VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast
-        initial page loads. This is a full SQL:1999 database with window functions, CTEs, and
-        ACID transactions running entirely in the browser.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">What's Included</h4>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li>Complete SQL parser and query optimizer</li>
-        <li>B-tree storage engine with MVCC</li>
-        <li>Window functions and advanced aggregations</li>
-        <li>Common table expressions (WITH clause)</li>
-        <li>Full ACID transaction support</li>
-      </ul>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">Browser Deployment Benefits</h4>
-      <p class="text-muted mb-2">
-        Running SQL in the browser eliminates round-trip latency to servers, enables offline-first
-        applications, and keeps sensitive data on the user's device. VibeSQL's WASM build is
-        designed for this use case with minimal dependencies and efficient memory usage.
-      </p>
-
-      <h4 class="text-md font-medium text-foreground mt-4 mb-2">WASM Roadmap</h4>
-      <ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
-        <li><strong>Streaming compilation:</strong> Start executing while the module downloads</li>
-        <li><strong>IndexedDB persistence:</strong> Durable storage across browser sessions</li>
-        <li><strong>Worker thread support:</strong> Run queries off the main thread for responsive UIs</li>
-      </ul>
-    `,
+    methodology: methodology(
+      'WASM Footprint',
+      `<strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment,
+        critical for web applications where download size impacts user experience.`,
+      [
+        li('WASM Size', 'Size of the raw WebAssembly module'),
+        li('WASM (gzip)', 'Compressed size for HTTP delivery (browsers auto-decompress)'),
+        li('WASM (brotli)', 'Brotli-compressed size for optimal web delivery'),
+      ],
+      [
+        `WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts
+        time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.`,
+        `<strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining
+        full SQL:1999 compliance in the browser.`,
+      ]
+    ),
+    discussion: discussion([
+      {
+        title: 'WASM: 2.2MB Compressed',
+        content: p(`VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast
+          initial page loads. This is a full SQL:1999 database with window functions, CTEs, and
+          ACID transactions running entirely in the browser.`),
+      },
+      {
+        title: "What's Included",
+        content: bullets([
+          '<li>Complete SQL parser and query optimizer</li>',
+          '<li>B-tree storage engine with MVCC</li>',
+          '<li>Window functions and advanced aggregations</li>',
+          '<li>Common table expressions (WITH clause)</li>',
+          '<li>Full ACID transaction support</li>',
+        ]),
+      },
+      {
+        title: 'Browser Deployment Benefits',
+        content: p(`Running SQL in the browser eliminates round-trip latency to servers, enables offline-first
+          applications, and keeps sensitive data on the user's device. VibeSQL's WASM build is
+          designed for this use case with minimal dependencies and efficient memory usage.`),
+      },
+      {
+        title: 'WASM Roadmap',
+        content: bullets([
+          bullet('Streaming compilation', 'Start executing while the module downloads'),
+          bullet('IndexedDB persistence', 'Durable storage across browser sessions'),
+          bullet('Worker thread support', 'Run queries off the main thread for responsive UIs'),
+        ]),
+      },
+    ]),
   },
 };
 
@@ -1737,17 +1721,13 @@ function renderTPCCTable(data: TPCCResults): void {
   const table = document.getElementById('results-table');
   if (!tbody || !table) return;
 
-  // Update table headers for TPC-C view
+  // Update table headers for TPC-C view (TPS = higher is better)
   const thead = table.querySelector('thead tr');
   if (thead) {
     thead.innerHTML = `
       <th class="px-4 py-3">Workload</th>
-      <th class="px-4 py-3 text-right">VibeSQL</th>
-      <th class="px-4 py-3 text-right">SQLite</th>
-      <th class="px-4 py-3 text-right">Transactions</th>
-      <th class="px-4 py-3 text-right">Duration</th>
-      <th class="px-4 py-3 text-right">Speedup</th>
-      <th class="px-4 py-3 text-center">Winner</th>
+      <th class="px-4 py-3 text-right" title="Transactions per second (higher is better)">VibeSQL (TPS)</th>
+      <th class="px-4 py-3 text-right" title="Transactions per second (higher is better)">SQLite (TPS)</th>
     `;
   }
 
@@ -1779,66 +1759,34 @@ function renderTPCCTable(data: TPCCResults): void {
     }
     row.appendChild(opCell);
 
+    // For TPS, higher is better - track which is the winner
+    const vibesqlTps = vibesql?.stats.tps ?? 0;
+    const sqliteTps = sqlite?.stats.tps ?? 0;
+    const vibesqlWins = vibesqlTps > sqliteTps && vibesqlTps > 0;
+    const sqliteWins = sqliteTps > vibesqlTps && sqliteTps > 0;
+
     // VibeSQL TPS
     const vibesqlCell = document.createElement('td');
-    vibesqlCell.className = 'px-4 py-3 text-right text-muted';
+    vibesqlCell.className = vibesqlWins
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-muted';
     vibesqlCell.textContent = vibesql ? formatTPS(vibesql.stats.tps) : 'N/A';
     row.appendChild(vibesqlCell);
 
     // SQLite TPS
     const sqliteCell = document.createElement('td');
-    sqliteCell.className = 'px-4 py-3 text-right text-muted';
+    sqliteCell.className = sqliteWins
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-muted';
     sqliteCell.textContent = sqlite ? formatTPS(sqlite.stats.tps) : 'N/A';
     row.appendChild(sqliteCell);
 
-    // Transactions (use vibesql or sqlite)
-    const txCell = document.createElement('td');
-    txCell.className = 'px-4 py-3 text-right text-muted';
-    const txBench = vibesql || sqlite;
-    txCell.textContent = txBench ? txBench.stats.transactions.toLocaleString() : 'N/A';
-    row.appendChild(txCell);
-
-    // Duration
-    const durCell = document.createElement('td');
-    durCell.className = 'px-4 py-3 text-right text-muted';
-    durCell.textContent = txBench ? `${(txBench.stats.duration_ms / 1000).toFixed(0)}s` : 'N/A';
-    row.appendChild(durCell);
-
-    // Speedup (for TPS, higher is better, so speedup = vibesql / sqlite)
-    const speedupCell = document.createElement('td');
-    speedupCell.className = 'px-4 py-3 text-right font-semibold';
-
+    // Track speedup for summary card
     if (vibesql && sqlite && vibesql.stats.tps > 0 && sqlite.stats.tps > 0) {
       const speedup = vibesql.stats.tps / sqlite.stats.tps;
-      speedupCell.textContent = `${speedup.toFixed(2)}x`;
-
-      if (speedup > 1) {
-        speedupCell.className += ' text-green-600 dark:text-green-400';
-      } else if (speedup < 1) {
-        speedupCell.className += ' text-red-600 dark:text-red-400';
-      } else {
-        speedupCell.className += ' text-muted';
-      }
-
       totalSpeedup += speedup;
       comparisonCount++;
-    } else {
-      speedupCell.textContent = 'N/A';
-      speedupCell.className += ' text-muted';
     }
-    row.appendChild(speedupCell);
-
-    // Winner
-    const winnerCell = document.createElement('td');
-    winnerCell.className = 'px-4 py-3 text-center text-2xl';
-
-    if (vibesql && sqlite && vibesql.stats.tps > 0 && sqlite.stats.tps > 0) {
-      const speedup = vibesql.stats.tps / sqlite.stats.tps;
-      winnerCell.textContent = speedup > 1 ? '🚀' : speedup < 1 ? '🐌' : '🤝';
-    } else {
-      winnerCell.textContent = '-';
-    }
-    row.appendChild(winnerCell);
 
     tbody.appendChild(row);
   }
