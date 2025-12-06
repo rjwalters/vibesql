@@ -28,13 +28,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
         with:
-          key: i18n-check
+          cache-key-suffix: i18n
 
       - name: Check Fluent syntax
         run: cargo run -p vibesql-l10n --bin check-ftl
