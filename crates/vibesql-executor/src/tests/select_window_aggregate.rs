@@ -628,3 +628,192 @@ fn test_tpcds_q12_revenue_ratio_pattern() {
         panic!("Expected SELECT statement");
     }
 }
+
+/// Test AVG(SUM(...)) pattern - minimal reproduction of TPC-DS Q57 issue
+/// This is the exact pattern that fails in Q57:
+/// AVG(SUM(cs_sales_price)) OVER (PARTITION BY ... ORDER BY ... ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING)
+#[test]
+fn test_window_function_avg_sum_nested() {
+    use vibesql_storage::Row;
+    let mut db = Database::new();
+
+    // Create sales table with categories and months
+    let schema = TableSchema::new(
+        "SALES".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new(
+                "CATEGORY".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
+            ColumnSchema::new("MONTH".to_string(), DataType::Integer, false),
+            ColumnSchema::new("AMOUNT".to_string(), DataType::Integer, false),
+        ],
+    );
+
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("SALES").unwrap();
+    // Category A, Month 1: sales 100, 200 = 300 total
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar("A".to_string()),
+            SqlValue::Integer(1),
+            SqlValue::Integer(100),
+        ]))
+        .unwrap();
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar("A".to_string()),
+            SqlValue::Integer(1),
+            SqlValue::Integer(200),
+        ]))
+        .unwrap();
+    // Category A, Month 2: sales 300 = 300 total
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(3),
+            SqlValue::Varchar("A".to_string()),
+            SqlValue::Integer(2),
+            SqlValue::Integer(300),
+        ]))
+        .unwrap();
+    // Category A, Month 3: sales 400 = 400 total
+    table
+        .insert(Row::new(vec![
+            SqlValue::Integer(4),
+            SqlValue::Varchar("A".to_string()),
+            SqlValue::Integer(3),
+            SqlValue::Integer(400),
+        ]))
+        .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // Test AVG(SUM(amount)) - this is the Q57 pattern
+    let query = r#"
+        SELECT
+            category,
+            month,
+            SUM(amount) as total,
+            AVG(SUM(amount)) OVER (PARTITION BY category) as avg_monthly
+        FROM sales
+        GROUP BY category, month
+    "#;
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute(&select_stmt);
+
+        assert!(result.is_ok(), "AVG(SUM()) should work: {:?}", result.err());
+
+        let rows = result.unwrap();
+        // 3 months for category A
+        assert_eq!(rows.len(), 3);
+
+        // Debug output
+        eprintln!("=== AVG(SUM()) test results ===");
+        for (i, row) in rows.iter().enumerate() {
+            eprintln!("Row {}: {:?}", i, row.values);
+        }
+
+        // Month 1: total=300
+        // Month 2: total=300
+        // Month 3: total=400
+        // AVG = (300 + 300 + 400) / 3 = 333.33...
+        for row in &rows {
+            // avg_monthly should be ~333.33 for all rows
+            if let SqlValue::Numeric(avg) = row.values[3] {
+                assert!(
+                    (avg - 333.333).abs() < 1.0,
+                    "Expected avg ~333.33, got {}",
+                    avg
+                );
+            } else {
+                panic!("Expected Numeric for avg_monthly, got {:?}", row.values[3]);
+            }
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+/// Test AVG(SUM(...)) with frame specification like Q57
+#[test]
+fn test_window_function_avg_sum_with_frame() {
+    use vibesql_storage::Row;
+    let mut db = Database::new();
+
+    // Create sales table with categories and months
+    let schema = TableSchema::new(
+        "SALES".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new(
+                "CATEGORY".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
+            ColumnSchema::new("MONTH".to_string(), DataType::Integer, false),
+            ColumnSchema::new("AMOUNT".to_string(), DataType::Integer, false),
+        ],
+    );
+
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("SALES").unwrap();
+    // 5 months of data for category A
+    for month in 1..=5 {
+        table
+            .insert(Row::new(vec![
+                SqlValue::Integer(month),
+                SqlValue::Varchar("A".to_string()),
+                SqlValue::Integer(month),
+                SqlValue::Integer(month * 100), // 100, 200, 300, 400, 500
+            ]))
+            .unwrap();
+    }
+
+    let executor = SelectExecutor::new(&db);
+
+    // Test AVG(SUM(amount)) with frame - exact Q57 pattern
+    let query = r#"
+        SELECT
+            category,
+            month,
+            SUM(amount) as total,
+            AVG(SUM(amount)) OVER (
+                PARTITION BY category
+                ORDER BY month
+                ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+            ) as moving_avg
+        FROM sales
+        GROUP BY category, month
+        ORDER BY month
+    "#;
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute(&select_stmt);
+
+        assert!(
+            result.is_ok(),
+            "AVG(SUM()) with frame should work: {:?}",
+            result.err()
+        );
+
+        let rows = result.unwrap();
+        assert_eq!(rows.len(), 5);
+
+        // Month 1: AVG(100, 200) = 150
+        // Month 2: AVG(100, 200, 300) = 200
+        // Month 3: AVG(200, 300, 400) = 300
+        // Month 4: AVG(300, 400, 500) = 400
+        // Month 5: AVG(400, 500) = 450
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
