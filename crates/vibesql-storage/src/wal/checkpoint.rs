@@ -258,7 +258,7 @@ impl CheckpointWriter {
         if let Ok(entries) = fs::read_dir(&self.checkpoint_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "vchk") {
+                if path.extension().is_some_and(|ext| ext == "vchk") {
                     if let Ok(info) = Self::read_checkpoint_info(&path) {
                         checkpoints.push(info);
                     }
