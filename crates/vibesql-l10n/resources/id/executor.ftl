@@ -110,8 +110,8 @@ executor-label-not-found = Label '{ $name }' tidak ditemukan
 # SELECT INTO Errors
 # =============================================================================
 
-executor-select-into-row-count = SELECT INTO prosedural harus mengembalikan tepat { $expected } baris, mendapat { $actual } baris
-executor-select-into-column-count = Ketidakcocokan jumlah kolom SELECT INTO prosedural: { $expected } variabel tetapi query mengembalikan { $actual } kolom
+executor-select-into-row-count = SELECT INTO prosedural harus mengembalikan tepat { $expected } baris, mendapat { $actual } baris{ $plural }
+executor-select-into-column-count = Ketidakcocokan jumlah kolom SELECT INTO prosedural: { $expected } variabel{ $expected_plural } tetapi query mengembalikan { $actual } kolom{ $actual_plural }
 
 # =============================================================================
 # Procedure and Function Errors
@@ -131,7 +131,7 @@ executor-function-not-found-with-suggestion = Fungsi '{ $function_name }' tidak 
     .available = Fungsi yang tersedia: { $available_functions }
     .suggestion = Apakah Anda maksud '{ $suggestion }'?
 
-executor-parameter-count-mismatch = { $routine_type } '{ $routine_name }' mengharapkan { $expected } parameter ({ $parameter_signature }), mendapat { $actual } argumen
+executor-parameter-count-mismatch = { $routine_type } '{ $routine_name }' mengharapkan { $expected } parameter{ $expected_plural } ({ $parameter_signature }), mendapat { $actual } argumen{ $actual_plural }
 executor-parameter-type-mismatch = Parameter '{ $parameter_name }' mengharapkan { $expected_type }, mendapat { $actual_type } '{ $actual_value }'
 executor-argument-count-mismatch = Ketidakcocokan jumlah argumen: diharapkan { $expected }, mendapat { $actual }
 
