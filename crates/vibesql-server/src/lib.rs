@@ -13,6 +13,7 @@ pub mod registry;
 pub mod scheduler;
 pub mod session;
 pub mod subscription;
+pub mod transaction;
 
 pub use auth::PasswordStore;
 pub use config::{
@@ -33,6 +34,9 @@ pub use subscription::{
     extract_table_dependencies, extract_table_refs, SessionSubscription, SessionSubscriptionId,
     SessionSubscriptionManager, Subscription, SubscriptionError, SubscriptionId,
     SubscriptionManager, SubscriptionUpdate,
+};
+pub use transaction::{
+    SessionTransactionManager, TransactionChange, TransactionError, TransactionState,
 };
 // Re-export ChangeEvent from storage layer for consistency
 pub use vibesql_storage::ChangeEvent;
