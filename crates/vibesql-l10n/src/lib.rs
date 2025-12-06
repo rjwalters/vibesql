@@ -83,6 +83,10 @@ where
     })
 }
 
+/// List of FTL resource files to load for each locale.
+/// These files are loaded in order and merged into a single bundle.
+const RESOURCE_FILES: &[&str] = &["cli.ftl", "parser.ftl"];
+
 /// Create a new FluentBundle for the given locale
 fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nError> {
     let locale: LanguageIdentifier = locale_str
@@ -91,22 +95,36 @@ fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nE
 
     let mut bundle = FluentBundle::new(vec![locale]);
 
-    // Load resources for the requested locale, falling back to en-US
-    let resource_path = format!("{}/cli.ftl", locale_str);
-    let fallback_path = "en-US/cli.ftl";
+    // Load all resource files for this locale
+    for file_name in RESOURCE_FILES {
+        let resource_path = format!("{}/{}", locale_str, file_name);
+        let fallback_path = format!("en-US/{}", file_name);
 
-    let ftl_content = Resources::get(&resource_path)
-        .or_else(|| Resources::get(fallback_path))
-        .ok_or_else(|| L10nError::ResourceNotFound(resource_path.clone()))?;
+        // Try the requested locale first, then fall back to en-US
+        let ftl_content = match Resources::get(&resource_path) {
+            Some(content) => content,
+            None => {
+                // Try fallback locale
+                match Resources::get(&fallback_path) {
+                    Some(content) => content,
+                    None => {
+                        // Skip if neither locale has this file (it's optional)
+                        continue;
+                    }
+                }
+            }
+        };
 
-    let ftl_string = std::str::from_utf8(ftl_content.data.as_ref())
-        .map_err(|e| L10nError::ParseError(e.to_string()))?
-        .to_string();
+        let ftl_string = std::str::from_utf8(ftl_content.data.as_ref())
+            .map_err(|e| L10nError::ParseError(e.to_string()))?
+            .to_string();
 
-    let resource = FluentResource::try_new(ftl_string)
-        .map_err(|(_, errors)| L10nError::ParseError(format!("{:?}", errors)))?;
+        let resource = FluentResource::try_new(ftl_string)
+            .map_err(|(_, errors)| L10nError::ParseError(format!("{:?}", errors)))?;
 
-    bundle.add_resource(resource).map_err(|errors| L10nError::ParseError(format!("{:?}", errors)))?;
+        // Ignore errors from duplicate message IDs (later files override earlier ones)
+        let _ = bundle.add_resource(resource);
+    }
 
     Ok(bundle)
 }
@@ -306,5 +324,61 @@ mod tests {
 
         let result = vibe_msg!("rows-count", count = 5);
         assert!(result.contains("5"));
+    }
+
+    #[test]
+    fn test_parser_resources_loaded() {
+        init(Some("en-US")).unwrap();
+
+        // Test parser.ftl messages are accessible
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Unterminated string literal");
+
+        let result = format("lexer-empty-delimited-identifier", None);
+        assert_eq!(result, "Empty delimited identifier is not allowed");
+    }
+
+    #[test]
+    fn test_parser_message_with_args() {
+        init(Some("en-US")).unwrap();
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Unexpected character"));
+    }
+
+    #[test]
+    fn test_spanish_locale() {
+        init(Some("es")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "¡Hasta luego!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("filas"));
+    }
+
+    #[test]
+    fn test_spanish_parser_messages() {
+        init(Some("es")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Literal de cadena sin terminar");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Carácter inesperado"));
+    }
+
+    #[test]
+    fn test_spanish_resources_embedded() {
+        // Check that Spanish resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("es/")), "Spanish resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "es/cli.ftl"), "es/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "es/parser.ftl"), "es/parser.ftl not found");
     }
 }

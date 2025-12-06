@@ -9,11 +9,31 @@ pub mod schema;
 #[cfg(test)]
 mod tests;
 
-/// Initializes the WASM module and sets up panic hooks
+/// Initializes the WASM module and sets up panic hooks.
+///
+/// When the `i18n` feature is enabled, this also detects the browser's
+/// language setting via `navigator.language` and initializes the localization
+/// system accordingly.
 #[wasm_bindgen(start)]
 pub fn init_wasm() {
     // Better error messages in browser console
     console_error_panic_hook::set_once();
+
+    // Initialize l10n with browser locale detection when i18n feature is enabled
+    #[cfg(feature = "i18n")]
+    {
+        let locale = detect_browser_locale();
+        let _ = vibesql_l10n::init(locale.as_deref());
+    }
+}
+
+/// Detect the browser's preferred locale from navigator.language.
+///
+/// Returns `Some(locale)` if detection succeeds, `None` to use default.
+#[cfg(feature = "i18n")]
+fn detect_browser_locale() -> Option<String> {
+    web_sys::window()
+        .and_then(|w| w.navigator().language())
 }
 
 /// Result of a query execution
