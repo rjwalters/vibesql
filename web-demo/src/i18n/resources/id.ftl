@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - Database SQL:1999 Bertenaga AI
 demo-title = Demo VibeSQL
+benchmarks-title = Benchmark Kinerja - VibeSQL
+benchmarks-heading = VibeSQL - Benchmark Kinerja
+conformance-title = Laporan Kesesuaian - VibeSQL
+conformance-heading = Laporan Kesesuaian
+conformance-subtitle = Pengujian Kepatuhan Standar SQL:1999
 
 # Navigation
 nav-showcase = Showcase SQL:1999

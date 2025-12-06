@@ -7,9 +7,10 @@
 
 import './styles/main.css';
 import { initTheme } from './theme';
-import { initLocale } from './locale';
+import { initLocale, SUPPORTED_LOCALES } from './locale';
 import { NavigationComponent } from './components/Navigation';
 import { formatTime, formatBytes, formatMemory, formatTps } from './utils/measurement';
+import { initI18n, setI18nLocale, updateDOM } from './i18n';
 
 // Chart.js is loaded via CDN in benchmarks.html
 declare const Chart: any;
@@ -2366,6 +2367,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize locale system
   const locale = initLocale();
+
+  // Initialize i18n with current locale
+  initI18n(locale.current);
+  updateDOM();
+  document.title = document.querySelector('title')?.textContent || document.title;
+
+  // Wire up locale changes to i18n
+  locale.onChange(localeCode => {
+    setI18nLocale(localeCode);
+    updateDOM();
+    document.documentElement.lang = localeCode;
+  });
 
   // Initialize navigation component with theme and locale
   new NavigationComponent('benchmarks', theme, locale);

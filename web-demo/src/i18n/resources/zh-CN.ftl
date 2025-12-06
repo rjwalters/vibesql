@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - AI驱动的SQL:1999数据库
 demo-title = VibeSQL 演示
+benchmarks-title = 性能基准测试 - VibeSQL
+benchmarks-heading = VibeSQL - 性能基准测试
+conformance-title = 合规性报告 - VibeSQL
+conformance-heading = 合规性报告
+conformance-subtitle = SQL:1999 标准合规性测试
 
 # Navigation
 nav-showcase = SQL:1999 展示

@@ -151,7 +151,8 @@ export function onI18nChange(callback: () => void): () => void {
  */
 export function updateDOM(): void {
   // Update text content
-  document.querySelectorAll('[data-i18n]').forEach(el => {
+  const elements = document.querySelectorAll('[data-i18n]')
+  elements.forEach(el => {
     const id = el.getAttribute('data-i18n')
     if (id) {
       el.textContent = t(id)

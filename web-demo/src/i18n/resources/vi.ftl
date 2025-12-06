@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - Cơ sở dữ liệu SQL:1999 hỗ trợ AI
 demo-title = Demo VibeSQL
+benchmarks-title = Đánh giá hiệu năng - VibeSQL
+benchmarks-heading = VibeSQL - Đánh giá hiệu năng
+conformance-title = Báo cáo tuân thủ - VibeSQL
+conformance-heading = Báo cáo tuân thủ
+conformance-subtitle = Kiểm tra tuân thủ tiêu chuẩn SQL:1999
 
 # Navigation
 nav-showcase = Trình diễn SQL:1999

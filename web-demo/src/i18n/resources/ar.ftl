@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - قاعدة بيانات SQL:1999 مدعومة بالذكاء الاصطناعي
 demo-title = عرض VibeSQL
+benchmarks-title = معايير الأداء - VibeSQL
+benchmarks-heading = VibeSQL - معايير الأداء
+conformance-title = تقرير المطابقة - VibeSQL
+conformance-heading = تقرير المطابقة
+conformance-subtitle = اختبار الامتثال لمعايير SQL:1999
 
 # Navigation
 nav-showcase = عرض SQL:1999

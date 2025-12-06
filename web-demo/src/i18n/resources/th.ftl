@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - ฐานข้อมูล SQL:1999 ที่ขับเคลื่อนด้วย AI
 demo-title = สาธิต VibeSQL
+benchmarks-title = เกณฑ์มาตรฐานประสิทธิภาพ - VibeSQL
+benchmarks-heading = VibeSQL - เกณฑ์มาตรฐานประสิทธิภาพ
+conformance-title = รายงานความสอดคล้อง - VibeSQL
+conformance-heading = รายงานความสอดคล้อง
+conformance-subtitle = การทดสอบความสอดคล้องกับมาตรฐาน SQL:1999
 
 # Navigation
 nav-showcase = โชว์เคส SQL:1999

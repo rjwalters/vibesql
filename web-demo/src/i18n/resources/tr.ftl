@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - Yapay Zeka Destekli SQL:1999 Veritabanı
 demo-title = VibeSQL Demo
+benchmarks-title = Performans Karşılaştırmaları - VibeSQL
+benchmarks-heading = VibeSQL - Performans Karşılaştırmaları
+conformance-title = Uyumluluk Raporu - VibeSQL
+conformance-heading = Uyumluluk Raporu
+conformance-subtitle = SQL:1999 Standart Uyumluluk Testi
 
 # Navigation
 nav-showcase = SQL:1999 Vitrin

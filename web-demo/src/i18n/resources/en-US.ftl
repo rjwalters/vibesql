@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - AI-Powered SQL:1999 Database
 demo-title = VibeSQL Demo
+benchmarks-title = Performance Benchmarks - VibeSQL
+benchmarks-heading = VibeSQL - Performance Benchmarks
+conformance-title = Conformance Report - VibeSQL
+conformance-heading = Conformance Report
+conformance-subtitle = SQL:1999 Standards Compliance Testing
 
 # Navigation
 nav-showcase = SQL:1999 Showcase

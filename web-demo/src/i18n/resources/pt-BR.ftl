@@ -3,6 +3,11 @@
 # Page titles
 page-title = VibeSQL - Banco de Dados SQL:1999 com IA
 demo-title = Demo do VibeSQL
+benchmarks-title = Benchmarks de Desempenho - VibeSQL
+benchmarks-heading = VibeSQL - Benchmarks de Desempenho
+conformance-title = Relatório de Conformidade - VibeSQL
+conformance-heading = Relatório de Conformidade
+conformance-subtitle = Testes de Conformidade com o Padrão SQL:1999
 
 # Navigation
 nav-showcase = Demonstração SQL:1999
