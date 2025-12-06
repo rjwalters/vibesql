@@ -223,12 +223,18 @@ impl DeleteExecutor {
 
         // Step 5a: Emit WAL entries and remove entries from user-defined indexes
         // BEFORE deleting rows (while row indices are still valid and we have old values)
+        // First emit WAL entries for each row (needed for recovery replay)
         for (idx, row) in &rows_and_indices_to_delete {
-            // Emit WAL entry for persistence (captures old_values for recovery replay)
             database.emit_wal_delete(&stmt.table_name, *idx as u64, row.values.clone());
-
-            database.update_indexes_for_delete(&stmt.table_name, row, *idx);
         }
+
+        // Then use batch method for index updates: O(d + m*log n) vs O(d*m*log n)
+        // where d=deletes, m=indexes
+        let rows_refs: Vec<(usize, &vibesql_storage::Row)> = rows_and_indices_to_delete
+            .iter()
+            .map(|(idx, row)| (*idx, row))
+            .collect();
+        database.batch_update_indexes_for_delete(&stmt.table_name, &rows_refs);
 
         // Step 5b: Actually delete the rows using fast path (no table scan needed)
         let table_mut = database
