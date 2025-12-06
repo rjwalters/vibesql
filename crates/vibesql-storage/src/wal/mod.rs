@@ -68,10 +68,12 @@
 // valid entry using `find_recovery_point()`.
 
 pub mod checkpoint;
+pub mod durability;
 pub mod engine;
 pub mod entry;
 pub mod format;
 pub mod reader;
+pub mod recovery;
 pub mod scheduler;
 pub mod truncate;
 pub mod writer;
@@ -81,6 +83,7 @@ pub use checkpoint::{
     read_checkpoint_data, CheckpointHeader, CheckpointInfo, CheckpointWriter,
     CHECKPOINT_HEADER_SIZE, CHECKPOINT_MAGIC, CHECKPOINT_VERSION,
 };
+pub use durability::{DurabilityConfig, DurabilityMode, TransactionDurability};
 pub use engine::{
     FlushNotifier, PersistenceConfig, PersistenceEngine, PersistenceStats, WalMessage,
     DEFAULT_CHANNEL_CAPACITY, DEFAULT_FLUSH_COUNT, DEFAULT_FLUSH_INTERVAL_MS,
@@ -93,5 +96,6 @@ pub use scheduler::{
     CheckpointTriggerState, DEFAULT_CHECKPOINT_INTERVAL_SECS, DEFAULT_KEEP_CHECKPOINTS,
     DEFAULT_WAL_SIZE_THRESHOLD,
 };
+pub use recovery::{needs_recovery, recover, RecoveryConfig, RecoveryManager, RecoveryStats};
 pub use truncate::{truncate_wal, TruncateResult};
 pub use writer::{verify_checksum, WalWriter};

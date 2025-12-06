@@ -27,6 +27,9 @@ mod loader;
 pub use detection::detect_locale;
 pub use loader::L10nError;
 
+// Re-export fluent for use by the vibe_msg! macro in downstream crates
+pub use fluent;
+
 use std::cell::RefCell;
 use std::sync::RwLock;
 
@@ -85,7 +88,7 @@ where
 
 /// List of FTL resource files to load for each locale.
 /// These files are loaded in order and merged into a single bundle.
-const RESOURCE_FILES: &[&str] = &["cli.ftl", "parser.ftl"];
+const RESOURCE_FILES: &[&str] = &["cli.ftl", "parser.ftl", "storage.ftl", "catalog.ftl", "executor.ftl"];
 
 /// Create a new FluentBundle for the given locale
 fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nError> {
@@ -94,6 +97,9 @@ fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nE
         .map_err(|_| L10nError::InvalidLocale(locale_str.to_string()))?;
 
     let mut bundle = FluentBundle::new(vec![locale]);
+    // Disable Unicode isolation characters (used for bidirectional text support)
+    // Not needed for database error messages and causes test failures
+    bundle.set_use_isolating(false);
 
     // Load all resource files for this locale
     for file_name in RESOURCE_FILES {
@@ -256,7 +262,7 @@ macro_rules! vibe_msg {
         $crate::format($id, None)
     };
     ($id:literal, $($key:ident = $value:expr),+ $(,)?) => {{
-        let mut args = fluent::FluentArgs::new();
+        let mut args = $crate::fluent::FluentArgs::new();
         $(
             args.set(stringify!($key), $value);
         )+

@@ -1623,3 +1623,84 @@ fn test_lookup_by_index_prefix_empty_prefix() {
     let rows = db.lookup_by_index_prefix("idx_ab", &[]).unwrap();
     assert_eq!(rows.len(), 1, "Empty prefix should return all rows");
 }
+
+// ============================================================================
+// range_scan_limit tests (#3638)
+// ============================================================================
+
+#[test]
+fn test_range_scan_limit_basic() {
+    // Test that range_scan_limit stops after collecting limit rows
+    let mut data = std::collections::BTreeMap::new();
+
+    // Insert 10 rows with values 10, 20, ..., 100
+    for i in 1..=10 {
+        data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
+    }
+
+    let index_data = IndexData::InMemory { data };
+
+    // Query all rows with limit 3
+    let result = index_data.range_scan_limit(None, None, false, false, Some(3));
+    assert_eq!(result.len(), 3, "Should return exactly 3 rows");
+
+    // Query with BETWEEN and limit
+    let result = index_data.range_scan_limit(
+        Some(&SqlValue::Integer(25)),
+        Some(&SqlValue::Integer(85)),
+        true,
+        true,
+        Some(2),
+    );
+    // Values 30, 40, 50, 60, 70, 80 match, but limit is 2
+    assert_eq!(result.len(), 2, "Should return exactly 2 rows with limit");
+    // Should be rows with values 30 and 40 (row indices 3 and 4)
+    assert_eq!(result, vec![3, 4]);
+}
+
+#[test]
+fn test_range_scan_limit_no_limit() {
+    // Test that range_scan_limit with None limit returns all rows
+    let mut data = std::collections::BTreeMap::new();
+
+    for i in 1..=5 {
+        data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
+    }
+
+    let index_data = IndexData::InMemory { data };
+
+    // Query with no limit - should return all
+    let result = index_data.range_scan_limit(None, None, false, false, None);
+    assert_eq!(result.len(), 5, "Should return all rows when limit is None");
+}
+
+#[test]
+fn test_range_scan_limit_zero() {
+    // Test that range_scan_limit with limit=0 returns empty
+    let mut data = std::collections::BTreeMap::new();
+
+    for i in 1..=5 {
+        data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
+    }
+
+    let index_data = IndexData::InMemory { data };
+
+    let result = index_data.range_scan_limit(None, None, false, false, Some(0));
+    assert!(result.is_empty(), "Should return empty when limit is 0");
+}
+
+#[test]
+fn test_range_scan_limit_larger_than_result() {
+    // Test that limit larger than result set returns all matches
+    let mut data = std::collections::BTreeMap::new();
+
+    for i in 1..=3 {
+        data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
+    }
+
+    let index_data = IndexData::InMemory { data };
+
+    // Ask for 100 rows but only 3 exist
+    let result = index_data.range_scan_limit(None, None, false, false, Some(100));
+    assert_eq!(result.len(), 3, "Should return all 3 rows when limit > result size");
+}

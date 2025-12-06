@@ -298,9 +298,14 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
 impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use vibesql_l10n::vibe_msg;
         match self {
-            ExecutorError::TableNotFound(name) => write!(f, "Table '{}' not found", name),
-            ExecutorError::TableAlreadyExists(name) => write!(f, "Table '{}' already exists", name),
+            ExecutorError::TableNotFound(name) => {
+                write!(f, "{}", vibe_msg!("executor-table-not-found", name = name.as_str()))
+            }
+            ExecutorError::TableAlreadyExists(name) => {
+                write!(f, "{}", vibe_msg!("executor-table-already-exists", name = name.as_str()))
+            }
             ExecutorError::ColumnNotFound {
                 column_name,
                 table_name,
@@ -308,166 +313,148 @@ impl std::fmt::Display for ExecutorError {
                 available_columns,
             } => {
                 if searched_tables.is_empty() {
-                    write!(f, "Column '{}' not found in table '{}'", column_name, table_name)
+                    write!(f, "{}", vibe_msg!("executor-column-not-found-simple", column_name = column_name.as_str(), table_name = table_name.as_str()))
                 } else if available_columns.is_empty() {
-                    write!(
-                        f,
-                        "Column '{}' not found (searched tables: {})",
-                        column_name,
-                        searched_tables.join(", ")
-                    )
+                    let searched = searched_tables.join(", ");
+                    write!(f, "{}", vibe_msg!("executor-column-not-found-searched", column_name = column_name.as_str(), searched_tables = searched.as_str()))
                 } else {
-                    write!(
-                        f,
-                        "Column '{}' not found (searched tables: {}). Available columns: {}",
-                        column_name,
-                        searched_tables.join(", "),
-                        available_columns.join(", ")
-                    )
+                    let searched = searched_tables.join(", ");
+                    let available = available_columns.join(", ");
+                    write!(f, "{}", vibe_msg!("executor-column-not-found-with-available", column_name = column_name.as_str(), searched_tables = searched.as_str(), available_columns = available.as_str()))
                 }
             }
             ExecutorError::InvalidTableQualifier { qualifier, column, available_tables } => {
-                write!(
-                    f,
-                    "Invalid table qualifier '{}' for column '{}'. Available tables: {}",
-                    qualifier,
-                    column,
-                    available_tables.join(", ")
-                )
+                let available = available_tables.join(", ");
+                write!(f, "{}", vibe_msg!("executor-invalid-table-qualifier", qualifier = qualifier.as_str(), column = column.as_str(), available_tables = available.as_str()))
             }
             ExecutorError::ColumnAlreadyExists(name) => {
-                write!(f, "Column '{}' already exists", name)
+                write!(f, "{}", vibe_msg!("executor-column-already-exists", name = name.as_str()))
             }
-            ExecutorError::IndexNotFound(name) => write!(f, "Index '{}' not found", name),
-            ExecutorError::IndexAlreadyExists(name) => write!(f, "Index '{}' already exists", name),
+            ExecutorError::IndexNotFound(name) => {
+                write!(f, "{}", vibe_msg!("executor-index-not-found", name = name.as_str()))
+            }
+            ExecutorError::IndexAlreadyExists(name) => {
+                write!(f, "{}", vibe_msg!("executor-index-already-exists", name = name.as_str()))
+            }
             ExecutorError::InvalidIndexDefinition(msg) => {
-                write!(f, "Invalid index definition: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-invalid-index-definition", message = msg.as_str()))
             }
-            ExecutorError::TriggerNotFound(name) => write!(f, "Trigger '{}' not found", name),
+            ExecutorError::TriggerNotFound(name) => {
+                write!(f, "{}", vibe_msg!("executor-trigger-not-found", name = name.as_str()))
+            }
             ExecutorError::TriggerAlreadyExists(name) => {
-                write!(f, "Trigger '{}' already exists", name)
+                write!(f, "{}", vibe_msg!("executor-trigger-already-exists", name = name.as_str()))
             }
-            ExecutorError::SchemaNotFound(name) => write!(f, "Schema '{}' not found", name),
+            ExecutorError::SchemaNotFound(name) => {
+                write!(f, "{}", vibe_msg!("executor-schema-not-found", name = name.as_str()))
+            }
             ExecutorError::SchemaAlreadyExists(name) => {
-                write!(f, "Schema '{}' already exists", name)
+                write!(f, "{}", vibe_msg!("executor-schema-already-exists", name = name.as_str()))
             }
             ExecutorError::SchemaNotEmpty(name) => {
-                write!(f, "Cannot drop schema '{}': schema is not empty", name)
+                write!(f, "{}", vibe_msg!("executor-schema-not-empty", name = name.as_str()))
             }
-            ExecutorError::RoleNotFound(name) => write!(f, "Role '{}' not found", name),
-            ExecutorError::TypeNotFound(name) => write!(f, "Type '{}' not found", name),
-            ExecutorError::TypeAlreadyExists(name) => write!(f, "Type '{}' already exists", name),
+            ExecutorError::RoleNotFound(name) => {
+                write!(f, "{}", vibe_msg!("executor-role-not-found", name = name.as_str()))
+            }
+            ExecutorError::TypeNotFound(name) => {
+                write!(f, "{}", vibe_msg!("executor-type-not-found", name = name.as_str()))
+            }
+            ExecutorError::TypeAlreadyExists(name) => {
+                write!(f, "{}", vibe_msg!("executor-type-already-exists", name = name.as_str()))
+            }
             ExecutorError::TypeInUse(name) => {
-                write!(f, "Cannot drop type '{}': type is still in use", name)
+                write!(f, "{}", vibe_msg!("executor-type-in-use", name = name.as_str()))
             }
             ExecutorError::DependentPrivilegesExist(msg) => {
-                write!(f, "Dependent privileges exist: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-dependent-privileges-exist", message = msg.as_str()))
             }
             ExecutorError::PermissionDenied { role, privilege, object } => {
-                write!(
-                    f,
-                    "Permission denied: role '{}' lacks {} privilege on {}",
-                    role, privilege, object
-                )
+                write!(f, "{}", vibe_msg!("executor-permission-denied", role = role.as_str(), privilege = privilege.as_str(), object = object.as_str()))
             }
             ExecutorError::ColumnIndexOutOfBounds { index } => {
-                write!(f, "Column index {} out of bounds", index)
+                write!(f, "{}", vibe_msg!("executor-column-index-out-of-bounds", index = *index as i64))
             }
             ExecutorError::TypeMismatch { left, op, right } => {
-                write!(f, "Type mismatch: {:?} {} {:?}", left, op, right)
+                let left_str = format!("{:?}", left);
+                let right_str = format!("{:?}", right);
+                write!(f, "{}", vibe_msg!("executor-type-mismatch", left = left_str.as_str(), op = op.as_str(), right = right_str.as_str()))
             }
-            ExecutorError::DivisionByZero => write!(f, "Division by zero"),
-            ExecutorError::InvalidWhereClause(msg) => write!(f, "Invalid WHERE clause: {}", msg),
+            ExecutorError::DivisionByZero => {
+                write!(f, "{}", vibe_msg!("executor-division-by-zero"))
+            }
+            ExecutorError::InvalidWhereClause(msg) => {
+                write!(f, "{}", vibe_msg!("executor-invalid-where-clause", message = msg.as_str()))
+            }
             ExecutorError::UnsupportedExpression(msg) => {
-                write!(f, "Unsupported expression: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-unsupported-expression", message = msg.as_str()))
             }
-            ExecutorError::UnsupportedFeature(msg) => write!(f, "Unsupported feature: {}", msg),
-            ExecutorError::StorageError(msg) => write!(f, "Storage error: {}", msg),
+            ExecutorError::UnsupportedFeature(msg) => {
+                write!(f, "{}", vibe_msg!("executor-unsupported-feature", message = msg.as_str()))
+            }
+            ExecutorError::StorageError(msg) => {
+                write!(f, "{}", vibe_msg!("executor-storage-error", message = msg.as_str()))
+            }
             ExecutorError::SubqueryReturnedMultipleRows { expected, actual } => {
-                write!(f, "Scalar subquery returned {} rows, expected {}", actual, expected)
+                write!(f, "{}", vibe_msg!("executor-subquery-returned-multiple-rows", expected = *expected as i64, actual = *actual as i64))
             }
             ExecutorError::SubqueryColumnCountMismatch { expected, actual } => {
-                write!(f, "Subquery returned {} columns, expected {}", actual, expected)
+                write!(f, "{}", vibe_msg!("executor-subquery-column-count-mismatch", expected = *expected as i64, actual = *actual as i64))
             }
             ExecutorError::ColumnCountMismatch { expected, provided } => {
-                write!(
-                    f,
-                    "Derived column list has {} columns but query produces {} columns",
-                    provided, expected
-                )
+                write!(f, "{}", vibe_msg!("executor-column-count-mismatch", expected = *expected as i64, provided = *provided as i64))
             }
             ExecutorError::CastError { from_type, to_type } => {
-                write!(f, "Cannot cast {} to {}", from_type, to_type)
+                write!(f, "{}", vibe_msg!("executor-cast-error", from_type = from_type.as_str(), to_type = to_type.as_str()))
             }
             ExecutorError::TypeConversionError { from, to } => {
-                write!(f, "Cannot convert {} to {}", from, to)
+                write!(f, "{}", vibe_msg!("executor-type-conversion-error", from = from.as_str(), to = to.as_str()))
             }
             ExecutorError::ConstraintViolation(msg) => {
-                write!(f, "Constraint violation: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-constraint-violation", message = msg.as_str()))
             }
             ExecutorError::MultiplePrimaryKeys => {
-                write!(f, "Multiple PRIMARY KEY constraints are not allowed")
+                write!(f, "{}", vibe_msg!("executor-multiple-primary-keys"))
             }
             ExecutorError::CannotDropColumn(msg) => {
-                write!(f, "Cannot drop column: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-cannot-drop-column", message = msg.as_str()))
             }
             ExecutorError::ConstraintNotFound { constraint_name, table_name } => {
-                write!(f, "Constraint '{}' not found in table '{}'", constraint_name, table_name)
+                write!(f, "{}", vibe_msg!("executor-constraint-not-found", constraint_name = constraint_name.as_str(), table_name = table_name.as_str()))
             }
             ExecutorError::ExpressionDepthExceeded { depth, max_depth } => {
-                write!(
-                    f,
-                    "Expression depth limit exceeded: {} > {} (prevents stack overflow)",
-                    depth, max_depth
-                )
+                write!(f, "{}", vibe_msg!("executor-expression-depth-exceeded", depth = *depth as i64, max_depth = *max_depth as i64))
             }
             ExecutorError::QueryTimeoutExceeded { elapsed_seconds, max_seconds } => {
-                write!(f, "Query timeout exceeded: {}s > {}s", elapsed_seconds, max_seconds)
+                write!(f, "{}", vibe_msg!("executor-query-timeout-exceeded", elapsed_seconds = *elapsed_seconds as i64, max_seconds = *max_seconds as i64))
             }
             ExecutorError::RowLimitExceeded { rows_processed, max_rows } => {
-                write!(f, "Row processing limit exceeded: {} > {}", rows_processed, max_rows)
+                write!(f, "{}", vibe_msg!("executor-row-limit-exceeded", rows_processed = *rows_processed as i64, max_rows = *max_rows as i64))
             }
             ExecutorError::MemoryLimitExceeded { used_bytes, max_bytes } => {
-                write!(
-                    f,
-                    "Memory limit exceeded: {:.2} GB > {:.2} GB",
-                    *used_bytes as f64 / 1024.0 / 1024.0 / 1024.0,
-                    *max_bytes as f64 / 1024.0 / 1024.0 / 1024.0
-                )
+                let used_gb = format!("{:.2}", *used_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
+                let max_gb = format!("{:.2}", *max_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
+                write!(f, "{}", vibe_msg!("executor-memory-limit-exceeded", used_gb = used_gb.as_str(), max_gb = max_gb.as_str()))
             }
             ExecutorError::VariableNotFound { variable_name, available_variables } => {
                 if available_variables.is_empty() {
-                    write!(f, "Variable '{}' not found", variable_name)
+                    write!(f, "{}", vibe_msg!("executor-variable-not-found-simple", variable_name = variable_name.as_str()))
                 } else {
-                    write!(
-                        f,
-                        "Variable '{}' not found. Available variables: {}",
-                        variable_name,
-                        available_variables.join(", ")
-                    )
+                    let available = available_variables.join(", ");
+                    write!(f, "{}", vibe_msg!("executor-variable-not-found-with-available", variable_name = variable_name.as_str(), available_variables = available.as_str()))
                 }
             }
             ExecutorError::LabelNotFound(name) => {
-                write!(f, "Label '{}' not found", name)
+                write!(f, "{}", vibe_msg!("executor-label-not-found", name = name.as_str()))
             }
             ExecutorError::SelectIntoRowCount { expected, actual } => {
-                write!(
-                    f,
-                    "Procedural SELECT INTO must return exactly {} row, got {} row{}",
-                    expected,
-                    actual,
-                    if *actual == 1 { "" } else { "s" }
-                )
+                let plural = if *actual == 1 { "" } else { "s" };
+                write!(f, "{}", vibe_msg!("executor-select-into-row-count", expected = *expected as i64, actual = *actual as i64, plural = plural))
             }
             ExecutorError::SelectIntoColumnCount { expected, actual } => {
-                write!(
-                    f,
-                    "Procedural SELECT INTO column count mismatch: {} variable{} but query returned {} column{}",
-                    expected,
-                    if *expected == 1 { "" } else { "s" },
-                    actual,
-                    if *actual == 1 { "" } else { "s" }
-                )
+                let expected_plural = if *expected == 1 { "" } else { "s" };
+                let actual_plural = if *actual == 1 { "" } else { "s" };
+                write!(f, "{}", vibe_msg!("executor-select-into-column-count", expected = *expected as i64, expected_plural = expected_plural, actual = *actual as i64, actual_plural = actual_plural))
             }
             ExecutorError::ProcedureNotFound {
                 procedure_name,
@@ -475,56 +462,36 @@ impl std::fmt::Display for ExecutorError {
                 available_procedures,
             } => {
                 if available_procedures.is_empty() {
-                    write!(
-                        f,
-                        "Procedure '{}' not found in schema '{}'",
-                        procedure_name, schema_name
-                    )
+                    write!(f, "{}", vibe_msg!("executor-procedure-not-found-simple", procedure_name = procedure_name.as_str(), schema_name = schema_name.as_str()))
                 } else {
-                    // Check for similar names using simple edit distance
                     let suggestion = find_closest_match(procedure_name, available_procedures);
                     if let Some(similar) = suggestion {
-                        write!(
-                            f,
-                            "Procedure '{}' not found in schema '{}'\nAvailable procedures: {}\nDid you mean '{}'?",
-                            procedure_name,
-                            schema_name,
-                            available_procedures.join(", "),
-                            similar
-                        )
+                        // Use multi-line format with suggestion
+                        write!(f, "{}\n{}\n{}",
+                            vibe_msg!("executor-procedure-not-found-simple", procedure_name = procedure_name.as_str(), schema_name = schema_name.as_str()),
+                            format!("Available procedures: {}", available_procedures.join(", ")),
+                            format!("Did you mean '{}'?", similar))
                     } else {
-                        write!(
-                            f,
-                            "Procedure '{}' not found in schema '{}'\nAvailable procedures: {}",
-                            procedure_name,
-                            schema_name,
-                            available_procedures.join(", ")
-                        )
+                        write!(f, "{}\n{}",
+                            vibe_msg!("executor-procedure-not-found-simple", procedure_name = procedure_name.as_str(), schema_name = schema_name.as_str()),
+                            format!("Available procedures: {}", available_procedures.join(", ")))
                     }
                 }
             }
             ExecutorError::FunctionNotFound { function_name, schema_name, available_functions } => {
                 if available_functions.is_empty() {
-                    write!(f, "Function '{}' not found in schema '{}'", function_name, schema_name)
+                    write!(f, "{}", vibe_msg!("executor-function-not-found-simple", function_name = function_name.as_str(), schema_name = schema_name.as_str()))
                 } else {
                     let suggestion = find_closest_match(function_name, available_functions);
                     if let Some(similar) = suggestion {
-                        write!(
-                            f,
-                            "Function '{}' not found in schema '{}'\nAvailable functions: {}\nDid you mean '{}'?",
-                            function_name,
-                            schema_name,
-                            available_functions.join(", "),
-                            similar
-                        )
+                        write!(f, "{}\n{}\n{}",
+                            vibe_msg!("executor-function-not-found-simple", function_name = function_name.as_str(), schema_name = schema_name.as_str()),
+                            format!("Available functions: {}", available_functions.join(", ")),
+                            format!("Did you mean '{}'?", similar))
                     } else {
-                        write!(
-                            f,
-                            "Function '{}' not found in schema '{}'\nAvailable functions: {}",
-                            function_name,
-                            schema_name,
-                            available_functions.join(", ")
-                        )
+                        write!(f, "{}\n{}",
+                            vibe_msg!("executor-function-not-found-simple", function_name = function_name.as_str(), schema_name = schema_name.as_str()),
+                            format!("Available functions: {}", available_functions.join(", ")))
                     }
                 }
             }
@@ -535,17 +502,16 @@ impl std::fmt::Display for ExecutorError {
                 actual,
                 parameter_signature,
             } => {
-                write!(
-                    f,
-                    "{} '{}' expects {} parameter{} ({}), got {} argument{}",
-                    routine_type,
-                    routine_name,
-                    expected,
-                    if *expected == 1 { "" } else { "s" },
-                    parameter_signature,
-                    actual,
-                    if *actual == 1 { "" } else { "s" }
-                )
+                let expected_plural = if *expected == 1 { "" } else { "s" };
+                let actual_plural = if *actual == 1 { "" } else { "s" };
+                write!(f, "{}", vibe_msg!("executor-parameter-count-mismatch",
+                    routine_type = routine_type.as_str(),
+                    routine_name = routine_name.as_str(),
+                    expected = *expected as i64,
+                    expected_plural = expected_plural,
+                    parameter_signature = parameter_signature.as_str(),
+                    actual = *actual as i64,
+                    actual_plural = actual_plural))
             }
             ExecutorError::ParameterTypeMismatch {
                 parameter_name,
@@ -553,22 +519,22 @@ impl std::fmt::Display for ExecutorError {
                 actual_type,
                 actual_value,
             } => {
-                write!(
-                    f,
-                    "Parameter '{}' expects {}, got {} '{}'",
-                    parameter_name, expected_type, actual_type, actual_value
-                )
+                write!(f, "{}", vibe_msg!("executor-parameter-type-mismatch",
+                    parameter_name = parameter_name.as_str(),
+                    expected_type = expected_type.as_str(),
+                    actual_type = actual_type.as_str(),
+                    actual_value = actual_value.as_str()))
             }
             ExecutorError::TypeError(msg) => {
-                write!(f, "Type error: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-type-error", message = msg.as_str()))
             }
             ExecutorError::ArgumentCountMismatch { expected, actual } => {
-                write!(f, "Argument count mismatch: expected {}, got {}", expected, actual)
+                write!(f, "{}", vibe_msg!("executor-argument-count-mismatch", expected = *expected as i64, actual = *actual as i64))
             }
             ExecutorError::RecursionLimitExceeded { message, call_stack, max_depth } => {
-                write!(f, "Maximum recursion depth ({}) exceeded: {}", max_depth, message)?;
+                write!(f, "{}", vibe_msg!("executor-recursion-limit-exceeded", max_depth = *max_depth as i64, message = message.as_str()))?;
                 if !call_stack.is_empty() {
-                    write!(f, "\nCall stack:")?;
+                    write!(f, "\n{}", vibe_msg!("executor-recursion-call-stack"))?;
                     for call in call_stack {
                         write!(f, "\n  {}", call)?;
                     }
@@ -576,81 +542,75 @@ impl std::fmt::Display for ExecutorError {
                 Ok(())
             }
             ExecutorError::FunctionMustReturn => {
-                write!(f, "Function must return a value")
+                write!(f, "{}", vibe_msg!("executor-function-must-return"))
             }
             ExecutorError::InvalidControlFlow(msg) => {
-                write!(f, "Invalid control flow: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-invalid-control-flow", message = msg.as_str()))
             }
             ExecutorError::InvalidFunctionBody(msg) => {
-                write!(f, "Invalid function body: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-invalid-function-body", message = msg.as_str()))
             }
             ExecutorError::FunctionReadOnlyViolation(msg) => {
-                write!(f, "Function read-only violation: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-function-read-only-violation", message = msg.as_str()))
             }
             ExecutorError::ParseError(msg) => {
-                write!(f, "Parse error: {}", msg)
+                write!(f, "{}", vibe_msg!("executor-parse-error", message = msg.as_str()))
             }
             ExecutorError::InvalidExtractField { field, value_type } => {
-                write!(f, "Cannot extract {} from {} value", field, value_type)
+                write!(f, "{}", vibe_msg!("executor-invalid-extract-field", field = field.as_str(), value_type = value_type.as_str()))
             }
             ExecutorError::ArrowDowncastError { expected_type, context } => {
-                write!(f, "Failed to downcast Arrow array to {} ({})", expected_type, context)
+                write!(f, "{}", vibe_msg!("executor-arrow-downcast-error", expected_type = expected_type.as_str(), context = context.as_str()))
             }
             ExecutorError::ColumnarTypeMismatch { operation, left_type, right_type } => {
                 if let Some(right) = right_type {
-                    write!(f, "Incompatible types for {}: {} vs {}", operation, left_type, right)
+                    write!(f, "{}", vibe_msg!("executor-columnar-type-mismatch-binary", operation = operation.as_str(), left_type = left_type.as_str(), right_type = right.as_str()))
                 } else {
-                    write!(f, "Incompatible type for {}: {}", operation, left_type)
+                    write!(f, "{}", vibe_msg!("executor-columnar-type-mismatch-unary", operation = operation.as_str(), left_type = left_type.as_str()))
                 }
             }
             ExecutorError::SimdOperationFailed { operation, reason } => {
-                write!(f, "SIMD {} failed: {}", operation, reason)
+                write!(f, "{}", vibe_msg!("executor-simd-operation-failed", operation = operation.as_str(), reason = reason.as_str()))
             }
             ExecutorError::ColumnarColumnNotFound { column_index, batch_columns } => {
-                write!(
-                    f,
-                    "Column index {} out of bounds (batch has {} columns)",
-                    column_index, batch_columns
-                )
+                write!(f, "{}", vibe_msg!("executor-columnar-column-not-found", column_index = *column_index as i64, batch_columns = *batch_columns as i64))
             }
             ExecutorError::ColumnarColumnNotFoundByName { column_name } => {
-                write!(f, "Column not found: {}", column_name)
+                write!(f, "{}", vibe_msg!("executor-columnar-column-not-found-by-name", column_name = column_name.as_str()))
             }
             ExecutorError::ColumnarLengthMismatch { context, expected, actual } => {
-                write!(
-                    f,
-                    "Column length mismatch in {}: expected {}, got {}",
-                    context, expected, actual
-                )
+                write!(f, "{}", vibe_msg!("executor-columnar-length-mismatch", context = context.as_str(), expected = *expected as i64, actual = *actual as i64))
             }
             ExecutorError::UnsupportedArrayType { operation, array_type } => {
-                write!(f, "Unsupported array type for {}: {}", operation, array_type)
+                write!(f, "{}", vibe_msg!("executor-unsupported-array-type", operation = operation.as_str(), array_type = array_type.as_str()))
             }
             ExecutorError::SpatialGeometryError { function_name, message } => {
-                write!(f, "{}: {}", function_name, message)
+                write!(f, "{}", vibe_msg!("executor-spatial-geometry-error", function_name = function_name.as_str(), message = message.as_str()))
             }
             ExecutorError::SpatialOperationFailed { function_name, message } => {
-                write!(f, "{}: {}", function_name, message)
+                write!(f, "{}", vibe_msg!("executor-spatial-operation-failed", function_name = function_name.as_str(), message = message.as_str()))
             }
             ExecutorError::SpatialArgumentError { function_name, expected, actual } => {
-                write!(f, "{} expects {}, got {}", function_name, expected, actual)
+                write!(f, "{}", vibe_msg!("executor-spatial-argument-error", function_name = function_name.as_str(), expected = expected.as_str(), actual = actual.as_str()))
             }
             ExecutorError::CursorAlreadyExists(name) => {
-                write!(f, "Cursor '{}' already exists", name)
+                write!(f, "{}", vibe_msg!("executor-cursor-already-exists", name = name.as_str()))
             }
             ExecutorError::CursorNotFound(name) => {
-                write!(f, "Cursor '{}' not found", name)
+                write!(f, "{}", vibe_msg!("executor-cursor-not-found", name = name.as_str()))
             }
             ExecutorError::CursorAlreadyOpen(name) => {
-                write!(f, "Cursor '{}' is already open", name)
+                write!(f, "{}", vibe_msg!("executor-cursor-already-open", name = name.as_str()))
             }
             ExecutorError::CursorNotOpen(name) => {
-                write!(f, "Cursor '{}' is not open", name)
+                write!(f, "{}", vibe_msg!("executor-cursor-not-open", name = name.as_str()))
             }
             ExecutorError::CursorNotScrollable(name) => {
-                write!(f, "Cursor '{}' is not scrollable (SCROLL not specified)", name)
+                write!(f, "{}", vibe_msg!("executor-cursor-not-scrollable", name = name.as_str()))
             }
-            ExecutorError::Other(msg) => write!(f, "{}", msg),
+            ExecutorError::Other(msg) => {
+                write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))
+            }
         }
     }
 }

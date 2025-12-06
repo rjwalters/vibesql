@@ -492,6 +492,26 @@ impl Operations {
         self.update_spatial_indexes_for_delete(catalog, table_name, row, row_index);
     }
 
+    /// Batch update user-defined indexes for delete operation
+    ///
+    /// This is significantly more efficient than calling `update_indexes_for_delete` in a loop
+    /// because it pre-computes column indices once per index rather than once per row.
+    pub fn batch_update_indexes_for_delete(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        rows_to_delete: &[(usize, &Row)],
+    ) {
+        if let Some(table_schema) = catalog.get_table(table_name) {
+            self.index_manager.batch_update_indexes_for_delete(table_name, table_schema, rows_to_delete);
+        }
+
+        // Update spatial indexes for each deleted row (batch optimization TODO)
+        for &(row_index, row) in rows_to_delete {
+            self.update_spatial_indexes_for_delete(catalog, table_name, row, row_index);
+        }
+    }
+
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(
         &mut self,
