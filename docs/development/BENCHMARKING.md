@@ -789,6 +789,104 @@ sysbench --version
 
 ---
 
+## Benchmark Methodology
+
+This section documents how benchmarks are conducted for fair and reproducible results.
+
+### Test Environment Standards
+
+For official benchmark results (published in README, web demo, etc.):
+
+| Parameter | Standard Value | Notes |
+|-----------|----------------|-------|
+| CPU | Apple M-series or x86_64 | Document specific model |
+| RAM | 16GB+ | Sufficient for TPC-DS at SF=1 |
+| Storage | SSD | Avoid HDDs for benchmarks |
+| OS | macOS or Linux | Windows support varies |
+| Background processes | Minimal | Close other applications |
+| Power mode | High performance | Disable power saving |
+
+### Scale Factors
+
+Each benchmark supports multiple scale factors. Use these guidelines:
+
+| Benchmark | Development | CI/Quick | Full Run | Production |
+|-----------|-------------|----------|----------|------------|
+| TPC-H | 0.001 | 0.01 | 0.1 | 1.0 |
+| TPC-C | 1 warehouse | 1 warehouse | 1 warehouse | 10 warehouses |
+| TPC-DS | 0.001 | 0.001 | 0.01 | 1.0 |
+| Sysbench | 100 rows | 1000 rows | 10000 rows | 100000 rows |
+
+### Measurement Protocol
+
+1. **Warmup phase**: Always include warmup runs
+   - TPC-C: 10 seconds warmup before measurement
+   - TPC-H/TPC-DS: First query execution discarded
+
+2. **Iteration count**: Multiple runs for statistical validity
+   - TPC-H: 3-5 iterations per query
+   - TPC-C: 60-second continuous measurement
+   - Criterion benchmarks: Automatic statistical sampling
+
+3. **Reporting**: Include confidence intervals
+   - Report mean ± standard deviation
+   - Note outliers explicitly
+   - Document any anomalies
+
+### Comparison Fairness
+
+When comparing databases:
+
+1. **Same scale factor** for all engines
+2. **Same hardware** for all measurements
+3. **Native APIs** only (no binding overhead)
+4. **Cold start** measurements (restart between engine tests)
+5. **Same query execution** (identical SQL where possible)
+
+### JSON Export for CI
+
+Use the unified bench CLI to export results for CI integration:
+
+```bash
+# Export results to JSON
+./scripts/bench --all --json --output results.json
+
+# Quick benchmark with JSON output for CI
+./scripts/bench --quick --json --output ci_results.json
+```
+
+JSON output format:
+
+```json
+{
+  "metadata": {
+    "timestamp": "2024-12-05T12:00:00",
+    "git_commit": "abc123",
+    "git_branch": "main",
+    "config": { "engines": ["vibesql"], "scale": 0.01 }
+  },
+  "benchmarks": {
+    "tpch": { "status": "success", "duration_secs": 45.2 },
+    "tpcc": { "status": "success", "tps": 75404, "duration_secs": 60 }
+  }
+}
+```
+
+### Reproducibility Checklist
+
+Before publishing benchmark results:
+
+- [ ] Document exact hardware specifications
+- [ ] Record OS version and kernel
+- [ ] Note Rust/compiler version
+- [ ] Include git commit hash
+- [ ] List any non-default settings
+- [ ] Run at least 3 full iterations
+- [ ] Verify results are within expected variance
+- [ ] Compare against previous baseline
+
+---
+
 ## Quick Links
 
 - **Web Demo**: https://vibesql.dev/benchmarks.html
@@ -796,3 +894,4 @@ sysbench --version
 - **CI Pipeline**: `.github/workflows/benchmarks.yml`
 - **Makefile Targets**: `Makefile` (search for `benchmark`)
 - **Result Scripts**: `scripts/query_benchmark_results.py`
+- **JSON Export**: `./scripts/bench --json`
