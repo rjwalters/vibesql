@@ -4,6 +4,7 @@
 [![Demo](https://img.shields.io/badge/demo-live-success)](https://rjwalters.github.io/vibesql/)
 [![sqltest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sql1999-conformance.json)](https://rjwalters.github.io/vibesql/conformance.html)
 [![SQLLogicTest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sqllogictest.json)](https://rjwalters.github.io/vibesql/conformance.html#SQLlogicTest)
+[![i18n](https://img.shields.io/badge/i18n-en--US%20|%20ja--JP%20|%20es-blue)](docs/CONTRIBUTING_TRANSLATIONS.md)
 
 **SQL:1999 compliant database in Rust, 100% AI-generated**
 
