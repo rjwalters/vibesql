@@ -962,14 +962,19 @@ fn run_delete_benchmark<E: SysbenchExecutor>(
     executor: &mut E,
     table_size: usize,
     duration: Duration,
-    warmup: Duration,
+    _warmup: Duration,
 ) -> WorkloadResults {
     let mut rng = ChaCha8Rng::seed_from_u64(42);
     let mut available_ids: Vec<i64> = (1..=table_size as i64).collect();
 
-    // Warmup - delete a few rows
-    let warmup_start = Instant::now();
-    while warmup_start.elapsed() < warmup && !available_ids.is_empty() {
+    // Warmup - delete at most 1% of rows to preserve most data for benchmark
+    // Unlike other benchmarks, DELETE has no cache warmup benefit, and with fast
+    // deletion rates (200K+ ops/sec), unlimited warmup can exhaust all rows.
+    let warmup_limit = (table_size / 100).max(10); // At least 10 rows
+    for _ in 0..warmup_limit {
+        if available_ids.is_empty() {
+            break;
+        }
         let idx = rng.random_range(0..available_ids.len());
         let id = available_ids.swap_remove(idx);
         executor.delete(id);

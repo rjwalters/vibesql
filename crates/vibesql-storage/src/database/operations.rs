@@ -592,6 +592,37 @@ impl Operations {
             .collect()
     }
 
+    /// Check if a column has any user-defined index (B-tree or spatial)
+    #[inline]
+    pub fn has_index_on_column(&self, table_name: &str, column_name: &str) -> bool {
+        let normalized_table = table_name.to_uppercase();
+        let normalized_column = column_name.to_uppercase();
+
+        // Check B-tree indexes
+        for index_name in self.index_manager.list_indexes() {
+            if let Some(metadata) = self.index_manager.get_index(&index_name) {
+                if metadata.table_name.to_uppercase() == normalized_table {
+                    for col in &metadata.columns {
+                        if col.column_name.to_uppercase() == normalized_column {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check spatial indexes
+        for (_, (metadata, _)) in &self.spatial_indexes {
+            if metadata.table_name.to_uppercase() == normalized_table
+                && metadata.column_name.to_uppercase() == normalized_column
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
     // ========================================================================
     // Spatial Index Methods
     // ========================================================================

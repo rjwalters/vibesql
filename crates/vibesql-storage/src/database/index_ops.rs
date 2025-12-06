@@ -111,6 +111,15 @@ impl Database {
         self.operations.list_indexes_for_table(table_name)
     }
 
+    /// Check if a column has any user-defined index
+    ///
+    /// This is used to determine if updates to a column require index maintenance.
+    /// Returns true if any user-defined index (B-tree or spatial) includes this column.
+    #[inline]
+    pub fn has_index_on_column(&self, table_name: &str, column_name: &str) -> bool {
+        self.operations.has_index_on_column(table_name, column_name)
+    }
+
     // ============================================================================
     // Spatial Index Methods
     // ============================================================================

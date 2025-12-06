@@ -748,13 +748,10 @@ impl Table {
         // Get old row for index updates (clone to avoid borrow issues)
         let old_row = self.rows[index].clone();
 
-        // Update the row
-        self.rows[index] = normalized_row.clone();
-
         // Determine which indexes are affected by the changed columns (delegate to IndexManager)
         let affected_indexes = self.indexes.get_affected_indexes(&self.schema, changed_columns);
 
-        // Update only affected indexes (delegate to IndexManager)
+        // Update only affected indexes BEFORE replacing row (delegate to IndexManager)
         self.indexes.update_selective(
             &self.schema,
             &old_row,
@@ -762,6 +759,9 @@ impl Table {
             index,
             &affected_indexes,
         );
+
+        // Update the row (move ownership, no clone needed)
+        self.rows[index] = normalized_row;
 
         // For native columnar tables, rebuild columnar data
         // For row tables, invalidate the cache
@@ -772,6 +772,82 @@ impl Table {
         }
 
         Ok(())
+    }
+
+    /// Fast path update for pre-validated rows
+    ///
+    /// This variant skips normalization/validation, assuming the caller has already
+    /// validated the row data. Use for performance-critical UPDATE paths where
+    /// validation was done at the executor level.
+    ///
+    /// # Arguments
+    /// * `index` - Row index to update
+    /// * `new_row` - Pre-validated new row data (ownership transferred)
+    /// * `old_row` - Reference to old row for index updates
+    /// * `changed_columns` - Set of column indices that were modified
+    ///
+    /// # Safety
+    /// Caller must ensure row data is valid (correct column count, types, constraints)
+    #[inline]
+    pub fn update_row_unchecked(
+        &mut self,
+        index: usize,
+        new_row: Row,
+        old_row: &Row,
+        changed_columns: &std::collections::HashSet<usize>,
+    ) {
+        // Determine which indexes are affected by the changed columns
+        let affected_indexes = self.indexes.get_affected_indexes(&self.schema, changed_columns);
+
+        // Update affected indexes BEFORE replacing row
+        self.indexes.update_selective(
+            &self.schema,
+            old_row,
+            &new_row,
+            index,
+            &affected_indexes,
+        );
+
+        // Update the row (direct move, no validation)
+        self.rows[index] = new_row;
+
+        // Invalidate columnar cache (skip for native columnar as it's rare in OLTP)
+        if self.native_columnar.is_none() {
+            *self.columnar_cache.write().unwrap() = None;
+        }
+    }
+
+    /// Update a single column value in-place without cloning the row
+    ///
+    /// This is the fastest possible update path for non-indexed columns:
+    /// - No row cloning (direct in-place modification)
+    /// - No index updates (caller must verify column is not indexed)
+    /// - No validation (caller must pre-validate the value)
+    ///
+    /// # Arguments
+    ///
+    /// * `row_index` - Index of the row to update
+    /// * `col_index` - Index of the column to update
+    /// * `new_value` - The new value for the column
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - The column is NOT indexed (no internal or user-defined indexes)
+    /// - The value satisfies all constraints (NOT NULL, type, etc.)
+    #[inline]
+    pub fn update_column_inplace(
+        &mut self,
+        row_index: usize,
+        col_index: usize,
+        new_value: vibesql_types::SqlValue,
+    ) {
+        self.rows[row_index].values[col_index] = new_value;
+
+        // Invalidate columnar cache
+        if self.native_columnar.is_none() {
+            *self.columnar_cache.write().unwrap() = None;
+        }
     }
 
     /// Delete rows matching a predicate

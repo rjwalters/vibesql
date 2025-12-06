@@ -393,6 +393,59 @@ impl UpdateExecutor {
             None => return Ok(Some(0)), // Row not found - 0 rows updated
         };
 
+        // SUPER-FAST PATH: Single literal assignment to non-indexed, non-PK column
+        // This path avoids ALL row cloning by updating the column in-place
+        if stmt.assignments.len() == 1 {
+            let assignment = &stmt.assignments[0];
+
+            // Check if value is a literal (no expression evaluation needed)
+            if let vibesql_ast::Expression::Literal(new_value) = &assignment.value {
+                if let Some(col_index) = schema.get_column_index(&assignment.column) {
+                    // Check column is not in PK
+                    let is_pk_col = schema
+                        .get_primary_key_indices()
+                        .map(|pk| pk.contains(&col_index))
+                        .unwrap_or(false);
+
+                    // Check column is not in any unique constraint
+                    // unique_constraints is Vec<Vec<String>> where each inner Vec is column names
+                    let col_name_upper = assignment.column.to_uppercase();
+                    let is_unique_col = schema
+                        .unique_constraints
+                        .iter()
+                        .any(|uc| uc.iter().any(|name| name.to_uppercase() == col_name_upper));
+
+                    // Check NOT NULL constraint
+                    let column = &schema.columns[col_index];
+                    let null_ok =
+                        column.nullable || *new_value != vibesql_types::SqlValue::Null;
+
+                    if !is_pk_col && !is_unique_col && null_ok {
+                        // Check no user-defined indexes on this column
+                        let has_user_index =
+                            database.has_index_on_column(&stmt.table_name, &assignment.column);
+
+                        if !has_user_index {
+                            // SUPER-FAST: Direct in-place update, no row cloning!
+                            let table_mut = database
+                                .get_table_mut(&stmt.table_name)
+                                .ok_or_else(|| {
+                                    ExecutorError::TableNotFound(stmt.table_name.clone())
+                                })?;
+
+                            table_mut.update_column_inplace(
+                                row_index,
+                                col_index,
+                                new_value.clone(),
+                            );
+
+                            return Ok(Some(1));
+                        }
+                    }
+                }
+            }
+        }
+
         // Skip fast path if table has foreign keys (need validation)
         if !schema.foreign_keys.is_empty() {
             return Ok(None);
@@ -495,20 +548,16 @@ impl UpdateExecutor {
             }
         }
 
-        // Apply the update directly
+        // Update user-defined indexes FIRST (while we still have both row references)
+        database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, row_index);
+
+        // Apply the update directly (transfers ownership of new_row, no clone needed)
         let table_mut = database
             .get_table_mut(&stmt.table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-        table_mut
-            .update_row_selective(row_index, new_row.clone(), &changed_columns)
-            .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
-
-        // Update user-defined indexes
-        database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, row_index);
-
-        // Invalidate columnar cache
-        database.invalidate_columnar_cache(&stmt.table_name);
+        // Use unchecked variant - row is already validated above
+        table_mut.update_row_unchecked(row_index, new_row, &old_row, &changed_columns);
 
         Ok(Some(1))
     }
