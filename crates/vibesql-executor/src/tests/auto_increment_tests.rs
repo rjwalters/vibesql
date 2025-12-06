@@ -14,6 +14,7 @@ fn test_auto_increment_basic_inserts() {
 
     // Create table with AUTO_INCREMENT
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
             ColumnDef {
@@ -86,6 +87,7 @@ fn test_multiple_auto_increment_error() {
 
     // Should fail - multiple AUTO_INCREMENT columns not allowed
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "bad".to_string(),
         columns: vec![
             ColumnDef {
@@ -127,6 +129,7 @@ fn test_last_insert_rowid_basic() {
 
     // Create table with AUTO_INCREMENT
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
             ColumnDef {
@@ -198,6 +201,7 @@ fn test_last_insert_rowid_multi_row_insert() {
 
     // Create table with AUTO_INCREMENT
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "items".to_string(),
         columns: vec![
             ColumnDef {
@@ -260,6 +264,7 @@ fn test_last_insert_rowid_no_auto_increment() {
 
     // Create table WITHOUT AUTO_INCREMENT
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "manual".to_string(),
         columns: vec![
             ColumnDef {
@@ -315,6 +320,7 @@ fn test_last_insert_rowid_via_select() {
 
     // Create table with AUTO_INCREMENT
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
             ColumnDef {

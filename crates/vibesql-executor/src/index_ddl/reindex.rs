@@ -75,6 +75,7 @@ mod tests {
 
     fn create_test_table(db: &mut Database) {
         let stmt = CreateTableStmt {
+        if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![
                 ColumnDef {

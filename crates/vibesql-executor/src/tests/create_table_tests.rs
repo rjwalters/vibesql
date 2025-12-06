@@ -22,6 +22,7 @@ fn test_create_simple_table() {
     let mut db = Database::new();
 
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
             ColumnDef {
@@ -61,6 +62,7 @@ fn test_create_table_with_multiple_types() {
     let mut db = Database::new();
 
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "products".to_string(),
         columns: vec![
             ColumnDef {
@@ -126,6 +128,7 @@ fn test_create_table_already_exists() {
     let mut db = Database::new();
 
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![ColumnDef {
             name: "id".to_string(),
@@ -154,6 +157,7 @@ fn test_create_table_with_nullable_columns() {
     let mut db = Database::new();
 
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "employees".to_string(),
         columns: vec![
             ColumnDef {
@@ -200,6 +204,7 @@ fn test_create_table_empty_columns_list() {
     let mut db = Database::new();
 
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "empty_table".to_string(),
         columns: vec![], // Empty columns
         table_constraints: vec![],
@@ -220,6 +225,7 @@ fn test_create_multiple_tables() {
 
     // Create first table
     let stmt1 = CreateTableStmt {
+        if_not_exists: false,
         table_name: "customers".to_string(),
         columns: vec![ColumnDef {
             name: "customer_id".to_string(),
@@ -236,6 +242,7 @@ fn test_create_multiple_tables() {
 
     // Create second table
     let stmt2 = CreateTableStmt {
+        if_not_exists: false,
         table_name: "orders".to_string(),
         columns: vec![ColumnDef {
             name: "order_id".to_string(),
@@ -262,6 +269,7 @@ fn test_create_table_with_special_characters_in_name() {
 
     // Test with underscores (common case)
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "user_profiles".to_string(),
         columns: vec![ColumnDef {
             name: "profile_id".to_string(),
@@ -285,6 +293,7 @@ fn test_create_table_case_sensitivity() {
     let mut db = Database::new();
 
     let stmt1 = CreateTableStmt {
+        if_not_exists: false,
         table_name: "Users".to_string(),
         columns: vec![ColumnDef {
             name: "id".to_string(),
@@ -301,6 +310,7 @@ fn test_create_table_case_sensitivity() {
 
     // Try to create "users" (different case)
     let stmt2 = CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![ColumnDef {
             name: "id".to_string(),
@@ -327,6 +337,7 @@ fn test_create_table_with_spatial_types() {
     let mut db = Database::new();
 
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "spatial_table".to_string(),
         columns: vec![
             ColumnDef {
@@ -387,6 +398,7 @@ fn test_create_table_multipolygon_sqllogictest() {
     let mut db = Database::new();
 
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "t1710a".to_string(),
         columns: vec![
             ColumnDef {

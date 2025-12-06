@@ -7,6 +7,7 @@ use vibesql_ast::*;
 #[test]
 fn test_create_table_statement() {
     let stmt = Statement::CreateTable(CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
             ColumnDef {

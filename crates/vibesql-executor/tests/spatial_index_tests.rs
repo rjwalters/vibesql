@@ -11,6 +11,7 @@ fn test_create_spatial_index_basic() {
 
     // Create table with geometry column
     let create_table_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
             ColumnDef {
@@ -60,6 +61,7 @@ fn test_spatial_index_multiple_columns_error() {
 
     // Create table
     let create_table_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
             ColumnDef {
@@ -123,6 +125,7 @@ fn test_drop_spatial_index() {
 
     // Create table with geometry column
     let create_table_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
             ColumnDef {
@@ -179,6 +182,7 @@ fn test_spatial_index_if_not_exists() {
 
     // Create table
     let create_table_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
             ColumnDef {

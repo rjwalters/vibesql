@@ -11,6 +11,7 @@ fn test_truncate_single_table() {
 
     // Create a table
     let create_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "USERS".to_string(),
         columns: vec![
             ColumnDef {
@@ -72,6 +73,7 @@ fn test_truncate_multiple_tables() {
 
     // Create first table
     let create_stmt1 = CreateTableStmt {
+        if_not_exists: false,
         table_name: "ORDERS".to_string(),
         columns: vec![ColumnDef {
             name: "ID".to_string(),
@@ -88,6 +90,7 @@ fn test_truncate_multiple_tables() {
 
     // Create second table
     let create_stmt2 = CreateTableStmt {
+        if_not_exists: false,
         table_name: "ORDER_ITEMS".to_string(),
         columns: vec![ColumnDef {
             name: "ID".to_string(),
@@ -104,6 +107,7 @@ fn test_truncate_multiple_tables() {
 
     // Create third table
     let create_stmt3 = CreateTableStmt {
+        if_not_exists: false,
         table_name: "ORDER_HISTORY".to_string(),
         columns: vec![ColumnDef {
             name: "ID".to_string(),
@@ -186,6 +190,7 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
 
     // Create one table
     let create_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "EXISTING".to_string(),
         columns: vec![ColumnDef {
             name: "ID".to_string(),
@@ -226,6 +231,7 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
 
     // Create one table
     let create_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "EXISTING".to_string(),
         columns: vec![ColumnDef {
             name: "ID".to_string(),
@@ -264,6 +270,7 @@ fn test_truncate_empty_table() {
 
     // Create a table
     let create_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "EMPTY".to_string(),
         columns: vec![ColumnDef {
             name: "ID".to_string(),
@@ -305,6 +312,7 @@ fn test_truncate_resets_auto_increment() {
 
     // Create table with AUTO_INCREMENT
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "auto_inc_test".to_string(),
         columns: vec![
             ColumnDef {
@@ -394,6 +402,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
 
     // Create table with AUTO_INCREMENT
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "multi_test".to_string(),
         columns: vec![
             ColumnDef {
@@ -474,6 +483,7 @@ fn test_truncate_without_auto_increment() {
     let mut db = Database::new();
 
     let create_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "no_auto_inc".to_string(),
         columns: vec![
             ColumnDef {

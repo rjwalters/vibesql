@@ -34,6 +34,7 @@ impl CreateTableExecutor {
     ///
     /// let mut db = Database::new();
     /// let stmt = CreateTableStmt {
+    ///     if_not_exists: false,
     ///     table_name: "users".to_string(),
     ///     columns: vec![
     ///         ColumnDef {
@@ -78,6 +79,13 @@ impl CreateTableExecutor {
         // Check if table already exists in the target schema
         let qualified_name = format!("{}.{}", schema_name, table_name);
         if database.catalog.table_exists(&qualified_name) {
+            if stmt.if_not_exists {
+                // IF NOT EXISTS - silently return success without creating the table
+                return Ok(format!(
+                    "Table '{}' already exists in schema '{}' (skipped)",
+                    table_name, schema_name
+                ));
+            }
             return Err(ExecutorError::TableAlreadyExists(qualified_name));
         }
 

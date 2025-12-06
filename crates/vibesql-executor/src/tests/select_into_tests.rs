@@ -8,6 +8,7 @@ fn test_select_into_single_row() {
 
     // Create source table
     let create_stmt = vibesql_ast::CreateTableStmt {
+        if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![
             vibesql_ast::ColumnDef {
@@ -116,6 +117,7 @@ fn test_select_into_no_rows_error() {
 
     // Create source table
     let create_stmt = vibesql_ast::CreateTableStmt {
+        if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
             name: "id".to_string(),
@@ -172,6 +174,7 @@ fn test_select_into_multiple_rows_error() {
 
     // Create source table
     let create_stmt = vibesql_ast::CreateTableStmt {
+        if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
             name: "id".to_string(),
@@ -238,6 +241,7 @@ fn test_select_into_with_expressions() {
 
     // Create source table
     let create_stmt = vibesql_ast::CreateTableStmt {
+        if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
             name: "x".to_string(),
