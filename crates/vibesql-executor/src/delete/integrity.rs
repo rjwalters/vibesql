@@ -71,8 +71,9 @@ pub fn check_no_child_references(
             }
 
             // Check if any row in the child table references the parent row
+            // Use scan_live() to skip soft-deleted rows
             let child_table = db.get_table(&table_name).unwrap();
-            let has_references = child_table.scan().iter().any(|child_row| {
+            let has_references = child_table.scan_live().any(|(_, child_row)| {
                 let child_fk_values: Vec<SqlValue> =
                     fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 
@@ -126,11 +127,11 @@ fn cascade_delete(
     fk: &vibesql_catalog::ForeignKeyConstraint,
     parent_key_values: &[SqlValue],
 ) -> Result<(), ExecutorError> {
-    // Find rows to delete
+    // Find rows to delete (use scan_live to skip soft-deleted rows)
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_delete: Vec<vibesql_storage::Row> = Vec::new();
 
-    for child_row in child_table.scan() {
+    for (_, child_row) in child_table.scan_live() {
         let child_fk_values: Vec<SqlValue> =
             fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 
