@@ -131,7 +131,7 @@ executor-function-not-found-with-suggestion = Funktion '{ $function_name }' im S
     .available = Verfügbare Funktionen: { $available_functions }
     .suggestion = Meinten Sie '{ $suggestion }'?
 
-executor-parameter-count-mismatch = { $routine_type } '{ $routine_name }' erwartet { $expected } Parameter ({ $parameter_signature }), erhielt { $actual } Argument{ $actual_plural }
+executor-parameter-count-mismatch = { $routine_type } '{ $routine_name }' erwartet { $expected } Parameter{ $expected_plural } ({ $parameter_signature }), erhielt { $actual } Argument{ $actual_plural }
 executor-parameter-type-mismatch = Parameter '{ $parameter_name }' erwartet { $expected_type }, erhielt { $actual_type } '{ $actual_value }'
 executor-argument-count-mismatch = Argumentanzahl-Konflikt: erwartet { $expected }, erhielt { $actual }
 
