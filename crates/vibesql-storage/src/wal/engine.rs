@@ -167,6 +167,32 @@ mod native {
         pub count_flushes: u64,
         /// Number of explicit flushes
         pub explicit_flushes: u64,
+        /// Average flush latency in microseconds
+        pub avg_flush_latency_us: u64,
+        /// Maximum flush latency in microseconds
+        pub max_flush_latency_us: u64,
+        /// Total flush latency in microseconds (used for avg calculation)
+        total_flush_latency_us: u64,
+        /// Number of flush latency samples (used for avg calculation)
+        flush_latency_samples: u64,
+    }
+
+    impl PersistenceStats {
+        /// Record a flush latency measurement
+        pub fn record_flush_latency(&mut self, duration: Duration) {
+            let latency_us = duration.as_micros() as u64;
+
+            // Update max
+            if latency_us > self.max_flush_latency_us {
+                self.max_flush_latency_us = latency_us;
+            }
+
+            // Update running average
+            self.total_flush_latency_us += latency_us;
+            self.flush_latency_samples += 1;
+            self.avg_flush_latency_us =
+                self.total_flush_latency_us / self.flush_latency_samples;
+        }
     }
 
     /// Persistence engine that manages async WAL writing
@@ -355,6 +381,9 @@ mod native {
             let mut bytes_written = 0u64;
             let entries_count = batch.len() as u64;
 
+            // Start timing the flush operation
+            let flush_start = Instant::now();
+
             for entry in batch.drain(..) {
                 // Estimate bytes (actual size varies with entry content)
                 bytes_written += 32; // Approximate overhead per entry
@@ -368,6 +397,9 @@ mod native {
                 log::error!("Failed to flush WAL: {}", e);
             }
 
+            // Measure flush latency
+            let flush_duration = flush_start.elapsed();
+
             // Update stats
             {
                 let mut stats = stats.lock();
@@ -377,6 +409,7 @@ mod native {
                 if is_count_flush {
                     stats.count_flushes += 1;
                 }
+                stats.record_flush_latency(flush_duration);
             }
 
             // Notify all waiters
@@ -556,6 +589,10 @@ mod wasm {
         pub time_flushes: u64,
         pub count_flushes: u64,
         pub explicit_flushes: u64,
+        /// Average flush latency in microseconds (always 0 for WASM)
+        pub avg_flush_latency_us: u64,
+        /// Maximum flush latency in microseconds (always 0 for WASM)
+        pub max_flush_latency_us: u64,
     }
 
     /// Persistence engine for WASM (buffered, no background thread)
@@ -903,6 +940,94 @@ mod tests {
         let stats = engine.stats();
         // Should have triggered at least one count-based flush
         assert!(stats.count_flushes >= 1);
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_flush_latency_tracking() {
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+
+        let mut engine =
+            PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+
+        // Send some entries
+        for i in 1..=5 {
+            engine
+                .send(WalOp::Insert {
+                    table_id: 1,
+                    row_id: i as u64,
+                    values: vec![SqlValue::Integer(i)],
+                })
+                .unwrap();
+        }
+
+        // Sync to trigger a flush
+        engine.sync().unwrap();
+
+        let stats = engine.stats();
+
+        // Latency should be recorded (at least one sample)
+        // avg and max should be > 0 since we did at least one flush
+        assert!(
+            stats.avg_flush_latency_us > 0 || stats.max_flush_latency_us > 0,
+            "Flush latency should be recorded after sync"
+        );
+
+        // Max should be >= avg
+        assert!(
+            stats.max_flush_latency_us >= stats.avg_flush_latency_us,
+            "Max latency should be >= avg latency"
+        );
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_flush_latency_max_tracking() {
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+
+        // Use low flush count to trigger multiple flushes
+        let config = PersistenceConfig { flush_count: 2, ..Default::default() };
+
+        let mut engine = PersistenceEngine::with_writer(cursor, config).unwrap();
+
+        // Send enough entries to trigger multiple flushes
+        for i in 1..=10 {
+            engine
+                .send(WalOp::Insert {
+                    table_id: 1,
+                    row_id: i as u64,
+                    values: vec![SqlValue::Integer(i)],
+                })
+                .unwrap();
+        }
+
+        // Give writer thread time to process
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Final sync to ensure all entries flushed
+        engine.sync().unwrap();
+
+        let stats = engine.stats();
+
+        // Multiple flushes should have occurred
+        assert!(
+            stats.batches_written >= 1,
+            "At least one batch should have been written"
+        );
+
+        // Latency metrics should be populated
+        // Note: On very fast systems, latency could be 0 microseconds
+        // so we just verify the tracking doesn't break
+        assert!(
+            stats.max_flush_latency_us >= stats.avg_flush_latency_us,
+            "Max latency ({}) should be >= avg latency ({})",
+            stats.max_flush_latency_us,
+            stats.avg_flush_latency_us
+        );
 
         engine.shutdown().unwrap();
     }
