@@ -799,13 +799,18 @@ impl Database {
             .get_table_mut(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
 
-        let deleted = table_mut.delete_by_indices(&[row_index]);
+        let delete_result = table_mut.delete_by_indices(&[row_index]);
+
+        // If compaction occurred, rebuild user-defined indexes since row indices changed
+        if delete_result.compacted {
+            self.rebuild_indexes(table_name);
+        }
 
         // Invalidate columnar cache
-        if deleted > 0 {
+        if delete_result.deleted_count > 0 {
             self.invalidate_columnar_cache(table_name);
         }
 
-        Ok(deleted > 0)
+        Ok(delete_result.deleted_count > 0)
     }
 }

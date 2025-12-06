@@ -97,11 +97,17 @@ pub fn handle_replace_conflicts(
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
-    table_mut.delete_by_indices(&deleted_indices);
+    let delete_result = table_mut.delete_by_indices(&deleted_indices);
 
-    // Adjust remaining user-defined index entries
-    // (entries pointing to indices > deleted need to be decremented)
-    db.adjust_indexes_after_delete(table_name, &deleted_indices);
+    // Handle index maintenance based on whether compaction occurred
+    if delete_result.compacted {
+        // Compaction changed all row indices - rebuild indexes from scratch
+        db.rebuild_indexes(table_name);
+    } else {
+        // No compaction - just adjust remaining user-defined index entries
+        // (entries pointing to indices > deleted need to be decremented)
+        db.adjust_indexes_after_delete(table_name, &deleted_indices);
+    }
 
     Ok(())
 }

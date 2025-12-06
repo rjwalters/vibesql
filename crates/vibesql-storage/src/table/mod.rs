@@ -66,6 +66,29 @@ use vibesql_types::SqlValue;
 
 use crate::{Row, StorageError};
 
+/// Result of a delete operation, indicating how many rows were deleted
+/// and whether table compaction occurred.
+///
+/// # Important
+///
+/// When `compacted` is true, all row indices in the table have changed.
+/// User-defined indexes (B-tree indexes managed at the Database level)
+/// must be rebuilt after compaction to maintain correctness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeleteResult {
+    /// Number of rows that were deleted
+    pub deleted_count: usize,
+    /// Whether table compaction occurred (row indices changed)
+    pub compacted: bool,
+}
+
+impl DeleteResult {
+    /// Create a new DeleteResult
+    pub fn new(deleted_count: usize, compacted: bool) -> Self {
+        Self { deleted_count, compacted }
+    }
+}
+
 /// In-memory table - stores rows with optimized indexing and validation
 ///
 /// # Architecture
@@ -851,10 +874,12 @@ impl Table {
     }
 
     /// Delete rows matching a predicate
-    /// Returns number of rows deleted
     ///
     /// Uses O(1) bitmap marking for each deleted row instead of O(n) Vec::remove().
-    pub fn delete_where<F>(&mut self, mut predicate: F) -> usize
+    ///
+    /// # Returns
+    /// [`DeleteResult`] containing the count of deleted rows and whether compaction occurred.
+    pub fn delete_where<F>(&mut self, mut predicate: F) -> DeleteResult
     where
         F: FnMut(&Row) -> bool,
     {
@@ -867,7 +892,7 @@ impl Table {
         }
 
         if indices_to_delete.is_empty() {
-            return 0;
+            return DeleteResult::new(0, false);
         }
 
         // Use the optimized delete_by_indices which uses bitmap marking
@@ -878,12 +903,18 @@ impl Table {
     /// Returns error if row not found
     ///
     /// Uses O(1) bitmap marking instead of O(n) Vec::remove().
+    ///
+    /// Note: This method does not return compaction status since it's used
+    /// internally for transaction rollback where index consistency is handled
+    /// at a higher level.
     pub fn remove_row(&mut self, target_row: &Row) -> Result<(), StorageError> {
         // Find the first matching non-deleted row
         for (idx, row) in self.rows.iter().enumerate() {
             if !self.deleted[idx] && row == target_row {
                 // Use delete_by_indices for consistent behavior
-                self.delete_by_indices(&[idx]);
+                // Note: We ignore compaction status here since transaction rollback
+                // handles index consistency at the transaction layer
+                let _ = self.delete_by_indices(&[idx]);
                 return Ok(());
             }
         }
@@ -899,13 +930,21 @@ impl Table {
     /// * `indices` - Indices of rows to delete, need not be sorted
     ///
     /// # Returns
-    /// Number of rows deleted
+    /// [`DeleteResult`] containing:
+    /// - `deleted_count`: Number of rows deleted
+    /// - `compacted`: Whether compaction occurred (row indices changed)
+    ///
+    /// # Important
+    ///
+    /// When `compacted` is true, all row indices in the table have changed.
+    /// User-defined indexes (B-tree indexes managed at the Database level)
+    /// must be rebuilt after compaction to maintain correctness.
     ///
     /// # Performance
     /// O(d) where d = number of rows to delete, compared to O(d * n) for Vec::remove()
-    pub fn delete_by_indices(&mut self, indices: &[usize]) -> usize {
+    pub fn delete_by_indices(&mut self, indices: &[usize]) -> DeleteResult {
         if indices.is_empty() {
-            return 0;
+            return DeleteResult::new(0, false);
         }
 
         // Count valid, non-already-deleted indices
@@ -927,14 +966,19 @@ impl Table {
         }
 
         if deleted == 0 {
-            return 0;
+            return DeleteResult::new(0, false);
         }
 
         // Check if compaction is needed (> 50% deleted)
         // Compaction rebuilds the vectors without deleted rows
-        if self.should_compact() {
+        // NOTE: When compaction occurs, all row indices change and user-defined
+        // indexes (B-tree indexes) must be rebuilt by the caller
+        let compacted = if self.should_compact() {
             self.compact();
-        }
+            true
+        } else {
+            false
+        };
 
         // For native columnar tables, rebuild columnar data
         // For row tables, invalidate the cache
@@ -944,7 +988,7 @@ impl Table {
             *self.columnar_cache.write().unwrap() = None;
         }
 
-        deleted
+        DeleteResult::new(deleted, compacted)
     }
 
     /// Check if the table should be compacted

@@ -154,10 +154,11 @@ fn cascade_delete(
     // Now delete the child rows
     let child_table_mut = db.get_table_mut(child_table_name).unwrap();
     for row_to_delete in &rows_to_delete {
-        child_table_mut.delete_where(|row| row == row_to_delete);
+        // Ignore delete_result since we unconditionally rebuild indexes after the loop
+        let _ = child_table_mut.delete_where(|row| row == row_to_delete);
     }
 
-    // Rebuild indexes after deletion
+    // Rebuild indexes after deletion (handles both compaction and non-compaction cases)
     db.rebuild_indexes(child_table_name);
 
     Ok(())

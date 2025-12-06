@@ -45,7 +45,7 @@ pub use query_buffer_pool::{
 };
 pub use row::Row;
 pub use statistics::{ColumnStatistics, TableStatistics};
-pub use table::Table;
+pub use table::{DeleteResult, Table};
 pub use wal::{
     DurabilityConfig, DurabilityMode, Lsn, PersistenceConfig, PersistenceEngine, PersistenceStats,
     TransactionDurability, WalEntry, WalOp, WalOpTag,

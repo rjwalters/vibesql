@@ -287,13 +287,18 @@ impl DeleteExecutor {
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Use delete_by_indices for O(d * log n) instead of O(n) where d = deletes
-        // Note: With bitmap deletion, row indices don't change (rows are marked as deleted
-        // but remain in place). User-defined index entries have already been removed by
-        // batch_update_indexes_for_delete above, so we don't need to adjust remaining entries.
-        let deleted_count = table_mut.delete_by_indices(&deleted_indices);
+        // User-defined index entries have already been removed by batch_update_indexes_for_delete above.
+        // Note: If >50% of rows are deleted, compaction triggers and row indices change.
+        // When compaction occurs, we must rebuild user-defined indexes.
+        let delete_result = table_mut.delete_by_indices(&deleted_indices);
+
+        // If compaction occurred, rebuild user-defined indexes since all row indices changed
+        if delete_result.compacted {
+            database.rebuild_indexes(&stmt.table_name);
+        }
 
         // Invalidate columnar cache since table data has changed
-        if deleted_count > 0 {
+        if delete_result.deleted_count > 0 {
             database.invalidate_columnar_cache(&stmt.table_name);
         }
 
@@ -320,7 +325,7 @@ impl DeleteExecutor {
             )?;
         }
 
-        Ok(deleted_count)
+        Ok(delete_result.deleted_count)
     }
 
     /// Extract primary key value from WHERE expression if it's a simple equality

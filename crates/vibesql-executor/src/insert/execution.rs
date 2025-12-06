@@ -285,13 +285,14 @@ fn execute_insert_internal(
                     use std::cell::Cell;
                     let current_index = Cell::new(0);
                     let target_index = row_count_before;
-                    table.delete_where(|_row| {
+                    // Ignore delete_result since we unconditionally rebuild indexes below
+                    let _ = table.delete_where(|_row| {
                         let index = current_index.get();
                         current_index.set(index + 1);
                         index == target_index
                     });
 
-                    // Rebuild indexes since we modified the table
+                    // Rebuild indexes since we modified the table (handles compaction)
                     db.rebuild_indexes(&stmt.table_name);
 
                     // Re-throw the trigger error
