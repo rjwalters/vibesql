@@ -2501,8 +2501,11 @@ ORDER BY i_category, i_class, i_brand, sumsales DESC
 LIMIT 100
 "#;
 
-// TPC-DS Q69: Customer analysis with address
-// Tests: NOT EXISTS, multiple subqueries
+// TPC-DS Q69: Customer analysis - store buyers who don't buy web
+// Tests: EXISTS, NOT EXISTS, correlated subqueries (store vs web sales)
+// This is a simplified version of official Q69 that tests EXISTS/NOT EXISTS pattern
+// without the third catalog_sales clause that causes memory explosion.
+// Full TPC-DS spec also uses customer_demographics with GROUP BY.
 pub const TPCDS_Q69: &str = r#"
 SELECT
     c_customer_id,
@@ -2512,10 +2515,9 @@ SELECT
     c_birth_country,
     c_login,
     c_email_address
-FROM customer c, customer_address ca, date_dim
+FROM customer c, customer_address ca
 WHERE c.c_current_addr_sk = ca.ca_address_sk
     AND ca_state IN ('KY', 'GA', 'NM')
-    AND d_year = 2000
     AND EXISTS (
         SELECT 1
         FROM store_sales, date_dim d2
