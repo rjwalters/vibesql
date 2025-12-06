@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use crate::wal::TransactionDurability;
 use crate::{Row, StorageError, Table};
 
 /// A single change made during a transaction
@@ -40,6 +41,8 @@ pub enum TransactionState {
         savepoints: Vec<Savepoint>,
         /// All changes made since transaction start (for incremental undo)
         changes: Vec<TransactionChange>,
+        /// Durability hint for this transaction
+        durability: TransactionDurability,
     },
 }
 
@@ -65,11 +68,21 @@ impl TransactionManager {
         }
     }
 
-    /// Begin a new transaction
+    /// Begin a new transaction with default durability
     pub fn begin_transaction(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
         tables: &HashMap<String, Table>,
+    ) -> Result<(), StorageError> {
+        self.begin_transaction_with_durability(catalog, tables, TransactionDurability::Default)
+    }
+
+    /// Begin a new transaction with a specific durability hint
+    pub fn begin_transaction_with_durability(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        tables: &HashMap<String, Table>,
+        durability: TransactionDurability,
     ) -> Result<(), StorageError> {
         match self.transaction_state {
             TransactionState::None => {
@@ -86,6 +99,7 @@ impl TransactionManager {
                     original_tables,
                     savepoints: Vec::new(),
                     changes: Vec::new(),
+                    durability,
                 };
                 Ok(())
             }
@@ -139,6 +153,14 @@ impl TransactionManager {
     pub fn transaction_id(&self) -> Option<u64> {
         match &self.transaction_state {
             TransactionState::Active { id, .. } => Some(*id),
+            TransactionState::None => None,
+        }
+    }
+
+    /// Get the durability hint for the current transaction (if any)
+    pub fn get_durability(&self) -> Option<TransactionDurability> {
+        match &self.transaction_state {
+            TransactionState::Active { durability, .. } => Some(*durability),
             TransactionState::None => None,
         }
     }
