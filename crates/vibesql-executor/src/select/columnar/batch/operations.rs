@@ -5,6 +5,10 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use std::sync::Arc;
+
+use ahash::AHashSet;
+
 use crate::errors::ExecutorError;
 use vibesql_storage::Row;
 use vibesql_types::{DataType, Date, SqlValue, Time, Timestamp};
@@ -93,9 +97,170 @@ impl ColumnarBatch {
 
         Ok(rows)
     }
+
+    /// Deduplicate rows in the batch, returning a new batch with unique rows only
+    ///
+    /// Uses hash-based deduplication on all columns, preserving insertion order.
+    /// This implements DISTINCT semantics: NULL == NULL for uniqueness purposes.
+    ///
+    /// # Performance
+    ///
+    /// - O(n) time complexity where n is the number of rows
+    /// - Uses AHashSet for efficient duplicate detection
+    /// - Preserves the first occurrence of each unique row combination
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// // Original batch:
+    /// // [1, "A"], [2, "B"], [1, "A"], [3, "C"]
+    ///
+    /// // After deduplicate():
+    /// // [1, "A"], [2, "B"], [3, "C"]
+    /// ```
+    pub fn deduplicate(&self) -> Result<Self, ExecutorError> {
+        if self.row_count == 0 {
+            return Ok(self.clone());
+        }
+
+        // Track which row indices to keep (first occurrence of each unique row)
+        let mut seen: AHashSet<Vec<SqlValue>> = AHashSet::with_capacity(self.row_count);
+        let mut keep_indices: Vec<usize> = Vec::with_capacity(self.row_count);
+
+        for row_idx in 0..self.row_count {
+            // Extract all column values for this row as a key
+            let mut row_key = Vec::with_capacity(self.columns.len());
+            for col in &self.columns {
+                let value = col.get_value(row_idx)?;
+                row_key.push(value);
+            }
+
+            // If this row hasn't been seen, keep it
+            if seen.insert(row_key) {
+                keep_indices.push(row_idx);
+            }
+        }
+
+        // If no duplicates found, return self unchanged
+        if keep_indices.len() == self.row_count {
+            return Ok(self.clone());
+        }
+
+        log::debug!(
+            "Columnar deduplicate: {} rows -> {} unique rows",
+            self.row_count,
+            keep_indices.len()
+        );
+
+        // Build new batch with only the unique rows
+        self.select_rows(&keep_indices)
+    }
+
+    /// Select specific rows from the batch by index, returning a new batch
+    ///
+    /// # Arguments
+    ///
+    /// * `indices` - Row indices to select (must be valid for this batch)
+    ///
+    /// # Returns
+    ///
+    /// A new ColumnarBatch containing only the selected rows
+    pub fn select_rows(&self, indices: &[usize]) -> Result<Self, ExecutorError> {
+        if indices.is_empty() {
+            return Self::empty(self.columns.len());
+        }
+
+        let new_row_count = indices.len();
+        let mut new_columns = Vec::with_capacity(self.columns.len());
+
+        for column in &self.columns {
+            let new_column = column.select_rows(indices)?;
+            new_columns.push(new_column);
+        }
+
+        Ok(Self {
+            row_count: new_row_count,
+            columns: new_columns,
+            column_names: self.column_names.clone(),
+        })
+    }
 }
 
 impl ColumnArray {
+    /// Select specific rows from the column by index, returning a new column
+    fn select_rows(&self, indices: &[usize]) -> Result<Self, ExecutorError> {
+        match self {
+            Self::Int64(values, nulls) => {
+                let new_values: Vec<i64> = indices.iter().map(|&i| values[i]).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::Int64(Arc::new(new_values), new_nulls))
+            }
+            Self::Int32(values, nulls) => {
+                let new_values: Vec<i32> = indices.iter().map(|&i| values[i]).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::Int32(Arc::new(new_values), new_nulls))
+            }
+            Self::Float64(values, nulls) => {
+                let new_values: Vec<f64> = indices.iter().map(|&i| values[i]).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::Float64(Arc::new(new_values), new_nulls))
+            }
+            Self::Float32(values, nulls) => {
+                let new_values: Vec<f32> = indices.iter().map(|&i| values[i]).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::Float32(Arc::new(new_values), new_nulls))
+            }
+            Self::String(values, nulls) => {
+                let new_values: Vec<String> = indices.iter().map(|&i| values[i].clone()).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::String(Arc::new(new_values), new_nulls))
+            }
+            Self::FixedString(values, nulls) => {
+                let new_values: Vec<String> = indices.iter().map(|&i| values[i].clone()).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::FixedString(Arc::new(new_values), new_nulls))
+            }
+            Self::Date(values, nulls) => {
+                let new_values: Vec<i32> = indices.iter().map(|&i| values[i]).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::Date(Arc::new(new_values), new_nulls))
+            }
+            Self::Timestamp(values, nulls) => {
+                let new_values: Vec<i64> = indices.iter().map(|&i| values[i]).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::Timestamp(Arc::new(new_values), new_nulls))
+            }
+            Self::Boolean(values, nulls) => {
+                let new_values: Vec<u8> = indices.iter().map(|&i| values[i]).collect();
+                let new_nulls = nulls
+                    .as_ref()
+                    .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
+                Ok(Self::Boolean(Arc::new(new_values), new_nulls))
+            }
+            Self::Mixed(values) => {
+                let new_values: Vec<SqlValue> =
+                    indices.iter().map(|&i| values[i].clone()).collect();
+                Ok(Self::Mixed(Arc::new(new_values)))
+            }
+        }
+    }
+
     /// Get the number of values in this column
     pub fn len(&self) -> usize {
         match self {
@@ -380,5 +545,89 @@ mod tests {
         } else {
             panic!("Expected f64 slice");
         }
+    }
+
+    #[test]
+    fn test_deduplicate_with_duplicates() {
+        // Create batch with duplicate rows
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("A".to_string())]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("B".to_string())]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("A".to_string())]), // duplicate
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("C".to_string())]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("B".to_string())]), // duplicate
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        assert_eq!(batch.row_count(), 5);
+
+        let deduped = batch.deduplicate().unwrap();
+        assert_eq!(deduped.row_count(), 3);
+
+        // Verify the first occurrences are kept in order
+        let result_rows = deduped.to_rows().unwrap();
+        assert_eq!(result_rows[0].get(0), Some(&SqlValue::Integer(1)));
+        assert_eq!(result_rows[0].get(1), Some(&SqlValue::Varchar("A".to_string())));
+        assert_eq!(result_rows[1].get(0), Some(&SqlValue::Integer(2)));
+        assert_eq!(result_rows[1].get(1), Some(&SqlValue::Varchar("B".to_string())));
+        assert_eq!(result_rows[2].get(0), Some(&SqlValue::Integer(3)));
+        assert_eq!(result_rows[2].get(1), Some(&SqlValue::Varchar("C".to_string())));
+    }
+
+    #[test]
+    fn test_deduplicate_no_duplicates() {
+        // All unique rows
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Integer(2)]),
+            Row::new(vec![SqlValue::Integer(3)]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        let deduped = batch.deduplicate().unwrap();
+
+        assert_eq!(deduped.row_count(), 3);
+    }
+
+    #[test]
+    fn test_deduplicate_with_nulls() {
+        // Test NULL handling: NULL == NULL for DISTINCT purposes
+        let rows = vec![
+            Row::new(vec![SqlValue::Null, SqlValue::Varchar("A".to_string())]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("B".to_string())]),
+            Row::new(vec![SqlValue::Null, SqlValue::Varchar("A".to_string())]), // duplicate
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        let deduped = batch.deduplicate().unwrap();
+
+        assert_eq!(deduped.row_count(), 2);
+    }
+
+    #[test]
+    fn test_deduplicate_empty_batch() {
+        let batch = ColumnarBatch::new(2);
+        let deduped = batch.deduplicate().unwrap();
+        assert_eq!(deduped.row_count(), 0);
+    }
+
+    #[test]
+    fn test_select_rows() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("A".to_string())]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("B".to_string())]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("C".to_string())]),
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("D".to_string())]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Select rows 0, 2 (indices)
+        let selected = batch.select_rows(&[0, 2]).unwrap();
+        assert_eq!(selected.row_count(), 2);
+
+        let result_rows = selected.to_rows().unwrap();
+        assert_eq!(result_rows[0].get(0), Some(&SqlValue::Integer(1)));
+        assert_eq!(result_rows[1].get(0), Some(&SqlValue::Integer(3)));
     }
 }
