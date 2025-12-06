@@ -91,7 +91,9 @@ jobs:
         if: inputs.rebuild-web-demo || github.event_name == 'workflow_dispatch'
         working-directory: web-demo
         run: |
-          pnpm install --frozen-lockfile
+          # Use --ignore-workspace to prevent pnpm from using root workspace
+          # web-demo has its own package.json and pnpm-lock.yaml
+          pnpm install --frozen-lockfile --ignore-workspace
           pnpm run build
 
       # ============================================================================
