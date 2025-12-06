@@ -817,4 +817,79 @@ mod tests {
         assert!(result.contains("\\help"));
         assert!(result.contains("도움말"));
     }
+
+    #[test]
+    fn test_indonesian_locale() {
+        init(Some("id")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Sampai jumpa!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("baris"));
+    }
+
+    #[test]
+    fn test_indonesian_parser_messages() {
+        init(Some("id")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Literal string tidak diakhiri");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Karakter tidak terduga"));
+    }
+
+    #[test]
+    fn test_indonesian_resources_embedded() {
+        // Check that Indonesian resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("id/")), "Indonesian resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "id/cli.ftl"), "id/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "id/parser.ftl"), "id/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "id/executor.ftl"), "id/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "id/storage.ftl"), "id/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "id/catalog.ftl"), "id/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_indonesian_executor_messages() {
+        init(Some("id")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("tidak ditemukan"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "Pembagian dengan nol");
+    }
+
+    #[test]
+    fn test_indonesian_storage_messages() {
+        init(Some("id")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("tidak ditemukan"));
+
+        let result = format("storage-row-not-found", None);
+        assert_eq!(result, "Baris tidak ditemukan");
+    }
+
+    #[test]
+    fn test_indonesian_catalog_messages() {
+        init(Some("id")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("sudah ada"));
+
+        let result = vibe_msg!("catalog-schema-not-found", name = "myschema");
+        assert!(result.contains("myschema"));
+        assert!(result.contains("tidak ditemukan"));
+    }
 }
