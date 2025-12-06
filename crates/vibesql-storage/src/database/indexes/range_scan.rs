@@ -328,4 +328,131 @@ impl IndexData {
             }
         }
     }
+
+    /// Scan index for rows matching range predicate with early termination at limit
+    ///
+    /// This is an optimization for LIMIT queries - stops scanning after collecting
+    /// enough rows instead of scanning the entire range.
+    ///
+    /// # Arguments
+    /// * `start` - Lower bound (None = unbounded)
+    /// * `end` - Upper bound (None = unbounded)
+    /// * `inclusive_start` - Include rows equal to start value
+    /// * `inclusive_end` - Include rows equal to end value
+    /// * `limit` - Maximum number of rows to return (None = no limit)
+    ///
+    /// # Returns
+    /// Vector of row indices that match the range predicate, up to limit
+    ///
+    /// # Performance
+    /// For queries with small LIMIT relative to matching rows, this is O(log n + limit)
+    /// instead of O(log n + k) where k = all matching keys.
+    pub fn range_scan_limit(
+        &self,
+        start: Option<&SqlValue>,
+        end: Option<&SqlValue>,
+        inclusive_start: bool,
+        inclusive_end: bool,
+        limit: Option<usize>,
+    ) -> Vec<usize> {
+        // If no limit, fall back to regular range_scan
+        let Some(limit) = limit else {
+            return self.range_scan(start, end, inclusive_start, inclusive_end);
+        };
+
+        if limit == 0 {
+            return vec![];
+        }
+
+        match self {
+            IndexData::InMemory { data } => {
+                use std::ops::Bound;
+
+                let mut matching_row_indices = Vec::with_capacity(limit);
+
+                // Normalize bounds for consistent numeric comparison
+                let normalized_start = start.map(normalize_for_comparison);
+                let normalized_end = end.map(normalize_for_comparison);
+
+                // Edge case: Check for invalid/empty ranges
+                if let (Some(start_val), Some(end_val)) = (&normalized_start, &normalized_end) {
+                    if start_val == end_val && (!inclusive_start || !inclusive_end) {
+                        return Vec::new();
+                    }
+                    if start_val > end_val {
+                        return Vec::new();
+                    }
+                }
+
+                // Build bounds for BTreeMap::range()
+                let start_key = normalized_start.as_ref().map(|v| vec![v.clone()]);
+                let end_key = normalized_end.as_ref().map(|v| vec![v.clone()]);
+
+                let start_bound: Bound<&[SqlValue]> = match start_key.as_ref() {
+                    Some(key) if inclusive_start => Bound::Included(key.as_slice()),
+                    Some(key) => Bound::Excluded(key.as_slice()),
+                    None => Bound::Unbounded,
+                };
+
+                let end_bound: Bound<&[SqlValue]> = match end_key.as_ref() {
+                    Some(key) if inclusive_end => Bound::Included(key.as_slice()),
+                    Some(key) => Bound::Excluded(key.as_slice()),
+                    None => Bound::Unbounded,
+                };
+
+                // Edge case: both bounds excluded at same value
+                if let (Bound::Excluded(start_slice), Bound::Excluded(end_slice)) =
+                    (&start_bound, &end_bound)
+                {
+                    if start_slice == end_slice {
+                        return Vec::new();
+                    }
+                }
+
+                // Iterate with early termination at limit
+                for (_key_values, row_indices) in
+                    data.range::<[SqlValue], _>((start_bound, end_bound))
+                {
+                    for &row_idx in row_indices {
+                        matching_row_indices.push(row_idx);
+                        if matching_row_indices.len() >= limit {
+                            return matching_row_indices;
+                        }
+                    }
+                }
+
+                matching_row_indices
+            }
+            IndexData::IVFFlat { .. } => Vec::new(),
+            IndexData::Hnsw { .. } => Vec::new(),
+            IndexData::DiskBacked { btree, .. } => {
+                // Normalize bounds
+                let normalized_start = start.map(normalize_for_comparison);
+                let normalized_end = end.map(normalize_for_comparison);
+
+                let start_key = normalized_start.as_ref().map(|v| vec![v.clone()]);
+                let end_key = normalized_end.as_ref().map(|v| vec![v.clone()]);
+
+                // For DiskBacked, fall back to regular range_scan with post-limit
+                // TODO: Implement early termination in BTreeIndex::range_scan
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => {
+                        let all_rows = guard
+                            .range_scan(
+                                start_key.as_ref(),
+                                end_key.as_ref(),
+                                inclusive_start,
+                                inclusive_end,
+                            )
+                            .unwrap_or_else(|_| vec![]);
+                        all_rows.into_iter().take(limit).collect()
+                    }
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in range_scan_limit: {}", e);
+                        vec![]
+                    }
+                }
+            }
+        }
+    }
 }
