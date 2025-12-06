@@ -20,6 +20,31 @@ set -e
 # Change to repository root
 cd "$(dirname "$0")/.."
 
+# Detect macOS and configure LLVM if available
+# The default macOS clang (Xcode) doesn't support wasm32-unknown-unknown target
+if [[ "$(uname)" == "Darwin" ]]; then
+    # Check for Homebrew LLVM (required for wasm32 support on macOS)
+    if [[ -x "/opt/homebrew/opt/llvm/bin/clang" ]]; then
+        echo "🍎 macOS detected, using Homebrew LLVM for wasm32 support"
+        export CC="/opt/homebrew/opt/llvm/bin/clang"
+        export AR="/opt/homebrew/opt/llvm/bin/llvm-ar"
+    elif [[ -x "/usr/local/opt/llvm/bin/clang" ]]; then
+        # Intel Mac Homebrew location
+        echo "🍎 macOS detected, using Homebrew LLVM (Intel) for wasm32 support"
+        export CC="/usr/local/opt/llvm/bin/clang"
+        export AR="/usr/local/opt/llvm/bin/llvm-ar"
+    else
+        echo "❌ macOS detected but Homebrew LLVM not found."
+        echo "   The default macOS clang doesn't support wasm32-unknown-unknown target."
+        echo ""
+        echo "   Install LLVM with:"
+        echo "   brew install llvm"
+        echo ""
+        echo "   Then re-run this script."
+        exit 1
+    fi
+fi
+
 # Parse arguments
 BUILD_MODE="release"
 EXTRA_FLAGS=""

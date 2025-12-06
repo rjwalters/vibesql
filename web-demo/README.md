@@ -139,47 +139,54 @@ Or clear all site data for the demo origin through browser settings.
 - pnpm 9+
 - Rust toolchain with `wasm32-unknown-unknown` target
 - wasm-pack 0.13+
-- LLVM with wasm32 support (for local builds on macOS)
+- **macOS only:** Homebrew LLVM (`brew install llvm`)
 
-### Setup
+### Quick Start (Local Development)
 
 ```bash
-# Install Rust wasm target
+# 1. One-time setup: Install Rust wasm target and wasm-pack
 rustup target add wasm32-unknown-unknown
-
-# Install wasm-pack
 cargo install wasm-pack
 
-# Install dependencies
+# macOS only: Install LLVM (required for wasm32 support)
+brew install llvm
+
+# 2. Build the WASM module (from repository root)
+./scripts/build-wasm.sh
+
+# 3. Install web dependencies and start dev server
 cd web-demo
 pnpm install
+pnpm dev
 ```
+
+The dev server will start at **http://localhost:5173/vibesql/**
 
 ### Building WASM Module
 
-**On Linux/CI** (uses system clang):
+The `./scripts/build-wasm.sh` script handles platform-specific configuration automatically:
+
 ```bash
-wasm-pack build --target web --out-dir web-demo/public/pkg crates/vibesql-wasm-bindings --release
+# Release build (default, optimized for size)
+./scripts/build-wasm.sh
+
+# Development build (faster compile, larger output)
+./scripts/build-wasm.sh --dev
 ```
 
-**On macOS with Homebrew LLVM** (required for wasm32 support):
-```bash
-# Install LLVM if not already installed
-brew install llvm
+**What the script does:**
+- Detects macOS and automatically uses Homebrew LLVM
+- Cleans old build artifacts
+- Builds with size-optimized settings (opt-level=z, LTO, stripped)
+- Outputs to `web-demo/public/pkg/`
 
-# Build with LLVM's clang (has wasm32 target support)
-CC="/opt/homebrew/opt/llvm/bin/clang" \
-AR="/opt/homebrew/opt/llvm/bin/llvm-ar" \
-wasm-pack build --target web --out-dir web-demo/public/pkg crates/vibesql-wasm-bindings --release
-```
-
-> **Note:** The default macOS clang (Xcode) doesn't support `wasm32-unknown-unknown`. You must use Homebrew's LLVM.
+> **Note:** On macOS, the script requires Homebrew LLVM because the default Xcode clang doesn't support the `wasm32-unknown-unknown` target.
 
 ### Development Server
 
 ```bash
 cd web-demo
-pnpm dev
+pnpm dev     # Start at http://localhost:5173/vibesql/
 ```
 
 ### Available Scripts
@@ -291,17 +298,18 @@ The export script reads from `~/.vibesql/test_results/benchmark_results.vbsql` (
 | `tpch_vibesql_only.json` | TPC-H vibesql-only timings |
 | `footprint_results.json` | Memory footprint measurements |
 
-### Local Build & Preview
+### Local Build & Preview (Production Build)
+
+Test the production build locally before deploying:
 
 ```bash
-# Build WASM (see "Building WASM Module" section above)
+# From repository root
+./scripts/build-wasm.sh          # Build WASM module
 
-# Build the website
+# Build and preview
 cd web-demo
-pnpm build
-
-# Preview locally
-pnpm preview
+pnpm build                       # Creates optimized dist/ folder
+pnpm preview                     # Serves at http://localhost:4173/vibesql/
 ```
 
 ### Manual Deployment
@@ -321,14 +329,16 @@ You can trigger a manual deployment from GitHub Actions:
 
 **Cause:** The default macOS clang (from Xcode) doesn't support WebAssembly targets.
 
-**Solution:** Use Homebrew's LLVM which includes wasm32 support:
+**Solution:** Install Homebrew LLVM and use the build script:
 ```bash
+# Install LLVM (one-time setup)
 brew install llvm
 
-CC="/opt/homebrew/opt/llvm/bin/clang" \
-AR="/opt/homebrew/opt/llvm/bin/llvm-ar" \
-wasm-pack build --target web --out-dir web-demo/public/pkg crates/vibesql-wasm-bindings --release
+# Use the build script (auto-detects macOS and uses LLVM)
+./scripts/build-wasm.sh
 ```
+
+The `build-wasm.sh` script automatically detects macOS and configures the correct LLVM paths.
 
 ### WASM module not loading
 
