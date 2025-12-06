@@ -244,12 +244,9 @@ fn is_simple_aggregate_expression(expr: &Expression) -> bool {
                 return false;
             }
 
-            // Must have exactly one argument
+            // Must have exactly one argument (column reference)
+            // COUNT(*) is excluded until properly supported in extract_simple_aggregate
             if args.len() != 1 {
-                // COUNT(*) has no arguments but is special-cased
-                if upper_name == "COUNT" && args.is_empty() {
-                    return true; // COUNT(*) - TODO: handle this case
-                }
                 return false;
             }
 
