@@ -13,6 +13,7 @@ fn test_when_clause_filters_firing() {
 
     // Create table with amount column
     let table_stmt = vibesql_ast::CreateTableStmt {
+        if_not_exists: false,
         table_name: "TRANSACTIONS".to_string(),
         columns: vec![
             vibesql_ast::ColumnDef {

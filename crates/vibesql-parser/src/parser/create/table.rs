@@ -10,6 +10,16 @@ impl Parser {
         self.expect_keyword(Keyword::Create)?;
         self.expect_keyword(Keyword::Table)?;
 
+        // Check for optional IF NOT EXISTS clause
+        let if_not_exists = if self.peek_keyword(Keyword::If) {
+            self.advance(); // consume IF
+            self.expect_keyword(Keyword::Not)?;
+            self.expect_keyword(Keyword::Exists)?;
+            true
+        } else {
+            false
+        };
+
         // Parse table name (supports schema.table)
         let table_name = self.parse_qualified_identifier()?;
 
@@ -128,6 +138,12 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::CreateTableStmt { table_name, columns, table_constraints, table_options })
+        Ok(vibesql_ast::CreateTableStmt {
+            if_not_exists,
+            table_name,
+            columns,
+            table_constraints,
+            table_options,
+        })
     }
 }

@@ -131,6 +131,8 @@ pub enum RowFormat {
 /// CREATE TABLE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTableStmt {
+    /// If true, don't error if the table already exists
+    pub if_not_exists: bool,
     pub table_name: String,
     pub columns: Vec<ColumnDef>,
     pub table_constraints: Vec<TableConstraint>,

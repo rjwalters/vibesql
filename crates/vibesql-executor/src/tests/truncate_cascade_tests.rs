@@ -21,6 +21,7 @@ use crate::{CreateTableExecutor, InsertExecutor, TruncateTableExecutor};
 /// Uses table-level PK constraint for consistency
 fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: table_name.to_string(),
         columns: vec![ColumnDef {
             name: pk_column.to_string(),
@@ -56,6 +57,7 @@ fn create_table_with_fk(
     parent_column: &str,
 ) {
     let stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: table_name.to_string(),
         columns: vec![
             ColumnDef {

@@ -28,6 +28,7 @@ mod update;
 /// Helper to create audit log table for tracking trigger executions
 pub(super) fn create_audit_table(db: &mut Database) {
     let stmt = vibesql_ast::CreateTableStmt {
+        if_not_exists: false,
         table_name: "AUDIT_LOG".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
             name: "event".to_string(),
@@ -46,6 +47,7 @@ pub(super) fn create_audit_table(db: &mut Database) {
 /// Helper to create users table for testing trigger operations
 pub(super) fn create_users_table(db: &mut Database) {
     let stmt = vibesql_ast::CreateTableStmt {
+        if_not_exists: false,
         table_name: "USERS".to_string(),
         columns: vec![
             vibesql_ast::ColumnDef {

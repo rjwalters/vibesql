@@ -424,7 +424,7 @@ impl ConnectionHandler {
             }
         };
 
-        // Execute the query to get initial data (async due to shared database locking)
+        // Execute the query to get initial data
         match session.execute(query).await {
             Ok(ExecutionResult::Select { rows, .. }) => {
                 // Convert rows to wire format

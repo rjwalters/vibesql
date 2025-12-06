@@ -9,6 +9,7 @@ fn test_index_ordering() {
 
     // Create table
     let create_table_stmt = CreateTableStmt {
+        if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
             vibesql_ast::ColumnDef {

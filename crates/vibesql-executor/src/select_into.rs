@@ -51,6 +51,7 @@ impl SelectIntoExecutor {
 
         // Create the target table
         let create_stmt = CreateTableStmt {
+            if_not_exists: false,
             table_name: target_table.to_string(),
             columns: column_defs,
             table_constraints: vec![],
