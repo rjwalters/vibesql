@@ -72,6 +72,7 @@ pub mod engine;
 pub mod entry;
 pub mod format;
 pub mod reader;
+pub mod recovery;
 pub mod scheduler;
 pub mod truncate;
 pub mod writer;
@@ -93,5 +94,6 @@ pub use scheduler::{
     CheckpointTriggerState, DEFAULT_CHECKPOINT_INTERVAL_SECS, DEFAULT_KEEP_CHECKPOINTS,
     DEFAULT_WAL_SIZE_THRESHOLD,
 };
+pub use recovery::{needs_recovery, recover, RecoveryConfig, RecoveryManager, RecoveryStats};
 pub use truncate::{truncate_wal, TruncateResult};
 pub use writer::{verify_checksum, WalWriter};
