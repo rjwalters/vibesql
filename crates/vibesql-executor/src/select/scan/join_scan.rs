@@ -66,11 +66,26 @@ where
 {
     // Execute left and right sides with WHERE clause for predicate pushdown
     // Note: ORDER BY and LIMIT are not optimized at JOIN level, so we pass None
+    //
+    // Bug fix for #3773: For RIGHT/FULL OUTER joins, predicates that reference ONLY
+    // the left table must NOT be pushed down to the left-side scan. These predicates
+    // test for NULL values produced by the join, not stored NULLs.
+    let left_where_clause = match join_type {
+        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter => {
+            // For RIGHT/FULL OUTER JOIN: Remove predicates that reference ONLY the left table
+            if let Some(where_expr) = where_clause {
+                filter_out_nullable_side_predicates(left, where_expr, database)
+            } else {
+                None
+            }
+        }
+        _ => where_clause.cloned(),
+    };
     let left_result = super::execute_from_clause(
         left,
         cte_results,
         database,
-        where_clause,
+        left_where_clause.as_ref(),
         None,
         None,
         outer_row,
@@ -110,11 +125,26 @@ where
     // `s_quantity < ?` in TPC-C Stock-Level queries.
     //
     // Performance fix for #3130: Extract right-only predicates from JOIN condition.
+    //
+    // Bug fix for #3773: For LEFT/RIGHT/FULL OUTER joins, predicates that reference ONLY
+    // the nullable side must NOT be pushed down to that side's scan. These predicates
+    // test for NULL values that are PRODUCED BY THE JOIN (unmatched rows), not stored
+    // in the underlying table. Example: `LEFT JOIN ... WHERE right.col IS NULL` should
+    // find rows with no match, but if pushed to right-side scan, it filters on stored NULLs.
     let right_where_clause = match join_type {
         vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti => {
             // Extract right-table-only predicates from the join condition
             if let Some(cond) = condition {
                 extract_right_only_predicates(right, cond, database)
+            } else {
+                None
+            }
+        }
+        vibesql_ast::JoinType::LeftOuter | vibesql_ast::JoinType::FullOuter => {
+            // For LEFT/FULL OUTER JOIN: Remove predicates that reference ONLY the right table
+            // These must be evaluated post-join when NULL values from unmatched rows are present
+            if let Some(where_expr) = where_clause {
+                filter_out_nullable_side_predicates(right, where_expr, database)
             } else {
                 None
             }
@@ -158,10 +188,10 @@ where
             .map_err(ExecutorError::InvalidWhereClause)?;
 
         // Extract equijoin conditions that apply to this join
-        let left_schema_tables: std::collections::HashSet<_> =
-            left_result.schema.table_schemas.keys().cloned().collect();
-        let right_schema_tables: std::collections::HashSet<_> =
-            right_result.schema.table_schemas.keys().cloned().collect();
+        let left_schema_tables: std::collections::HashSet<String> =
+            left_result.schema.table_names().into_iter().collect();
+        let right_schema_tables: std::collections::HashSet<String> =
+            right_result.schema.table_names().into_iter().collect();
 
         predicate_plan
             .get_equijoin_conditions()
@@ -224,7 +254,7 @@ fn generate_natural_join_condition(
             left_columns
                 .entry(lowercase_name)
                 .or_default()
-                .push((table_name.clone(), col.name.clone()));
+                .push((table_name.to_string(), col.name.clone()));
         }
     }
 
@@ -239,7 +269,7 @@ fn generate_natural_join_condition(
                     common_columns.push((
                         left_table.clone(),
                         left_col.clone(),
-                        table_name.clone(),
+                        table_name.to_string(),
                         col.name.clone(),
                     ));
                 }
@@ -360,6 +390,145 @@ fn extract_right_only_predicates(
 
     // Combine predicates with AND
     combine_with_and(right_only_predicates)
+}
+
+/// Filter out predicates that reference ONLY the nullable side of an outer join.
+///
+/// For LEFT/FULL OUTER JOIN, the right side is "nullable" - it can produce NULL values
+/// for unmatched rows. Predicates like `right.col IS NULL` test for these join-produced NULLs,
+/// not for NULL values stored in the table. If we push such predicates to the right-side scan,
+/// they filter on stored NULLs instead of join-produced NULLs, causing incorrect results.
+///
+/// This function takes a WHERE clause and returns a modified version with nullable-side-only
+/// predicates removed. These predicates will be evaluated post-join instead.
+///
+/// Example: For `LEFT JOIN t2 ON t1.id = t2.tid WHERE t2.tid IS NULL`
+/// - Input: `t2.tid IS NULL`
+/// - Output: None (the entire predicate references only the nullable side)
+///
+/// Example: For `LEFT JOIN t2 ON t1.id = t2.tid WHERE t1.id > 5 AND t2.tid IS NULL`
+/// - Input: `t1.id > 5 AND t2.tid IS NULL`
+/// - Output: `t1.id > 5` (keep left-side predicate, remove right-side predicate)
+fn filter_out_nullable_side_predicates(
+    nullable_side_from: &vibesql_ast::FromClause,
+    where_expr: &vibesql_ast::Expression,
+    database: &vibesql_storage::Database,
+) -> Option<vibesql_ast::Expression> {
+    // Get the table name(s) from the nullable-side FROM clause
+    let nullable_tables = extract_table_names_from_from_clause(nullable_side_from);
+    if nullable_tables.is_empty() {
+        // No tables to filter, return original expression
+        return Some(where_expr.clone());
+    }
+
+    // Build a schema and table set for the nullable side
+    let mut nullable_table_set: HashSet<String> = HashSet::new();
+    let mut schema_builder = crate::schema::SchemaBuilder::new();
+
+    for table_name in &nullable_tables {
+        // Normalize table name for lookup
+        let normalized = table_name.to_lowercase();
+        if let Some(table) = database.get_table(&normalized) {
+            schema_builder.add_table(table_name.clone(), table.schema.clone());
+            nullable_table_set.insert(table_name.clone());
+            // Also add normalized version for case-insensitive matching
+            nullable_table_set.insert(normalized);
+        } else {
+            // Table not found in database - might be a subquery alias
+            // Still add to the set so we can check column references
+            nullable_table_set.insert(table_name.clone());
+            nullable_table_set.insert(normalized);
+        }
+    }
+
+    let nullable_schema = schema_builder.build();
+
+    // Flatten the WHERE clause into conjuncts (AND-separated predicates)
+    let conjuncts = flatten_conjuncts(where_expr);
+
+    // Filter to KEEP predicates that do NOT reference only nullable-side tables
+    // (i.e., remove predicates that reference ONLY the nullable side)
+    let kept_predicates: Vec<vibesql_ast::Expression> = conjuncts
+        .into_iter()
+        .filter(|pred| {
+            // extract_referenced_tables_branch returns Option<HashSet<String>>
+            // None means the expression couldn't be analyzed (keep it, evaluate post-join)
+            // Some(empty set) means no tables referenced (keep it - e.g., constant expression)
+            // Some(non-empty set) - check if ALL tables are in nullable_table_set
+            //   If ALL are nullable-side-only -> REMOVE (don't keep)
+            //   If ANY are from other tables -> KEEP
+            match extract_referenced_tables_branch(pred, &nullable_schema) {
+                Some(ref tables) if !tables.is_empty() => {
+                    // Check if ALL referenced tables are in the nullable set
+                    let all_nullable = tables.iter().all(|t| {
+                        let t_lower = t.to_lowercase();
+                        nullable_table_set.contains(t) || nullable_table_set.contains(&t_lower)
+                    });
+                    // KEEP if NOT all-nullable (i.e., at least one non-nullable table referenced)
+                    !all_nullable
+                }
+                Some(_) => true, // Empty set - keep (no table refs, e.g., literals)
+                None => {
+                    // Couldn't analyze - check if predicate mentions nullable table columns
+                    // For safety, keep predicates we can't analyze and evaluate post-join
+                    // But first, do a simple check for column references
+                    !predicate_references_only_tables(pred, &nullable_table_set)
+                }
+            }
+        })
+        .collect();
+
+    // Debug output
+    if std::env::var("JOIN_SCAN_DEBUG").is_ok() {
+        let original_count = flatten_conjuncts(where_expr).len();
+        eprintln!(
+            "[JOIN_SCAN] filter_out_nullable_side_predicates: kept {}/{} predicates, nullable tables: {:?}",
+            kept_predicates.len(),
+            original_count,
+            nullable_tables
+        );
+    }
+
+    // Combine remaining predicates with AND (returns None if empty)
+    combine_with_and(kept_predicates)
+}
+
+/// Simple check if a predicate references only tables from a given set.
+/// This is a fallback for when extract_referenced_tables_branch returns None.
+fn predicate_references_only_tables(
+    expr: &vibesql_ast::Expression,
+    table_set: &HashSet<String>,
+) -> bool {
+    match expr {
+        vibesql_ast::Expression::ColumnRef { table: Some(t), .. } => {
+            let t_lower = t.to_lowercase();
+            table_set.contains(t) || table_set.contains(&t_lower)
+        }
+        vibesql_ast::Expression::ColumnRef { table: None, .. } => {
+            // Unqualified column - can't determine which table, assume it might be from nullable side
+            // Return false to be conservative (keep the predicate)
+            false
+        }
+        vibesql_ast::Expression::IsNull { expr: inner, .. } => {
+            predicate_references_only_tables(inner, table_set)
+        }
+        vibesql_ast::Expression::UnaryOp { expr: inner, .. } => {
+            predicate_references_only_tables(inner, table_set)
+        }
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+            // For binary ops, check if BOTH sides reference only the table set
+            let left_only = predicate_references_only_tables(left, table_set);
+            let right_only = predicate_references_only_tables(right, table_set);
+            // If either side references other tables, this is not "only" nullable-side
+            left_only && right_only
+        }
+        vibesql_ast::Expression::Literal(_) => {
+            // Literals don't reference any table
+            true
+        }
+        // For other expression types, be conservative
+        _ => false,
+    }
 }
 
 /// Extract table names from a FROM clause
@@ -531,8 +700,6 @@ fn try_index_nested_loop_semi_join(
         AHashSet::with_capacity(left_slice.len());
     let mut matching_keys: AHashSet<vibesql_types::SqlValue> = AHashSet::new();
 
-    let all_rows = right_table.scan();
-
     for left_row in left_slice {
         let join_key = &left_row.values[left_col_idx];
 
@@ -557,11 +724,12 @@ fn try_index_nested_loop_semi_join(
             .collect();
 
         // Do point lookup
+        // Issue #3790: Use get_row() which returns None for deleted rows
         if let Some(&row_idx) = pk_index.get(&lookup_key) {
-            if row_idx >= all_rows.len() {
-                continue;
-            }
-            let right_row = &all_rows[row_idx];
+            let right_row = match right_table.get_row(row_idx) {
+                Some(row) => row,
+                None => continue, // Row deleted or invalid
+            };
 
             // Apply residual filter if any
             let passes = if let (Some(filter), Some(eval)) = (&residual_filter, &evaluator) {

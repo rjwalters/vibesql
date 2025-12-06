@@ -8,7 +8,7 @@ use super::operations::Operations;
 use super::transactions::TransactionChange;
 use crate::change_events::{ChangeEvent, ChangeEventReceiver, ChangeEventSender};
 use crate::columnar_cache::ColumnarCache;
-use crate::wal::{PersistenceEngine, WalOp};
+use crate::wal::{DurabilityMode, PersistenceEngine, TransactionDurability, WalOp};
 use crate::{QueryBufferPool, Row, StorageError, Table};
 use std::collections::HashMap;
 
@@ -58,8 +58,21 @@ impl Database {
 
     /// Begin a new transaction
     pub fn begin_transaction(&mut self) -> Result<(), StorageError> {
+        self.begin_transaction_with_durability(TransactionDurability::Default)
+    }
+
+    /// Begin a new transaction with a specific durability hint
+    ///
+    /// The durability hint controls how the transaction's changes are persisted.
+    /// See [`TransactionDurability`] for available options.
+    pub fn begin_transaction_with_durability(
+        &mut self,
+        durability: TransactionDurability,
+    ) -> Result<(), StorageError> {
         let catalog = &self.catalog.clone();
-        self.lifecycle.transaction_manager_mut().begin_transaction(catalog, &self.tables)?;
+        self.lifecycle
+            .transaction_manager_mut()
+            .begin_transaction_with_durability(catalog, &self.tables, durability)?;
 
         // Emit WAL entry for persistence
         if let Some(txn_id) = self.transaction_id() {
@@ -71,14 +84,29 @@ impl Database {
 
     /// Commit the current transaction
     pub fn commit_transaction(&mut self) -> Result<(), StorageError> {
-        // Get transaction ID before committing (it will be cleared after)
+        // Get transaction ID and durability hint before committing (they will be cleared after)
         let txn_id = self.transaction_id();
+        let durability_hint = self.lifecycle.transaction_manager().get_durability();
 
         self.lifecycle.transaction_manager_mut().commit_transaction()?;
 
         // Emit WAL entry for persistence
         if let Some(txn_id) = txn_id {
             self.emit_wal_op(WalOp::TxnCommit { txn_id });
+        }
+
+        // Apply durability-based sync at commit time
+        if let Some(hint) = durability_hint {
+            let db_mode = self
+                .persistence_engine
+                .as_ref()
+                .map(|e| e.durability_mode())
+                .unwrap_or(DurabilityMode::Lazy);
+
+            let resolved_mode = hint.resolve(db_mode);
+            if resolved_mode.sync_on_commit() {
+                self.sync_persistence()?;
+            }
         }
 
         Ok(())
@@ -1536,5 +1564,251 @@ mod tests {
 
         // Persistence stats should still be None
         assert!(db.persistence_stats().is_none());
+    }
+
+    // ============================================================================
+    // Transaction Durability Hint Tests
+    // ============================================================================
+
+    #[test]
+    fn test_begin_transaction_with_default_durability() {
+        use crate::wal::TransactionDurability;
+
+        let mut db = Database::new();
+
+        db.begin_transaction_with_durability(TransactionDurability::Default).unwrap();
+        assert!(db.in_transaction());
+
+        // Verify the durability hint is stored
+        let durability = db.lifecycle.transaction_manager().get_durability();
+        assert_eq!(durability, Some(TransactionDurability::Default));
+
+        db.rollback_transaction().unwrap();
+    }
+
+    #[test]
+    fn test_begin_transaction_with_force_durable() {
+        use crate::wal::TransactionDurability;
+
+        let mut db = Database::new();
+
+        db.begin_transaction_with_durability(TransactionDurability::ForceDurable).unwrap();
+        assert!(db.in_transaction());
+
+        // Verify the durability hint is stored
+        let durability = db.lifecycle.transaction_manager().get_durability();
+        assert_eq!(durability, Some(TransactionDurability::ForceDurable));
+
+        db.rollback_transaction().unwrap();
+    }
+
+    #[test]
+    fn test_begin_transaction_with_allow_lazy() {
+        use crate::wal::TransactionDurability;
+
+        let mut db = Database::new();
+
+        db.begin_transaction_with_durability(TransactionDurability::AllowLazy).unwrap();
+        assert!(db.in_transaction());
+
+        // Verify the durability hint is stored
+        let durability = db.lifecycle.transaction_manager().get_durability();
+        assert_eq!(durability, Some(TransactionDurability::AllowLazy));
+
+        db.rollback_transaction().unwrap();
+    }
+
+    #[test]
+    fn test_begin_transaction_with_force_volatile() {
+        use crate::wal::TransactionDurability;
+
+        let mut db = Database::new();
+
+        db.begin_transaction_with_durability(TransactionDurability::ForceVolatile).unwrap();
+        assert!(db.in_transaction());
+
+        // Verify the durability hint is stored
+        let durability = db.lifecycle.transaction_manager().get_durability();
+        assert_eq!(durability, Some(TransactionDurability::ForceVolatile));
+
+        db.rollback_transaction().unwrap();
+    }
+
+    #[test]
+    fn test_durability_hint_cleared_on_commit() {
+        use crate::wal::TransactionDurability;
+
+        let mut db = Database::new();
+
+        db.begin_transaction_with_durability(TransactionDurability::ForceDurable).unwrap();
+        assert!(db.in_transaction());
+
+        db.commit_transaction().unwrap();
+        assert!(!db.in_transaction());
+
+        // Durability hint should be None after commit
+        let durability = db.lifecycle.transaction_manager().get_durability();
+        assert_eq!(durability, None);
+    }
+
+    #[test]
+    fn test_durability_hint_cleared_on_rollback() {
+        use crate::wal::TransactionDurability;
+
+        let mut db = Database::new();
+
+        db.begin_transaction_with_durability(TransactionDurability::ForceDurable).unwrap();
+        assert!(db.in_transaction());
+
+        db.rollback_transaction().unwrap();
+        assert!(!db.in_transaction());
+
+        // Durability hint should be None after rollback
+        let durability = db.lifecycle.transaction_manager().get_durability();
+        assert_eq!(durability, None);
+    }
+
+    #[test]
+    fn test_force_durable_triggers_sync() {
+        use std::io::Cursor;
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+        use crate::wal::{PersistenceConfig, PersistenceEngine, TransactionDurability};
+
+        let mut db = Database::new();
+
+        // Enable persistence in lazy mode (default - no sync on commit)
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::lazy()).unwrap();
+        db.enable_persistence(engine);
+
+        // Create a table
+        let schema = TableSchema::new(
+            "test".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+        db.create_table(schema).unwrap();
+
+        // Begin transaction with ForceDurable hint
+        db.begin_transaction_with_durability(TransactionDurability::ForceDurable).unwrap();
+
+        // Insert a row
+        let row = crate::Row::new(vec![SqlValue::Integer(1)]);
+        db.insert_row("test", row).unwrap();
+
+        // Commit - should trigger sync because ForceDurable overrides lazy mode
+        db.commit_transaction().unwrap();
+
+        // Check stats - explicit_flushes should have been triggered by sync
+        let stats = db.persistence_stats().unwrap();
+        assert!(stats.explicit_flushes >= 1, "ForceDurable should trigger an explicit flush on commit");
+    }
+
+    #[test]
+    fn test_default_durability_respects_lazy_mode() {
+        use std::io::Cursor;
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+        use crate::wal::{PersistenceConfig, PersistenceEngine, TransactionDurability};
+
+        let mut db = Database::new();
+
+        // Enable persistence in lazy mode
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::lazy()).unwrap();
+        db.enable_persistence(engine);
+
+        // Create a table
+        let schema = TableSchema::new(
+            "test".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+        db.create_table(schema).unwrap();
+
+        // Get initial stats after table creation
+        let initial_stats = db.persistence_stats().unwrap();
+        let initial_explicit_flushes = initial_stats.explicit_flushes;
+
+        // Begin transaction with Default hint (should follow lazy mode - no sync on commit)
+        db.begin_transaction_with_durability(TransactionDurability::Default).unwrap();
+
+        // Insert a row
+        let row = crate::Row::new(vec![SqlValue::Integer(1)]);
+        db.insert_row("test", row).unwrap();
+
+        // Commit - should NOT trigger sync in lazy mode with default durability
+        db.commit_transaction().unwrap();
+
+        // Check stats - no new explicit_flushes should have been triggered
+        let final_stats = db.persistence_stats().unwrap();
+        assert_eq!(
+            final_stats.explicit_flushes,
+            initial_explicit_flushes,
+            "Default durability in lazy mode should not trigger explicit flush on commit"
+        );
+    }
+
+    #[test]
+    fn test_durability_hint_no_panic_without_persistence() {
+        use crate::wal::TransactionDurability;
+
+        // Create database WITHOUT persistence enabled
+        let mut db = Database::new();
+
+        // Begin transaction with ForceDurable hint
+        db.begin_transaction_with_durability(TransactionDurability::ForceDurable).unwrap();
+        assert!(db.in_transaction());
+
+        // Commit should not panic even though ForceDurable requests sync
+        // (sync is a no-op when persistence is not enabled)
+        db.commit_transaction().unwrap();
+        assert!(!db.in_transaction());
+    }
+
+    #[test]
+    fn test_allow_lazy_downgrades_durable_mode() {
+        use std::io::Cursor;
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+        use crate::wal::{PersistenceConfig, PersistenceEngine, TransactionDurability};
+
+        let mut db = Database::new();
+
+        // Enable persistence in durable mode (sync on every commit by default)
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::durable()).unwrap();
+        db.enable_persistence(engine);
+
+        // Create a table
+        let schema = TableSchema::new(
+            "test".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+        db.create_table(schema).unwrap();
+
+        // Get initial stats after table creation
+        let initial_stats = db.persistence_stats().unwrap();
+        let initial_explicit_flushes = initial_stats.explicit_flushes;
+
+        // Begin transaction with AllowLazy hint (should downgrade durable to lazy)
+        db.begin_transaction_with_durability(TransactionDurability::AllowLazy).unwrap();
+
+        // Insert a row
+        let row = crate::Row::new(vec![SqlValue::Integer(1)]);
+        db.insert_row("test", row).unwrap();
+
+        // Commit - AllowLazy should prevent sync even in durable mode
+        db.commit_transaction().unwrap();
+
+        // Check stats - no new explicit_flushes should have been triggered
+        let final_stats = db.persistence_stats().unwrap();
+        assert_eq!(
+            final_stats.explicit_flushes,
+            initial_explicit_flushes,
+            "AllowLazy should downgrade durable mode and not trigger explicit flush on commit"
+        );
     }
 }

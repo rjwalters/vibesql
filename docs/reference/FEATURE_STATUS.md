@@ -16,6 +16,7 @@ This document provides a detailed breakdown of implemented features in VibeSQL a
 - **Schema operations**: CREATE/DROP TABLE, CREATE/DROP SCHEMA, CREATE/DROP VIEW, ALTER TABLE
 - **Index types**: B-tree, R-tree (spatial), FULLTEXT, HNSW (vector), IVFFlat (vector)
 - **Transactions**: BEGIN, COMMIT, ROLLBACK, SAVEPOINT (nested transactions)
+- **Durability hints**: Per-transaction durability control (DEFAULT, DURABLE, LAZY, VOLATILE)
 - **Constraints**: NOT NULL, PRIMARY KEY, UNIQUE, CHECK, FOREIGN KEY (all fully enforced)
 
 ## Security & Privileges

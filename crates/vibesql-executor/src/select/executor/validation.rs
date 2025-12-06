@@ -186,7 +186,7 @@ fn validate_column_ref(
         vec![table.clone()]
     } else {
         // If unqualified, list all tables that were searched
-        schema.table_schemas.keys().cloned().collect()
+        schema.table_names()
     };
 
     // Collect available columns for suggestions (from both schemas)
@@ -199,7 +199,7 @@ fn validate_column_ref(
     // Include outer schema tables and columns in error message
     if let Some(outer) = outer_schema {
         if col_ref.table.is_none() {
-            searched_tables.extend(outer.table_schemas.keys().cloned());
+            searched_tables.extend(outer.table_names());
         }
         available_columns.extend(
             outer
@@ -267,9 +267,9 @@ pub fn validate_select_columns_with_context(
 
                 if !table_in_inner && !table_in_outer {
                     let mut available_tables: Vec<String> =
-                        schema.table_schemas.keys().cloned().collect();
+                        schema.table_names();
                     if let Some(outer) = outer_schema {
-                        available_tables.extend(outer.table_schemas.keys().cloned());
+                        available_tables.extend(outer.table_names());
                     }
                     return Err(ExecutorError::InvalidTableQualifier {
                         qualifier: qualifier.clone(),

@@ -185,9 +185,10 @@ impl SelectExecutor<'_> {
         let evaluator =
             ArenaExpressionEvaluator::with_database(&schema, params, self.database, interner);
 
-        // Scan table and filter
+        // Scan table and filter (only live rows)
+        // Issue #3790: Use scan_live() to filter out deleted rows
         let mut results = Vec::new();
-        for row in table.scan() {
+        for (_, row) in table.scan_live() {
             // Apply WHERE clause filter
             if let Some(where_clause) = &stmt.where_clause {
                 let filter_result = evaluator.eval(where_clause, row)?;
@@ -247,9 +248,7 @@ impl SelectExecutor<'_> {
                 ArenaSelectItem::QualifiedWildcard { qualifier, .. } => {
                     // Qualified wildcard (table.*) - expand columns from specific table
                     let qualifier_str = interner.resolve(*qualifier);
-                    if let Some(&(start, ref tbl_schema)) =
-                        schema.table_schemas.get(&qualifier_str.to_lowercase())
-                    {
+                    if let Some(&(start, ref tbl_schema)) = schema.get_table(qualifier_str) {
                         for i in 0..tbl_schema.columns.len() {
                             if let Some(val) = row.get(start + i) {
                                 values.push(val.clone());

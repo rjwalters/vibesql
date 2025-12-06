@@ -194,7 +194,13 @@ impl SelectExecutor<'_> {
     ///
     /// For fast path queries, we derive column names directly from the SELECT list
     /// and table schema without going through the full FROM clause execution.
-    fn derive_fast_path_column_names(
+    ///
+    /// # Performance Note (#3780)
+    ///
+    /// This method is called by `Session::execute_prepared()` to cache column names
+    /// in `SimpleFastPathPlan`. After the first execution, cached column names are
+    /// reused to avoid repeated table lookups and column name derivation.
+    pub fn derive_fast_path_column_names(
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<Vec<String>, ExecutorError> {
@@ -424,7 +430,13 @@ impl SelectExecutor<'_> {
                 if has_joins {
                     if let Some(result) = self.try_columnar_join_execution(stmt, cte_results)? {
                         log::info!("Columnar join execution succeeded");
-                        result
+                        // Apply LIMIT/OFFSET to columnar join results (#3776)
+                        // Skip if set_operation exists - it will be applied later
+                        if stmt.set_operation.is_none() {
+                            apply_limit_offset(result, stmt.limit, stmt.offset)
+                        } else {
+                            result
+                        }
                     } else {
                         log::debug!(
                             "Columnar join execution not applicable, falling back to row-oriented"

@@ -11,6 +11,7 @@ import { sampleDatabases } from './data/sample-databases'
 import { updateConformanceFooter } from './utils/conformance'
 import { initializeApp, setupThemeSync } from './app/initialization'
 import { createExecutionHandler } from './app/query-executor'
+import { initLocale } from './locale'
 
 async function bootstrap(): Promise<void> {
   // Initialize loading progress indicator
@@ -29,12 +30,15 @@ async function bootstrap(): Promise<void> {
     // Initialize core application components
     const app = await initializeApp(progress)
 
+    // Initialize locale system
+    const locale = initLocale()
+
     // Setup theme synchronization with editor
     setupThemeSync(app.theme, mode => app.editor.applyTheme(mode))
 
-    // Initialize Navigation component
+    // Initialize Navigation component with theme and locale
     progress.updateStep('ui', 70, 'loading')
-    new NavigationComponent('terminal', app.theme)
+    new NavigationComponent('terminal', app.theme, locale)
 
     // Update storage status display
     const storageStatusEl = document.getElementById('storage-status')

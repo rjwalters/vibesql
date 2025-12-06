@@ -67,9 +67,12 @@ class BenchConfig:
     duration: Optional[int] = None     # Benchmark duration in seconds
     scale: Optional[float] = None      # Scale factor
     output: Optional[str] = None       # Output file path
-    fast: bool = False                 # Fast mode for pipeline debugging
+    test_mode: bool = False            # Test mode for pipeline validation
+    quick: bool = False                # Quick mode for CI (reduced iterations)
     json_export: bool = False          # Export results to JSON
     verbose: bool = False              # Verbose output
+    sample_size: Optional[int] = None  # Criterion sample size (iterations per query)
+    measurement_time: Optional[int] = None  # Criterion measurement time in seconds
 
 
 @dataclass
@@ -116,14 +119,15 @@ Examples:
   ./scripts/bench --test=tpch                     Run TPC-H with VibeSQL
   ./scripts/bench --test=tpch --engine=sqlite     Run TPC-H vs SQLite
   ./scripts/bench --test=tpcc --engine=mysql      Run TPC-C with MySQL
-  ./scripts/bench --test=all                      Run all benchmarks
-  ./scripts/bench --quick                         Quick CI-friendly subset
-  ./scripts/bench --fast                          Ultra-fast pipeline debugging (~30s)
-  ./scripts/bench --fast --all                    Fast mode for ALL benchmarks
+  ./scripts/bench --test=all                      Run all benchmarks (2+ hours)
+  ./scripts/bench --test=all --quick              Quick CI run (~15-20 min)
+  ./scripts/bench --smoke                         Smoke test - pipeline validation (~30s)
+  ./scripts/bench --smoke --all                   Smoke test ALL benchmarks
   ./scripts/bench --test=tpch --query=Q1,Q6       Run only Q1 and Q6 queries
   ./scripts/bench --test=tpcds --query=Q4,Q11     Run specific TPC-DS queries
   ./scripts/bench --test=tpcc --txn=new-order     Run only new-order transactions
   ./scripts/bench --test=tpcc --duration=120      Run TPC-C for 120s
+  ./scripts/bench --sample-size=5                 Run with fewer iterations
 
 Query Filter (--query):
   Works with TPC-H and TPC-DS benchmarks.
@@ -197,13 +201,13 @@ Transaction Filter (--txn):
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Quick subset for CI (limited queries, no comparisons)"
+        help="Quick mode for CI (~15-20 min instead of 2+ hours). Reduces Criterion iterations (sample_size=10, measurement_time=3s)"
     )
 
     parser.add_argument(
-        "--fast",
+        "--smoke",
         action="store_true",
-        help="Ultra-fast mode for pipeline debugging (~30s total). Runs minimal queries/duration to validate data collection and storage."
+        help="Smoke test mode for pipeline validation (~30s total). Runs minimal queries/duration to validate data collection and storage."
     )
 
     parser.add_argument(
@@ -222,6 +226,19 @@ Transaction Filter (--txn):
         "--verbose", "-v",
         action="store_true",
         help="Verbose output with detailed timing information"
+    )
+
+    # Criterion benchmark settings (for TPC-H/TPC-DS)
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        help="Number of iterations per query (Criterion sample size). Default: 100, --quick: 10"
+    )
+
+    parser.add_argument(
+        "--measurement-time",
+        type=int,
+        help="Measurement time per query in seconds (Criterion). Default: 5, --quick: 3"
     )
 
     return parser
@@ -262,24 +279,30 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
     test = args.test if not args.all else "all"
     engines = parse_engines(args.engine)
 
-    # Quick mode: limit to VibeSQL only, no comparisons
+    # Quick mode: limit to VibeSQL only, reduced iterations for faster CI
+    # Targets ~15-20 minutes for full benchmark suite instead of 2+ hours
     if args.quick:
         engines = ["vibesql"]
         args.timeout = args.timeout or 10  # Shorter timeout
+        # Reduced Criterion settings: 10 samples instead of 100, 3s instead of 5s
+        args.sample_size = args.sample_size or 10
+        args.measurement_time = args.measurement_time or 3
 
-    # Fast mode: ultra-minimal settings for pipeline debugging (~30s total)
+    # Smoke test mode: ultra-minimal settings for pipeline validation (~30s total)
     # Purpose: Validate data collection, storage, and analysis pipeline
-    if args.fast:
+    if args.smoke:
         engines = ["vibesql"]
         args.timeout = args.timeout or 5      # 5s timeout per query
         args.duration = args.duration or 3    # 3s duration for TPC-C/Sysbench
         args.scale = args.scale or 0.001      # Minimal scale factor
+        args.sample_size = args.sample_size or 5
+        args.measurement_time = args.measurement_time or 1
         # Limit to fastest queries unless explicitly specified
         if not args.query:
             args.query = "Q1,Q6"  # TPC-H fastest queries
-        test = args.test if not args.all else "all"
+        test = "all" if args.all else test
         print("\n" + "=" * 60, flush=True)
-        print("FAST MODE - Pipeline Debugging", flush=True)
+        print("SMOKE TEST MODE - Pipeline Validation", flush=True)
         print("=" * 60, flush=True)
         print("Purpose: Validate benchmark → storage → analysis pipeline", flush=True)
         print(f"  Timeout:  {args.timeout}s per query", flush=True)
@@ -297,9 +320,12 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
         duration=args.duration,
         scale=args.scale,
         output=args.output,
-        fast=args.fast,
+        test_mode=args.smoke,
+        quick=args.quick,
         json_export=args.json,
         verbose=args.verbose,
+        sample_size=getattr(args, 'sample_size', None),
+        measurement_time=getattr(args, 'measurement_time', None),
     )
 
     return config
@@ -537,6 +563,14 @@ def run_tpcds(config: BenchConfig) -> int:
     if config.scale:
         env["SCALE_FACTOR"] = str(config.scale)
 
+    # Pass Criterion settings for reduced iterations (--quick mode)
+    if config.sample_size:
+        env["CRITERION_SAMPLE_SIZE"] = str(config.sample_size)
+        print(f"Sample size: {config.sample_size}")
+    if config.measurement_time:
+        env["CRITERION_MEASUREMENT_TIME"] = str(config.measurement_time)
+        print(f"Measurement time: {config.measurement_time}s")
+
     # Start MySQL Docker container for MySQL comparison
     # Always try to start MySQL for TPC-DS - the isolated script handles it gracefully
     print("\nStarting MySQL Docker container...")
@@ -693,7 +727,7 @@ def export_json_results(results: Dict[str, BenchmarkResult], config: BenchConfig
                 "scale": config.scale,
                 "timeout": config.timeout,
                 "duration": config.duration,
-                "fast_mode": config.fast,
+                "test_mode": config.test_mode,
             }
         },
         "benchmarks": {}
@@ -725,10 +759,10 @@ def run_all(config: BenchConfig) -> int:
     results: Dict[str, BenchmarkResult] = {}
     start_time = datetime.now()
 
-    # In fast mode, skip TPC-DS (it doesn't support query filtering and takes too long)
-    benchmarks = ["tpch", "tpcc", "sysbench"] if config.fast else ["tpch", "tpcc", "tpcds", "sysbench"]
-    if config.fast:
-        print("Note: Skipping TPC-DS in fast mode (no query filter support)")
+    # In smoke test mode, skip TPC-DS (it doesn't support query filtering and takes too long)
+    benchmarks = ["tpch", "tpcc", "sysbench"] if config.test_mode else ["tpch", "tpcc", "tpcds", "sysbench"]
+    if config.test_mode:
+        print("Note: Skipping TPC-DS in smoke test mode (no query filter support)")
 
     for test in benchmarks:
         config.test = test

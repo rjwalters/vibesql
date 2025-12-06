@@ -197,6 +197,61 @@ pub(crate) fn execute_index_scan(
         }
     };
 
+    // ==========================================================================
+    // Streaming Fast Path for Simple Range Scans (#3781)
+    // ==========================================================================
+    //
+    // For simple range queries without ORDER BY, LIMIT, or post-filtering,
+    // we can use streaming to avoid materializing all row indices into a Vec.
+    // This is critical for queries like:
+    //   SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?
+    //
+    // Conditions for streaming:
+    // - Single-column index with range predicate (not composite key, prefix, or IN)
+    // - No WHERE post-filtering needed (index fully satisfies predicate)
+    // - No ORDER BY (sorted_columns is None)
+    // - No LIMIT (limit is None) - streaming doesn't help much with LIMIT
+    //
+    // Performance: Avoids O(k) Vec allocation and sorting, processes rows on-demand.
+    let can_use_streaming = !use_composite_lookup
+        && !use_prefix_lookup
+        && !use_prefix_bounded_lookup
+        && !need_where_filter
+        && sorted_columns.is_none()
+        && limit.is_none()
+        && matches!(&index_predicate, Some(IndexPredicate::Range(_)));
+
+    if can_use_streaming {
+        if let Some(IndexPredicate::Range(range)) = &index_predicate {
+            // Try streaming range scan
+            if let Some(streaming_iter) = index_data.range_scan_streaming(
+                range.start.as_ref(),
+                range.end.as_ref(),
+                range.inclusive_start,
+                range.inclusive_end,
+            ) {
+                // Stream directly: iterate indices → lookup rows → clone
+                // This avoids:
+                // - Allocating Vec<usize> for all matching indices
+                // - Sorting the indices (not needed without ORDER BY)
+                let rows: Vec<Row> = streaming_iter
+                    .filter_map(|idx| table.get_row(idx))
+                    .cloned()
+                    .collect();
+
+                // Build schema and return result
+                let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+                let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+
+                // Mark as WHERE-filtered since index fully satisfied the predicate
+                return Ok(super::super::FromResult::from_rows_where_filtered(schema, rows, None));
+            }
+        }
+    }
+    // ==========================================================================
+    // End Streaming Fast Path
+    // ==========================================================================
+
     // Track if we used reverse iteration (to skip manual reversal later)
     let mut used_reverse_iteration = false;
 
@@ -361,17 +416,15 @@ pub(crate) fn execute_index_scan(
             false
         };
 
-    // Fetch rows from table (zero-copy - returns references)
-    let all_rows = table.scan();
-
     // Build schema early (needed for WHERE filtering)
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
     let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
 
     // Zero-copy optimization: Work with row references until the final step
     // This avoids cloning rows that will be filtered out by the WHERE clause
+    // Issue #3790: Use get_row() which returns None for deleted rows
     let row_refs: Vec<&Row> =
-        matching_row_indices.iter().filter_map(|idx| all_rows.get(*idx)).collect();
+        matching_row_indices.iter().filter_map(|idx| table.get_row(*idx)).collect();
 
     // Apply WHERE clause predicates if needed (zero-copy filtering)
     // Performance optimization: Skip WHERE clause evaluation if the index already

@@ -18,7 +18,7 @@ use crate::{
         },
         CombinedExpressionEvaluator,
     },
-    schema::CombinedSchema,
+    schema::{CombinedSchema, TableKey},
 };
 
 /// Information about a window function that needs post-aggregation evaluation
@@ -214,7 +214,7 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
     let table_schema = vibesql_catalog::TableSchema::new("result".to_string(), columns);
 
     let mut table_schemas = std::collections::HashMap::new();
-    table_schemas.insert("result".to_string(), (0, table_schema.clone()));
+    table_schemas.insert(TableKey::new("result"), (0, table_schema.clone()));
 
     CombinedSchema { table_schemas, total_columns: table_schema.columns.len() }
 }

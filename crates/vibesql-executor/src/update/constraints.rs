@@ -172,8 +172,8 @@ impl<'a> ConstraintValidator<'a> {
                 }
             } else {
                 // Fallback to table scan if index not available (should not happen in normal
-                // operation)
-                for (other_idx, other_row) in table.scan().iter().enumerate() {
+                // operation). Use scan_live() to skip deleted rows.
+                for (other_idx, other_row) in table.scan_live() {
                     // Skip the row being updated
                     if other_idx == row_index {
                         continue;
@@ -239,8 +239,8 @@ impl<'a> ConstraintValidator<'a> {
                 }
             } else {
                 // Fallback to table scan if index not available (should not happen in normal
-                // operation)
-                for (other_idx, other_row) in table.scan().iter().enumerate() {
+                // operation). Use scan_live() to skip deleted rows.
+                for (other_idx, other_row) in table.scan_live() {
                     // Skip the row being updated
                     if other_idx == row_index {
                         continue;

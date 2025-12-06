@@ -55,17 +55,8 @@ impl SelectExecutor<'_> {
                     // ...)]
                     if let Some(from_res) = from_result {
                         // Find the table/alias in the schema
-                        // Try exact match first for performance
-                        let result =
-                            from_res.schema.table_schemas.get(qualifier).cloned().or_else(|| {
-                                // Fall back to case-insensitive lookup without allocation
-                                from_res
-                                    .schema
-                                    .table_schemas
-                                    .iter()
-                                    .find(|(key, _)| key.eq_ignore_ascii_case(qualifier))
-                                    .map(|(_, value)| value.clone())
-                            });
+                        // TableKey lookup is case-insensitive
+                        let result = from_res.schema.get_table(qualifier).cloned();
 
                         if let Some((_start_index, schema)) = result {
                             // Apply derived column list if present

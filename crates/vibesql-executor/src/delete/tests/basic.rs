@@ -45,10 +45,10 @@ fn test_delete_with_simple_where() {
     let table = db.get_table("users").unwrap();
     assert_eq!(table.row_count(), 2);
 
+    // Use scan_live() to get only non-deleted rows
     let remaining: Vec<i64> = table
-        .scan()
-        .iter()
-        .map(|row| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
+        .scan_live()
+        .map(|(_, row)| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
         .collect();
 
     assert!(remaining.contains(&1)); // Alice
@@ -79,8 +79,12 @@ fn test_delete_with_boolean_where() {
     let table = db.get_table("users").unwrap();
     assert_eq!(table.row_count(), 1);
 
-    let remaining_id =
-        if let SqlValue::Integer(id) = table.scan()[0].get(0).unwrap() { *id } else { 0 };
+    // Use scan_live() to get only non-deleted rows
+    let remaining_id = table
+        .scan_live()
+        .next()
+        .map(|(_, row)| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
+        .unwrap_or(0);
     assert_eq!(remaining_id, 2); // Bob
 }
 

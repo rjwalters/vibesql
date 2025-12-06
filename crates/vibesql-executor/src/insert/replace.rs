@@ -41,7 +41,8 @@ pub fn handle_replace_conflicts(
 
     let mut rows_to_delete: Vec<(usize, vibesql_storage::Row)> = Vec::new();
 
-    for (row_index, row) in table.scan().iter().enumerate() {
+    // Use scan_live() to skip deleted rows and get correct physical indices
+    for (row_index, row) in table.scan_live() {
         let mut should_delete = false;
 
         // Check if this row matches the PRIMARY KEY

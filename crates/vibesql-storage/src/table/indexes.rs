@@ -289,72 +289,10 @@ impl IndexManager {
         }
     }
 
-    /// Adjust row indices after a single row deletion
-    ///
-    /// When a row is deleted at index `deleted_index`, all rows after it shift down by 1.
-    /// This method updates all index entries to reflect the new indices without rebuilding.
-    ///
-    /// # Performance
-    /// O(total_entries) where total_entries is the sum of entries across all indexes.
-    /// This is much faster than rebuild() for single-row deletes when most index entries
-    /// remain valid (only indices > deleted_index need adjustment).
-    ///
-    /// # Arguments
-    /// * `deleted_index` - The index of the row that was deleted
-    #[inline]
-    pub(crate) fn adjust_after_delete(&mut self, deleted_index: usize) {
-        // Adjust primary key index
-        if let Some(ref mut pk_index) = self.primary_key_index {
-            for row_idx in pk_index.values_mut() {
-                if *row_idx > deleted_index {
-                    *row_idx -= 1;
-                }
-            }
-        }
-
-        // Adjust unique constraint indexes
-        for unique_index in &mut self.unique_indexes {
-            for row_idx in unique_index.values_mut() {
-                if *row_idx > deleted_index {
-                    *row_idx -= 1;
-                }
-            }
-        }
-    }
-
-    /// Adjust row indices after multiple row deletions
-    ///
-    /// More efficient than calling adjust_after_delete() multiple times when deleting
-    /// multiple rows. The deleted_indices must be sorted in ascending order.
-    ///
-    /// # Arguments
-    /// * `deleted_indices` - Sorted list of deleted row indices (ascending order)
-    #[inline]
-    pub(crate) fn adjust_after_multi_delete(&mut self, deleted_indices: &[usize]) {
-        if deleted_indices.is_empty() {
-            return;
-        }
-
-        // Use binary search for O(log d) per entry instead of O(d)
-        // Total complexity: O(n log d) instead of O(n * d)
-
-        // Adjust primary key index
-        if let Some(ref mut pk_index) = self.primary_key_index {
-            for row_idx in pk_index.values_mut() {
-                // Binary search gives us the count of deleted indices < row_idx
-                let decrement = deleted_indices.partition_point(|&d| d < *row_idx);
-                *row_idx -= decrement;
-            }
-        }
-
-        // Adjust unique constraint indexes
-        for unique_index in &mut self.unique_indexes {
-            for row_idx in unique_index.values_mut() {
-                let decrement = deleted_indices.partition_point(|&d| d < *row_idx);
-                *row_idx -= decrement;
-            }
-        }
-    }
+    // NOTE: adjust_after_delete and adjust_after_multi_delete methods were removed
+    // as part of the deletion bitmap optimization (issue #3779). With the bitmap approach,
+    // rows are marked as deleted rather than physically removed, so index entry positions
+    // no longer need adjustment. Indexes are only rebuilt during compaction.
 
     /// Clear all indexes
     ///

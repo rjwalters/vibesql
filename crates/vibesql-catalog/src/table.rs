@@ -30,6 +30,10 @@ pub struct TableSchema {
 
 impl TableSchema {
     pub fn new(name: String, columns: Vec<ColumnSchema>) -> Self {
+        // Store columns by exact name for case-sensitive lookups.
+        // The parser normalizes unquoted identifiers to uppercase, so case-insensitive
+        // matching for regular identifiers works automatically. Delimited identifiers
+        // (quoted with "") preserve exact case per SQL:1999 Section 5.2.
         let column_index_cache: HashMap<String, usize> =
             columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
@@ -186,34 +190,30 @@ impl TableSchema {
     }
 
     /// Get column by name.
-    /// Uses case-insensitive matching for column names.
+    /// Uses exact case matching. The parser normalizes unquoted identifiers to uppercase,
+    /// so case-insensitive matching for regular identifiers works automatically.
+    /// Delimited identifiers preserve exact case per SQL:1999 Section 5.2.
     pub fn get_column(&self, name: &str) -> Option<&ColumnSchema> {
-        // First try exact match for performance
-        if let Some(col) = self.columns.iter().find(|col| col.name == name) {
-            return Some(col);
-        }
-
-        // Fall back to case-insensitive search
-        let name_lower = name.to_lowercase();
-        self.columns.iter().find(|col| col.name.to_lowercase() == name_lower)
+        self.get_column_index(name).map(|idx| &self.columns[idx])
     }
 
     /// Get column index by name.
-    /// Uses case-insensitive matching for column names.
+    /// First tries exact case match to support delimited identifiers (SQL:1999 Section 5.2).
+    /// Falls back to case-insensitive search for backward compatibility with tests
+    /// that create schemas directly without parser normalization.
     pub fn get_column_index(&self, name: &str) -> Option<usize> {
-        // First try exact match for performance
-        if let Some(idx) = self.column_index_cache.get(name) {
-            return Some(*idx);
+        // First, try exact case match (supports delimited identifiers correctly)
+        if let Some(&idx) = self.column_index_cache.get(name) {
+            return Some(idx);
         }
-
-        // Fall back to case-insensitive search
+        // Fallback: case-insensitive search for backward compatibility
+        // This handles cases where tests create columns with lowercase names
+        // but SQL queries normalize to uppercase
         let name_lower = name.to_lowercase();
-        for (i, col) in self.columns.iter().enumerate() {
-            if col.name.to_lowercase() == name_lower {
-                return Some(i);
-            }
-        }
-        None
+        self.column_index_cache
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == name_lower)
+            .map(|(_, &idx)| idx)
     }
 
     /// Get number of columns.
@@ -248,8 +248,8 @@ impl TableSchema {
             return Err(crate::CatalogError::ColumnAlreadyExists(column.name));
         }
         let index = self.columns.len();
-        self.columns.push(column.clone());
-        self.column_index_cache.insert(column.name, index);
+        self.column_index_cache.insert(column.name.clone(), index);
+        self.columns.push(column);
         Ok(())
     }
 

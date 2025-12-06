@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-fast benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Log file location for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
@@ -11,7 +11,7 @@ PID_FILE := /tmp/vibesql-make-all.pid
 # Use 'make all-fg' for foreground execution
 all:
 	@echo "══════════════════════════════════════════════════════════════════"
-	@echo "  Starting 'make all' in background (build + test + benchmark)"
+	@echo "  Starting 'make all' in background (build + test + benchmark-quick)"
 	@echo "══════════════════════════════════════════════════════════════════"
 	@echo ""
 	@echo "  Log file: $(LOG_FILE)"
@@ -28,7 +28,7 @@ all:
 
 # Run all targets in foreground (build, test, benchmark)
 # This is what 'make all' runs in the background
-all-fg: build-all test benchmark
+all-fg: build-all test benchmark-quick
 
 # Tail the background make output
 logs:
@@ -86,9 +86,10 @@ help:
 	@echo "  make fuzz-list          - List available fuzz targets"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  make benchmark           - Run all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
-	@echo "  make benchmark-quick     - Quick CI-friendly subset (VibeSQL only)"
-	@echo "  make benchmark-fast      - Ultra-fast pipeline debugging (~30s, validates data flow)"
+	@echo "  make benchmark           - Run all benchmarks, VibeSQL only (~2.5 hours)"
+	@echo "  make benchmark-quick     - Quick CI run with reduced iterations (~25 min)"
+	@echo "  make benchmark-smoke     - Smoke test for pipeline validation (~30s)"
+	@echo "  make benchmark-all       - FULL matrix: all tests × all engines (~8+ hours)"
 	@echo "  make benchmark-tpch      - Run TPC-H (all 4 engines: VibeSQL, SQLite, DuckDB, MySQL)"
 	@echo "  make benchmark-tpch-quick - Run TPC-H (VibeSQL only - fast iteration)"
 	@echo "  make benchmark-tpch-profile - Run TPC-H profiling (detailed timing breakdown)"
@@ -122,7 +123,7 @@ help:
 	@echo "Utility targets:"
 	@echo "  make clean              - Clean build artifacts"
 	@echo "  make website            - Regenerate web dashboard data from benchmark database"
-	@echo "  make all                - Build, test, benchmark (runs in BACKGROUND by default)"
+	@echo "  make all                - Build, test, benchmark-quick (runs in BACKGROUND by default)"
 	@echo "  make all-fg             - Run 'make all' in foreground (blocking)"
 	@echo "  make logs               - Tail the background make output"
 	@echo "  make status             - Check if background make is running and show recent output"
@@ -282,11 +283,19 @@ benchmark:
 benchmark-quick:
 	@./scripts/bench --quick
 
-# Ultra-fast benchmark for pipeline debugging (~30s total)
+# Smoke test benchmark for pipeline validation (~30s total)
 # Purpose: Validate data collection, storage, and analysis pipeline
 # Runs minimal queries with short durations to test the full flow
-benchmark-fast:
-	@./scripts/bench --fast --all
+benchmark-smoke:
+	@./scripts/bench --smoke --all
+
+# Full benchmark matrix: all tests × all engines
+# This is the most comprehensive benchmark (~8+ hours)
+# Runs TPC-H, TPC-C, TPC-DS, Sysbench against VibeSQL, SQLite, DuckDB, MySQL
+benchmark-all:
+	@echo "Running FULL benchmark matrix (all tests × all engines)..."
+	@echo "Expected time: 8+ hours"
+	@./scripts/bench --test=all --engine=all
 
 #
 # Individual Benchmark Targets

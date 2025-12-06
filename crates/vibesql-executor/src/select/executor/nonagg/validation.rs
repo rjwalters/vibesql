@@ -301,7 +301,7 @@ fn validate_expression_column_refs(
             }
 
             // Column not found - build error with context
-            let mut searched_tables: Vec<String> = schema.table_schemas.keys().cloned().collect();
+            let mut searched_tables: Vec<String> = schema.table_names();
             let mut available_columns: Vec<String> = schema
                 .table_schemas
                 .values()
@@ -310,7 +310,7 @@ fn validate_expression_column_refs(
 
             // Include outer schema info in error message
             if let Some(outer) = outer_schema {
-                searched_tables.extend(outer.table_schemas.keys().cloned());
+                searched_tables.extend(outer.table_names());
                 available_columns.extend(
                     outer.table_schemas.values().flat_map(|(_, tbl_schema)| {
                         tbl_schema.columns.iter().map(|c| c.name.clone())

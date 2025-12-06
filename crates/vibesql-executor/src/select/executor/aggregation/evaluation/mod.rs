@@ -188,12 +188,10 @@ impl SelectExecutor<'_> {
             vibesql_catalog::TableSchema::new("result".to_string(), result_columns);
 
         // Create a CombinedSchema for the result set
-        let mut table_schemas = std::collections::HashMap::new();
-        table_schemas.insert("result".to_string(), (0, result_table_schema.clone()));
-        let result_schema = crate::schema::CombinedSchema {
-            table_schemas,
-            total_columns: result_table_schema.columns.len(),
-        };
+        let result_schema = crate::schema::CombinedSchema::from_table(
+            "result".to_string(),
+            result_table_schema.clone(),
+        );
 
         let result_evaluator =
             CombinedExpressionEvaluator::with_database(&result_schema, self.database);

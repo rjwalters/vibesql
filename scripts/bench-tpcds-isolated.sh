@@ -22,6 +22,17 @@ set -e
 OUTPUT_FILE=${1:-/tmp/tpcds_results.txt}
 BENCH_NAME="tpcds_benchmark"
 
+# Criterion settings from environment (for --quick mode)
+CRITERION_ARGS="--noplot"
+if [ -n "$CRITERION_SAMPLE_SIZE" ]; then
+    CRITERION_ARGS="$CRITERION_ARGS --sample-size $CRITERION_SAMPLE_SIZE"
+    echo "Using reduced sample size: $CRITERION_SAMPLE_SIZE"
+fi
+if [ -n "$CRITERION_MEASUREMENT_TIME" ]; then
+    CRITERION_ARGS="$CRITERION_ARGS --measurement-time $CRITERION_MEASUREMENT_TIME"
+    echo "Using reduced measurement time: ${CRITERION_MEASUREMENT_TIME}s"
+fi
+
 # Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -63,7 +74,7 @@ echo -e "${YELLOW}Phase 1: Running VibeSQL-only benchmark...${NC}"
 echo ""
 echo "--- Phase 1: VibeSQL-only ---" >> "$OUTPUT_FILE"
 
-if cargo bench --package vibesql-executor --bench ${BENCH_NAME} -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+if cargo bench --package vibesql-executor --bench ${BENCH_NAME} -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ VibeSQL benchmark completed${NC}"
     ((ENGINES_PASSED++))
@@ -79,7 +90,7 @@ echo -e "${YELLOW}Phase 2: Running SQLite comparison benchmark...${NC}"
 echo ""
 echo "--- Phase 2: SQLite comparison ---" >> "$OUTPUT_FILE"
 
-if TPCDS_ENGINE=sqlite cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+if TPCDS_ENGINE=sqlite cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ SQLite comparison completed${NC}"
     ((ENGINES_PASSED++))
@@ -95,7 +106,7 @@ echo -e "${YELLOW}Phase 3: Running DuckDB comparison benchmark...${NC}"
 echo ""
 echo "--- Phase 3: DuckDB comparison ---" >> "$OUTPUT_FILE"
 
-if TPCDS_ENGINE=duckdb cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+if TPCDS_ENGINE=duckdb cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ DuckDB comparison completed${NC}"
     ((ENGINES_PASSED++))
@@ -112,7 +123,7 @@ if [ -n "$MYSQL_URL" ]; then
     echo ""
     echo "--- Phase 4: MySQL comparison ---" >> "$OUTPUT_FILE"
 
-    if TPCDS_ENGINE=mysql cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- --noplot 2>&1 | tee -a "$OUTPUT_FILE"; then
+    if TPCDS_ENGINE=mysql cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
         strip_quarantine
         echo -e "${GREEN}✓ MySQL comparison completed${NC}"
         ((ENGINES_PASSED++))

@@ -333,7 +333,13 @@ impl SelectExecutor<'_> {
     ///
     /// This bypasses the optimizer infrastructure and goes directly to table scan
     /// with optional index optimization.
-    pub(super) fn execute_fast_path(&self, stmt: &SelectStmt) -> Result<Vec<Row>, ExecutorError> {
+    ///
+    /// # Performance Note (#3780)
+    ///
+    /// This method is called by `Session::execute_prepared()` for queries using
+    /// `SimpleFastPath` cached plans. It executes the query and returns just the
+    /// rows, leaving column name resolution to the cached plan.
+    pub fn execute_fast_path(&self, stmt: &SelectStmt) -> Result<Vec<Row>, ExecutorError> {
         // Extract table name from FROM clause
         let (table_name, alias) = match &stmt.from {
             Some(vibesql_ast::FromClause::Table { name, alias, .. }) => {
@@ -631,10 +637,10 @@ impl SelectExecutor<'_> {
         };
 
         // Fetch the single row
-        let all_rows = table.scan();
-        let row = match all_rows.get(row_idx) {
+        // Issue #3790: Use get_row() which returns None for deleted rows
+        let row = match table.get_row(row_idx) {
             Some(r) => r.clone(),
-            None => return Ok(Some(vec![])), // Invalid row index
+            None => return Ok(Some(vec![])), // Row deleted or invalid index
         };
 
         // Build schema for projection
@@ -795,9 +801,9 @@ impl SelectExecutor<'_> {
             }
 
             // Fetch the rows
-            let all_rows = table.scan();
+            // Issue #3790: Use get_row() which returns None for deleted rows
             let rows: Vec<Row> =
-                row_indices.iter().filter_map(|&idx| all_rows.get(idx).cloned()).collect();
+                row_indices.iter().filter_map(|&idx| table.get_row(idx).cloned()).collect();
 
             // Build schema for projection and filtering
             let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
@@ -1267,7 +1273,7 @@ impl SelectExecutor<'_> {
                     return Err(ExecutorError::ColumnNotFound {
                         column_name: column.clone(),
                         table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
-                        searched_tables: schema.table_schemas.keys().cloned().collect(),
+                        searched_tables: schema.table_names(),
                         available_columns,
                     });
                 }
@@ -1313,7 +1319,7 @@ impl SelectExecutor<'_> {
                     .ok_or_else(|| ExecutorError::ColumnNotFound {
                         column_name: column.clone(),
                         table_name: table.clone().unwrap_or_default(),
-                        searched_tables: schema.table_schemas.keys().cloned().collect(),
+                        searched_tables: schema.table_names(),
                         available_columns: vec![],
                     })?,
                 _ => {

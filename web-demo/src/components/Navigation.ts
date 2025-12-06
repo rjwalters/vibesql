@@ -1,6 +1,8 @@
 import { Component } from './base'
 import { Theme } from '../theme'
 import { ThemeToggleComponent } from './ThemeToggle'
+import { LocaleSelectorComponent } from './LocaleSelector'
+import type { Locale } from '../locale'
 
 export interface NavigationLink {
   id: string
@@ -19,10 +21,12 @@ interface NavigationState {
  */
 export class NavigationComponent extends Component<NavigationState> {
   private themeSystem: Theme | null = null
+  private localeSystem: Locale | null = null
 
-  constructor(currentPage: string, themeSystem?: Theme) {
+  constructor(currentPage: string, themeSystem?: Theme, localeSystem?: Locale) {
     super('#nav-container', { currentPage })
     this.themeSystem = themeSystem || null
+    this.localeSystem = localeSystem || null
   }
 
   protected render(): void {
@@ -66,24 +70,37 @@ export class NavigationComponent extends Component<NavigationState> {
     this.element.innerHTML = `
       <nav class="flex items-center gap-2" role="navigation" aria-label="Main navigation">
         ${links.map(link => this.renderNavLink(link, currentPage)).join('')}
+        <div id="locale-selector-nav"></div>
         <div id="theme-toggle-nav"></div>
       </nav>
     `
 
-    // Initialize theme toggle if themeSystem is provided
+    // Initialize locale selector and theme toggle
     // Use setTimeout to ensure DOM is fully updated and subclass constructor completes
     setTimeout(() => {
-      if (!this.themeSystem) return
-      const themeToggleContainer = this.element.querySelector('#theme-toggle-nav') as HTMLDivElement
-      if (!themeToggleContainer) return
+      // Initialize locale selector if localeSystem is provided
+      if (this.localeSystem) {
+        const localeSelectorContainer = this.element.querySelector(
+          '#locale-selector-nav'
+        ) as HTMLDivElement
+        if (localeSelectorContainer) {
+          const wrapper = document.createElement('div')
+          wrapper.id = 'locale-selector'
+          localeSelectorContainer.appendChild(wrapper)
+          new LocaleSelectorComponent(this.localeSystem)
+        }
+      }
 
-      // Create a wrapper for the theme toggle
-      const wrapper = document.createElement('div')
-      wrapper.id = 'theme-toggle'
-      // Append wrapper to DOM
-      themeToggleContainer.appendChild(wrapper)
-      // Create the theme toggle component
-      new ThemeToggleComponent(this.themeSystem)
+      // Initialize theme toggle if themeSystem is provided
+      if (this.themeSystem) {
+        const themeToggleContainer = this.element.querySelector('#theme-toggle-nav') as HTMLDivElement
+        if (themeToggleContainer) {
+          const wrapper = document.createElement('div')
+          wrapper.id = 'theme-toggle'
+          themeToggleContainer.appendChild(wrapper)
+          new ThemeToggleComponent(this.themeSystem)
+        }
+      }
     }, 0)
   }
 

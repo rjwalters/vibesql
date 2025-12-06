@@ -176,7 +176,7 @@ fn find_table_for_column(
 ) -> Result<Option<String>, ExecutorError> {
     for (table, (_start_idx, table_schema)) in &schema.table_schemas {
         if table_schema.get_column_index(column_name).is_some() {
-            return Ok(Some(table.clone()));
+            return Ok(Some(table.to_string()));
         }
     }
     Ok(None)

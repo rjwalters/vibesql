@@ -34,8 +34,8 @@ pub use change_events::{
 pub use columnar::{ColumnData, ColumnarTable};
 pub use columnar_cache::{CacheStats, ColumnarCache};
 pub use database::{
-    Database, DatabaseConfig, IndexData, IndexManager, IndexMetadata, SpatialIndexMetadata,
-    SpillPolicy, TransactionState,
+    Database, DatabaseConfig, IndexData, IndexManager, IndexMetadata, OwnedStreamingRangeScan,
+    SpatialIndexMetadata, SpillPolicy, TransactionState,
 };
 pub use error::{StorageError, StorageResult};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};

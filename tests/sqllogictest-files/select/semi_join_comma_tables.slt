@@ -1,0 +1,125 @@
+# Semi-join reordering with comma-separated tables (issue #3728)
+#
+# This test ensures that when using comma-separated tables in FROM clause
+# with EXISTS/NOT EXISTS subqueries, the equijoin predicates from WHERE
+# are properly applied instead of creating cartesian products.
+
+# Setup test tables
+statement ok
+CREATE TABLE customer (c_customer_sk INTEGER PRIMARY KEY, c_current_addr_sk INTEGER, c_current_cdemo_sk INTEGER)
+
+statement ok
+CREATE TABLE customer_address (ca_address_sk INTEGER PRIMARY KEY, ca_state VARCHAR(10))
+
+statement ok
+CREATE TABLE customer_demographics (cd_demo_sk INTEGER PRIMARY KEY, cd_gender VARCHAR(1), cd_marital_status VARCHAR(1))
+
+statement ok
+CREATE TABLE store_sales (ss_customer_sk INTEGER, ss_sold_date_sk INTEGER)
+
+statement ok
+CREATE TABLE date_dim (d_date_sk INTEGER PRIMARY KEY, d_year INTEGER)
+
+# Insert test data
+statement ok
+INSERT INTO customer VALUES
+    (1, 101, 201),
+    (2, 102, 202),
+    (3, 103, 203)
+
+statement ok
+INSERT INTO customer_address VALUES
+    (101, 'KS'),
+    (102, 'NY'),
+    (103, 'AZ')
+
+statement ok
+INSERT INTO customer_demographics VALUES
+    (201, 'M', 'S'),
+    (202, 'F', 'M'),
+    (203, 'M', 'M')
+
+statement ok
+INSERT INTO store_sales VALUES
+    (1, 1001),
+    (1, 1002),
+    (3, 1001)
+
+statement ok
+INSERT INTO date_dim VALUES
+    (1001, 2000),
+    (1002, 2001)
+
+# Test 1: Simple comma-separated tables with EXISTS
+# This should NOT create a cartesian product - customer 2 is excluded by state filter,
+# customer 1 is included (has sales in 2000, state KS), customer 3 is included (has sales, state AZ)
+query TT rowsort
+SELECT cd.cd_gender, cd.cd_marital_status
+FROM customer c, customer_address ca, customer_demographics cd
+WHERE c.c_current_addr_sk = ca.ca_address_sk
+    AND cd.cd_demo_sk = c.c_current_cdemo_sk
+    AND ca.ca_state IN ('KS', 'AZ', 'NE')
+    AND EXISTS (
+        SELECT 1
+        FROM store_sales ss, date_dim d
+        WHERE c.c_customer_sk = ss.ss_customer_sk
+            AND ss.ss_sold_date_sk = d.d_date_sk
+            AND d.d_year = 2000
+    )
+----
+M M
+M S
+
+# Test 2: Verify correct behavior with NOT EXISTS
+# Customer 2 is excluded (NY state), customers 1 and 3 have sales,
+# so with NOT EXISTS, only customers without sales in 2000 would match.
+# But all our customers with KS/AZ/NE states do have sales in 2000, so empty result.
+query TT rowsort
+SELECT cd.cd_gender, cd.cd_marital_status
+FROM customer c, customer_address ca, customer_demographics cd
+WHERE c.c_current_addr_sk = ca.ca_address_sk
+    AND cd.cd_demo_sk = c.c_current_cdemo_sk
+    AND ca.ca_state IN ('KS', 'AZ', 'NE')
+    AND NOT EXISTS (
+        SELECT 1
+        FROM store_sales ss, date_dim d
+        WHERE c.c_customer_sk = ss.ss_customer_sk
+            AND ss.ss_sold_date_sk = d.d_date_sk
+            AND d.d_year = 2000
+    )
+----
+
+# Test 3: Same query using explicit JOINs (for comparison)
+# Should produce identical results to Test 1
+query TT rowsort
+SELECT cd.cd_gender, cd.cd_marital_status
+FROM customer c
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE ca.ca_state IN ('KS', 'AZ', 'NE')
+    AND EXISTS (
+        SELECT 1
+        FROM store_sales ss
+        JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+        WHERE c.c_customer_sk = ss.ss_customer_sk
+            AND d.d_year = 2000
+    )
+----
+M M
+M S
+
+# Cleanup
+statement ok
+DROP TABLE date_dim
+
+statement ok
+DROP TABLE store_sales
+
+statement ok
+DROP TABLE customer_demographics
+
+statement ok
+DROP TABLE customer_address
+
+statement ok
+DROP TABLE customer

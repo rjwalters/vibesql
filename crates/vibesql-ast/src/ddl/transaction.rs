@@ -7,9 +7,41 @@
 //! - SAVEPOINT
 //! - SET TRANSACTION
 
+/// Durability hint for a transaction
+///
+/// Controls how the transaction's changes are persisted.
+/// This mirrors `TransactionDurability` in the storage crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DurabilityHint {
+    /// Use the database's default durability mode
+    #[default]
+    Default,
+    /// Force durable commit (fsync on commit)
+    Durable,
+    /// Allow lazy commit (batched sync)
+    Lazy,
+    /// Force volatile (no WAL) for this transaction
+    Volatile,
+}
+
+impl DurabilityHint {
+    /// Convert to SQL hint string for use with storage layer
+    pub fn as_sql_hint(&self) -> &'static str {
+        match self {
+            DurabilityHint::Default => "DEFAULT",
+            DurabilityHint::Durable => "DURABLE",
+            DurabilityHint::Lazy => "LAZY",
+            DurabilityHint::Volatile => "VOLATILE",
+        }
+    }
+}
+
 /// BEGIN TRANSACTION statement
-#[derive(Debug, Clone, PartialEq)]
-pub struct BeginStmt;
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BeginStmt {
+    /// Optional durability hint for this transaction
+    pub durability: DurabilityHint,
+}
 
 /// COMMIT statement
 #[derive(Debug, Clone, PartialEq)]

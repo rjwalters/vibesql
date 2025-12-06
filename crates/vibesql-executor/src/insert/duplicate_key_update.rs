@@ -43,7 +43,8 @@ fn find_conflicting_row(
             pk_idx.iter().map(|&idx| row_values[idx].clone()).collect();
 
         // Search for a row with matching PRIMARY KEY
-        for (row_id, row) in table.scan().iter().enumerate() {
+        // Use scan_live() to skip deleted rows and get correct physical indices
+        for (row_id, row) in table.scan_live() {
             let row_pk_values: Vec<vibesql_types::SqlValue> =
                 pk_idx.iter().map(|&idx| row.values[idx].clone()).collect();
             if row_pk_values == pk_values {
@@ -63,7 +64,8 @@ fn find_conflicting_row(
         }
 
         // Search for a row with matching UNIQUE constraint values
-        for (row_id, row) in table.scan().iter().enumerate() {
+        // Use scan_live() to skip deleted rows and get correct physical indices
+        for (row_id, row) in table.scan_live() {
             let row_unique_values: Vec<vibesql_types::SqlValue> =
                 unique_indices.iter().map(|&idx| row.values[idx].clone()).collect();
             if row_unique_values == unique_values {
