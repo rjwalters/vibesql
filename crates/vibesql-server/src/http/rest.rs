@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{delete, get, patch, post, put},
     Json, Router,
@@ -18,6 +18,7 @@ use vibesql_storage::Database;
 
 use super::graphql;
 use super::types::*;
+use crate::registry::DatabaseRegistry;
 use crate::subscription::{SubscriptionManager, SubscriptionUpdate};
 
 /// Pagination configuration
@@ -43,19 +44,39 @@ impl PaginationParams {
     }
 }
 
+/// Default database name for HTTP API requests
+pub const DEFAULT_DATABASE_NAME: &str = "default";
+
+/// HTTP header for specifying the database name
+pub const DATABASE_HEADER: &str = "X-Database-Name";
+
 /// HTTP server state
 #[derive(Clone)]
 pub struct HttpState {
+    /// Database registry for shared database access
+    pub registry: DatabaseRegistry,
+    /// Legacy database reference for backwards compatibility (e.g., subscriptions, table listing)
     pub db: Arc<Database>,
+    /// Subscription manager for real-time updates
     pub subscription_manager: Arc<SubscriptionManager>,
 }
 
 /// Create the HTTP API router
+///
+/// # Arguments
+/// * `db` - Legacy database reference for backwards compatibility (subscriptions, table listing)
+/// * `registry` - Database registry for shared database access
+/// * `subscription_manager` - Subscription manager for real-time updates
 pub fn create_http_router(
     db: Arc<Database>,
+    registry: DatabaseRegistry,
     subscription_manager: Arc<SubscriptionManager>,
 ) -> Router {
-    let state = HttpState { db: db.clone(), subscription_manager: subscription_manager.clone() };
+    let state = HttpState {
+        registry: registry.clone(),
+        db: db.clone(),
+        subscription_manager: subscription_manager.clone(),
+    };
 
     // Create main router with state
     let main_router = Router::new()
@@ -77,25 +98,45 @@ pub fn create_http_router(
 
     // Create storage sub-router with its own state
     // We nest it after the main router is state-resolved
-    let storage_router = super::storage::create_storage_router(db);
+    let storage_router = super::storage::create_storage_router(db, registry);
 
     main_router.nest("/api/storage", storage_router)
+}
+
+/// Extract database name from request headers, falling back to default
+pub fn get_database_name(headers: &HeaderMap) -> String {
+    headers
+        .get(DATABASE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| DEFAULT_DATABASE_NAME.to_string())
 }
 
 /// GraphQL endpoint handler with relationship resolution support
 async fn graphql_handler(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Json(req): Json<graphql::GraphQLRequest>,
 ) -> impl IntoResponse {
     debug!("Received GraphQL request: {}", req.query);
 
-    // First, try to handle introspection queries
-    if let Some(introspection_result) = graphql::try_introspection_query(&state.db, &req.query) {
-        return (
-            StatusCode::OK,
-            Json(graphql::GraphQLResponse { data: Some(introspection_result), errors: None }),
-        )
-            .into_response();
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
+    // For introspection, we need a read lock on the database
+    {
+        let db_guard = shared_db.read().await;
+        let db_arc = std::sync::Arc::new((*db_guard).clone());
+        if let Some(introspection_result) = graphql::try_introspection_query(&db_arc, &req.query) {
+            return (
+                StatusCode::OK,
+                Json(graphql::GraphQLResponse { data: Some(introspection_result), errors: None }),
+            )
+                .into_response();
+        }
     }
 
     // Parse the GraphQL query
@@ -141,9 +182,9 @@ async fn graphql_handler(
 
     debug!("Generated SQL: {}", sql);
 
-    // Create a session and execute the query
+    // Create a session with the shared database
     let mut session =
-        crate::session::Session::new_standalone("graphql".to_string(), "graphql_user".to_string());
+        crate::session::Session::new(db_name.clone(), "graphql_user".to_string(), shared_db.clone());
 
     // Execute the main query
     let result = if params.is_empty() {
@@ -181,7 +222,9 @@ async fn graphql_handler(
                         } = &query_info
                         {
                             // Build schema map from database
-                            let schemas = build_schema_map(&state.db);
+                            let db_guard = shared_db.read().await;
+                            let schemas = build_schema_map(&db_guard);
+                            drop(db_guard);
 
                             if !schemas.is_empty() {
                                 let ctx = graphql::GraphQLExecutionContext::new(&schemas);
@@ -381,7 +424,8 @@ async fn health_check() -> impl IntoResponse {
 
 /// Execute a SQL query with optional pagination
 async fn execute_query(
-    State(_state): State<HttpState>,
+    State(state): State<HttpState>,
+    headers: HeaderMap,
     Json(req): Json<QueryRequest>,
 ) -> impl IntoResponse {
     debug!("Executing query: {} (limit: {:?}, offset: {:?})", req.sql, req.limit, req.offset);
@@ -399,9 +443,15 @@ async fn execute_query(
         }
     };
 
-    // Create a session for query execution
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
+    // Create a session with the shared database
     let mut session =
-        crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     // Execute the query
     let result = if params.is_empty() {
@@ -575,11 +625,18 @@ pub struct SseEvent {
 /// Returns a text/event-stream response with real-time updates
 async fn subscribe_stream(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Query(params): Query<SubscribeQuery>,
 ) -> axum::response::Response {
     use axum::response::sse::{Event, KeepAlive, Sse};
 
     debug!("SSE subscription requested for query: {}", params.query);
+
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
 
     // Parse optional parameters
     let params_vec = if let Some(params_str) = params.params {
@@ -598,9 +655,9 @@ async fn subscribe_stream(
         vec![]
     };
 
-    // Execute initial query
+    // Execute initial query with the shared database
     let mut session =
-        crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     // Execute the initial query
     let result = if params_vec.is_empty() {

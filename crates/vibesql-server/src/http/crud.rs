@@ -39,7 +39,7 @@ use std::collections::HashMap;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -47,8 +47,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use tracing::{debug, error};
 
-use super::rest::HttpState;
+use super::rest::{get_database_name, HttpState};
 use super::types::*;
+use crate::registry::SharedDatabase;
 
 /// Query parameters for GET collection endpoint
 #[derive(Debug, Deserialize, Default)]
@@ -361,9 +362,10 @@ fn json_to_sql_literal(val: &JsonValue) -> String {
     }
 }
 
-/// Get the primary key column name for a table
-fn get_primary_key_column(state: &HttpState, table_name: &str) -> Option<String> {
-    let table = state.db.get_table(table_name)?;
+/// Get the primary key column name for a table using shared database
+async fn get_primary_key_column(shared_db: &SharedDatabase, table_name: &str) -> Option<String> {
+    let db = shared_db.read().await;
+    let table = db.get_table(table_name)?;
     let pk = table.schema.primary_key.as_ref()?;
     // For now, support single-column primary keys
     pk.first().cloned()
@@ -385,26 +387,37 @@ fn rows_to_json(columns: &[String], rows: &[Vec<JsonValue>]) -> Vec<HashMap<Stri
 /// GET /api/tables/:table/rows - List all rows with filtering, sorting, pagination
 pub async fn list_rows(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Path(table_name): Path<String>,
     Query(params): Query<CrudQueryParams>,
 ) -> impl IntoResponse {
     debug!("CRUD: GET /api/tables/{}/rows with params: {:?}", table_name, params);
 
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
     // Check if table exists
-    let table_names = state.db.list_tables();
-    if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("Table '{}' not found", table_name) })),
-        )
-            .into_response();
+    {
+        let db = shared_db.read().await;
+        let table_names = db.list_tables();
+        if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("Table '{}' not found", table_name) })),
+            )
+                .into_response();
+        }
     }
 
     // Build and execute SQL
     let sql = build_select_sql(&table_name, &params);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+    let mut session =
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
@@ -432,13 +445,20 @@ pub async fn list_rows(
 /// GET /api/tables/:table/rows/:id - Get a single row by primary key
 pub async fn get_row(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Path((table_name, id)): Path<(String, String)>,
     Query(params): Query<CrudQueryParams>,
 ) -> impl IntoResponse {
     debug!("CRUD: GET /api/tables/{}/rows/{}", table_name, id);
 
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
     // Get primary key column
-    let pk_column = match get_primary_key_column(&state, &table_name) {
+    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -456,7 +476,8 @@ pub async fn get_row(
     let sql = build_select_by_pk_sql(&table_name, &pk_column, &id, params.select.as_deref());
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+    let mut session =
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
@@ -492,6 +513,7 @@ pub async fn get_row(
 /// POST /api/tables/:table/rows - Create a new row
 pub async fn create_row(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Path(table_name): Path<String>,
     Json(body): Json<CreateRequest>,
 ) -> impl IntoResponse {
@@ -505,21 +527,31 @@ pub async fn create_row(
             .into_response();
     }
 
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
     // Check if table exists
-    let table_names = state.db.list_tables();
-    if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("Table '{}' not found", table_name) })),
-        )
-            .into_response();
+    {
+        let db = shared_db.read().await;
+        let table_names = db.list_tables();
+        if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("Table '{}' not found", table_name) })),
+            )
+                .into_response();
+        }
     }
 
     // Build and execute SQL
     let sql = build_insert_sql(&table_name, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+    let mut session =
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Insert { rows_affected }) => {
@@ -541,6 +573,7 @@ pub async fn create_row(
 /// PUT /api/tables/:table/rows/:id - Full update (replace all columns)
 pub async fn update_row(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Path((table_name, id)): Path<(String, String)>,
     Json(body): Json<UpdateRequest>,
 ) -> impl IntoResponse {
@@ -554,8 +587,14 @@ pub async fn update_row(
             .into_response();
     }
 
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
     // Get primary key column
-    let pk_column = match get_primary_key_column(&state, &table_name) {
+    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -573,7 +612,8 @@ pub async fn update_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+    let mut session =
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
@@ -603,6 +643,7 @@ pub async fn update_row(
 /// PATCH /api/tables/:table/rows/:id - Partial update (only specified columns)
 pub async fn patch_row(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Path((table_name, id)): Path<(String, String)>,
     Json(body): Json<PatchRequest>,
 ) -> impl IntoResponse {
@@ -616,8 +657,14 @@ pub async fn patch_row(
             .into_response();
     }
 
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
     // Get primary key column
-    let pk_column = match get_primary_key_column(&state, &table_name) {
+    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -635,7 +682,8 @@ pub async fn patch_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+    let mut session =
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
@@ -665,12 +713,19 @@ pub async fn patch_row(
 /// DELETE /api/tables/:table/rows/:id - Delete a row
 pub async fn delete_row(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Path((table_name, id)): Path<(String, String)>,
 ) -> impl IntoResponse {
     debug!("CRUD: DELETE /api/tables/{}/rows/{}", table_name, id);
 
+    // Get the database name from headers
+    let db_name = get_database_name(&headers);
+
+    // Get or create the shared database from the registry
+    let shared_db = state.registry.get_or_create(&db_name).await;
+
     // Get primary key column
-    let pk_column = match get_primary_key_column(&state, &table_name) {
+    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -688,7 +743,8 @@ pub async fn delete_row(
     let sql = build_delete_sql(&table_name, &pk_column, &id);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session = crate::session::Session::new_standalone("http".to_string(), "http_user".to_string());
+    let mut session =
+        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Delete { rows_affected }) => {
