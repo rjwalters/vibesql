@@ -297,7 +297,6 @@ impl PredicatePattern {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
 

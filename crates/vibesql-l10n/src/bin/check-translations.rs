@@ -203,7 +203,7 @@ fn extract_message_ids(path: &Path) -> BTreeSet<String> {
 
     let resource = match parse(content.as_str()) {
         Ok(r) => r,
-        Err((r, _)) => r,
+        Err((r, _errors)) => r,
     };
 
     for entry in &resource.body {
