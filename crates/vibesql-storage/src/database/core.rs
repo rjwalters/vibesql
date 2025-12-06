@@ -556,13 +556,14 @@ impl Database {
         let table_mut = self.get_table_mut(table_name).unwrap();
         table_mut.update_row_selective(row_index, new_row.clone(), &changed_columns)?;
 
-        // Update user-defined indexes
+        // Update user-defined indexes (pass changed_columns to skip unaffected indexes)
         self.operations.update_indexes_for_update(
             &self.catalog,
             &resolved_name,
             &old_row,
             &new_row,
             row_index,
+            Some(&changed_columns),
         );
 
         // Emit WAL entry for persistence

@@ -52,11 +52,11 @@ jobs:
 
   # ============================================================================
   # TPC-H Quick Benchmarks
+  # Runs in parallel with other benchmarks (no dependency on test job)
   # ============================================================================
   tpch:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: test
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
@@ -70,14 +70,15 @@ jobs:
         with:
           cache-key-suffix: ci
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Setup Python with uv
+        run: uv python install 3.11
 
       - name: Run TPC-H benchmarks (quick mode)
         run: |
-          python3 scripts/run_tpch_benchmarks.py --quick --output tpch_results.json
+          uv run --python 3.11 scripts/run_tpch_benchmarks.py --quick --output tpch_results.json
 
       - name: Display TPC-H results
         if: always()
@@ -92,11 +93,11 @@ jobs:
 
   # ============================================================================
   # Sysbench Quick Benchmarks
+  # Runs in parallel with other benchmarks (no dependency on test job)
   # ============================================================================
   sysbench:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: test
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
@@ -110,14 +111,15 @@ jobs:
         with:
           cache-key-suffix: ci
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Setup Python with uv
+        run: uv python install 3.11
 
       - name: Run Sysbench benchmarks (quick mode)
         run: |
-          python3 scripts/run_sysbench_benchmarks.py --quick --output sysbench_results.json
+          uv run --python 3.11 scripts/run_sysbench_benchmarks.py --quick --output sysbench_results.json
 
       - name: Display Sysbench results
         if: always()
@@ -125,7 +127,7 @@ jobs:
           echo "## Sysbench Results (Quick Mode)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f sysbench_results.json ]; then
-            python3 << 'PYEOF' >> $GITHUB_STEP_SUMMARY
+            uv run --python 3.11 - << 'PYEOF' >> $GITHUB_STEP_SUMMARY
           import json
           with open('sysbench_results.json') as f:
               data = json.load(f)
@@ -144,11 +146,11 @@ jobs:
 
   # ============================================================================
   # TPC-DS Quick Benchmark with Validation
+  # Runs in parallel with other benchmarks (no dependency on test job)
   # ============================================================================
   tpcds:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: test
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
@@ -199,11 +201,11 @@ jobs:
 
   # ============================================================================
   # SQLLogicTest Sample (fast feedback on SQL correctness)
+  # Runs in parallel with other benchmarks (no dependency on test job)
   # ============================================================================
   sqllogictest:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: test
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
@@ -244,11 +246,11 @@ jobs:
 
   # ============================================================================
   # Python Benchmarks (pytest-based micro-benchmarks)
+  # Runs in parallel with other benchmarks (no dependency on test job)
   # ============================================================================
   python-benchmarks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: test
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
@@ -262,29 +264,31 @@ jobs:
         with:
           cache-key-suffix: ci
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Setup Python with uv
+        run: uv python install 3.11
+
       - name: Build and install Python bindings
         run: |
-          uv pip install --system maturin
+          uv venv .venv
+          source .venv/bin/activate
+          uv pip install maturin
           cd crates/vibesql-python-bindings
           maturin build --release
-          uv pip install --system ../../target/wheels/vibesql-*.whl
+          uv pip install ../../target/wheels/vibesql-*.whl
 
       - name: Install benchmark dependencies
         run: |
+          source .venv/bin/activate
           grep -v "^vibesql" benchmarks/requirements.txt > /tmp/requirements-ci.txt
-          uv pip install --system -r /tmp/requirements-ci.txt
+          uv pip install -r /tmp/requirements-ci.txt
 
       - name: Run quick benchmarks (1k tests only)
         working-directory: benchmarks
         run: |
+          source ../.venv/bin/activate
           pytest test_insert.py test_update.py test_delete.py test_select.py test_aggregates.py \
             --benchmark-only \
             --benchmark-json=../benchmark_results.json \
@@ -297,6 +301,7 @@ jobs:
           echo "## Python Benchmark Results (1k tests)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f benchmark_results.json ]; then
+            source .venv/bin/activate
             python benchmarks/format_results.py benchmark_results.json >> $GITHUB_STEP_SUMMARY
           else
             echo "No benchmark results generated" >> $GITHUB_STEP_SUMMARY

@@ -8,7 +8,6 @@ import type { DatabaseOption } from './components/DatabaseSelector'
 import { LoadingProgressComponent } from './components/LoadingProgress'
 import { initShowcase } from './showcase'
 import { sampleDatabases } from './data/sample-databases'
-import { updateConformanceFooter } from './utils/conformance'
 import { initializeApp, setupThemeSync } from './app/initialization'
 import { createExecutionHandler } from './app/query-executor'
 import { initLocale } from './locale'
@@ -142,10 +141,6 @@ async function bootstrap(): Promise<void> {
         timestampElement.textContent = 'Deployed: Development build'
       }
     }
-
-    // Update conformance pass rate dynamically
-    // Don't wait for conformance update, it can complete in background
-    void updateConformanceFooter()
 
     // Final UI setup complete
     progress.updateStep('ui', 95, 'loading')

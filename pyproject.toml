@@ -22,4 +22,4 @@ classifiers = [
 [tool.maturin]
 bindings = "pyo3"
 module-name = "vibesql"
-manifest-path = "crates/python-bindings/Cargo.toml"
+manifest-path = "crates/vibesql-python-bindings/Cargo.toml"
