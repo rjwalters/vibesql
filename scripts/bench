@@ -291,7 +291,10 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
     # Smoke test mode: ultra-minimal settings for pipeline validation (~30s total)
     # Purpose: Validate data collection, storage, and analysis pipeline
     if args.smoke:
-        engines = ["vibesql"]
+        # Only default to vibesql if no engine was explicitly specified
+        if args.engine == "vibesql":  # default value means not explicitly set
+            engines = ["vibesql"]
+        # else: keep the engines parsed from --engine flag
         args.timeout = args.timeout or 5      # 5s timeout per query
         args.duration = args.duration or 3    # 3s duration for TPC-C/Sysbench
         args.scale = args.scale or 0.001      # Minimal scale factor
@@ -305,6 +308,7 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
         print("SMOKE TEST MODE - Pipeline Validation", flush=True)
         print("=" * 60, flush=True)
         print("Purpose: Validate benchmark → storage → analysis pipeline", flush=True)
+        print(f"  Engines:  {', '.join(engines)}", flush=True)
         print(f"  Timeout:  {args.timeout}s per query", flush=True)
         print(f"  Duration: {args.duration}s (TPC-C/Sysbench)", flush=True)
         print(f"  Scale:    {args.scale}", flush=True)
@@ -410,11 +414,18 @@ def run_tpch_criterion(config: BenchConfig) -> int:
             # Continue without MySQL
             config.engines = [e for e in config.engines if e != "mysql"]
 
-    # Build the benchmark binary
+    # Build the benchmark binary with appropriate features
+    features = ["benchmark-comparison"]
+    if "duckdb" in config.engines:
+        features.append("duckdb-comparison")
+    if "mysql" in config.engines:
+        features.append("mysql-comparison")
+    features_str = ",".join(features)
+
     print("\nBuilding benchmark...")
     build_result = subprocess.run(
         ["cargo", "bench", "--package", "vibesql-executor", "--bench", "tpch_benchmark",
-         "--features", "benchmark-comparison", "--no-run"],
+         "--features", features_str, "--no-run"],
         cwd=Path(__file__).parent.parent
     )
 
@@ -425,18 +436,20 @@ def run_tpch_criterion(config: BenchConfig) -> int:
     strip_quarantine()
 
     # Run the Criterion benchmark
-    print("\nRunning TPC-H benchmarks (all engines)...")
+    print(f"\nRunning TPC-H benchmarks (features: {features_str})...")
     cmd = [
         "cargo", "bench",
         "--package", "vibesql-executor",
         "--bench", "tpch_benchmark",
-        "--features", "benchmark-comparison",
+        "--features", features_str,
         "--", "--noplot"
     ]
 
     # Add query filter if specified
     if config.queries:
-        filters = "|".join([f"tpch_q{q.replace('Q', '')}".lower() for q in config.queries])
+        # Use word boundaries to avoid q1 matching q10, q11, etc.
+        # Pattern: tpch_q1[_/] or tpch_q6[_/] to match exact query numbers
+        filters = "|".join([f"tpch_q{q.replace('Q', '')}[_/]" for q in config.queries])
         cmd.append(filters)
 
     result = subprocess.run(
