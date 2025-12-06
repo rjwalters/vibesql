@@ -2,6 +2,8 @@
 // Value Normalization - Canonical forms for index operations
 // ============================================================================
 
+use std::borrow::Cow;
+
 use vibesql_types::SqlValue;
 
 /// Normalize a SqlValue to a consistent numeric type for comparison in range scans.
@@ -27,6 +29,24 @@ pub fn normalize_for_comparison(value: &SqlValue) -> SqlValue {
         SqlValue::Numeric(n) => SqlValue::Double(*n),
         // For non-numeric types, return as-is
         other => other.clone(),
+    }
+}
+
+/// Zero-copy normalization using Cow - avoids allocation for non-numeric values.
+/// Returns Borrowed for non-numeric types (no clone), Owned for normalized numerics.
+#[inline]
+pub fn normalize_cow(value: &SqlValue) -> Cow<'_, SqlValue> {
+    match value {
+        SqlValue::Integer(i) => Cow::Owned(SqlValue::Double(*i as f64)),
+        SqlValue::Smallint(i) => Cow::Owned(SqlValue::Double(*i as f64)),
+        SqlValue::Bigint(i) => Cow::Owned(SqlValue::Double(*i as f64)),
+        SqlValue::Unsigned(u) => Cow::Owned(SqlValue::Double(*u as f64)),
+        SqlValue::Float(f) => Cow::Owned(SqlValue::Double(*f as f64)),
+        SqlValue::Real(r) => Cow::Owned(SqlValue::Double(*r as f64)),
+        SqlValue::Double(d) => Cow::Owned(SqlValue::Double(*d)),
+        SqlValue::Numeric(n) => Cow::Owned(SqlValue::Double(*n)),
+        // For non-numeric types, borrow without clone
+        other => Cow::Borrowed(other),
     }
 }
 

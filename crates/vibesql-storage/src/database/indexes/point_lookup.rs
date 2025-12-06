@@ -5,9 +5,95 @@
 use vibesql_types::SqlValue;
 
 use super::index_metadata::{acquire_btree_lock, IndexData};
-use super::value_normalization::normalize_for_comparison;
+use super::value_normalization::{normalize_cow, normalize_for_comparison};
 
 impl IndexData {
+    /// Optimized single-key lookup - avoids Vec allocation for common single-column index case.
+    ///
+    /// # Arguments
+    /// * `key` - Single key value to look up (will be normalized for consistent comparison)
+    ///
+    /// # Returns
+    /// Owned vector of row indices if key exists, None otherwise
+    ///
+    /// # Performance
+    /// This method avoids the Vec<SqlValue> allocation that `get()` requires, making it
+    /// significantly faster for single-column index lookups (the common case for primary keys).
+    #[inline]
+    pub fn get_single(&self, key: &SqlValue) -> Option<Vec<usize>> {
+        // Use Cow to avoid cloning non-numeric values
+        let normalized_key = normalize_cow(key);
+
+        match self {
+            IndexData::InMemory { data } => {
+                // Create a temporary slice for lookup without Vec allocation
+                let key_slice: &[SqlValue] = std::slice::from_ref(normalized_key.as_ref());
+                data.get(key_slice).cloned()
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // For disk-backed, we still need a Vec for the API, but this is less common
+                let key_vec = vec![normalized_key.into_owned()];
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => match guard.lookup(&key_vec) {
+                        Ok(row_ids) if !row_ids.is_empty() => Some(row_ids),
+                        Ok(_) => None,
+                        Err(e) => {
+                            log::warn!("BTreeIndex lookup failed in get_single: {}", e);
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        log::warn!("BTreeIndex lock acquisition failed in get_single: {}", e);
+                        None
+                    }
+                }
+            }
+            IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => None,
+        }
+    }
+
+    /// Optimized single-key existence check - avoids Vec allocation.
+    ///
+    /// # Arguments
+    /// * `key` - Single key value to check (will be normalized for consistent comparison)
+    ///
+    /// # Returns
+    /// true if key exists, false otherwise
+    ///
+    /// # Performance
+    /// This method avoids the Vec<SqlValue> allocation that `contains_key()` requires.
+    #[inline]
+    pub fn contains_key_single(&self, key: &SqlValue) -> bool {
+        let normalized_key = normalize_cow(key);
+
+        match self {
+            IndexData::InMemory { data } => {
+                let key_slice: &[SqlValue] = std::slice::from_ref(normalized_key.as_ref());
+                data.contains_key(key_slice)
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                let key_vec = vec![normalized_key.into_owned()];
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => match guard.lookup(&key_vec) {
+                        Ok(row_ids) => !row_ids.is_empty(),
+                        Err(e) => {
+                            log::warn!("BTreeIndex lookup failed in contains_key_single: {}", e);
+                            false
+                        }
+                    },
+                    Err(e) => {
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in contains_key_single: {}",
+                            e
+                        );
+                        false
+                    }
+                }
+            }
+            IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => false,
+        }
+    }
+
     /// Lookup exact key in the index
     ///
     /// # Arguments
@@ -20,9 +106,16 @@ impl IndexData {
     /// This is the primary point-lookup API for index queries.
     /// Returns owned data to support both in-memory (cloned) and disk-backed (loaded) indexes.
     /// Values are normalized (e.g., Integer -> Double) to match insertion-time normalization.
+    ///
+    /// # Performance
+    /// For single-column indexes, prefer `get_single()` which avoids Vec allocation.
     pub fn get(&self, key: &[SqlValue]) -> Option<Vec<usize>> {
-        // Normalize all key values for consistent comparison
-        // This ensures that Integer(100000) matches Double(100000.0) in the index
+        // Fast path for single-key lookups (common case)
+        if key.len() == 1 {
+            return self.get_single(&key[0]);
+        }
+
+        // Multi-column key path: normalize all key values
         let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
 
         match self {
@@ -68,8 +161,16 @@ impl IndexData {
     /// # Note
     /// Used primarily for UNIQUE constraint validation.
     /// Values are normalized (e.g., Integer -> Double) to match insertion-time normalization.
+    ///
+    /// # Performance
+    /// For single-column indexes, prefer `contains_key_single()` which avoids Vec allocation.
     pub fn contains_key(&self, key: &[SqlValue]) -> bool {
-        // Normalize all key values for consistent comparison
+        // Fast path for single-key lookups (common case)
+        if key.len() == 1 {
+            return self.contains_key_single(&key[0]);
+        }
+
+        // Multi-column key path: normalize all key values
         let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
 
         match self {
@@ -108,6 +209,10 @@ impl IndexData {
     ///
     /// # Returns
     /// Vector of row indices that match any of the values
+    ///
+    /// # Performance
+    /// Uses Cow normalization to avoid cloning non-numeric values, and slice::from_ref
+    /// to avoid Vec allocation per key lookup.
     pub fn multi_lookup(&self, values: &[SqlValue]) -> Vec<usize> {
         match self {
             IndexData::InMemory { data } => {
@@ -120,10 +225,11 @@ impl IndexData {
                 let mut matching_row_indices = Vec::new();
 
                 for value in unique_values {
-                    // Normalize value for consistent lookup (matches insertion-time normalization)
-                    let normalized_value = normalize_for_comparison(value);
-                    let search_key = vec![normalized_value];
-                    if let Some(row_indices) = data.get(&search_key) {
+                    // Use Cow to avoid cloning non-numeric values
+                    let normalized_value = normalize_cow(value);
+                    // Use slice::from_ref to avoid Vec allocation per key
+                    let search_key: &[SqlValue] = std::slice::from_ref(normalized_value.as_ref());
+                    if let Some(row_indices) = data.get(search_key) {
                         matching_row_indices.extend(row_indices);
                     }
                 }
@@ -140,10 +246,12 @@ impl IndexData {
                 unique_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 unique_values.dedup();
 
-                // Normalize values for consistent lookup (matches insertion-time normalization)
-                // Convert SqlValue values to Key (Vec<SqlValue>) format
-                let keys: Vec<Vec<SqlValue>> =
-                    unique_values.iter().map(|v| vec![normalize_for_comparison(v)]).collect();
+                // For disk-backed, we need Vec<Vec<SqlValue>> for the API
+                // but we still use normalize_cow to reduce cloning
+                let keys: Vec<Vec<SqlValue>> = unique_values
+                    .iter()
+                    .map(|v| vec![normalize_cow(v).into_owned()])
+                    .collect();
 
                 // Safely acquire lock and call BTreeIndex::multi_lookup
                 match acquire_btree_lock(btree) {
