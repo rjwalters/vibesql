@@ -297,6 +297,13 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
         <li><strong>Measurement:</strong> Operations per second and latency percentiles</li>
       </ul>
 
+      <h4 class="text-md font-semibold text-foreground mt-4 mb-2">Embedded vs Server Mode</h4>
+      <p class="text-muted mb-2">
+        <strong>VibeSQL (embedded)</strong> runs in-process with zero network overhead, ideal for
+        single-process applications. <strong>VibeSQL Server</strong> uses the PostgreSQL wire protocol,
+        adding ~10-50µs per query for protocol handling but enabling multi-client access.
+      </p>
+
       <p class="mt-4 text-muted">
         Sysbench micro-benchmarks help identify <strong>bottlenecks in specific operations</strong>
         and are useful for comparing raw SQL engine performance without application-level complexity.
@@ -305,6 +312,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       <p class="mt-2 text-muted text-sm">
         <strong>Note:</strong> Point selects and simple updates are the most common operations
         in typical web applications. Range selects test scan performance for reporting queries.
+        Server mode results (vibesql_server) show PostgreSQL wire protocol overhead.
       </p>
     `,
   },
@@ -580,11 +588,12 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
+    const vibesqlServer = databases.get('vibesql_server');
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
     const mysql = databases.get('mysql');
 
-    if (!vibesql && !sqlite && !duckdb && !mysql) continue;
+    if (!vibesql && !vibesqlServer && !sqlite && !duckdb && !mysql) continue;
 
     const row = document.createElement('tr');
     row.className = 'hover:bg-card/50 transition-colors';
@@ -632,6 +641,21 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
       vibesqlCell.textContent = 'N/A';
     }
     row.appendChild(vibesqlCell);
+
+    // vibesql_server time (only for Sysbench suite)
+    if (suite === 'sysbench') {
+      const vibesqlServerCell = document.createElement('td');
+      vibesqlServerCell.className = 'px-4 py-3 text-right text-muted';
+      const vibesqlServerTime = vibesqlServer ? formatTime(vibesqlServer.stats.mean) : null;
+      if (vibesqlServerTime) {
+        vibesqlServerCell.textContent = vibesqlServerTime;
+      } else if (vibesqlServer && vibesqlServer.stats.mean < 0) {
+        vibesqlServerCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
+      } else {
+        vibesqlServerCell.textContent = 'N/A';
+      }
+      row.appendChild(vibesqlServerCell);
+    }
 
     // SQLite time
     const sqliteCell = document.createElement('td');
@@ -771,26 +795,29 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
 
   const labels: string[] = [];
   const vibesqlData: number[] = [];
+  const vibesqlServerData: number[] = [];
   const sqliteData: number[] = [];
   const duckdbData: number[] = [];
   const mysqlData: number[] = [];
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
+    const vibesqlServer = databases.get('vibesql_server');
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
     const mysql = databases.get('mysql');
 
     // Skip failed queries (negative mean) in the chart
     const vibesqlValid = vibesql && vibesql.stats.mean > 0;
+    const vibesqlServerValid = vibesqlServer && vibesqlServer.stats.mean > 0;
     const sqliteValid = sqlite && sqlite.stats.mean > 0;
     const duckdbValid = duckdb && duckdb.stats.mean > 0;
     const mysqlValid = mysql && mysql.stats.mean > 0;
 
-    if (vibesqlValid || sqliteValid || duckdbValid || mysqlValid) {
+    if (vibesqlValid || vibesqlServerValid || sqliteValid || duckdbValid || mysqlValid) {
       // Get label - prefer query number if available (TPC-H)
       let label = operation.replace(/_/g, ' ').toUpperCase();
-      const firstBench = vibesql || sqlite || duckdb || mysql;
+      const firstBench = vibesql || vibesqlServer || sqlite || duckdb || mysql;
       if (firstBench) {
         const parsed = parseBenchmarkName(firstBench.name, suite);
         if (parsed.queryNum) {
@@ -800,46 +827,61 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
 
       labels.push(label);
       vibesqlData.push(vibesqlValid ? vibesql!.stats.mean * 1000 : 0); // Convert to ms
+      vibesqlServerData.push(vibesqlServerValid ? vibesqlServer!.stats.mean * 1000 : 0);
       sqliteData.push(sqliteValid ? sqlite!.stats.mean * 1000 : 0);
       duckdbData.push(duckdbValid ? duckdb!.stats.mean * 1000 : 0);
       mysqlData.push(mysqlValid ? mysql!.stats.mean * 1000 : 0);
     }
   }
 
+  // Build datasets array - include vibesql_server only for Sysbench
+  const datasets = [
+    {
+      label: 'VibeSQL',
+      data: vibesqlData,
+      backgroundColor: 'rgba(34, 197, 94, 0.5)',
+      borderColor: 'rgba(34, 197, 94, 1)',
+      borderWidth: 1,
+    },
+    ...(suite === 'sysbench'
+      ? [
+          {
+            label: 'VibeSQL Server',
+            data: vibesqlServerData,
+            backgroundColor: 'rgba(16, 185, 129, 0.5)', // Emerald/teal to differentiate from VibeSQL
+            borderColor: 'rgba(16, 185, 129, 1)',
+            borderWidth: 1,
+          },
+        ]
+      : []),
+    {
+      label: 'SQLite',
+      data: sqliteData,
+      backgroundColor: 'rgba(239, 68, 68, 0.5)',
+      borderColor: 'rgba(239, 68, 68, 1)',
+      borderWidth: 1,
+    },
+    {
+      label: 'DuckDB',
+      data: duckdbData,
+      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+      borderColor: 'rgba(59, 130, 246, 1)',
+      borderWidth: 1,
+    },
+    {
+      label: 'MySQL',
+      data: mysqlData,
+      backgroundColor: 'rgba(249, 115, 22, 0.5)',
+      borderColor: 'rgba(249, 115, 22, 1)',
+      borderWidth: 1,
+    },
+  ];
+
   currentChart = new Chart(canvas, {
     type: 'bar',
     data: {
       labels,
-      datasets: [
-        {
-          label: 'VibeSQL',
-          data: vibesqlData,
-          backgroundColor: 'rgba(34, 197, 94, 0.5)',
-          borderColor: 'rgba(34, 197, 94, 1)',
-          borderWidth: 1,
-        },
-        {
-          label: 'SQLite',
-          data: sqliteData,
-          backgroundColor: 'rgba(239, 68, 68, 0.5)',
-          borderColor: 'rgba(239, 68, 68, 1)',
-          borderWidth: 1,
-        },
-        {
-          label: 'DuckDB',
-          data: duckdbData,
-          backgroundColor: 'rgba(59, 130, 246, 0.5)',
-          borderColor: 'rgba(59, 130, 246, 1)',
-          borderWidth: 1,
-        },
-        {
-          label: 'MySQL',
-          data: mysqlData,
-          backgroundColor: 'rgba(249, 115, 22, 0.5)',
-          borderColor: 'rgba(249, 115, 22, 1)',
-          borderWidth: 1,
-        },
-      ],
+      datasets,
     },
     options: {
       responsive: true,
@@ -1636,21 +1678,35 @@ function updateOpsLabel(suite: BenchmarkSuite): void {
 /**
  * Restore table headers for TPC benchmarks
  */
-function restoreTPCTableHeaders(): void {
+function restoreTPCTableHeaders(suite?: BenchmarkSuite): void {
   const table = document.getElementById('results-table');
   if (!table) return;
 
   const thead = table.querySelector('thead tr');
   if (thead) {
-    thead.innerHTML = `
-      <th class="px-4 py-3">Operation</th>
-      <th class="px-4 py-3 text-right">VibeSQL</th>
-      <th class="px-4 py-3 text-right">SQLite</th>
-      <th class="px-4 py-3 text-right">DuckDB</th>
-      <th class="px-4 py-3 text-right">MySQL</th>
-      <th class="px-4 py-3 text-right">Speedup</th>
-      <th class="px-4 py-3 text-center">Winner</th>
-    `;
+    // Sysbench includes VibeSQL Server column for protocol overhead comparison
+    if (suite === 'sysbench') {
+      thead.innerHTML = `
+        <th class="px-4 py-3">Operation</th>
+        <th class="px-4 py-3 text-right">VibeSQL</th>
+        <th class="px-4 py-3 text-right" title="VibeSQL via PostgreSQL wire protocol">VibeSQL Server</th>
+        <th class="px-4 py-3 text-right">SQLite</th>
+        <th class="px-4 py-3 text-right">DuckDB</th>
+        <th class="px-4 py-3 text-right">MySQL</th>
+        <th class="px-4 py-3 text-right">Speedup</th>
+        <th class="px-4 py-3 text-center">Winner</th>
+      `;
+    } else {
+      thead.innerHTML = `
+        <th class="px-4 py-3">Operation</th>
+        <th class="px-4 py-3 text-right">VibeSQL</th>
+        <th class="px-4 py-3 text-right">SQLite</th>
+        <th class="px-4 py-3 text-right">DuckDB</th>
+        <th class="px-4 py-3 text-right">MySQL</th>
+        <th class="px-4 py-3 text-right">Speedup</th>
+        <th class="px-4 py-3 text-center">Winner</th>
+      `;
+    }
   }
 }
 
@@ -1666,7 +1722,7 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
 
   // Restore TPC headers if not footprint
   if (suite !== 'footprint') {
-    restoreTPCTableHeaders();
+    restoreTPCTableHeaders(suite);
   }
 
   try {
