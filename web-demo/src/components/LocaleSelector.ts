@@ -1,8 +1,9 @@
 import { Component } from './base'
-import type { Locale, LocaleCode } from '../locale'
+import type { Locale, LocaleCode, LocaleInfo } from '../locale'
 
 interface LocaleSelectorState {
   currentLocale: LocaleCode
+  supported: LocaleInfo[]
   isOpen: boolean
 }
 
@@ -14,7 +15,11 @@ export class LocaleSelectorComponent extends Component<LocaleSelectorState> {
   private unsubscribe: (() => void) | null = null
 
   constructor(localeSystem: Locale) {
-    super('#locale-selector', { currentLocale: localeSystem.current, isOpen: false })
+    super('#locale-selector', {
+      currentLocale: localeSystem.current,
+      supported: localeSystem.supported,
+      isOpen: false,
+    })
     this.localeSystem = localeSystem
 
     // Subscribe to locale changes
@@ -66,8 +71,7 @@ export class LocaleSelectorComponent extends Component<LocaleSelectorState> {
   }
 
   protected render(): void {
-    const { currentLocale, isOpen } = this.state
-    const supported = this.localeSystem.supported
+    const { currentLocale, supported, isOpen } = this.state
     const currentLocaleInfo = supported.find(l => l.code === currentLocale)
 
     this.element.innerHTML = `
