@@ -43,17 +43,23 @@ TPCH_QUERIES = {
 }
 
 
-def run_tpch_benchmarks(quick: bool = False) -> Dict:
+def run_tpch_benchmarks(quick: bool = False, include_duckdb: bool = False) -> Dict:
     """Run TPC-H benchmarks with Criterion and return parsed results."""
     print("🚀 Running TPC-H benchmarks...")
     print(f"   Mode: {'Quick (limited queries)' if quick else 'Full (all 22 queries)'}")
+    print(f"   DuckDB comparison: {'enabled' if include_duckdb else 'disabled'}")
+
+    # Build feature string
+    features = "benchmark-comparison"
+    if include_duckdb:
+        features += ",duckdb-comparison"
 
     # Build command
     cmd = [
         "cargo", "bench",
         "--package", "vibesql-executor",
         "--bench", "tpch_benchmark",
-        "--features", "benchmark-comparison",
+        "--features", features,
     ]
 
     # For quick mode, only run a few representative queries with VibeSQL only
@@ -215,6 +221,11 @@ def main():
         help="Run quick benchmarks (only Q1, Q3, Q6)"
     )
     parser.add_argument(
+        "--duckdb",
+        action="store_true",
+        help="Include DuckDB comparison benchmarks (adds ~73MB binary size)"
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="benchmark_results.json",
@@ -224,7 +235,7 @@ def main():
     args = parser.parse_args()
 
     # Run benchmarks
-    parsed_data = run_tpch_benchmarks(quick=args.quick)
+    parsed_data = run_tpch_benchmarks(quick=args.quick, include_duckdb=args.duckdb)
 
     # Convert to web demo format
     web_demo_data = convert_to_web_demo_format(parsed_data)
