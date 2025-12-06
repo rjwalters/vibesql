@@ -74,6 +74,20 @@ impl SelectExecutor<'_> {
             return self.execute_fast_path(stmt);
         }
 
+        // Streaming aggregate fast path (#3815)
+        // For queries like: SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?
+        // Accumulates aggregates inline during PK range scan without materializing rows
+        if self.subquery_depth == 0
+            && self.outer_row.is_none()
+            && self.cte_context.is_none()
+            && super::fast_path::is_streaming_aggregate_query(stmt)
+        {
+            if let Ok(result) = self.execute_streaming_aggregate(stmt) {
+                return Ok(result);
+            }
+            // Fall through to standard path if streaming aggregate fails
+        }
+
         #[cfg(feature = "profile-q6")]
         let _setup_time = execute_start.elapsed();
 

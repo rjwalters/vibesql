@@ -36,4 +36,4 @@ pub struct SelectResult {
 }
 
 pub use executor::SelectExecutor;
-pub use executor::is_simple_point_query;
+pub use executor::{is_simple_point_query, is_streaming_aggregate_query};

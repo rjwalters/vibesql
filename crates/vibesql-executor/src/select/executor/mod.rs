@@ -17,7 +17,7 @@ mod columnar_execution;
 mod columns;
 mod execute;
 mod fast_path;
-pub use fast_path::is_simple_point_query;
+pub use fast_path::{is_simple_point_query, is_streaming_aggregate_query};
 mod index_optimization;
 mod nonagg;
 mod utils;
