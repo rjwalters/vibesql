@@ -13,6 +13,10 @@ categories = ["database", "internationalization"]
 name = "check-ftl"
 path = "src/bin/check-ftl.rs"
 
+[[bin]]
+name = "check-translations"
+path = "src/bin/check-translations.rs"
+
 [dependencies]
 fluent = "0.16"
 fluent-bundle = "0.15"
