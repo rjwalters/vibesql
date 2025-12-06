@@ -11,24 +11,48 @@ import { SUPPORTED_LOCALES } from '../locale'
 
 // Import all FTL resources
 import enUS from './resources/en-US.ftl?raw'
-import ja from './resources/ja.ftl?raw'
-import es from './resources/es.ftl?raw'
-import ptBR from './resources/pt-BR.ftl?raw'
+import ar from './resources/ar.ftl?raw'
 import de from './resources/de.ftl?raw'
+import es from './resources/es.ftl?raw'
 import fr from './resources/fr.ftl?raw'
-import zhCN from './resources/zh-CN.ftl?raw'
+import hi from './resources/hi.ftl?raw'
+import id from './resources/id.ftl?raw'
+import it from './resources/it.ftl?raw'
+import ja from './resources/ja.ftl?raw'
 import ko from './resources/ko.ftl?raw'
+import nl from './resources/nl.ftl?raw'
+import pl from './resources/pl.ftl?raw'
+import ptBR from './resources/pt-BR.ftl?raw'
+import ru from './resources/ru.ftl?raw'
+import sv from './resources/sv.ftl?raw'
+import th from './resources/th.ftl?raw'
+import tr from './resources/tr.ftl?raw'
+import uk from './resources/uk.ftl?raw'
+import vi from './resources/vi.ftl?raw'
+import zhCN from './resources/zh-CN.ftl?raw'
 
 /** Map of locale codes to FTL resource content */
 const FTL_RESOURCES: Record<string, string> = {
   'en-US': enUS,
-  'ja': ja,
-  'es': es,
-  'pt-BR': ptBR,
+  'ar': ar,
   'de': de,
+  'es': es,
   'fr': fr,
-  'zh-CN': zhCN,
+  'hi': hi,
+  'id': id,
+  'it': it,
+  'ja': ja,
   'ko': ko,
+  'nl': nl,
+  'pl': pl,
+  'pt-BR': ptBR,
+  'ru': ru,
+  'sv': sv,
+  'th': th,
+  'tr': tr,
+  'uk': uk,
+  'vi': vi,
+  'zh-CN': zhCN,
 }
 
 /** Current active bundle */

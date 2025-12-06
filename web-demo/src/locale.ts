@@ -21,13 +21,25 @@ export interface LocaleInfo {
  */
 export const SUPPORTED_LOCALES: LocaleInfo[] = [
   { code: 'en-US', name: 'English', nativeName: 'English' },
-  { code: 'es', name: 'Spanish', nativeName: 'Español' },
-  { code: 'pt-BR', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)' },
-  { code: 'zh-CN', name: 'Chinese (Simplified)', nativeName: '简体中文' },
-  { code: 'ja', name: 'Japanese', nativeName: '日本語' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية' },
   { code: 'de', name: 'German', nativeName: 'Deutsch' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español' },
   { code: 'fr', name: 'French', nativeName: 'Français' },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
+  { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia' },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語' },
   { code: 'ko', name: 'Korean', nativeName: '한국어' },
+  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
+  { code: 'pl', name: 'Polish', nativeName: 'Polski' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)' },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский' },
+  { code: 'sv', name: 'Swedish', nativeName: 'Svenska' },
+  { code: 'th', name: 'Thai', nativeName: 'ไทย' },
+  { code: 'tr', name: 'Turkish', nativeName: 'Türkçe' },
+  { code: 'uk', name: 'Ukrainian', nativeName: 'Українська' },
+  { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt' },
+  { code: 'zh-CN', name: 'Chinese (Simplified)', nativeName: '简体中文' },
 ]
 
 export type LocaleCode = string
