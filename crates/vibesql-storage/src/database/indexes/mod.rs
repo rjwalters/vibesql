@@ -29,6 +29,7 @@ mod prefix_match;
 mod range_bounds;
 mod range_scan;
 mod reverse_scan;
+mod streaming;
 mod value_normalization;
 
 // Re-export public API
@@ -36,3 +37,4 @@ pub use hnsw::HnswIndex;
 pub use index_manager::IndexManager;
 pub use index_metadata::{IndexData, IndexMetadata};
 pub use ivfflat::IVFFlatIndex;
+pub use streaming::OwnedStreamingRangeScan;

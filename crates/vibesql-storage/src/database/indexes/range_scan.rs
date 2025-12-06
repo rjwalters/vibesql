@@ -6,6 +6,7 @@ use vibesql_types::SqlValue;
 
 use super::index_metadata::{acquire_btree_lock, IndexData};
 use super::range_bounds::{calculate_next_value, smart_increment_value, try_increment_sqlvalue};
+use super::streaming::OwnedStreamingRangeScan;
 use super::value_normalization::normalize_for_comparison;
 
 impl IndexData {
@@ -493,6 +494,68 @@ impl IndexData {
                     }
                 }
             }
+        }
+    }
+
+    /// Create a streaming iterator for range scan without materialization.
+    ///
+    /// Unlike `range_scan()` which returns a `Vec<usize>`, this method returns an
+    /// iterator that yields row indices one at a time. This is more efficient for:
+    /// - Large result sets where allocating a Vec is expensive
+    /// - Queries that may not consume all results
+    /// - Better cache locality during processing
+    ///
+    /// # Arguments
+    /// * `start` - Lower bound (None = unbounded)
+    /// * `end` - Upper bound (None = unbounded)
+    /// * `inclusive_start` - Include rows equal to start value
+    /// * `inclusive_end` - Include rows equal to end value
+    ///
+    /// # Returns
+    /// An iterator yielding row indices, or None if the index type doesn't support
+    /// streaming (e.g., DiskBacked, IVFFlat, HNSW) or if the range is invalid.
+    ///
+    /// # Performance
+    /// This method has O(log n) setup time and O(1) per-element iteration.
+    /// It avoids the O(k) allocation overhead of `range_scan()` where k = matching keys.
+    ///
+    /// # Limitations
+    /// - Only supported for InMemory single-column indexes
+    /// - Multi-column indexes fall back to `range_scan()` internally
+    /// - DiskBacked indexes don't support streaming yet
+    pub fn range_scan_streaming<'a>(
+        &'a self,
+        start: Option<&SqlValue>,
+        end: Option<&SqlValue>,
+        inclusive_start: bool,
+        inclusive_end: bool,
+    ) -> Option<OwnedStreamingRangeScan<'a>> {
+        match self {
+            IndexData::InMemory { data, pending_deletions } => {
+                // Check if this is a multi-column index (streaming not optimized for these)
+                let is_multi_column = data.keys().next().is_some_and(|k| k.len() > 1);
+                if is_multi_column {
+                    // Multi-column indexes need special handling that doesn't fit streaming
+                    // Fall back to caller using range_scan() instead
+                    return None;
+                }
+
+                // Normalize bounds for consistent numeric comparison
+                let normalized_start = start.map(normalize_for_comparison);
+                let normalized_end = end.map(normalize_for_comparison);
+
+                // Use OwnedStreamingRangeScan which handles bounds and uses BTreeMap::range()
+                OwnedStreamingRangeScan::new(
+                    data,
+                    pending_deletions,
+                    normalized_start,
+                    normalized_end,
+                    inclusive_start,
+                    inclusive_end,
+                )
+            }
+            // DiskBacked, IVFFlat, HNSW don't support streaming yet
+            _ => None,
         }
     }
 }
