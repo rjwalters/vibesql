@@ -387,4 +387,42 @@ mod tests {
         assert!(files.iter().any(|f| f == "es/cli.ftl"), "es/cli.ftl not found");
         assert!(files.iter().any(|f| f == "es/parser.ftl"), "es/parser.ftl not found");
     }
+
+    #[test]
+    fn test_portuguese_locale() {
+        init(Some("pt-BR")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Até logo!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("linhas"));
+    }
+
+    #[test]
+    fn test_portuguese_parser_messages() {
+        init(Some("pt-BR")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Literal de string não terminado");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Caractere inesperado"));
+    }
+
+    #[test]
+    fn test_portuguese_resources_embedded() {
+        // Check that Portuguese (Brazilian) resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("pt-BR/")), "Portuguese resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "pt-BR/cli.ftl"), "pt-BR/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/parser.ftl"), "pt-BR/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/executor.ftl"), "pt-BR/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/storage.ftl"), "pt-BR/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/catalog.ftl"), "pt-BR/catalog.ftl not found");
+    }
 }
