@@ -7,6 +7,7 @@
 
 import './styles/main.css';
 import { initTheme } from './theme';
+import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
 
 // Chart.js is loaded via CDN in benchmarks.html
@@ -1877,8 +1878,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize theme system
   const theme = initTheme();
 
-  // Initialize navigation component
-  new NavigationComponent('benchmarks', theme);
+  // Initialize locale system
+  const locale = initLocale();
+
+  // Initialize navigation component with theme and locale
+  new NavigationComponent('benchmarks', theme, locale);
 
   // Initialize tabs
   initTabs();
