@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+/* Enable class-based dark mode (instead of prefers-color-scheme media query) */
+@variant dark (&:where(.dark, .dark *));
+
 /* Define custom theme colors using v4's @theme directive */
 @theme {
   --color-primary-light: #3b82f6;
