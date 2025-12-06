@@ -235,6 +235,7 @@ make help           # Show all targets
 | [CLI Guide](docs/CLI_GUIDE.md) | Command-line interface |
 | [Python Bindings](docs/PYTHON_BINDINGS.md) | Python API reference |
 | [Scheduled Functions](docs/scheduled-functions.md) | Cron jobs and scheduled tasks |
+| [Transactions](docs/transactions.md) | Durability hints and savepoints |
 | [Vector Search](docs/vector-search.md) | AI/ML embeddings and similarity search |
 | [File Storage](docs/file-storage.md) | Blob storage with SQL integration |
 | [ODBC/JDBC](docs/ODBC_JDBC_CONNECTIVITY.md) | Database connectivity |
