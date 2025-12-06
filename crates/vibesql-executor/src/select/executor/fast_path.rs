@@ -333,7 +333,13 @@ impl SelectExecutor<'_> {
     ///
     /// This bypasses the optimizer infrastructure and goes directly to table scan
     /// with optional index optimization.
-    pub(super) fn execute_fast_path(&self, stmt: &SelectStmt) -> Result<Vec<Row>, ExecutorError> {
+    ///
+    /// # Performance Note (#3780)
+    ///
+    /// This method is called by `Session::execute_prepared()` for queries using
+    /// `SimpleFastPath` cached plans. It executes the query and returns just the
+    /// rows, leaving column name resolution to the cached plan.
+    pub fn execute_fast_path(&self, stmt: &SelectStmt) -> Result<Vec<Row>, ExecutorError> {
         // Extract table name from FROM clause
         let (table_name, alias) = match &stmt.from {
             Some(vibesql_ast::FromClause::Table { name, alias, .. }) => {
