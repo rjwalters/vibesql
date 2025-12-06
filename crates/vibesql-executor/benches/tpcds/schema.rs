@@ -92,6 +92,7 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     create_tpcds_schema_vibesql(&mut db);
     eprintln!("done");
 
+
     // Load dimension tables first (fact tables reference them)
     eprint!("  Loading date_dim ({} rows)... ", data.date_dim_count);
     std::io::stderr().flush().ok();
@@ -310,6 +311,7 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     let mut data = TPCDSData::new(scale_factor);
 
     create_tpcds_schema_duckdb(&conn);
+
 
     // Phase 1 tables (core dimension and fact tables)
     load_date_dim_duckdb(&conn, &mut data);
@@ -4243,13 +4245,14 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let w_warehouse_id = format!("AAAAAA{:010}", i);
         let state_idx = i % STATES.len();
 
+        // Match DuckDB's random parameters exactly for deterministic data generation
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(w_warehouse_id),
-            SqlValue::Varchar(format!("Warehouse#{}", i)),
+            SqlValue::Varchar(format!("Warehouse {}", i)),
             SqlValue::Integer(data.random_i32(50000, 500000) as i64), // sq_ft
-            SqlValue::Varchar(format!("{}", data.random_i32(1, 9999))),
-            SqlValue::Varchar(data.random_varchar(40)),
+            SqlValue::Varchar(format!("{}", data.random_i32(1, 9999))), // Match DuckDB: 1-9999
+            SqlValue::Varchar(data.random_varchar(40)),                 // Match DuckDB: max 40
             SqlValue::Varchar("Street".to_string()),
             SqlValue::Varchar(format!("Suite {}", data.random_i32(100, 999))),
             SqlValue::Varchar(data.random_city()),
@@ -4257,7 +4260,7 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(STATES[state_idx].to_string()),
             SqlValue::Varchar(data.random_zip()),
             SqlValue::Varchar("United States".to_string()),
-            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),
+            SqlValue::Numeric(-5.0 - (state_idx % 4) as f64), // Match DuckDB's formula
         ]);
         rows.push(row);
     }
