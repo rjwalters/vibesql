@@ -638,4 +638,93 @@ mod tests {
         assert!(result.contains("produits"));
         assert!(result.contains("existe déjà"));
     }
+
+    #[test]
+    fn test_german_locale() {
+        init(Some("de")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Auf Wiedersehen!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("Zeilen"));
+    }
+
+    #[test]
+    fn test_german_parser_messages() {
+        init(Some("de")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Nicht abgeschlossenes Zeichenkettenliteral");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Unerwartetes Zeichen"));
+    }
+
+    #[test]
+    fn test_german_executor_messages() {
+        init(Some("de")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("nicht gefunden"));
+
+        let result = format("executor-division-by-zero", None);
+        assert_eq!(result, "Division durch Null");
+    }
+
+    #[test]
+    fn test_german_storage_messages() {
+        init(Some("de")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "products");
+        assert!(result.contains("products"));
+        assert!(result.contains("nicht gefunden"));
+
+        let result = format("storage-row-not-found", None);
+        assert_eq!(result, "Zeile nicht gefunden");
+    }
+
+    #[test]
+    fn test_german_catalog_messages() {
+        init(Some("de")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("existiert bereits"));
+
+        let result = vibe_msg!("catalog-schema-not-found", name = "myschema");
+        assert!(result.contains("myschema"));
+        assert!(result.contains("nicht gefunden"));
+    }
+
+    #[test]
+    fn test_german_resources_embedded() {
+        // Check that German resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("de/")), "German resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "de/cli.ftl"), "de/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "de/parser.ftl"), "de/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "de/executor.ftl"), "de/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "de/storage.ftl"), "de/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "de/catalog.ftl"), "de/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_german_umlaut_handling() {
+        init(Some("de")).unwrap();
+
+        // Test messages with umlauts are correctly handled
+        let result = vibe_msg!("executor-schema-not-empty", name = "öffentlich");
+        assert!(result.contains("öffentlich"));
+        assert!(result.contains("kann nicht gelöscht werden"));
+
+        // Test the help hint with German characters
+        let result = format("cli-help-hint", None);
+        assert!(result.contains("Geben Sie"));
+    }
 }
