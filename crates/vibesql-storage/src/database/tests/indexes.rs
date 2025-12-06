@@ -16,7 +16,7 @@ fn test_range_scan_preserves_index_order() {
     data.insert(vec![SqlValue::Double(60.0)], vec![2]);
     data.insert(vec![SqlValue::Double(70.0)], vec![0]);
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     // Query: col0 > 55 should return rows in index order: [2, 0] (values 60, 70)
     let result = index_data.range_scan(
@@ -47,7 +47,7 @@ fn test_range_scan_between_preserves_order() {
     data.insert(vec![SqlValue::Double(60.0)], vec![2]);
     data.insert(vec![SqlValue::Double(70.0)], vec![0]);
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     // Query: col0 BETWEEN 45 AND 65 (i.e., col0 >= 45 AND col0 <= 65)
     let result = index_data.range_scan(
@@ -72,7 +72,7 @@ fn test_range_scan_with_duplicate_values() {
     data.insert(vec![SqlValue::Double(60.0)], vec![3, 7, 2]); // duplicates
     data.insert(vec![SqlValue::Double(70.0)], vec![0]);
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     // Query: col0 >= 60 should return [3, 7, 2, 0]
     // Rows with value 60 maintain insertion order, then row 0 with value 70
@@ -101,7 +101,7 @@ fn test_multi_lookup_with_duplicate_values() {
     data.insert(vec![SqlValue::Double(60.0)], vec![3, 7, 2]); // duplicates
     data.insert(vec![SqlValue::Double(70.0)], vec![0]);
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     // Query: col0 IN (60, 70) should return [3, 7, 2, 0]
     // Rows with value 60 maintain insertion order, then row 0 with value 70
@@ -567,7 +567,7 @@ fn test_index_scan_after_database_reset() {
 
         // Check that index contains row indices
         let all_indices: Vec<usize> = match &index_data {
-            crate::database::indexes::IndexData::InMemory { data } => {
+            crate::database::indexes::IndexData::InMemory { data, .. } => {
                 data.values().flatten().copied().collect()
             }
             crate::database::indexes::IndexData::DiskBacked { .. } => {
@@ -1638,7 +1638,7 @@ fn test_range_scan_limit_basic() {
         data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
     }
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     // Query all rows with limit 3
     let result = index_data.range_scan_limit(None, None, false, false, Some(3));
@@ -1667,7 +1667,7 @@ fn test_range_scan_limit_no_limit() {
         data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
     }
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     // Query with no limit - should return all
     let result = index_data.range_scan_limit(None, None, false, false, None);
@@ -1683,7 +1683,7 @@ fn test_range_scan_limit_zero() {
         data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
     }
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     let result = index_data.range_scan_limit(None, None, false, false, Some(0));
     assert!(result.is_empty(), "Should return empty when limit is 0");
@@ -1698,7 +1698,7 @@ fn test_range_scan_limit_larger_than_result() {
         data.insert(vec![SqlValue::Double((i * 10) as f64)], vec![i as usize]);
     }
 
-    let index_data = IndexData::InMemory { data };
+    let index_data = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     // Ask for 100 rows but only 3 exist
     let result = index_data.range_scan_limit(None, None, false, false, Some(100));
