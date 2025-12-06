@@ -380,6 +380,13 @@ impl SelectExecutor<'_> {
             return Ok(result);
         }
 
+        // Try PK range scan with early projection (#3799)
+        // For simple range queries like `SELECT c FROM t WHERE pk BETWEEN ? AND ?`,
+        // use streaming scan with early projection to avoid cloning unneeded columns.
+        if let Some(result) = self.try_pk_range_scan_with_early_projection(table_name, stmt)? {
+            return Ok(result);
+        }
+
         // Fall back to standard fast path with execute_from_clause
         // Pass LIMIT for early termination optimization (#3253)
         let from_result = crate::select::scan::execute_from_clause(
@@ -1487,6 +1494,132 @@ impl SelectExecutor<'_> {
         });
 
         Ok(rows)
+    }
+
+    /// Try PK range scan with early projection (issue #3799)
+    ///
+    /// For simple range queries like `SELECT c FROM t WHERE pk BETWEEN ? AND ?`,
+    /// this uses streaming scan with early projection to avoid cloning unneeded columns.
+    /// This is critical for sysbench range queries where full row clone was the bottleneck.
+    ///
+    /// Returns Some(rows) if we can use this optimization, None if fallback is needed.
+    fn try_pk_range_scan_with_early_projection(
+        &self,
+        table_name: &str,
+        stmt: &SelectStmt,
+    ) -> Result<Option<Vec<Row>>, ExecutorError> {
+        // Need a WHERE clause with BETWEEN
+        let where_clause = match &stmt.where_clause {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        // No ORDER BY (streaming path doesn't maintain order beyond index order)
+        if stmt.order_by.is_some() {
+            return Ok(None);
+        }
+
+        // No LIMIT (streaming doesn't help much with LIMIT)
+        if stmt.limit.is_some() {
+            return Ok(None);
+        }
+
+        // Get table
+        let table = match self.database.get_table(table_name) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Need single-column PK for streaming
+        let pk_columns = match &table.schema.primary_key {
+            Some(cols) if cols.len() == 1 => cols,
+            _ => return Ok(None),
+        };
+        let pk_col = &pk_columns[0];
+
+        // Extract BETWEEN bounds from WHERE clause
+        let (low_value, high_value) = match self.extract_between_bounds(where_clause, pk_col) {
+            Some(bounds) => bounds,
+            None => return Ok(None),
+        };
+
+        // Need simple column references in SELECT (not SELECT *)
+        let col_indices =
+            match self.try_extract_simple_column_indices(&stmt.select_list, &table.schema) {
+                Some(indices) => indices,
+                None => return Ok(None),
+            };
+
+        // Find an index on the PK column (may not be named pk_{table})
+        let index_names = self.database.list_indexes_for_table(table_name);
+        let pk_index_data = index_names.iter().find_map(|idx_name| {
+            let metadata = self.database.get_index(idx_name)?;
+            if metadata.columns.len() == 1
+                && metadata.columns[0].column_name.eq_ignore_ascii_case(pk_col)
+            {
+                self.database.get_index_data(idx_name)
+            } else {
+                None
+            }
+        });
+        let pk_index_data = match pk_index_data {
+            Some(idx) => idx,
+            None => return Ok(None),
+        };
+
+        // Try streaming range scan
+        let streaming_iter = match pk_index_data.range_scan_streaming(
+            Some(&low_value),
+            Some(&high_value),
+            true, // inclusive start (BETWEEN is inclusive)
+            true, // inclusive end
+        ) {
+            Some(iter) => iter,
+            None => return Ok(None),
+        };
+
+        // Stream with early projection - only clone needed columns
+        let rows: Vec<Row> = streaming_iter
+            .filter_map(|idx| {
+                table.get_row(idx).map(|row| {
+                    let projected_values: Vec<SqlValue> =
+                        col_indices.iter().map(|&col_idx| row.values[col_idx].clone()).collect();
+                    Row { values: projected_values }
+                })
+            })
+            .collect();
+
+        Ok(Some(rows))
+    }
+
+    /// Extract BETWEEN bounds from a WHERE clause for a target column
+    ///
+    /// Returns Some((low, high)) if the expression contains `column BETWEEN low AND high`,
+    /// None otherwise. Handles nested ANDs to find the BETWEEN clause.
+    fn extract_between_bounds(
+        &self,
+        expr: &Expression,
+        target_column: &str,
+    ) -> Option<(SqlValue, SqlValue)> {
+        match expr {
+            Expression::Between { expr: col_expr, low, high, negated, .. } => {
+                if *negated {
+                    return None;
+                }
+                if let Expression::ColumnRef { column, .. } = col_expr.as_ref() {
+                    if column.eq_ignore_ascii_case(target_column) {
+                        let low_val = self.literal_to_value(low)?;
+                        let high_val = self.literal_to_value(high)?;
+                        return Some((low_val, high_val));
+                    }
+                }
+                None
+            }
+            Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => self
+                .extract_between_bounds(left, target_column)
+                .or_else(|| self.extract_between_bounds(right, target_column)),
+            _ => None,
+        }
     }
 
     /// Try to extract simple column indices from a SELECT list
