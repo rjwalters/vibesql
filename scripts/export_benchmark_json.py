@@ -219,7 +219,7 @@ def export_tpcds_results(cursor: Any) -> Optional[Dict]:
         print("  No TPC-DS results found")
         return None
 
-    print(f"  Exported {len(benchmarks)} TPC-DS queries")
+    print(f"  Exported {len(benchmarks)} TPC-DS results ({passed}/{total} passed, excluding sanity checks)")
     return {
         "benchmarks": benchmarks,
         "metadata": {
