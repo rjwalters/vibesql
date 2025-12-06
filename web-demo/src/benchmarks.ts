@@ -769,12 +769,29 @@ function updateSpeedupDisplay(elementId: string, avgSpeedup: number): void {
 }
 
 /**
+ * Reset summary card headers to default state (for comparison benchmarks)
+ */
+function resetSummaryCardHeaders(): void {
+  const sqliteHeader = document.querySelector('#avg-speedup-sqlite')?.parentElement?.querySelector('h3');
+  if (sqliteHeader) sqliteHeader.textContent = 'vs SQLite';
+  const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
+  if (sqliteLabelEl) sqliteLabelEl.textContent = 'average speedup';
+
+  const duckdbHeader = document.querySelector('#avg-speedup-duckdb')?.parentElement?.querySelector('h3');
+  if (duckdbHeader) duckdbHeader.textContent = 'vs DuckDB';
+  const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
+  if (duckdbLabelEl) duckdbLabelEl.textContent = 'average speedup';
+}
+
+/**
  * Update both speedup summary cards (vs SQLite and vs DuckDB)
  */
 function updateSpeedupSummary(
   sqliteSpeedup: { total: number; count: number },
   duckdbSpeedup: { total: number; count: number }
 ): void {
+  // Reset headers to default first
+  resetSummaryCardHeaders();
   // Update SQLite speedup
   if (sqliteSpeedup.count > 0) {
     updateSpeedupDisplay('avg-speedup-sqlite', sqliteSpeedup.total / sqliteSpeedup.count);
@@ -1249,22 +1266,42 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
     tbody.appendChild(row);
   }
 
-  // Update summary cards
+  // Update summary cards for footprint embedded
   const vibesql = data.benchmarks.find(b => b.database === 'vibesql');
   const sqlite = data.benchmarks.find(b => b.database === 'sqlite');
+  const duckdb = data.benchmarks.find(b => b.database === 'duckdb');
 
-  const avgSpeedupEl = document.getElementById('avg-speedup');
-  if (avgSpeedupEl && vibesql && sqlite && vibesql.available && sqlite.available) {
+  // SQLite comparison (startup time)
+  const sqliteEl = document.getElementById('avg-speedup-sqlite');
+  if (sqliteEl && vibesql && sqlite && vibesql.available && sqlite.available) {
     const startupSpeedup = sqlite.startup_time_ms / vibesql.startup_time_ms;
     if (startupSpeedup > 1) {
-      avgSpeedupEl.textContent = `${startupSpeedup.toFixed(2)}x faster startup`;
-      avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
+      sqliteEl.textContent = `${startupSpeedup.toFixed(2)}x faster`;
+      sqliteEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
     } else {
       const slower = 1 / startupSpeedup;
-      avgSpeedupEl.textContent = `${slower.toFixed(2)}x slower startup`;
-      avgSpeedupEl.className = 'text-xl font-bold text-red-600 dark:text-red-400';
+      sqliteEl.textContent = `${slower.toFixed(2)}x slower`;
+      sqliteEl.className = 'text-3xl font-bold text-red-600 dark:text-red-400';
     }
   }
+  const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
+  if (sqliteLabelEl) sqliteLabelEl.textContent = 'startup time';
+
+  // DuckDB comparison (startup time)
+  const duckdbEl = document.getElementById('avg-speedup-duckdb');
+  if (duckdbEl && vibesql && duckdb && vibesql.available && duckdb.available) {
+    const startupSpeedup = duckdb.startup_time_ms / vibesql.startup_time_ms;
+    if (startupSpeedup > 1) {
+      duckdbEl.textContent = `${startupSpeedup.toFixed(2)}x faster`;
+      duckdbEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
+    } else {
+      const slower = 1 / startupSpeedup;
+      duckdbEl.textContent = `${slower.toFixed(2)}x slower`;
+      duckdbEl.className = 'text-3xl font-bold text-red-600 dark:text-red-400';
+    }
+  }
+  const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
+  if (duckdbLabelEl) duckdbLabelEl.textContent = 'startup time';
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -1405,12 +1442,28 @@ function renderFootprintServerTable(data: FootprintResults): void {
     tbody.appendChild(row);
   }
 
-  // Update summary cards
-  const avgSpeedupEl = document.getElementById('avg-speedup');
-  if (avgSpeedupEl && vibesql.wasm_size_gzip_bytes) {
-    avgSpeedupEl.textContent = formatBytes(vibesql.wasm_size_gzip_bytes);
-    avgSpeedupEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+  // Update summary cards for WASM footprint
+  const sqliteEl = document.getElementById('avg-speedup-sqlite');
+  if (sqliteEl && vibesql.wasm_size_gzip_bytes) {
+    sqliteEl.textContent = formatBytes(vibesql.wasm_size_gzip_bytes);
+    sqliteEl.className = 'text-3xl font-bold text-primary-light dark:text-primary-dark';
   }
+  // Update the header since this isn't a comparison
+  const sqliteHeader = sqliteEl?.parentElement?.querySelector('h3');
+  if (sqliteHeader) sqliteHeader.textContent = 'WASM (gzip)';
+  const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
+  if (sqliteLabelEl) sqliteLabelEl.textContent = 'download size';
+
+  // Show raw WASM size in DuckDB slot
+  const duckdbEl = document.getElementById('avg-speedup-duckdb');
+  if (duckdbEl && vibesql.wasm_size_bytes) {
+    duckdbEl.textContent = formatBytes(vibesql.wasm_size_bytes);
+    duckdbEl.className = 'text-3xl font-bold text-primary-light dark:text-primary-dark';
+  }
+  const duckdbHeader = duckdbEl?.parentElement?.querySelector('h3');
+  if (duckdbHeader) duckdbHeader.textContent = 'WASM (raw)';
+  const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
+  if (duckdbLabelEl) duckdbLabelEl.textContent = 'uncompressed';
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -1418,7 +1471,7 @@ function renderFootprintServerTable(data: FootprintResults): void {
   }
 
   // Update label below ops tested
-  const opsLabelEl = document.querySelector('#ops-tested + p');
+  const opsLabelEl = document.getElementById('ops-tested-label');
   if (opsLabelEl) {
     opsLabelEl.textContent = 'size metrics';
   }
@@ -1759,8 +1812,8 @@ function renderTPCCTable(data: TPCCResults): void {
 
   const grouped = groupTPCCBenchmarksByOperation(data.benchmarks);
 
-  let totalSpeedup = 0;
-  let comparisonCount = 0;
+  const sqliteSpeedup = { total: 0, count: 0 };
+  const duckdbSpeedup = { total: 0, count: 0 }; // TPC-C doesn't have DuckDB, but needed for API
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
@@ -1805,34 +1858,18 @@ function renderTPCCTable(data: TPCCResults): void {
     sqliteCell.textContent = sqlite ? formatTPS(sqlite.stats.tps) : 'N/A';
     row.appendChild(sqliteCell);
 
-    // Track speedup for summary card
+    // Track speedup for summary card (TPS = higher is better, so vibesql/sqlite)
     if (vibesql && sqlite && vibesql.stats.tps > 0 && sqlite.stats.tps > 0) {
       const speedup = vibesql.stats.tps / sqlite.stats.tps;
-      totalSpeedup += speedup;
-      comparisonCount++;
+      sqliteSpeedup.total += speedup;
+      sqliteSpeedup.count++;
     }
 
     tbody.appendChild(row);
   }
 
   // Update summary cards
-  if (comparisonCount > 0) {
-    const avgSpeedup = totalSpeedup / comparisonCount;
-    const avgSpeedupEl = document.getElementById('avg-speedup');
-    if (avgSpeedupEl) {
-      if (avgSpeedup > 1) {
-        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x faster`;
-        avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
-      } else if (avgSpeedup < 1) {
-        const slowerBy = 1 / avgSpeedup;
-        avgSpeedupEl.textContent = `${slowerBy.toFixed(2)}x slower`;
-        avgSpeedupEl.className = 'text-xl font-bold text-red-600 dark:text-red-400';
-      } else {
-        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x`;
-        avgSpeedupEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
-      }
-    }
-  }
+  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -2022,17 +2059,32 @@ function renderTPCDSTable(data: TPCDSResults): void {
     tbody.appendChild(row);
   }
 
-  // Update summary cards
-  const avgSpeedupEl = document.getElementById('avg-speedup');
-  if (avgSpeedupEl) {
+  // Update summary cards for TPC-DS (shows pass rate instead of speedup)
+  const sqliteEl = document.getElementById('avg-speedup-sqlite');
+  if (sqliteEl) {
     const passRate = (passedCount / sortedBenchmarks.length * 100).toFixed(0);
-    avgSpeedupEl.textContent = `${passRate}% pass rate`;
-    avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
+    sqliteEl.textContent = `${passRate}%`;
+    sqliteEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
   }
+  const sqliteHeader = sqliteEl?.parentElement?.querySelector('h3');
+  if (sqliteHeader) sqliteHeader.textContent = 'Pass Rate';
+  const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
+  if (sqliteLabelEl) sqliteLabelEl.textContent = 'queries passing';
+
+  // Show passed/total in DuckDB slot
+  const duckdbEl = document.getElementById('avg-speedup-duckdb');
+  if (duckdbEl) {
+    duckdbEl.textContent = `${passedCount}/${sortedBenchmarks.length}`;
+    duckdbEl.className = 'text-3xl font-bold text-primary-light dark:text-primary-dark';
+  }
+  const duckdbHeader = duckdbEl?.parentElement?.querySelector('h3');
+  if (duckdbHeader) duckdbHeader.textContent = 'Queries';
+  const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
+  if (duckdbLabelEl) duckdbLabelEl.textContent = 'passed / total';
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
-    opsTestedEl.textContent = `${passedCount}/${sortedBenchmarks.length}`;
+    opsTestedEl.textContent = `${passedCount}`;
   }
 
   // Update last updated timestamp
@@ -2354,10 +2406,15 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
       `;
     }
 
-    const avgSpeedupEl = document.getElementById('avg-speedup');
-    if (avgSpeedupEl) {
-      avgSpeedupEl.textContent = 'N/A';
-      avgSpeedupEl.className = 'text-xl font-bold text-muted';
+    const sqliteEl = document.getElementById('avg-speedup-sqlite');
+    if (sqliteEl) {
+      sqliteEl.textContent = 'N/A';
+      sqliteEl.className = 'text-3xl font-bold text-muted';
+    }
+    const duckdbEl = document.getElementById('avg-speedup-duckdb');
+    if (duckdbEl) {
+      duckdbEl.textContent = 'N/A';
+      duckdbEl.className = 'text-3xl font-bold text-muted';
     }
 
     const opsTestedEl = document.getElementById('ops-tested');
