@@ -49,6 +49,7 @@
     "vitest": "^4.0.14"
   },
   "dependencies": {
+    "@fluent/bundle": "^0.19.1",
     "chart.js": "^4.5.1",
     "monaco-editor": "^0.55.1",
     "vite-plugin-monaco-editor": "^1.1.0"

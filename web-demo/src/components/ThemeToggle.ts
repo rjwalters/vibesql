@@ -1,5 +1,6 @@
 import { Component } from './base'
 import { Theme } from '../theme'
+import { t, onI18nChange } from '../i18n'
 
 interface ThemeToggleState {
   theme: 'light' | 'dark'
@@ -10,11 +11,23 @@ interface ThemeToggleState {
  */
 export class ThemeToggleComponent extends Component<ThemeToggleState> {
   private themeSystem: Theme
+  private unsubscribeI18n: (() => void) | null = null
 
   constructor(themeSystem: Theme) {
     const currentTheme = themeSystem.current as 'light' | 'dark'
     super('#theme-toggle', { theme: currentTheme })
     this.themeSystem = themeSystem
+
+    // Re-render when locale changes to update translations
+    this.unsubscribeI18n = onI18nChange(() => {
+      this.render()
+    })
+  }
+
+  destroy(): void {
+    if (this.unsubscribeI18n) {
+      this.unsubscribeI18n()
+    }
   }
 
   /**
@@ -27,7 +40,7 @@ export class ThemeToggleComponent extends Component<ThemeToggleState> {
 
   protected render(): void {
     const { theme } = this.state
-    const label = theme === 'dark' ? 'Light' : 'Dark'
+    const label = theme === 'dark' ? t('theme-toggle-light') : t('theme-toggle-dark')
 
     // SVG icons for sun and moon
     const sunIcon = `
@@ -48,8 +61,8 @@ export class ThemeToggleComponent extends Component<ThemeToggleState> {
       <button
         id="theme-toggle-btn"
         class="p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-        aria-label="Toggle ${label} mode"
-        title="Toggle ${label} mode"
+        aria-label="${this.escapeHtml(label)}"
+        title="${this.escapeHtml(label)}"
       >
         ${icon}
       </button>

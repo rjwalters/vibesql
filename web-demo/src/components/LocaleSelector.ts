@@ -1,5 +1,6 @@
 import { Component } from './base'
 import type { Locale, LocaleCode, LocaleInfo } from '../locale'
+import { t, onI18nChange } from '../i18n'
 
 interface LocaleSelectorState {
   currentLocale: LocaleCode
@@ -12,7 +13,8 @@ interface LocaleSelectorState {
  */
 export class LocaleSelectorComponent extends Component<LocaleSelectorState> {
   private localeSystem: Locale
-  private unsubscribe: (() => void) | null = null
+  private unsubscribeLocale: (() => void) | null = null
+  private unsubscribeI18n: (() => void) | null = null
 
   constructor(localeSystem: Locale) {
     super('#locale-selector', {
@@ -23,8 +25,13 @@ export class LocaleSelectorComponent extends Component<LocaleSelectorState> {
     this.localeSystem = localeSystem
 
     // Subscribe to locale changes
-    this.unsubscribe = localeSystem.onChange(locale => {
+    this.unsubscribeLocale = localeSystem.onChange(locale => {
       this.setState({ currentLocale: locale })
+    })
+
+    // Re-render when i18n changes to update translations
+    this.unsubscribeI18n = onI18nChange(() => {
+      this.render()
     })
 
     // Close dropdown when clicking outside
@@ -32,8 +39,11 @@ export class LocaleSelectorComponent extends Component<LocaleSelectorState> {
   }
 
   destroy(): void {
-    if (this.unsubscribe) {
-      this.unsubscribe()
+    if (this.unsubscribeLocale) {
+      this.unsubscribeLocale()
+    }
+    if (this.unsubscribeI18n) {
+      this.unsubscribeI18n()
     }
     document.removeEventListener('click', this.handleDocumentClick.bind(this))
   }
@@ -79,10 +89,10 @@ export class LocaleSelectorComponent extends Component<LocaleSelectorState> {
         <button
           id="locale-toggle-btn"
           class="p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-          aria-label="Select language"
+          aria-label="${this.escapeHtml(t('locale-select'))}"
           aria-haspopup="listbox"
           aria-expanded="${isOpen}"
-          title="Language: ${currentLocaleInfo?.nativeName ?? currentLocale}"
+          title="${this.escapeHtml(currentLocaleInfo?.nativeName ?? currentLocale)}"
         >
           ${this.getGlobeIcon()}
         </button>

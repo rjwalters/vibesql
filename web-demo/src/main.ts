@@ -11,6 +11,7 @@ import { sampleDatabases } from './data/sample-databases'
 import { initializeApp, setupThemeSync } from './app/initialization'
 import { createExecutionHandler } from './app/query-executor'
 import { initLocale, SUPPORTED_LOCALES } from './locale'
+import { initI18n, setI18nLocale, updateDOM, t } from './i18n'
 
 async function bootstrap(): Promise<void> {
   // Initialize loading progress indicator
@@ -32,10 +33,23 @@ async function bootstrap(): Promise<void> {
     // Initialize locale system
     const locale = initLocale()
 
-    // Wire up locale changes to WASM module and show confirmation
+    // Initialize i18n with current locale
+    initI18n(locale.current)
+    updateDOM()
+    updateDocumentTitle()
+
+    // Wire up locale changes to WASM module, i18n, and show confirmation
     locale.onChange(localeCode => {
       // Update WASM locale for localized error messages
       setLocale(localeCode)
+
+      // Update web UI i18n
+      setI18nLocale(localeCode)
+      updateDOM()
+      updateDocumentTitle()
+
+      // Update HTML lang attribute
+      document.documentElement.lang = localeCode
 
       // Get localized confirmation message
       const localeInfo = SUPPORTED_LOCALES.find(l => l.code === localeCode)
@@ -171,6 +185,13 @@ async function bootstrap(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error)
     progress.errorStep('ui', `Initialization failed: ${message}`)
   }
+}
+
+/**
+ * Update the document title with translated text
+ */
+function updateDocumentTitle(): void {
+  document.title = t('page-title')
 }
 
 /**
