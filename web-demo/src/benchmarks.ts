@@ -75,11 +75,11 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
 
       <ul class="space-y-2 text-muted">
-        <li><strong>Hardware:</strong> GitHub Actions runners (ubuntu-latest, 2-core CPU)</li>
+        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
         <li><strong>Benchmark Framework:</strong> Criterion.rs (Rust native benchmarking)</li>
-        <li><strong>Scale Factor:</strong> SF 0.01 (~60,000 rows across 6 tables)</li>
+        <li><strong>Scale Factor:</strong> SF 0.01 (~60,000 rows across 8 tables)</li>
         <li><strong>Data:</strong> Deterministic TPC-H compliant dataset</li>
-        <li><strong>Databases Tested:</strong> VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs), MySQL 8.0 (via mysql crate)</li>
+        <li><strong>Databases Tested:</strong> VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs)</li>
         <li><strong>Execution Mode:</strong> All databases run in-memory (no disk I/O)</li>
         <li><strong>Measurement:</strong> Native Rust API calls (no Python/FFI overhead)</li>
       </ul>
@@ -244,9 +244,10 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
 
       <ul class="space-y-2 text-muted">
+        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
         <li><strong>Schema:</strong> 24 tables with star/snowflake schema design</li>
         <li><strong>Query Count:</strong> 99 queries (currently 88/99 passing)</li>
-        <li><strong>Scale Factor:</strong> SF 0.001 (development/testing scale)</li>
+        <li><strong>Scale Factor:</strong> SF 0.01</li>
         <li><strong>Query Types:</strong> Reporting, ad-hoc, data mining patterns</li>
         <li><strong>SQL Features:</strong> Window functions, CTEs, complex subqueries, ROLLUP/CUBE</li>
       </ul>
@@ -311,6 +312,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
 
       <ul class="space-y-2 text-muted">
+        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
         <li><strong>Workload:</strong> OLTP (Online Transaction Processing)</li>
         <li><strong>Transaction Mix:</strong> 45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level</li>
         <li><strong>Warehouses:</strong> 1 warehouse (scaled for in-memory testing)</li>
@@ -377,6 +379,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
 
       <ul class="space-y-2 text-muted">
+        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
         <li><strong>Mode:</strong> Embedded (in-process, zero network overhead)</li>
         <li><strong>Workload Types:</strong> Point queries, range scans, updates, inserts, deletes</li>
         <li><strong>Table Size:</strong> 10,000 rows per table</li>
@@ -442,6 +445,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
 
       <ul class="space-y-2 text-muted">
+        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
         <li><strong>Mode:</strong> Server (PostgreSQL wire protocol)</li>
         <li><strong>Workload Types:</strong> Point queries, range scans, updates, inserts, deletes</li>
         <li><strong>Table Size:</strong> 10,000 rows per table</li>
@@ -497,6 +501,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
 
       <ul class="space-y-2 text-muted">
+        <li><strong>Hardware:</strong> Mac Studio M3 Ultra (28 cores, 96GB RAM)</li>
         <li><strong>Binary Size:</strong> Size of the compiled native binary in bytes (stripped release build)</li>
         <li><strong>Startup Time:</strong> Time from process start to first query result (CREATE TABLE, INSERT, SELECT)</li>
         <li><strong>Peak Memory:</strong> Maximum resident set size (RSS) during cold startup</li>
@@ -896,106 +901,59 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     }
     row.appendChild(opCell);
 
-    // vibesql time
-    const vibesqlCell = document.createElement('td');
-    vibesqlCell.className = 'px-4 py-3 text-right text-muted';
-    const vibesqlTime = vibesql ? formatTime(vibesql.stats.mean, vibesql.stats.stddev) : null;
-    if (vibesqlTime) {
-      vibesqlCell.textContent = vibesqlTime;
-    } else if (vibesql && vibesql.stats.mean < 0) {
-      vibesqlCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
-    } else {
-      vibesqlCell.textContent = 'N/A';
-    }
+    // Collect valid times to find the winner
+    const times: { name: string; mean: number; cell: HTMLTableCellElement }[] = [];
+
+    // Helper to create a time cell
+    const createTimeCell = (
+      bench: Benchmark | undefined,
+      name: string
+    ): HTMLTableCellElement => {
+      const cell = document.createElement('td');
+      cell.className = 'px-4 py-3 text-right text-muted';
+
+      if (bench && bench.stats.mean > 0) {
+        cell.textContent = formatTime(bench.stats.mean, bench.stats.stddev);
+        times.push({ name, mean: bench.stats.mean, cell });
+      } else if (bench && bench.stats.mean < 0) {
+        cell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
+      } else {
+        cell.textContent = 'N/A';
+      }
+
+      return cell;
+    };
+
+    // Create cells for each database
+    const vibesqlCell = createTimeCell(vibesql, 'vibesql');
     row.appendChild(vibesqlCell);
 
-    // SQLite time
-    const sqliteCell = document.createElement('td');
-    sqliteCell.className = 'px-4 py-3 text-right text-muted';
-    const sqliteTime = sqlite ? formatTime(sqlite.stats.mean, sqlite.stats.stddev) : null;
-    if (sqliteTime) {
-      sqliteCell.textContent = sqliteTime;
-    } else if (sqlite && sqlite.stats.mean < 0) {
-      sqliteCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
-    } else {
-      sqliteCell.textContent = 'N/A';
-    }
+    const sqliteCell = createTimeCell(sqlite, 'sqlite');
     row.appendChild(sqliteCell);
 
-    // DuckDB time
-    const duckdbCell = document.createElement('td');
-    duckdbCell.className = 'px-4 py-3 text-right text-muted';
-    const duckdbTime = duckdb ? formatTime(duckdb.stats.mean, duckdb.stats.stddev) : null;
-    if (duckdbTime) {
-      duckdbCell.textContent = duckdbTime;
-    } else if (duckdb && duckdb.stats.mean < 0) {
-      duckdbCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
-    } else {
-      duckdbCell.textContent = 'N/A';
-    }
+    const duckdbCell = createTimeCell(duckdb, 'duckdb');
     row.appendChild(duckdbCell);
 
-    // MySQL time - only show for sysbench-server (server mode compares to MySQL)
+    // MySQL time - only show for sysbench-server
     if (suite === 'sysbench-server') {
-      const mysqlCell = document.createElement('td');
-      mysqlCell.className = 'px-4 py-3 text-right text-muted';
-      const mysqlTime = mysql ? formatTime(mysql.stats.mean, mysql.stats.stddev) : null;
-      if (mysqlTime) {
-        mysqlCell.textContent = mysqlTime;
-      } else if (mysql && mysql.stats.mean < 0) {
-        mysqlCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
-      } else {
-        mysqlCell.textContent = 'N/A';
-      }
+      const mysqlCell = createTimeCell(mysql, 'mysql');
       row.appendChild(mysqlCell);
     }
 
-    // Speedup vs SQLite
-    const speedupCell = document.createElement('td');
-    speedupCell.className = 'px-4 py-3 text-right font-semibold';
+    // Find and highlight the winner (fastest time)
+    if (times.length > 0) {
+      const winner = times.reduce((min, t) => t.mean < min.mean ? t : min);
+      // Highlight winner in green with bold
+      winner.cell.className = 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400';
+    }
 
-    // Check if vibesql query failed
-    const vibesqlFailed = vibesql && vibesql.stats.mean < 0;
-
-    if (vibesqlFailed) {
-      speedupCell.textContent = 'FAILED';
-      speedupCell.className += ' text-red-600 dark:text-red-400';
-    } else if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
+    // Track speedup for summary card (VibeSQL vs SQLite)
+    if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
       const speedup = calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
-      speedupCell.textContent = `${speedup.toFixed(2)}x`;
-
-      if (speedup > 1) {
-        speedupCell.className += ' text-green-600 dark:text-green-400';
-      } else if (speedup < 1) {
-        speedupCell.className += ' text-red-600 dark:text-red-400';
-      } else {
-        speedupCell.className += ' text-muted';
-      }
-
       totalSpeedup += speedup;
       comparisonCount++;
-    } else {
-      speedupCell.textContent = 'N/A';
-      speedupCell.className += ' text-muted';
     }
 
-    row.appendChild(speedupCell);
-
-    // Winner
-    const winnerCell = document.createElement('td');
-    winnerCell.className = 'px-4 py-3 text-center text-2xl';
-
-    if (vibesqlFailed) {
-      winnerCell.textContent = '❌';
-      winnerCell.title = 'Query failed (timeout or error)';
-    } else if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
-      const speedup = calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
-      winnerCell.textContent = speedup > 1 ? '🚀' : speedup < 1 ? '🐌' : '🤝';
-    } else {
-      winnerCell.textContent = '-';
-    }
-
-    row.appendChild(winnerCell);
     tbody.appendChild(row);
   }
 
@@ -2247,8 +2205,6 @@ function restoreTPCTableHeaders(suite?: BenchmarkSuite): void {
         <th class="px-4 py-3 text-right">VibeSQL</th>
         <th class="px-4 py-3 text-right">SQLite</th>
         <th class="px-4 py-3 text-right">DuckDB</th>
-        <th class="px-4 py-3 text-right">Speedup</th>
-        <th class="px-4 py-3 text-center">Winner</th>
       `;
     // Sysbench server shows VibeSQL Server vs MySQL
     } else if (suite === 'sysbench-server') {
@@ -2256,8 +2212,6 @@ function restoreTPCTableHeaders(suite?: BenchmarkSuite): void {
         <th class="px-4 py-3">Operation</th>
         <th class="px-4 py-3 text-right" title="VibeSQL via PostgreSQL wire protocol">VibeSQL Server</th>
         <th class="px-4 py-3 text-right">MySQL</th>
-        <th class="px-4 py-3 text-right">Speedup</th>
-        <th class="px-4 py-3 text-center">Winner</th>
       `;
     } else {
       // TPC-H, TPC-DS, TPC-C: VibeSQL vs SQLite vs DuckDB (embedded databases only)
@@ -2266,8 +2220,6 @@ function restoreTPCTableHeaders(suite?: BenchmarkSuite): void {
         <th class="px-4 py-3 text-right">VibeSQL</th>
         <th class="px-4 py-3 text-right">SQLite</th>
         <th class="px-4 py-3 text-right">DuckDB</th>
-        <th class="px-4 py-3 text-right">Speedup</th>
-        <th class="px-4 py-3 text-center">Winner</th>
       `;
     }
   }
