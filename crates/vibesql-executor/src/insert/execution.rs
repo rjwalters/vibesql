@@ -176,8 +176,16 @@ fn execute_insert_internal(
 
     // All rows validated successfully, now insert them
 
-    // Fire BEFORE STATEMENT triggers (unless we're already inside a trigger context)
-    if trigger_context.is_none() {
+    // Check once if any INSERT triggers exist for this table (used for batch optimization)
+    let has_insert_triggers = db
+        .catalog
+        .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Insert))
+        .next()
+        .is_some();
+
+    // Fire BEFORE STATEMENT triggers only if triggers exist AND we're not inside a trigger context
+    // (Statement-level triggers don't fire for inserts within trigger bodies)
+    if has_insert_triggers && trigger_context.is_none() {
         crate::TriggerFirer::execute_before_statement_triggers(
             db,
             &stmt.table_name,
@@ -186,17 +194,6 @@ fn execute_insert_internal(
     }
 
     let mut rows_inserted = 0;
-
-    // Check if we can use batch insert optimization
-    // Batch insert is faster but can only be used when:
-    // 1. No ON DUPLICATE KEY UPDATE clause
-    // 2. No REPLACE conflict clause
-    // 3. No INSERT triggers on the table (BEFORE or AFTER)
-    let has_insert_triggers = db
-        .catalog
-        .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Insert))
-        .next()
-        .is_some();
 
     let use_batch_insert = stmt.on_duplicate_key_update.is_none()
         && !matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
@@ -240,15 +237,17 @@ fn execute_insert_internal(
                 )?;
             }
 
-            // Fire BEFORE INSERT triggers
+            // Fire BEFORE INSERT triggers only if triggers exist
             let row_to_insert = vibesql_storage::Row::new(full_row_values.clone());
-            crate::TriggerFirer::execute_before_triggers(
-                db,
-                &stmt.table_name,
-                vibesql_ast::TriggerEvent::Insert,
-                None,
-                Some(&row_to_insert),
-            )?;
+            if has_insert_triggers {
+                crate::TriggerFirer::execute_before_triggers(
+                    db,
+                    &stmt.table_name,
+                    vibesql_ast::TriggerEvent::Insert,
+                    None,
+                    Some(&row_to_insert),
+                )?;
+            }
 
             // Get row count before insert to enable rollback
             let row_count_before = db
@@ -262,48 +261,51 @@ fn execute_insert_internal(
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
 
-            // Fire AFTER INSERT triggers
+            // Fire AFTER INSERT triggers only if triggers exist
             // If AFTER triggers fail, we need to rollback the insert
-            let trigger_result = crate::TriggerFirer::execute_after_triggers(
-                db,
-                &stmt.table_name,
-                vibesql_ast::TriggerEvent::Insert,
-                None,
-                Some(&row),
-            );
+            if has_insert_triggers {
+                let trigger_result = crate::TriggerFirer::execute_after_triggers(
+                    db,
+                    &stmt.table_name,
+                    vibesql_ast::TriggerEvent::Insert,
+                    None,
+                    Some(&row),
+                );
 
-            if let Err(trigger_error) = trigger_result {
-                // Rollback: Delete the row we just inserted
-                // Note: This is a simple rollback mechanism for Phase 3
-                // Full transaction support will come in a later phase
-                let table = db
-                    .get_table_mut(&stmt.table_name)
-                    .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+                if let Err(trigger_error) = trigger_result {
+                    // Rollback: Delete the row we just inserted
+                    // Note: This is a simple rollback mechanism for Phase 3
+                    // Full transaction support will come in a later phase
+                    let table = db
+                        .get_table_mut(&stmt.table_name)
+                        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-                // Delete the last row (the one we just inserted)
-                // Row was inserted at index row_count_before
-                use std::cell::Cell;
-                let current_index = Cell::new(0);
-                let target_index = row_count_before;
-                table.delete_where(|_row| {
-                    let index = current_index.get();
-                    current_index.set(index + 1);
-                    index == target_index
-                });
+                    // Delete the last row (the one we just inserted)
+                    // Row was inserted at index row_count_before
+                    use std::cell::Cell;
+                    let current_index = Cell::new(0);
+                    let target_index = row_count_before;
+                    table.delete_where(|_row| {
+                        let index = current_index.get();
+                        current_index.set(index + 1);
+                        index == target_index
+                    });
 
-                // Rebuild indexes since we modified the table
-                db.rebuild_indexes(&stmt.table_name);
+                    // Rebuild indexes since we modified the table
+                    db.rebuild_indexes(&stmt.table_name);
 
-                // Re-throw the trigger error
-                return Err(trigger_error);
+                    // Re-throw the trigger error
+                    return Err(trigger_error);
+                }
             }
 
             rows_inserted += 1;
         }
     }
 
-    // Fire AFTER STATEMENT triggers (unless we're already inside a trigger context)
-    if trigger_context.is_none() {
+    // Fire AFTER STATEMENT triggers only if triggers exist AND we're not inside a trigger context
+    // (Statement-level triggers don't fire for inserts within trigger bodies)
+    if has_insert_triggers && trigger_context.is_none() {
         crate::TriggerFirer::execute_after_statement_triggers(
             db,
             &stmt.table_name,

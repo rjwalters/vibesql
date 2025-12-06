@@ -148,6 +148,13 @@ impl DeleteExecutor {
             ExpressionEvaluator::with_database(&schema, database)
         };
 
+        // Check once if any DELETE triggers exist for this table (used for fast-path checks)
+        let has_delete_triggers = database
+            .catalog
+            .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Delete))
+            .next()
+            .is_some();
+
         // Find rows to delete and their indices
         // Try to use primary key index for fast lookup
         let mut rows_and_indices_to_delete: Vec<(usize, vibesql_storage::Row)> = Vec::new();
@@ -190,8 +197,9 @@ impl DeleteExecutor {
             )?;
         }
 
-        // Fire BEFORE STATEMENT triggers (unless we're already inside a trigger context)
-        if trigger_context.is_none() {
+        // Fire BEFORE STATEMENT triggers only if triggers exist AND we're not inside a trigger context
+        // (Statement-level triggers don't fire for deletes within trigger bodies)
+        if has_delete_triggers && trigger_context.is_none() {
             crate::TriggerFirer::execute_before_statement_triggers(
                 database,
                 &stmt.table_name,
@@ -199,15 +207,17 @@ impl DeleteExecutor {
             )?;
         }
 
-        // Step 3: Fire BEFORE DELETE ROW triggers
-        for (_, row) in &rows_and_indices_to_delete {
-            crate::TriggerFirer::execute_before_triggers(
-                database,
-                &stmt.table_name,
-                vibesql_ast::TriggerEvent::Delete,
-                Some(row),
-                None,
-            )?;
+        // Step 3: Fire BEFORE DELETE ROW triggers only if triggers exist
+        if has_delete_triggers {
+            for (_, row) in &rows_and_indices_to_delete {
+                crate::TriggerFirer::execute_before_triggers(
+                    database,
+                    &stmt.table_name,
+                    vibesql_ast::TriggerEvent::Delete,
+                    Some(row),
+                    None,
+                )?;
+            }
         }
 
         // Step 4: Handle referential integrity for each row to be deleted
@@ -247,19 +257,22 @@ impl DeleteExecutor {
             database.invalidate_columnar_cache(&stmt.table_name);
         }
 
-        // Step 6: Fire AFTER DELETE ROW triggers for each deleted row
-        for (_, row) in &rows_and_indices_to_delete {
-            crate::TriggerFirer::execute_after_triggers(
-                database,
-                &stmt.table_name,
-                vibesql_ast::TriggerEvent::Delete,
-                Some(row),
-                None,
-            )?;
+        // Step 6: Fire AFTER DELETE ROW triggers only if triggers exist
+        if has_delete_triggers {
+            for (_, row) in &rows_and_indices_to_delete {
+                crate::TriggerFirer::execute_after_triggers(
+                    database,
+                    &stmt.table_name,
+                    vibesql_ast::TriggerEvent::Delete,
+                    Some(row),
+                    None,
+                )?;
+            }
         }
 
-        // Fire AFTER STATEMENT triggers (unless we're already inside a trigger context)
-        if trigger_context.is_none() {
+        // Fire AFTER STATEMENT triggers only if triggers exist AND we're not inside a trigger context
+        // (Statement-level triggers don't fire for deletes within trigger bodies)
+        if has_delete_triggers && trigger_context.is_none() {
             crate::TriggerFirer::execute_after_statement_triggers(
                 database,
                 &stmt.table_name,
