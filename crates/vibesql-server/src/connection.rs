@@ -9,15 +9,24 @@ use crate::session::{ExecutionResult, Session};
 use crate::subscription::{extract_table_refs, SessionSubscriptionManager, SubscriptionManager};
 use anyhow::Result;
 use bytes::BytesMut;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 use vibesql_executor::cache::table_extractor;
+
+/// Notification sent when a mutation affects tables
+/// This is broadcast to all connections so they can notify their subscriptions
+#[derive(Debug, Clone)]
+pub struct TableMutationNotification {
+    /// Tables that were affected by the mutation
+    pub affected_tables: HashSet<String>,
+}
 
 /// Connection handler for a single client
 pub struct ConnectionHandler {
@@ -38,6 +47,10 @@ pub struct ConnectionHandler {
     /// Global subscription manager for processing storage change events
     #[allow(dead_code)]
     global_subscription_manager: Arc<SubscriptionManager>,
+    /// Broadcast sender for notifying other connections about mutations
+    mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
+    /// Broadcast receiver for receiving mutation notifications from other connections
+    mutation_broadcast_rx: broadcast::Receiver<TableMutationNotification>,
 }
 
 impl ConnectionHandler {
@@ -52,7 +65,10 @@ impl ConnectionHandler {
         active_connections: Arc<AtomicUsize>,
         database_registry: DatabaseRegistry,
         global_subscription_manager: Arc<SubscriptionManager>,
+        mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     ) -> Self {
+        // Subscribe to the broadcast channel to receive notifications from other connections
+        let mutation_broadcast_rx = mutation_broadcast_tx.subscribe();
         Self {
             stream,
             peer_addr,
@@ -67,6 +83,8 @@ impl ConnectionHandler {
             database_registry,
             subscription_manager: SessionSubscriptionManager::new(),
             global_subscription_manager,
+            mutation_broadcast_tx,
+            mutation_broadcast_rx,
         }
     }
 
@@ -254,13 +272,76 @@ impl ConnectionHandler {
     }
 
     /// Process queries from the client
+    ///
+    /// This method handles both:
+    /// 1. Client messages from the TCP stream
+    /// 2. Broadcast notifications from other connections about table mutations
+    ///
+    /// This enables cross-connection subscription notifications: when connection A
+    /// mutates a table, connection B's subscriptions on that table are notified.
     async fn process_queries(&mut self) -> Result<()> {
         loop {
-            // Read a complete message, waiting for more data if needed
-            let msg = match self.read_complete_message().await {
-                Ok(msg) => msg,
-                Err(e) => {
-                    // Check if this is a clean connection close
+            // First, drain any pending broadcast notifications without blocking
+            // This ensures we process notifications that arrived while handling previous messages
+            loop {
+                match self.mutation_broadcast_rx.try_recv() {
+                    Ok(notification) => {
+                        if self.subscription_manager.subscription_count() > 0 {
+                            self.handle_cross_connection_notification(&notification.affected_tables)
+                                .await;
+                        }
+                    }
+                    Err(broadcast::error::TryRecvError::Empty) => break,
+                    Err(broadcast::error::TryRecvError::Lagged(n)) => {
+                        debug!("Missed {} broadcast notifications (lagged)", n);
+                    }
+                    Err(broadcast::error::TryRecvError::Closed) => {
+                        warn!("Mutation broadcast channel closed");
+                        break;
+                    }
+                }
+            }
+
+            // Now wait for the next event: either a client message or a broadcast notification
+            // We use a short timeout on the client read to periodically check for broadcasts
+            let msg_result = tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                self.read_complete_message(),
+            )
+            .await;
+
+            match msg_result {
+                Ok(Ok(msg)) => {
+                    // Process the client message
+                    match msg {
+                        FrontendMessage::Query { query } => {
+                            debug!("Query: {}", query);
+                            self.execute_query(&query).await?;
+                        }
+
+                        FrontendMessage::Subscribe { query, params } => {
+                            debug!("Subscribe: {}", query);
+                            self.handle_subscribe(&query, params).await?;
+                        }
+
+                        FrontendMessage::Unsubscribe { subscription_id } => {
+                            debug!("Unsubscribe: {:?}", subscription_id);
+                            self.subscription_manager.unsubscribe(&subscription_id);
+                            // No response needed per protocol spec
+                        }
+
+                        FrontendMessage::Terminate => {
+                            debug!("Client requested termination");
+                            break;
+                        }
+
+                        msg => {
+                            warn!("Unexpected message: {:?}", msg);
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    // Error reading from client
                     let err_str = e.to_string();
                     if err_str.contains("Connection closed") {
                         debug!("Connection closed by client");
@@ -268,32 +349,10 @@ impl ConnectionHandler {
                     }
                     return Err(e);
                 }
-            };
-
-            match msg {
-                FrontendMessage::Query { query } => {
-                    debug!("Query: {}", query);
-                    self.execute_query(&query).await?;
-                }
-
-                FrontendMessage::Subscribe { query, params } => {
-                    debug!("Subscribe: {}", query);
-                    self.handle_subscribe(&query, params).await?;
-                }
-
-                FrontendMessage::Unsubscribe { subscription_id } => {
-                    debug!("Unsubscribe: {:?}", subscription_id);
-                    self.subscription_manager.unsubscribe(&subscription_id);
-                    // No response needed per protocol spec
-                }
-
-                FrontendMessage::Terminate => {
-                    debug!("Client requested termination");
-                    break;
-                }
-
-                msg => {
-                    warn!("Unexpected message: {:?}", msg);
+                Err(_elapsed) => {
+                    // Timeout - no client message, loop back to check for broadcasts
+                    // This is the normal case when client is idle
+                    continue;
                 }
             }
         }
@@ -302,6 +361,85 @@ impl ConnectionHandler {
         self.subscription_manager.clear();
 
         Ok(())
+    }
+
+    /// Handle a cross-connection notification about table mutations
+    ///
+    /// When another connection mutates tables, this method is called to
+    /// check if any of our subscriptions are affected and send updates.
+    async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
+        // Collect subscriptions that need updating
+        let subscriptions_to_update: Vec<([u8; 16], String)> = affected_tables
+            .iter()
+            .flat_map(|table| {
+                self.subscription_manager
+                    .get_subscriptions_for_table_with_details(table)
+                    .map(|(id, sub)| (*id, sub.query.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        if subscriptions_to_update.is_empty() {
+            return;
+        }
+
+        // De-duplicate subscriptions (a subscription may depend on multiple affected tables)
+        let mut seen = std::collections::HashSet::new();
+        let unique_subscriptions: Vec<_> = subscriptions_to_update
+            .into_iter()
+            .filter(|(id, _)| seen.insert(*id))
+            .collect();
+
+        debug!(
+            "Cross-connection notification: notifying {} subscriptions for tables: {:?}",
+            unique_subscriptions.len(),
+            affected_tables
+        );
+
+        // Re-execute each subscription query and send updates
+        for (subscription_id, query) in unique_subscriptions {
+            if let Some(session) = &mut self.session {
+                match session.execute(&query).await {
+                    Ok(ExecutionResult::Select { rows, .. }) => {
+                        // Convert rows to wire format
+                        let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
+                            .iter()
+                            .map(|row| {
+                                row.values
+                                    .iter()
+                                    .map(|v| Some(v.to_string().as_bytes().to_vec()))
+                                    .collect()
+                            })
+                            .collect();
+
+                        // Send full update
+                        if let Err(e) = self
+                            .send_subscription_data(
+                                &subscription_id,
+                                SubscriptionUpdateType::Full,
+                                wire_rows,
+                            )
+                            .await
+                        {
+                            warn!("Failed to send cross-connection subscription update: {}", e);
+                        }
+                    }
+                    Ok(_) => {
+                        // Non-SELECT result - shouldn't happen for a subscription query
+                        warn!("Subscription query returned non-SELECT result");
+                    }
+                    Err(e) => {
+                        // Query failed - send error to subscriber
+                        if let Err(send_err) = self
+                            .send_subscription_error(&subscription_id, &format!("Query error: {}", e))
+                            .await
+                        {
+                            warn!("Failed to send subscription error: {}", send_err);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Read a complete frontend message, looping until enough data is available
@@ -361,7 +499,11 @@ impl ConnectionHandler {
 
                 // Notify affected subscriptions after mutations
                 if is_mutation {
+                    // First, notify local subscriptions (same connection)
                     self.notify_affected_subscriptions(query).await;
+
+                    // Then, broadcast to other connections for cross-connection notifications
+                    self.broadcast_mutation(query);
                 }
 
                 // Return appropriate transaction status
@@ -567,6 +709,36 @@ impl ConnectionHandler {
                     }
                 }
             }
+        }
+    }
+
+    /// Broadcast a mutation event to all connections
+    ///
+    /// This is called after a mutation (INSERT/UPDATE/DELETE) is executed to notify
+    /// other connections that may have subscriptions on the affected tables.
+    fn broadcast_mutation(&self, mutation_query: &str) {
+        // Parse the mutation query to extract affected tables
+        let affected_tables = match vibesql_parser::Parser::parse_sql(mutation_query) {
+            Ok(stmt) => extract_table_refs(&stmt),
+            Err(e) => {
+                debug!("Failed to parse mutation query for broadcast: {}", e);
+                return;
+            }
+        };
+
+        if affected_tables.is_empty() {
+            return;
+        }
+
+        debug!("Broadcasting mutation affecting tables: {:?}", affected_tables);
+
+        // Broadcast the notification to all connections
+        // Note: This is fire-and-forget. If the channel is full or has no receivers,
+        // it's okay - we've already notified our own connection's subscriptions.
+        let notification = TableMutationNotification { affected_tables };
+        if let Err(e) = self.mutation_broadcast_tx.send(notification) {
+            // No receivers or channel issue - this is fine, just log at debug level
+            debug!("Failed to broadcast mutation notification: {}", e);
         }
     }
 

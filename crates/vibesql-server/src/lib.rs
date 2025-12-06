@@ -20,7 +20,7 @@ pub use config::{
     ApiKeyConfig, AuthConfig, Config, HttpAuthConfig, HttpAuthMethod, HttpConfig, JwtConfig,
     LoggingConfig, ServerConfig,
 };
-pub use connection::ConnectionHandler;
+pub use connection::{ConnectionHandler, TableMutationNotification};
 pub use observability::ObservabilityProvider;
 pub use protocol::{
     BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
