@@ -14,9 +14,28 @@ use super::select::SelectStmt;
 // Transaction Statements
 // ============================================================================
 
+/// Durability hint for a transaction (arena version)
+///
+/// Controls how the transaction's changes are persisted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DurabilityHint {
+    /// Use the database's default durability mode
+    #[default]
+    Default,
+    /// Force durable commit (fsync on commit)
+    Durable,
+    /// Allow lazy commit (batched sync)
+    Lazy,
+    /// Force volatile (no WAL) for this transaction
+    Volatile,
+}
+
 /// BEGIN TRANSACTION statement
-#[derive(Debug, Clone, PartialEq)]
-pub struct BeginStmt;
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BeginStmt {
+    /// Optional durability hint for this transaction
+    pub durability: DurabilityHint,
+}
 
 /// COMMIT statement
 #[derive(Debug, Clone, PartialEq)]

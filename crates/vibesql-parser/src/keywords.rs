@@ -315,6 +315,11 @@ pub enum Keyword {
     // VibeSQL storage format keywords
     Storage,
     Columnar,
+    // Transaction durability hint keywords
+    Durability,
+    Lazy,
+    Durable,
+    Volatile,
 }
 
 impl Keyword {
@@ -619,6 +624,11 @@ impl fmt::Display for Keyword {
             // VibeSQL storage format keywords
             Keyword::Storage => "STORAGE",
             Keyword::Columnar => "COLUMNAR",
+            // Transaction durability hint keywords
+            Keyword::Durability => "DURABILITY",
+            Keyword::Lazy => "LAZY",
+            Keyword::Durable => "DURABLE",
+            Keyword::Volatile => "VOLATILE",
         };
         write!(f, "{}", keyword_str)
     }

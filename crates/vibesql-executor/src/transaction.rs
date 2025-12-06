@@ -1,24 +1,41 @@
 //! Transaction control statement execution (BEGIN, COMMIT, ROLLBACK)
 
 use vibesql_ast::{
-    BeginStmt, CommitStmt, ReleaseSavepointStmt, RollbackStmt, RollbackToSavepointStmt,
-    SavepointStmt,
+    BeginStmt, CommitStmt, DurabilityHint, ReleaseSavepointStmt, RollbackStmt,
+    RollbackToSavepointStmt, SavepointStmt,
 };
-use vibesql_storage::Database;
+use vibesql_storage::{Database, TransactionDurability};
 
 use crate::errors::ExecutorError;
+
+/// Convert AST DurabilityHint to storage TransactionDurability
+fn convert_durability_hint(hint: &DurabilityHint) -> TransactionDurability {
+    match hint {
+        DurabilityHint::Default => TransactionDurability::Default,
+        DurabilityHint::Durable => TransactionDurability::ForceDurable,
+        DurabilityHint::Lazy => TransactionDurability::AllowLazy,
+        DurabilityHint::Volatile => TransactionDurability::ForceVolatile,
+    }
+}
 
 /// Executor for BEGIN TRANSACTION statements
 pub struct BeginTransactionExecutor;
 
 impl BeginTransactionExecutor {
     /// Execute a BEGIN TRANSACTION statement
-    pub fn execute(_stmt: &BeginStmt, db: &mut Database) -> Result<String, ExecutorError> {
-        db.begin_transaction().map_err(|e| {
+    pub fn execute(stmt: &BeginStmt, db: &mut Database) -> Result<String, ExecutorError> {
+        let durability = convert_durability_hint(&stmt.durability);
+        db.begin_transaction_with_durability(durability).map_err(|e| {
             ExecutorError::StorageError(format!("Failed to begin transaction: {}", e))
         })?;
 
-        Ok("Transaction started".to_string())
+        let msg = match stmt.durability {
+            DurabilityHint::Default => "Transaction started".to_string(),
+            DurabilityHint::Durable => "Transaction started (durability: DURABLE)".to_string(),
+            DurabilityHint::Lazy => "Transaction started (durability: LAZY)".to_string(),
+            DurabilityHint::Volatile => "Transaction started (durability: VOLATILE)".to_string(),
+        };
+        Ok(msg)
     }
 }
 
