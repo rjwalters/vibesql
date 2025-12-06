@@ -223,7 +223,7 @@ pub(super) fn execute_covering_index_scan(
 /// - The index doesn't cover all needed columns
 /// - No suitable predicate could be extracted
 /// - Caller should fall back to regular index scan
-pub(crate) fn try_covering_index_scan(
+pub(in crate::select) fn try_covering_index_scan(
     table_name: &str,
     index_name: &str,
     alias: Option<&String>,
