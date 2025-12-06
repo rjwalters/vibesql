@@ -982,4 +982,94 @@ mod tests {
         assert!(result.contains("\\help"));
         assert!(result.contains("hjälp"));
     }
+
+    #[test]
+    fn test_thai_locale() {
+        init(Some("th")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "ลาก่อน!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("แถว"));
+    }
+
+    #[test]
+    fn test_thai_parser_messages() {
+        init(Some("th")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "String literal ไม่ถูกปิด");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("อักขระไม่คาดคิด"));
+    }
+
+    #[test]
+    fn test_thai_resources_embedded() {
+        // Check that Thai resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("th/")), "Thai resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "th/cli.ftl"), "th/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "th/parser.ftl"), "th/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "th/executor.ftl"), "th/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "th/storage.ftl"), "th/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "th/catalog.ftl"), "th/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_thai_executor_messages() {
+        init(Some("th")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("ไม่พบตาราง"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "หารด้วยศูนย์");
+    }
+
+    #[test]
+    fn test_thai_storage_messages() {
+        init(Some("th")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("ไม่พบตาราง"));
+
+        let result = format("storage-row-not-found", None);
+        assert_eq!(result, "ไม่พบแถว");
+    }
+
+    #[test]
+    fn test_thai_catalog_messages() {
+        init(Some("th")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("มีอยู่แล้ว"));
+
+        let result = vibe_msg!("catalog-schema-not-found", name = "myschema");
+        assert!(result.contains("myschema"));
+        assert!(result.contains("ไม่พบ Schema"));
+    }
+
+    #[test]
+    fn test_thai_script_handling() {
+        init(Some("th")).unwrap();
+
+        // Test messages with Thai script are correctly handled
+        let result = vibe_msg!("executor-schema-not-empty", name = "สาธารณะ");
+        assert!(result.contains("สาธารณะ"));
+        assert!(result.contains("ไม่สามารถลบ"));
+
+        // Test the help hint with Thai characters
+        let result = format("cli-help-hint", None);
+        assert!(result.contains("\\help"));
+        assert!(result.contains("ความช่วยเหลือ"));
+    }
 }
