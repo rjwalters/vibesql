@@ -387,7 +387,7 @@ interface TPCCStats {
   tps: number;
   transactions: number;
   duration_ms: number;
-  success_rate: number;
+  success_rate?: number;
 }
 
 interface TPCCBenchmark {
@@ -397,9 +397,15 @@ interface TPCCBenchmark {
 
 interface TPCCResults {
   benchmarks: TPCCBenchmark[];
-  metadata: {
+  datetime?: string;
+  metadata?: {
     suite: string;
     timestamp: string;
+    git_commit: string;
+    scale_factor: string;
+  };
+  machine_info?: {
+    suite: string;
     git_commit: string;
     scale_factor: string;
   };
@@ -1362,8 +1368,9 @@ function renderTPCCTable(data: TPCCResults): void {
 
   // Update last updated timestamp
   const lastUpdatedEl = document.getElementById('last-updated');
-  if (lastUpdatedEl && data.metadata.timestamp) {
-    const date = new Date(data.metadata.timestamp);
+  const timestamp = data.metadata?.timestamp || data.datetime;
+  if (lastUpdatedEl && timestamp) {
+    const date = new Date(timestamp);
     lastUpdatedEl.textContent = date.toLocaleDateString();
     lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
   }
