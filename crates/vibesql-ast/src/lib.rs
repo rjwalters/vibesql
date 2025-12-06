@@ -37,6 +37,7 @@ mod statement;
 pub use ddl::{
     AddColumnStmt, AddConstraintStmt, AlterColumnStmt, AlterCronStmt, AlterSequenceStmt,
     AlterTableStmt, AlterTriggerAction, AlterTriggerStmt, AnalyzeStmt, BeginStmt, CallStmt,
+    DurabilityHint,
     CancelScheduleStmt, ChangeColumnStmt, CloseCursorStmt, ColumnConstraint, ColumnConstraintKind,
     ColumnDef, CommitStmt, CreateAssertionStmt, CreateCharacterSetStmt, CreateCollationStmt,
     CreateCronStmt, CreateDomainStmt, CreateFunctionStmt, CreateIndexStmt, CreateProcedureStmt,

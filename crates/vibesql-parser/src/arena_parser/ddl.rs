@@ -11,10 +11,10 @@ use vibesql_ast::arena::{
     AddColumnStmt, AddConstraintStmt, AlterColumnStmt, AlterTableStmt, AnalyzeStmt, BeginStmt,
     ChangeColumnStmt, ColumnConstraint, ColumnConstraintKind, ColumnDef, CommitStmt,
     CreateIndexStmt, CreateViewStmt, DropColumnStmt, DropConstraintStmt, DropIndexStmt,
-    DropTableStmt, DropViewStmt, Expression, IndexColumn, IndexType, ModifyColumnStmt,
-    OrderDirection, ReferentialAction, ReleaseSavepointStmt, RenameTableStmt, RollbackStmt,
-    RollbackToSavepointStmt, SavepointStmt, Symbol, TableConstraint, TableConstraintKind,
-    TruncateCascadeOption, TruncateTableStmt,
+    DropTableStmt, DropViewStmt, DurabilityHint, Expression, IndexColumn, IndexType,
+    ModifyColumnStmt, OrderDirection, ReferentialAction, ReleaseSavepointStmt, RenameTableStmt,
+    RollbackStmt, RollbackToSavepointStmt, SavepointStmt, Symbol, TableConstraint,
+    TableConstraintKind, TruncateCascadeOption, TruncateTableStmt,
 };
 
 use super::ArenaParser;
@@ -27,7 +27,7 @@ impl<'arena> ArenaParser<'arena> {
     // Transaction Statements
     // ========================================================================
 
-    /// Parse BEGIN [TRANSACTION] or START TRANSACTION statement.
+    /// Parse BEGIN [TRANSACTION] [WITH DURABILITY = <mode>] or START TRANSACTION [WITH DURABILITY = <mode>] statement.
     pub(crate) fn parse_begin_statement(&mut self) -> Result<BeginStmt, ParseError> {
         if self.peek_keyword(Keyword::Begin) {
             self.consume_keyword(Keyword::Begin)?;
@@ -40,7 +40,38 @@ impl<'arena> ArenaParser<'arena> {
         // Optional TRANSACTION keyword
         self.try_consume_keyword(Keyword::Transaction);
 
-        Ok(BeginStmt)
+        // Parse optional WITH DURABILITY = <mode> clause
+        let durability = if self.peek_keyword(Keyword::With) {
+            self.consume_keyword(Keyword::With)?;
+            self.consume_keyword(Keyword::Durability)?;
+
+            // Optional = sign
+            self.try_consume(&Token::Symbol('='));
+
+            // Parse durability mode
+            self.parse_durability_hint()?
+        } else {
+            DurabilityHint::Default
+        };
+
+        Ok(BeginStmt { durability })
+    }
+
+    /// Parse a durability hint keyword.
+    fn parse_durability_hint(&mut self) -> Result<DurabilityHint, ParseError> {
+        if self.try_consume_keyword(Keyword::Default) {
+            Ok(DurabilityHint::Default)
+        } else if self.try_consume_keyword(Keyword::Durable) {
+            Ok(DurabilityHint::Durable)
+        } else if self.try_consume_keyword(Keyword::Lazy) {
+            Ok(DurabilityHint::Lazy)
+        } else if self.try_consume_keyword(Keyword::Volatile) {
+            Ok(DurabilityHint::Volatile)
+        } else {
+            Err(ParseError {
+                message: "Expected durability mode: DEFAULT, DURABLE, LAZY, or VOLATILE".to_string(),
+            })
+        }
     }
 
     /// Parse COMMIT statement.

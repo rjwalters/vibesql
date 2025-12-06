@@ -311,6 +311,11 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     // VibeSQL storage format keywords
     "STORAGE" => Keyword::Storage,
     "COLUMNAR" => Keyword::Columnar,
+    // Transaction durability hint keywords
+    "DURABILITY" => Keyword::Durability,
+    "LAZY" => Keyword::Lazy,
+    "DURABLE" => Keyword::Durable,
+    "VOLATILE" => Keyword::Volatile,
 };
 
 /// Map an uppercase string to its corresponding Keyword using perfect hash lookup.
