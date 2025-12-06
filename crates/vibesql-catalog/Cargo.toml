@@ -12,5 +12,6 @@ categories = ["database"]
 [dependencies]
 vibesql-types = { version = "0.1.2", path = "../vibesql-types" }
 vibesql-ast = { version = "0.1.2", path = "../vibesql-ast" }
+vibesql-l10n = { version = "0.1.2", path = "../vibesql-l10n" }
 
 [dev-dependencies]

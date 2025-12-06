@@ -27,6 +27,9 @@ mod loader;
 pub use detection::detect_locale;
 pub use loader::L10nError;
 
+// Re-export fluent for use by the vibe_msg! macro in downstream crates
+pub use fluent;
+
 use std::cell::RefCell;
 use std::sync::RwLock;
 
@@ -90,23 +93,37 @@ fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nE
         .map_err(|_| L10nError::InvalidLocale(locale_str.to_string()))?;
 
     let mut bundle = FluentBundle::new(vec![locale]);
+    // Disable Unicode isolation characters (used for bidirectional text support)
+    // Not needed for database error messages and causes test failures
+    bundle.set_use_isolating(false);
 
-    // Load resources for the requested locale, falling back to en-US
-    let resource_path = format!("{}/cli.ftl", locale_str);
-    let fallback_path = "en-US/cli.ftl";
+    // List of all .ftl files to load
+    let ftl_files = ["cli.ftl", "storage.ftl", "catalog.ftl", "executor.ftl"];
 
-    let ftl_content = Resources::get(&resource_path)
-        .or_else(|| Resources::get(fallback_path))
-        .ok_or_else(|| L10nError::ResourceNotFound(resource_path.clone()))?;
+    for ftl_file in ftl_files {
+        // Load resources for the requested locale, falling back to en-US
+        let resource_path = format!("{}/{}", locale_str, ftl_file);
+        let fallback_path = format!("en-US/{}", ftl_file);
 
-    let ftl_string = std::str::from_utf8(ftl_content.data.as_ref())
-        .map_err(|e| L10nError::ParseError(e.to_string()))?
-        .to_string();
+        // Try to load from requested locale, fall back to en-US
+        let ftl_content = Resources::get(&resource_path)
+            .or_else(|| Resources::get(&fallback_path));
 
-    let resource = FluentResource::try_new(ftl_string)
-        .map_err(|(_, errors)| L10nError::ParseError(format!("{:?}", errors)))?;
+        // Skip if file doesn't exist (graceful degradation)
+        let ftl_content = match ftl_content {
+            Some(content) => content,
+            None => continue,
+        };
 
-    bundle.add_resource(resource).map_err(|errors| L10nError::ParseError(format!("{:?}", errors)))?;
+        let ftl_string = std::str::from_utf8(ftl_content.data.as_ref())
+            .map_err(|e| L10nError::ParseError(e.to_string()))?
+            .to_string();
+
+        let resource = FluentResource::try_new(ftl_string)
+            .map_err(|(_, errors)| L10nError::ParseError(format!("{:?}", errors)))?;
+
+        bundle.add_resource(resource).map_err(|errors| L10nError::ParseError(format!("{:?}", errors)))?;
+    }
 
     Ok(bundle)
 }
@@ -238,7 +255,7 @@ macro_rules! vibe_msg {
         $crate::format($id, None)
     };
     ($id:literal, $($key:ident = $value:expr),+ $(,)?) => {{
-        let mut args = fluent::FluentArgs::new();
+        let mut args = $crate::fluent::FluentArgs::new();
         $(
             args.set(stringify!($key), $value);
         )+
