@@ -9,6 +9,7 @@ import './styles/main.css';
 import { initTheme } from './theme';
 import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
+import { formatTime, formatBytes, formatMemory, formatTps } from './utils/measurement';
 
 // Chart.js is loaded via CDN in benchmarks.html
 declare const Chart: any;
@@ -16,7 +17,8 @@ declare const Chart: any;
 /**
  * Benchmark suite types
  */
-type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench' | 'footprint';
+type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench-embedded' | 'sysbench-server' | 'footprint-embedded' | 'footprint-server';
+
 
 /**
  * Suite configuration
@@ -269,9 +271,9 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
     `,
   },
-  sysbench: {
-    id: 'sysbench',
-    name: 'Sysbench',
+  'sysbench-embedded': {
+    id: 'sysbench-embedded',
+    name: 'Sysbench (Embedded)',
     dataFile: 'sysbench_results.json',
     opsLabel: 'Sysbench operations',
     descriptions: {
@@ -283,7 +285,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'range_queries': 'Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans',
     },
     methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Sysbench Micro-Benchmarks</h3>
+      <h3 class="text-lg font-semibold text-foreground mb-2">Sysbench Micro-Benchmarks (Embedded)</h3>
       <p class="text-muted mb-4">
         <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific
         database operations. These tests measure raw performance for fundamental operations
@@ -291,68 +293,114 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       </p>
 
       <ul class="space-y-2 text-muted">
+        <li><strong>Mode:</strong> Embedded (in-process, zero network overhead)</li>
         <li><strong>Workload Types:</strong> Point queries, range scans, updates, inserts, deletes</li>
         <li><strong>Table Size:</strong> 10,000 rows per table</li>
         <li><strong>Index Types:</strong> Primary key and secondary indexes</li>
         <li><strong>Operations:</strong> Single-statement operations (no multi-statement transactions)</li>
-        <li><strong>Measurement:</strong> Operations per second and latency percentiles</li>
+        <li><strong>Databases:</strong> VibeSQL, SQLite, DuckDB</li>
       </ul>
 
-      <h4 class="text-md font-semibold text-foreground mt-4 mb-2">Embedded vs Server Mode</h4>
-      <p class="text-muted mb-2">
-        <strong>VibeSQL (embedded)</strong> runs in-process with zero network overhead, ideal for
-        single-process applications. <strong>VibeSQL Server</strong> uses the PostgreSQL wire protocol,
-        adding ~10-50µs per query for protocol handling but enabling multi-client access.
-      </p>
-
       <p class="mt-4 text-muted">
-        Sysbench micro-benchmarks help identify <strong>bottlenecks in specific operations</strong>
-        and are useful for comparing raw SQL engine performance without application-level complexity.
-      </p>
-
-      <p class="mt-2 text-muted text-sm">
-        <strong>Note:</strong> Point selects and simple updates are the most common operations
-        in typical web applications. Range selects test scan performance for reporting queries.
-        Server mode results (vibesql_server) show PostgreSQL wire protocol overhead.
+        Embedded mode runs the database in-process with zero network overhead, ideal for
+        single-process applications where minimal latency is critical.
       </p>
     `,
   },
-  footprint: {
-    id: 'footprint',
-    name: 'Footprint',
+  'sysbench-server': {
+    id: 'sysbench-server',
+    name: 'Sysbench (Server)',
+    dataFile: 'sysbench_results.json',
+    opsLabel: 'Sysbench operations',
+    descriptions: {
+      'point_select': 'Point Select - Single row lookup by primary key',
+      'insert': 'Insert - Insert new rows into table',
+      'update_index': 'Update Index - Update indexed column (k = k + 1)',
+      'update_non_index': 'Update Non-Index - Update non-indexed column',
+      'delete': 'Delete - Remove rows by primary key',
+      'range_queries': 'Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans',
+    },
+    methodology: `
+      <h3 class="text-lg font-semibold text-foreground mb-2">Sysbench Micro-Benchmarks (Server)</h3>
+      <p class="text-muted mb-4">
+        <strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol)
+        against MySQL, measuring performance for multi-client database deployments.
+      </p>
+
+      <ul class="space-y-2 text-muted">
+        <li><strong>Mode:</strong> Server (PostgreSQL wire protocol)</li>
+        <li><strong>Workload Types:</strong> Point queries, range scans, updates, inserts, deletes</li>
+        <li><strong>Table Size:</strong> 10,000 rows per table</li>
+        <li><strong>Protocol Overhead:</strong> ~10-50µs per query for wire protocol handling</li>
+        <li><strong>Databases:</strong> VibeSQL Server, MySQL</li>
+      </ul>
+
+      <p class="mt-4 text-muted">
+        Server mode uses the PostgreSQL wire protocol, enabling multi-client access and
+        compatibility with existing PostgreSQL tooling and drivers.
+      </p>
+    `,
+  },
+  'footprint-embedded': {
+    id: 'footprint-embedded',
+    name: 'Footprint (Embedded)',
     dataFile: 'footprint_results.json',
     opsLabel: 'databases compared',
     descriptions: {
       'binary_size': 'Binary Size - Size of the compiled database binary on disk',
-      'wasm_size': 'WASM Size - Size of the WebAssembly module for browser deployment',
       'startup_time': 'Startup Time - Time to cold-start and execute first query',
       'peak_memory': 'Peak Memory - Maximum resident set size during initialization',
     },
     methodology: `
-      <h3 class="text-lg font-semibold text-foreground mb-2">Binary Footprint Benchmarks</h3>
+      <h3 class="text-lg font-semibold text-foreground mb-2">Native Binary Footprint</h3>
       <p class="text-muted mb-4">
-        <strong>Footprint benchmarks</strong> measure the resource efficiency of database binaries,
-        comparing binary size, WASM bundle size, cold startup time, and peak memory usage during initialization.
+        <strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries,
+        comparing binary size, cold startup time, and peak memory usage.
       </p>
 
       <ul class="space-y-2 text-muted">
         <li><strong>Binary Size:</strong> Size of the compiled native binary in bytes (stripped release build)</li>
-        <li><strong>WASM Size:</strong> Size of the WebAssembly module (raw and gzip-compressed)</li>
         <li><strong>Startup Time:</strong> Time from process start to first query result (CREATE TABLE, INSERT, SELECT)</li>
         <li><strong>Peak Memory:</strong> Maximum resident set size (RSS) during cold startup</li>
-        <li><strong>Measurement:</strong> macOS /usr/bin/time -l for memory, perf_counter for timing</li>
-        <li><strong>Runs:</strong> 5-10 iterations with standard deviation reported</li>
+        <li><strong>Databases:</strong> VibeSQL, SQLite, DuckDB</li>
       </ul>
 
       <p class="mt-4 text-muted">
-        Footprint benchmarks are critical for <strong>embedded, edge, and web deployments</strong> where
-        binary size, WASM bundle size, startup latency, and memory consumption directly impact user experience and costs.
-        WASM gzip sizes are particularly relevant for web delivery, as browsers automatically decompress gzip content.
+        Native binary footprint is critical for <strong>embedded and edge deployments</strong> where
+        binary size, startup latency, and memory consumption directly impact deployment feasibility.
+      </p>
+    `,
+  },
+  'footprint-server': {
+    id: 'footprint-server',
+    name: 'Footprint (Server/WASM)',
+    dataFile: 'footprint_results.json',
+    opsLabel: 'deployment targets',
+    descriptions: {
+      'wasm_size': 'WASM Size - Size of the WebAssembly module for browser deployment',
+      'wasm_gzip': 'WASM (gzip) - Compressed size for web delivery',
+    },
+    methodology: `
+      <h3 class="text-lg font-semibold text-foreground mb-2">WASM Footprint</h3>
+      <p class="text-muted mb-4">
+        <strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment,
+        critical for web applications where download size impacts user experience.
+      </p>
+
+      <ul class="space-y-2 text-muted">
+        <li><strong>WASM Size:</strong> Size of the raw WebAssembly module</li>
+        <li><strong>WASM (gzip):</strong> Compressed size for HTTP delivery (browsers auto-decompress)</li>
+        <li><strong>WASM (brotli):</strong> Brotli-compressed size for optimal web delivery</li>
+      </ul>
+
+      <p class="mt-4 text-muted">
+        WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts
+        time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.
       </p>
 
       <p class="mt-2 text-muted text-sm">
-        <strong>Note:</strong> VibeSQL is designed for minimal footprint while maintaining SQL:1999 compliance.
-        Smaller binaries mean faster downloads, quicker cold starts, and lower memory pressure.
+        <strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining
+        full SQL:1999 compliance in the browser.
       </p>
     `,
   },
@@ -373,10 +421,17 @@ interface Benchmark {
 
 interface BenchmarkResults {
   benchmarks: Benchmark[];
-  datetime: string;
+  datetime?: string;
   machine_info?: {
     system?: string;
     python_version?: string;
+    git_commit?: string;
+  };
+  metadata?: {
+    suite?: string;
+    timestamp?: string;
+    git_commit?: string;
+    table_size?: string;
   };
 }
 
@@ -477,20 +532,23 @@ interface FootprintResults {
 }
 
 /**
- * Format time in appropriate units
- * Returns null for failed/timeout queries (negative values)
+ * Update the "Last Updated" display with date, time, and optional git commit
  */
-function formatTime(seconds: number): string | null {
-  if (seconds < 0) {
-    return null; // Failed or timeout
-  }
-  if (seconds < 0.001) {
-    return `${(seconds * 1_000_000).toFixed(2)} µs`;
-  } else if (seconds < 1) {
-    return `${(seconds * 1000).toFixed(2)} ms`;
+function updateLastUpdated(timestamp: string, gitCommit?: string): void {
+  const lastUpdatedEl = document.getElementById('last-updated');
+  if (!lastUpdatedEl || !timestamp) return;
+
+  const date = new Date(timestamp);
+  const dateStr = date.toLocaleDateString();
+  const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  if (gitCommit) {
+    // Show date, time, and commit hash on two lines
+    lastUpdatedEl.innerHTML = `${dateStr} ${timeStr}<br/><span class="text-sm font-mono text-muted">${gitCommit}</span>`;
   } else {
-    return `${seconds.toFixed(2)} s`;
+    lastUpdatedEl.textContent = `${dateStr} ${timeStr}`;
   }
+  lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
 }
 
 /**
@@ -639,7 +697,7 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     // vibesql time
     const vibesqlCell = document.createElement('td');
     vibesqlCell.className = 'px-4 py-3 text-right text-muted';
-    const vibesqlTime = vibesql ? formatTime(vibesql.stats.mean) : null;
+    const vibesqlTime = vibesql ? formatTime(vibesql.stats.mean, vibesql.stats.stddev) : null;
     if (vibesqlTime) {
       vibesqlCell.textContent = vibesqlTime;
     } else if (vibesql && vibesql.stats.mean < 0) {
@@ -649,25 +707,10 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     }
     row.appendChild(vibesqlCell);
 
-    // vibesql_server time (only for Sysbench suite)
-    if (suite === 'sysbench') {
-      const vibesqlServerCell = document.createElement('td');
-      vibesqlServerCell.className = 'px-4 py-3 text-right text-muted';
-      const vibesqlServerTime = vibesqlServer ? formatTime(vibesqlServer.stats.mean) : null;
-      if (vibesqlServerTime) {
-        vibesqlServerCell.textContent = vibesqlServerTime;
-      } else if (vibesqlServer && vibesqlServer.stats.mean < 0) {
-        vibesqlServerCell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
-      } else {
-        vibesqlServerCell.textContent = 'N/A';
-      }
-      row.appendChild(vibesqlServerCell);
-    }
-
     // SQLite time
     const sqliteCell = document.createElement('td');
     sqliteCell.className = 'px-4 py-3 text-right text-muted';
-    const sqliteTime = sqlite ? formatTime(sqlite.stats.mean) : null;
+    const sqliteTime = sqlite ? formatTime(sqlite.stats.mean, sqlite.stats.stddev) : null;
     if (sqliteTime) {
       sqliteCell.textContent = sqliteTime;
     } else if (sqlite && sqlite.stats.mean < 0) {
@@ -680,7 +723,7 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     // DuckDB time
     const duckdbCell = document.createElement('td');
     duckdbCell.className = 'px-4 py-3 text-right text-muted';
-    const duckdbTime = duckdb ? formatTime(duckdb.stats.mean) : null;
+    const duckdbTime = duckdb ? formatTime(duckdb.stats.mean, duckdb.stats.stddev) : null;
     if (duckdbTime) {
       duckdbCell.textContent = duckdbTime;
     } else if (duckdb && duckdb.stats.mean < 0) {
@@ -693,7 +736,7 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     // MySQL time
     const mysqlCell = document.createElement('td');
     mysqlCell.className = 'px-4 py-3 text-right text-muted';
-    const mysqlTime = mysql ? formatTime(mysql.stats.mean) : null;
+    const mysqlTime = mysql ? formatTime(mysql.stats.mean, mysql.stats.stddev) : null;
     if (mysqlTime) {
       mysqlCell.textContent = mysqlTime;
     } else if (mysql && mysql.stats.mean < 0) {
@@ -802,29 +845,26 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
 
   const labels: string[] = [];
   const vibesqlData: number[] = [];
-  const vibesqlServerData: number[] = [];
   const sqliteData: number[] = [];
   const duckdbData: number[] = [];
   const mysqlData: number[] = [];
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
-    const vibesqlServer = databases.get('vibesql_server');
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
     const mysql = databases.get('mysql');
 
     // Skip failed queries (negative mean) in the chart
     const vibesqlValid = vibesql && vibesql.stats.mean > 0;
-    const vibesqlServerValid = vibesqlServer && vibesqlServer.stats.mean > 0;
     const sqliteValid = sqlite && sqlite.stats.mean > 0;
     const duckdbValid = duckdb && duckdb.stats.mean > 0;
     const mysqlValid = mysql && mysql.stats.mean > 0;
 
-    if (vibesqlValid || vibesqlServerValid || sqliteValid || duckdbValid || mysqlValid) {
+    if (vibesqlValid || sqliteValid || duckdbValid || mysqlValid) {
       // Get label - prefer query number if available (TPC-H)
       let label = operation.replace(/_/g, ' ').toUpperCase();
-      const firstBench = vibesql || vibesqlServer || sqlite || duckdb || mysql;
+      const firstBench = vibesql || sqlite || duckdb || mysql;
       if (firstBench) {
         const parsed = parseBenchmarkName(firstBench.name, suite);
         if (parsed.queryNum) {
@@ -834,14 +874,13 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
 
       labels.push(label);
       vibesqlData.push(vibesqlValid ? vibesql!.stats.mean * 1000 : 0); // Convert to ms
-      vibesqlServerData.push(vibesqlServerValid ? vibesqlServer!.stats.mean * 1000 : 0);
       sqliteData.push(sqliteValid ? sqlite!.stats.mean * 1000 : 0);
       duckdbData.push(duckdbValid ? duckdb!.stats.mean * 1000 : 0);
       mysqlData.push(mysqlValid ? mysql!.stats.mean * 1000 : 0);
     }
   }
 
-  // Build datasets array - include vibesql_server only for Sysbench
+  // Build datasets array for TPC-H/TPC-DS comparisons
   const datasets = [
     {
       label: 'VibeSQL',
@@ -850,17 +889,6 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
       borderColor: 'rgba(34, 197, 94, 1)',
       borderWidth: 1,
     },
-    ...(suite === 'sysbench'
-      ? [
-          {
-            label: 'VibeSQL Server',
-            data: vibesqlServerData,
-            backgroundColor: 'rgba(16, 185, 129, 0.5)', // Emerald/teal to differentiate from VibeSQL
-            borderColor: 'rgba(16, 185, 129, 1)',
-            borderWidth: 1,
-          },
-        ]
-      : []),
     {
       label: 'SQLite',
       data: sqliteData,
@@ -932,39 +960,23 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
   });
 }
 
-/**
- * Format bytes as human-readable size
- */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
+// formatBytes and formatMemory are now imported from './utils/measurement'
+
 
 /**
- * Format memory in KB as human-readable
+ * Render footprint embedded table (native binary metrics only)
  */
-function formatMemory(kb: number): string {
-  if (kb < 1024) return `${kb.toFixed(0)} KB`;
-  return `${(kb / 1024).toFixed(1)} MB`;
-}
-
-/**
- * Render footprint results table (different format from TPC benchmarks)
- */
-function renderFootprintTable(data: FootprintResults): void {
+function renderFootprintEmbeddedTable(data: FootprintResults): void {
   const tbody = document.getElementById('results-tbody');
   const table = document.getElementById('results-table');
   if (!tbody || !table) return;
 
-  // Update table headers for footprint view
+  // Update table headers for embedded footprint view
   const thead = table.querySelector('thead tr');
   if (thead) {
     thead.innerHTML = `
       <th class="px-4 py-3">Database</th>
       <th class="px-4 py-3 text-right">Binary Size</th>
-      <th class="px-4 py-3 text-right">WASM Size</th>
-      <th class="px-4 py-3 text-right">WASM (gzip)</th>
       <th class="px-4 py-3 text-right">Startup Time</th>
       <th class="px-4 py-3 text-right">Peak Memory</th>
       <th class="px-4 py-3 text-right">Version</th>
@@ -974,23 +986,19 @@ function renderFootprintTable(data: FootprintResults): void {
 
   tbody.innerHTML = '';
 
-  // Find best values for highlighting
+  // Filter to available benchmarks
   const availableBenchmarks = data.benchmarks.filter(b => b.available);
   const minBinarySize = Math.min(...availableBenchmarks.map(b => b.binary_size_bytes));
   const minStartupTime = Math.min(...availableBenchmarks.map(b => b.startup_time_ms));
   const minMemory = Math.min(...availableBenchmarks.map(b => b.peak_memory_kb));
 
-  // Database display names and colors
   const dbDisplayNames: Record<string, string> = {
     'vibesql': 'VibeSQL',
     'sqlite': 'SQLite',
     'duckdb': 'DuckDB',
-    'mysql': 'MySQL',
   };
 
-  for (const benchmark of data.benchmarks) {
-    if (!benchmark.available) continue;
-
+  for (const benchmark of availableBenchmarks) {
     const row = document.createElement('tr');
     row.className = 'hover:bg-card/50 transition-colors';
 
@@ -1008,33 +1016,6 @@ function renderFootprintTable(data: FootprintResults): void {
       ? `<span class="text-green-600 dark:text-green-400 font-semibold">${formatBytes(benchmark.binary_size_bytes)}</span>`
       : `<span class="text-muted">${formatBytes(benchmark.binary_size_bytes)}</span>`;
     row.appendChild(sizeCell);
-
-    // WASM size (only for VibeSQL)
-    const wasmCell = document.createElement('td');
-    wasmCell.className = 'px-4 py-3 text-right';
-    if (benchmark.wasm_size_bytes) {
-      wasmCell.innerHTML = `<span class="text-muted">${formatBytes(benchmark.wasm_size_bytes)}</span>`;
-    } else {
-      wasmCell.innerHTML = '<span class="text-muted/50">-</span>';
-    }
-    row.appendChild(wasmCell);
-
-    // WASM gzip size (only for VibeSQL)
-    const wasmGzipCell = document.createElement('td');
-    wasmGzipCell.className = 'px-4 py-3 text-right';
-    if (benchmark.wasm_size_gzip_bytes) {
-      // Show percentage of original WASM size
-      const ratio = benchmark.wasm_size_bytes
-        ? ((benchmark.wasm_size_gzip_bytes / benchmark.wasm_size_bytes) * 100).toFixed(0)
-        : '';
-      wasmGzipCell.innerHTML = `<span class="text-muted">${formatBytes(benchmark.wasm_size_gzip_bytes)}</span>`;
-      if (ratio) {
-        wasmGzipCell.title = `${ratio}% of uncompressed WASM`;
-      }
-    } else {
-      wasmGzipCell.innerHTML = '<span class="text-muted/50">-</span>';
-    }
-    row.appendChild(wasmGzipCell);
 
     // Startup time
     const startupCell = document.createElement('td');
@@ -1079,7 +1060,7 @@ function renderFootprintTable(data: FootprintResults): void {
     tbody.appendChild(row);
   }
 
-  // Update summary cards for footprint
+  // Update summary cards
   const vibesql = data.benchmarks.find(b => b.database === 'vibesql');
   const sqlite = data.benchmarks.find(b => b.database === 'sqlite');
 
@@ -1103,13 +1084,12 @@ function renderFootprintTable(data: FootprintResults): void {
 }
 
 /**
- * Render footprint comparison chart
+ * Render footprint embedded chart
  */
-function renderFootprintChart(data: FootprintResults): void {
+function renderFootprintEmbeddedChart(data: FootprintResults): void {
   const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
   if (!canvas) return;
 
-  // Destroy existing chart if any
   if (currentChart) {
     currentChart.destroy();
     currentChart = null;
@@ -1117,31 +1097,26 @@ function renderFootprintChart(data: FootprintResults): void {
 
   const availableBenchmarks = data.benchmarks.filter(b => b.available);
 
-  // Database display names and colors
   const dbColors: Record<string, { bg: string; border: string }> = {
     'vibesql': { bg: 'rgba(34, 197, 94, 0.5)', border: 'rgba(34, 197, 94, 1)' },
     'sqlite': { bg: 'rgba(239, 68, 68, 0.5)', border: 'rgba(239, 68, 68, 1)' },
     'duckdb': { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgba(59, 130, 246, 1)' },
-    'mysql': { bg: 'rgba(249, 115, 22, 0.5)', border: 'rgba(249, 115, 22, 1)' },
   };
 
   const dbDisplayNames: Record<string, string> = {
     'vibesql': 'VibeSQL',
     'sqlite': 'SQLite',
     'duckdb': 'DuckDB',
-    'mysql': 'MySQL',
   };
 
-  const labels = ['Binary Size (MB)', 'WASM Size (MB)', 'WASM gzip (MB)', 'Startup Time (ms)', 'Peak Memory (MB)'];
+  const labels = ['Binary Size (MB)', 'Startup Time (ms)', 'Peak Memory (MB)'];
 
   const datasets = availableBenchmarks.map(bench => ({
     label: dbDisplayNames[bench.database] || bench.database,
     data: [
-      bench.binary_size_bytes / (1024 * 1024), // Convert to MB
-      bench.wasm_size_bytes ? bench.wasm_size_bytes / (1024 * 1024) : 0, // WASM size
-      bench.wasm_size_gzip_bytes ? bench.wasm_size_gzip_bytes / (1024 * 1024) : 0, // WASM gzip
+      bench.binary_size_bytes / (1024 * 1024),
       bench.startup_time_ms,
-      bench.peak_memory_kb / 1024, // Convert to MB
+      bench.peak_memory_kb / 1024,
     ],
     backgroundColor: dbColors[bench.database]?.bg || 'rgba(156, 163, 175, 0.5)',
     borderColor: dbColors[bench.database]?.border || 'rgba(156, 163, 175, 1)',
@@ -1150,9 +1125,160 @@ function renderFootprintChart(data: FootprintResults): void {
 
   currentChart = new Chart(canvas, {
     type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'Value (lower is better)' },
+        },
+      },
+      plugins: {
+        legend: { display: true, position: 'top' },
+      },
+    },
+  });
+}
+
+/**
+ * Render footprint server table (WASM metrics only)
+ */
+function renderFootprintServerTable(data: FootprintResults): void {
+  const tbody = document.getElementById('results-tbody');
+  const table = document.getElementById('results-table');
+  if (!tbody || !table) return;
+
+  // Update table headers for server/WASM footprint view
+  const thead = table.querySelector('thead tr');
+  if (thead) {
+    thead.innerHTML = `
+      <th class="px-4 py-3">Metric</th>
+      <th class="px-4 py-3 text-right">Value</th>
+      <th class="px-4 py-3 text-right">Notes</th>
+    `;
+  }
+
+  tbody.innerHTML = '';
+
+  // Find VibeSQL which has WASM data
+  const vibesql = data.benchmarks.find(b => b.database === 'vibesql' && b.available);
+
+  if (!vibesql || !vibesql.wasm_size_bytes) {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td colspan="3" class="px-4 py-8 text-center text-muted">No WASM data available</td>`;
+    tbody.appendChild(row);
+    return;
+  }
+
+  const metrics = [
+    {
+      name: 'WASM Size (raw)',
+      value: formatBytes(vibesql.wasm_size_bytes),
+      note: 'Uncompressed WebAssembly module',
+    },
+    {
+      name: 'WASM Size (gzip)',
+      value: vibesql.wasm_size_gzip_bytes ? formatBytes(vibesql.wasm_size_gzip_bytes) : 'N/A',
+      note: vibesql.wasm_size_gzip_bytes && vibesql.wasm_size_bytes
+        ? `${((vibesql.wasm_size_gzip_bytes / vibesql.wasm_size_bytes) * 100).toFixed(0)}% of raw - typical HTTP delivery`
+        : 'Standard HTTP compression',
+    },
+    {
+      name: 'WASM Size (brotli)',
+      value: vibesql.wasm_size_brotli_bytes ? formatBytes(vibesql.wasm_size_brotli_bytes) : 'N/A',
+      note: vibesql.wasm_size_brotli_bytes && vibesql.wasm_size_bytes
+        ? `${((vibesql.wasm_size_brotli_bytes / vibesql.wasm_size_bytes) * 100).toFixed(0)}% of raw - optimal compression`
+        : 'Best compression for CDN delivery',
+    },
+  ];
+
+  for (const metric of metrics) {
+    const row = document.createElement('tr');
+    row.className = 'hover:bg-card/50 transition-colors';
+
+    const nameCell = document.createElement('td');
+    nameCell.className = 'px-4 py-3 font-medium text-foreground';
+    nameCell.textContent = metric.name;
+    row.appendChild(nameCell);
+
+    const valueCell = document.createElement('td');
+    valueCell.className = 'px-4 py-3 text-right text-primary-light dark:text-primary-dark font-semibold';
+    valueCell.textContent = metric.value;
+    row.appendChild(valueCell);
+
+    const noteCell = document.createElement('td');
+    noteCell.className = 'px-4 py-3 text-right text-muted text-sm';
+    noteCell.textContent = metric.note;
+    row.appendChild(noteCell);
+
+    tbody.appendChild(row);
+  }
+
+  // Update summary cards
+  const avgSpeedupEl = document.getElementById('avg-speedup');
+  if (avgSpeedupEl && vibesql.wasm_size_gzip_bytes) {
+    avgSpeedupEl.textContent = formatBytes(vibesql.wasm_size_gzip_bytes);
+    avgSpeedupEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+  }
+
+  const opsTestedEl = document.getElementById('ops-tested');
+  if (opsTestedEl) {
+    opsTestedEl.textContent = '3'; // 3 metrics shown
+  }
+
+  // Update label below ops tested
+  const opsLabelEl = document.querySelector('#ops-tested + p');
+  if (opsLabelEl) {
+    opsLabelEl.textContent = 'size metrics';
+  }
+}
+
+/**
+ * Render footprint server chart (WASM sizes)
+ */
+function renderFootprintServerChart(data: FootprintResults): void {
+  const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  if (currentChart) {
+    currentChart.destroy();
+    currentChart = null;
+  }
+
+  const vibesql = data.benchmarks.find(b => b.database === 'vibesql' && b.available);
+
+  if (!vibesql || !vibesql.wasm_size_bytes) {
+    return;
+  }
+
+  const labels = ['Raw', 'Gzip', 'Brotli'];
+  const sizes = [
+    vibesql.wasm_size_bytes / (1024 * 1024),
+    (vibesql.wasm_size_gzip_bytes || 0) / (1024 * 1024),
+    (vibesql.wasm_size_brotli_bytes || 0) / (1024 * 1024),
+  ];
+
+  currentChart = new Chart(canvas, {
+    type: 'bar',
     data: {
       labels,
-      datasets,
+      datasets: [{
+        label: 'WASM Size (MB)',
+        data: sizes,
+        backgroundColor: [
+          'rgba(156, 163, 175, 0.5)',
+          'rgba(34, 197, 94, 0.5)',
+          'rgba(59, 130, 246, 0.5)',
+        ],
+        borderColor: [
+          'rgba(156, 163, 175, 1)',
+          'rgba(34, 197, 94, 1)',
+          'rgba(59, 130, 246, 1)',
+        ],
+        borderWidth: 1,
+      }],
     },
     options: {
       responsive: true,
@@ -1160,32 +1286,16 @@ function renderFootprintChart(data: FootprintResults): void {
       scales: {
         y: {
           beginAtZero: true,
-          title: {
-            display: true,
-            text: 'Value (lower is better)',
-          },
+          title: { display: true, text: 'Size (MB) - lower is better' },
         },
       },
       plugins: {
-        legend: {
-          display: true,
-          position: 'top',
-        },
+        legend: { display: false },
         tooltip: {
           callbacks: {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             label: function (context: any) {
-              const label = context.dataset.label;
-              const value = context.parsed.y;
-              const category = context.label;
-
-              if (category.includes('Size')) {
-                return `${label}: ${value.toFixed(2)} MB`;
-              } else if (category.includes('Time')) {
-                return `${label}: ${value.toFixed(2)} ms`;
-              } else {
-                return `${label}: ${value.toFixed(1)} MB`;
-              }
+              return `${context.parsed.y.toFixed(2)} MB`;
             },
           },
         },
@@ -1195,17 +1305,242 @@ function renderFootprintChart(data: FootprintResults): void {
 }
 
 /**
- * Format TPS (transactions per second) with appropriate units
+ * Render Sysbench results table (filtered by embedded/server mode)
  */
-function formatTPS(tps: number): string {
-  if (tps >= 1_000_000) {
-    return `${(tps / 1_000_000).toFixed(2)}M TPS`;
-  } else if (tps >= 1_000) {
-    return `${(tps / 1_000).toFixed(2)}K TPS`;
-  } else {
-    return `${tps.toFixed(2)} TPS`;
+function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): void {
+  const tbody = document.getElementById('results-tbody');
+  if (!tbody) return;
+
+  const config = SUITE_CONFIGS[suite];
+  const grouped = groupBenchmarksByOperation(data.benchmarks, suite);
+
+  tbody.innerHTML = '';
+
+  let totalSpeedup = 0;
+  let comparisonCount = 0;
+
+  // Determine which databases to show based on mode
+  const isServer = suite === 'sysbench-server';
+  const primaryDb = isServer ? 'vibesql_server' : 'vibesql';
+  const comparisonDb = isServer ? 'mysql' : 'sqlite';
+
+  for (const [operation, databases] of grouped.entries()) {
+    const primary = databases.get(primaryDb);
+    const comparison = databases.get(comparisonDb);
+    const duckdb = isServer ? null : databases.get('duckdb');
+
+    if (!primary && !comparison) continue;
+
+    const row = document.createElement('tr');
+    row.className = 'hover:bg-card/50 transition-colors';
+
+    // Operation name
+    const opCell = document.createElement('td');
+    opCell.className = 'px-4 py-3 font-medium text-foreground';
+    const description = config.descriptions[operation];
+    if (description) {
+      opCell.innerHTML = `<span class="cursor-help" title="${description}">${operation.replace(/_/g, ' ').toUpperCase()}</span>`;
+    } else {
+      opCell.textContent = operation.replace(/_/g, ' ').toUpperCase();
+    }
+    row.appendChild(opCell);
+
+    // Primary database time
+    const primaryCell = document.createElement('td');
+    primaryCell.className = 'px-4 py-3 text-right text-muted';
+    primaryCell.textContent = primary ? formatTime(primary.stats.mean, primary.stats.stddev) || 'N/A' : 'N/A';
+    row.appendChild(primaryCell);
+
+    // Comparison database time
+    const compCell = document.createElement('td');
+    compCell.className = 'px-4 py-3 text-right text-muted';
+    compCell.textContent = comparison ? formatTime(comparison.stats.mean, comparison.stats.stddev) || 'N/A' : 'N/A';
+    row.appendChild(compCell);
+
+    // DuckDB (only for embedded mode)
+    if (!isServer) {
+      const duckdbCell = document.createElement('td');
+      duckdbCell.className = 'px-4 py-3 text-right text-muted';
+      duckdbCell.textContent = duckdb ? formatTime(duckdb.stats.mean, duckdb.stats.stddev) || 'N/A' : 'N/A';
+      row.appendChild(duckdbCell);
+    }
+
+    // Speedup
+    const speedupCell = document.createElement('td');
+    speedupCell.className = 'px-4 py-3 text-right font-semibold';
+
+    if (primary && comparison && primary.stats.mean > 0 && comparison.stats.mean > 0) {
+      const speedup = calculateSpeedup(primary.stats.mean, comparison.stats.mean);
+      speedupCell.textContent = `${speedup.toFixed(2)}x`;
+
+      if (speedup > 1) {
+        speedupCell.className += ' text-green-600 dark:text-green-400';
+      } else if (speedup < 1) {
+        speedupCell.className += ' text-red-600 dark:text-red-400';
+      } else {
+        speedupCell.className += ' text-muted';
+      }
+
+      totalSpeedup += speedup;
+      comparisonCount++;
+    } else {
+      speedupCell.textContent = 'N/A';
+      speedupCell.className += ' text-muted';
+    }
+    row.appendChild(speedupCell);
+
+    // Winner
+    const winnerCell = document.createElement('td');
+    winnerCell.className = 'px-4 py-3 text-center text-2xl';
+
+    if (primary && comparison && primary.stats.mean > 0 && comparison.stats.mean > 0) {
+      const speedup = calculateSpeedup(primary.stats.mean, comparison.stats.mean);
+      winnerCell.textContent = speedup > 1 ? '🚀' : speedup < 1 ? '🐌' : '🤝';
+    } else {
+      winnerCell.textContent = '-';
+    }
+    row.appendChild(winnerCell);
+
+    tbody.appendChild(row);
+  }
+
+  // Update summary cards
+  if (comparisonCount > 0) {
+    const avgSpeedup = totalSpeedup / comparisonCount;
+    const avgSpeedupEl = document.getElementById('avg-speedup');
+    if (avgSpeedupEl) {
+      const compLabel = isServer ? 'vs MySQL' : 'vs SQLite';
+      if (avgSpeedup > 1) {
+        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x faster`;
+        avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
+      } else if (avgSpeedup < 1) {
+        const slowerBy = 1 / avgSpeedup;
+        avgSpeedupEl.textContent = `${slowerBy.toFixed(2)}x slower`;
+        avgSpeedupEl.className = 'text-xl font-bold text-red-600 dark:text-red-400';
+      } else {
+        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x`;
+        avgSpeedupEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+      }
+
+      // Update the comparison label
+      const compLabelEl = document.querySelector('#avg-speedup + p');
+      if (compLabelEl) {
+        compLabelEl.textContent = compLabel;
+      }
+    }
+  }
+
+  const opsTestedEl = document.getElementById('ops-tested');
+  if (opsTestedEl) {
+    opsTestedEl.textContent = grouped.size.toString();
   }
 }
+
+/**
+ * Render Sysbench chart (filtered by embedded/server mode)
+ */
+function renderSysbenchChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
+  const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  if (currentChart) {
+    currentChart.destroy();
+    currentChart = null;
+  }
+
+  const grouped = groupBenchmarksByOperation(data.benchmarks, suite);
+  const isServer = suite === 'sysbench-server';
+
+  const labels: string[] = [];
+  const primaryData: number[] = [];
+  const comparisonData: number[] = [];
+  const duckdbData: number[] = [];
+
+  const primaryDb = isServer ? 'vibesql_server' : 'vibesql';
+  const comparisonDb = isServer ? 'mysql' : 'sqlite';
+
+  for (const [operation, databases] of grouped.entries()) {
+    const primary = databases.get(primaryDb);
+    const comparison = databases.get(comparisonDb);
+    const duckdb = isServer ? null : databases.get('duckdb');
+
+    if (primary || comparison) {
+      labels.push(operation.replace(/_/g, ' ').toUpperCase());
+      primaryData.push(primary && primary.stats.mean > 0 ? primary.stats.mean * 1000 : 0);
+      comparisonData.push(comparison && comparison.stats.mean > 0 ? comparison.stats.mean * 1000 : 0);
+      if (!isServer) {
+        duckdbData.push(duckdb && duckdb.stats.mean > 0 ? duckdb.stats.mean * 1000 : 0);
+      }
+    }
+  }
+
+  const datasets = [
+    {
+      label: isServer ? 'VibeSQL Server' : 'VibeSQL',
+      data: primaryData,
+      backgroundColor: 'rgba(34, 197, 94, 0.5)',
+      borderColor: 'rgba(34, 197, 94, 1)',
+      borderWidth: 1,
+    },
+    {
+      label: isServer ? 'MySQL' : 'SQLite',
+      data: comparisonData,
+      backgroundColor: isServer ? 'rgba(249, 115, 22, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+      borderColor: isServer ? 'rgba(249, 115, 22, 1)' : 'rgba(239, 68, 68, 1)',
+      borderWidth: 1,
+    },
+  ];
+
+  if (!isServer) {
+    datasets.push({
+      label: 'DuckDB',
+      data: duckdbData,
+      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+      borderColor: 'rgba(59, 130, 246, 1)',
+      borderWidth: 1,
+    });
+  }
+
+  currentChart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          type: 'logarithmic',
+          beginAtZero: false,
+          title: { display: true, text: 'Time (ms) - Log Scale' },
+          ticks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            callback: function (value: any) {
+              const allowedTicks = [0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000];
+              if (allowedTicks.includes(value)) {
+                return value;
+              }
+              return null;
+            },
+          },
+        },
+      },
+      plugins: {
+        legend: { display: true, position: 'top' },
+        tooltip: {
+          callbacks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            label: function (context: any) {
+              return `${context.dataset.label}: ${context.parsed.y.toFixed(4)} ms`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+// formatTps is imported from './utils/measurement' (aliased as formatTPS for compatibility)
+const formatTPS = formatTps;
 
 /**
  * Group TPC-C benchmarks by operation
@@ -1367,12 +1702,10 @@ function renderTPCCTable(data: TPCCResults): void {
   }
 
   // Update last updated timestamp
-  const lastUpdatedEl = document.getElementById('last-updated');
   const timestamp = data.metadata?.timestamp || data.datetime;
-  if (lastUpdatedEl && timestamp) {
-    const date = new Date(timestamp);
-    lastUpdatedEl.textContent = date.toLocaleDateString();
-    lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+  const gitCommit = data.metadata?.git_commit || data.machine_info?.git_commit;
+  if (timestamp) {
+    updateLastUpdated(timestamp, gitCommit);
   }
 }
 
@@ -1521,7 +1854,7 @@ function renderTPCDSTable(data: TPCDSResults): void {
     const timeCell = document.createElement('td');
     timeCell.className = 'px-4 py-3 text-right text-muted';
     if (isPassed && bench.stats.mean > 0) {
-      timeCell.textContent = formatTime(bench.stats.mean) || 'N/A';
+      timeCell.textContent = formatTime(bench.stats.mean, bench.stats.stddev) || 'N/A';
     } else {
       timeCell.textContent = '-';
     }
@@ -1565,11 +1898,8 @@ function renderTPCDSTable(data: TPCDSResults): void {
   }
 
   // Update last updated timestamp
-  const lastUpdatedEl = document.getElementById('last-updated');
-  if (lastUpdatedEl && data.metadata.timestamp) {
-    const date = new Date(data.metadata.timestamp);
-    lastUpdatedEl.textContent = date.toLocaleDateString();
-    lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+  if (data.metadata.timestamp) {
+    updateLastUpdated(data.metadata.timestamp, data.metadata.git_commit);
   }
 }
 
@@ -1692,14 +2022,21 @@ function restoreTPCTableHeaders(suite?: BenchmarkSuite): void {
 
   const thead = table.querySelector('thead tr');
   if (thead) {
-    // Sysbench includes VibeSQL Server column for protocol overhead comparison
-    if (suite === 'sysbench') {
+    // Sysbench embedded shows VibeSQL vs SQLite vs DuckDB
+    if (suite === 'sysbench-embedded') {
       thead.innerHTML = `
         <th class="px-4 py-3">Operation</th>
         <th class="px-4 py-3 text-right">VibeSQL</th>
-        <th class="px-4 py-3 text-right" title="VibeSQL via PostgreSQL wire protocol">VibeSQL Server</th>
         <th class="px-4 py-3 text-right">SQLite</th>
         <th class="px-4 py-3 text-right">DuckDB</th>
+        <th class="px-4 py-3 text-right">Speedup</th>
+        <th class="px-4 py-3 text-center">Winner</th>
+      `;
+    // Sysbench server shows VibeSQL Server vs MySQL
+    } else if (suite === 'sysbench-server') {
+      thead.innerHTML = `
+        <th class="px-4 py-3">Operation</th>
+        <th class="px-4 py-3 text-right" title="VibeSQL via PostgreSQL wire protocol">VibeSQL Server</th>
         <th class="px-4 py-3 text-right">MySQL</th>
         <th class="px-4 py-3 text-right">Speedup</th>
         <th class="px-4 py-3 text-center">Winner</th>
@@ -1729,7 +2066,7 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
   updateOpsLabel(suite);
 
   // Restore TPC headers if not footprint
-  if (suite !== 'footprint') {
+  if (!suite.startsWith('footprint')) {
     restoreTPCTableHeaders(suite);
   }
 
@@ -1740,20 +2077,29 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
       throw new Error(`Failed to load benchmark data: ${response.status}`);
     }
 
-    // Handle footprint suite differently (different data format)
-    if (suite === 'footprint') {
+    // Handle footprint-embedded suite (native binary metrics)
+    if (suite === 'footprint-embedded') {
       const data: FootprintResults = await response.json();
 
-      // Update last updated timestamp
-      const lastUpdatedEl = document.getElementById('last-updated');
-      if (lastUpdatedEl && data.datetime) {
-        const date = new Date(data.datetime);
-        lastUpdatedEl.textContent = date.toLocaleDateString();
-        lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+      if (data.datetime) {
+        updateLastUpdated(data.datetime);
       }
 
-      renderFootprintTable(data);
-      renderFootprintChart(data);
+      renderFootprintEmbeddedTable(data);
+      renderFootprintEmbeddedChart(data);
+      return;
+    }
+
+    // Handle footprint-server suite (WASM metrics)
+    if (suite === 'footprint-server') {
+      const data: FootprintResults = await response.json();
+
+      if (data.datetime) {
+        updateLastUpdated(data.datetime);
+      }
+
+      renderFootprintServerTable(data);
+      renderFootprintServerChart(data);
       return;
     }
 
@@ -1791,11 +2137,8 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
         };
 
         // Update last updated timestamp
-        const lastUpdatedEl = document.getElementById('last-updated');
-        if (lastUpdatedEl && data.metadata.timestamp) {
-          const date = new Date(data.metadata.timestamp);
-          lastUpdatedEl.textContent = date.toLocaleDateString();
-          lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+        if (data.metadata.timestamp) {
+          updateLastUpdated(data.metadata.timestamp, data.metadata.git_commit);
         }
 
         renderResultsTable(benchmarkResults, suite);
@@ -1808,15 +2151,47 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
       return;
     }
 
+    // Handle Sysbench suites - filter by embedded vs server databases
+    if (suite === 'sysbench-embedded' || suite === 'sysbench-server') {
+      const data: BenchmarkResults = await response.json();
+
+      // Update last updated timestamp
+      const timestamp = data.metadata?.timestamp || data.datetime;
+      const gitCommit = data.metadata?.git_commit || data.machine_info?.git_commit;
+      if (timestamp) {
+        updateLastUpdated(timestamp, gitCommit);
+      }
+
+      // Filter benchmarks based on mode
+      const filteredData: BenchmarkResults = {
+        ...data,
+        benchmarks: data.benchmarks.filter(b => {
+          if (suite === 'sysbench-embedded') {
+            // Keep vibesql, sqlite, duckdb (exclude vibesql_server and mysql)
+            return b.name.endsWith('_vibesql') ||
+                   b.name.endsWith('_sqlite') ||
+                   b.name.endsWith('_duckdb');
+          } else {
+            // Server mode: keep vibesql_server and mysql
+            return b.name.endsWith('_vibesql_server') ||
+                   b.name.endsWith('_mysql');
+          }
+        }),
+      };
+
+      renderSysbenchTable(filteredData, suite);
+      renderSysbenchChart(filteredData, suite);
+      return;
+    }
+
     // Standard TPC benchmark handling (TPC-H with comparisons)
     const data: BenchmarkResults = await response.json();
 
-    // Update last updated timestamp
-    const lastUpdatedEl = document.getElementById('last-updated');
-    if (lastUpdatedEl && data.datetime) {
-      const date = new Date(data.datetime);
-      lastUpdatedEl.textContent = date.toLocaleDateString();
-      lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+    // Update last updated timestamp (support both datetime and metadata.timestamp formats)
+    const timestamp = data.metadata?.timestamp || data.datetime;
+    const gitCommit = data.metadata?.git_commit || data.machine_info?.git_commit;
+    if (timestamp) {
+      updateLastUpdated(timestamp, gitCommit);
     }
 
     renderResultsTable(data, suite);
@@ -1863,9 +2238,24 @@ function initTabs(): void {
 
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
-      const tabId = tab.id.replace('tab-', '') as BenchmarkSuite;
+      // Map tab IDs to suite names
+      const tabId = tab.id;
+      let suite: BenchmarkSuite;
 
-      // Update active state
+      // Handle the new tab ID format
+      if (tabId === 'tab-sysbench-embedded') {
+        suite = 'sysbench-embedded';
+      } else if (tabId === 'tab-sysbench-server') {
+        suite = 'sysbench-server';
+      } else if (tabId === 'tab-footprint-embedded') {
+        suite = 'footprint-embedded';
+      } else if (tabId === 'tab-footprint-server') {
+        suite = 'footprint-server';
+      } else {
+        suite = tabId.replace('tab-', '') as BenchmarkSuite;
+      }
+
+      // Update active state - clear all tabs
       tabs.forEach((t) => {
         t.classList.remove('benchmark-tab--active');
         t.setAttribute('aria-selected', 'false');
@@ -1874,8 +2264,8 @@ function initTabs(): void {
       tab.setAttribute('aria-selected', 'true');
 
       // Load new data
-      currentSuite = tabId;
-      loadBenchmarkData(tabId);
+      currentSuite = suite;
+      loadBenchmarkData(suite);
     });
   });
 }
