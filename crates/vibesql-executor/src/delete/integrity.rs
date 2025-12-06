@@ -173,7 +173,8 @@ fn set_null(
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
 
-    for (idx, child_row) in child_table.scan().iter().enumerate() {
+    // Use scan_live() to skip deleted rows and get correct physical indices
+    for (idx, child_row) in child_table.scan_live() {
         let child_fk_values: Vec<SqlValue> =
             fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 
@@ -246,7 +247,8 @@ fn set_default(
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
 
-    for (idx, child_row) in child_table.scan().iter().enumerate() {
+    // Use scan_live() to skip deleted rows and get correct physical indices
+    for (idx, child_row) in child_table.scan_live() {
         let child_fk_values: Vec<SqlValue> =
             fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 

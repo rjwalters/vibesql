@@ -135,9 +135,8 @@ fn test_delete_with_exists_correlated() {
         assert_eq!(customers.row_count(), 2);
 
         let remaining_ids: Vec<i64> = customers
-            .scan()
-            .iter()
-            .map(|row| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
+            .scan_live()
+            .map(|(_, row)| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
             .collect();
 
         assert!(remaining_ids.contains(&3)); // Charlie
@@ -165,9 +164,8 @@ fn test_delete_with_not_exists_correlated() {
         assert_eq!(customers.row_count(), 2);
 
         let remaining_ids: Vec<i64> = customers
-            .scan()
-            .iter()
-            .map(|row| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
+            .scan_live()
+            .map(|(_, row)| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
             .collect();
 
         assert!(remaining_ids.contains(&1)); // Alice
@@ -237,9 +235,8 @@ fn test_delete_with_exists_and_other_conditions() {
         assert_eq!(customers.row_count(), 2);
 
         let remaining_ids: Vec<i64> = customers
-            .scan()
-            .iter()
-            .map(|row| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
+            .scan_live()
+            .map(|(_, row)| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
             .collect();
 
         assert!(remaining_ids.contains(&3)); // Charlie (inactive)
@@ -287,9 +284,8 @@ fn test_delete_with_exists_complex_subquery() {
         assert_eq!(customers.row_count(), 3);
 
         let remaining_ids: Vec<i64> = customers
-            .scan()
-            .iter()
-            .map(|row| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
+            .scan_live()
+            .map(|(_, row)| if let SqlValue::Integer(id) = row.get(0).unwrap() { *id } else { 0 })
             .collect();
 
         assert!(!remaining_ids.contains(&1)); // Alice deleted
@@ -368,7 +364,7 @@ fn test_delete_with_nested_exists() {
         assert_eq!(users.row_count(), 1);
 
         let remaining_id =
-            if let SqlValue::Integer(id) = users.scan()[0].get(0).unwrap() { *id } else { 0 };
+            if let SqlValue::Integer(id) = users.scan_live().next().unwrap().1.get(0).unwrap() { *id } else { 0 };
         assert_eq!(remaining_id, 2); // Bob remains
     } else {
         panic!("Expected DELETE statement");
@@ -393,7 +389,7 @@ fn test_delete_with_or_exists() {
         assert_eq!(customers.row_count(), 1);
 
         let remaining_id =
-            if let SqlValue::Integer(id) = customers.scan()[0].get(0).unwrap() { *id } else { 0 };
+            if let SqlValue::Integer(id) = customers.scan_live().next().unwrap().1.get(0).unwrap() { *id } else { 0 };
         assert_eq!(remaining_id, 4); // Diana
     } else {
         panic!("Expected DELETE statement");

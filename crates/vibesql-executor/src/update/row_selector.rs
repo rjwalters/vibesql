@@ -104,7 +104,8 @@ impl<'a> RowSelector<'a> {
     ) -> Result<Vec<(usize, vibesql_storage::Row)>, ExecutorError> {
         let mut candidate_rows = Vec::new();
 
-        for (row_index, row) in table.scan().iter().enumerate() {
+        // Use scan_live() to skip deleted rows and get correct physical indices
+        for (row_index, row) in table.scan_live() {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
             evaluator.clear_cse_cache();

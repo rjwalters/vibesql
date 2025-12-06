@@ -395,12 +395,12 @@ impl Database {
             .get_table(&table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
-        // Collect the rows
-        let rows = table.scan();
+        // Collect the rows (use get_row() to skip deleted rows)
         let mut result = Vec::with_capacity(row_indices.len());
         for &idx in &row_indices {
-            if idx < rows.len() {
-                result.push(&rows[idx]);
+            // Use get_row() which returns None for deleted rows
+            if let Some(row) = table.get_row(idx) {
+                result.push(row);
             }
         }
 
