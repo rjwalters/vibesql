@@ -6,11 +6,22 @@
   <title>Performance Benchmarks - VibeSQL</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Prevent flash of unstyled content by applying theme before page renders -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = savedTheme ?? (prefersDark ? 'dark' : 'light');
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
 </head>
 <body>
-  <div id="app" class="min-h-screen bg-surface-light dark:bg-surface-dark">
+  <div id="app" class="min-h-screen bg-white dark:bg-gray-800">
     <!-- Header -->
-    <header class="bg-background shadow-md border-b border-border">
+    <header class="bg-white dark:bg-gray-800 shadow-md border-b border-gray-300 dark:border-gray-600">
       <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center flex-wrap gap-4">
         <h1 class="text-3xl font-bold text-primary-light dark:text-primary-dark">
           VibeSQL - Performance Benchmarks
@@ -22,11 +33,11 @@
     <!-- Main Content -->
     <main class="max-w-7xl mx-auto px-4 py-6 space-y-8">
       <!-- Benchmark Suite Tabs - Dual Section Layout -->
-      <div class="bg-background rounded-lg shadow-lg p-4 border border-border">
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-300 dark:border-gray-600">
         <div class="flex flex-col lg:flex-row gap-4 lg:gap-8">
           <!-- Embedded Section -->
           <div class="flex-1">
-            <h3 class="text-xs uppercase tracking-wider text-muted font-semibold mb-2 px-1">Embedded</h3>
+            <h3 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 font-semibold mb-2 px-1">Embedded</h3>
             <nav class="flex flex-wrap gap-2" role="tablist" aria-label="Embedded benchmark suites">
               <button
                 id="tab-tpch"
@@ -77,12 +88,12 @@
           </div>
 
           <!-- Divider -->
-          <div class="hidden lg:block w-px bg-border"></div>
-          <div class="lg:hidden h-px bg-border"></div>
+          <div class="hidden lg:block w-px bg-gray-300 dark:bg-gray-600"></div>
+          <div class="lg:hidden h-px bg-gray-300 dark:bg-gray-600"></div>
 
           <!-- Server Section -->
           <div class="flex-1">
-            <h3 class="text-xs uppercase tracking-wider text-muted font-semibold mb-2 px-1">Server</h3>
+            <h3 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 font-semibold mb-2 px-1">Server</h3>
             <nav class="flex flex-wrap gap-2" role="tablist" aria-label="Server benchmark suites">
               <button
                 id="tab-sysbench-server"
@@ -109,51 +120,51 @@
 
       <!-- Summary Cards -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-          <h3 class="text-sm font-medium text-muted mb-2">vs SQLite</h3>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">vs SQLite</h3>
           <p id="avg-speedup-sqlite" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
             Loading...
           </p>
-          <p id="avg-speedup-sqlite-label" class="text-sm text-muted mt-1">average speedup</p>
+          <p id="avg-speedup-sqlite-label" class="text-sm text-gray-500 dark:text-gray-400 mt-1">average speedup</p>
         </div>
-        <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-          <h3 class="text-sm font-medium text-muted mb-2">vs DuckDB</h3>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">vs DuckDB</h3>
           <p id="avg-speedup-duckdb" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
             Loading...
           </p>
-          <p id="avg-speedup-duckdb-label" class="text-sm text-muted mt-1">average speedup</p>
+          <p id="avg-speedup-duckdb-label" class="text-sm text-gray-500 dark:text-gray-400 mt-1">average speedup</p>
         </div>
-        <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-          <h3 class="text-sm font-medium text-muted mb-2">Operations Tested</h3>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Operations Tested</h3>
           <p id="ops-tested" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
             -
           </p>
-          <p id="ops-tested-label" class="text-sm text-muted mt-1">TPC-H queries</p>
+          <p id="ops-tested-label" class="text-sm text-gray-500 dark:text-gray-400 mt-1">TPC-H queries</p>
         </div>
-        <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-          <h3 class="text-sm font-medium text-muted mb-2">Last Updated</h3>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Last Updated</h3>
           <p id="last-updated" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
             -
           </p>
-          <p class="text-sm text-muted mt-1">from main branch</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">from main branch</p>
         </div>
       </div>
 
       <!-- Analysis & Roadmap (Discussion) -->
-      <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-        <div id="discussion-content" class="prose prose-sm dark:prose-invert max-w-none text-foreground">
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+        <div id="discussion-content" class="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-gray-100">
           <!-- Content populated by JavaScript based on selected tab -->
         </div>
       </div>
 
       <!-- Benchmark Results Table -->
-      <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-        <h2 class="text-2xl font-semibold text-foreground mb-4">
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+        <h2 class="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
           Benchmark Results
         </h2>
         <div class="overflow-x-auto">
           <table id="results-table" class="w-full text-sm text-left">
-            <thead class="text-xs uppercase bg-card text-muted border-b border-border">
+            <thead class="text-xs uppercase bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-b border-gray-300 dark:border-gray-600">
               <tr>
                 <th class="px-4 py-3">Operation</th>
                 <th class="px-4 py-3 text-right">VibeSQL</th>
@@ -161,9 +172,9 @@
                 <th class="px-4 py-3 text-right">DuckDB</th>
               </tr>
             </thead>
-            <tbody id="results-tbody" class="divide-y divide-border">
+            <tbody id="results-tbody" class="divide-y divide-gray-300 dark:divide-gray-600">
               <tr>
-                <td colspan="4" class="px-4 py-8 text-center text-muted">
+                <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
                   Loading benchmark results...
                 </td>
               </tr>
@@ -173,8 +184,8 @@
       </div>
 
       <!-- Performance Chart -->
-      <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-        <h2 class="text-2xl font-semibold text-foreground mb-4">
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+        <h2 class="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
           Performance Comparison
         </h2>
         <div class="relative" style="height: 400px;">
@@ -183,18 +194,18 @@
       </div>
 
       <!-- Methodology -->
-      <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-        <h2 class="text-2xl font-semibold text-foreground mb-4">
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+        <h2 class="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
           Methodology
         </h2>
-        <div id="methodology-content" class="prose prose-sm dark:prose-invert max-w-none text-foreground">
+        <div id="methodology-content" class="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-gray-100">
           <!-- Content populated by JavaScript based on selected tab -->
         </div>
       </div>
     </main>
 
     <!-- Footer -->
-    <footer class="mt-12 text-center text-sm text-muted pb-6">
+    <footer class="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 pb-6">
       <p>VibeSQL - SQL:1999 Database in WebAssembly</p>
     </footer>
   </div>

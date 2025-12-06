@@ -47,7 +47,7 @@ export class ThemeToggleComponent extends Component<ThemeToggleState> {
     this.element.innerHTML = `
       <button
         id="theme-toggle-btn"
-        class="p-2.5 rounded-full border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+        class="p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
         aria-label="Toggle ${label} mode"
         title="Toggle ${label} mode"
       >

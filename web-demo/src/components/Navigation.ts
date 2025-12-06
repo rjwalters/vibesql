@@ -70,8 +70,12 @@ export class NavigationComponent extends Component<NavigationState> {
     this.element.innerHTML = `
       <nav class="flex items-center gap-2" role="navigation" aria-label="Main navigation">
         ${links.map(link => this.renderNavLink(link, currentPage)).join('')}
-        <div id="locale-selector-nav"></div>
-        <div id="theme-toggle-nav"></div>
+        <!-- Separator between navigation and settings -->
+        <div class="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1" aria-hidden="true"></div>
+        <div class="flex items-center gap-1">
+          <div id="locale-selector-nav"></div>
+          <div id="theme-toggle-nav"></div>
+        </div>
       </nav>
     `
 
