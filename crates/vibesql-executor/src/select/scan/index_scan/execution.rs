@@ -230,14 +230,15 @@ pub(crate) fn execute_index_scan(
                 range.inclusive_start,
                 range.inclusive_end,
             ) {
-                // Stream directly: iterate indices → lookup rows → clone
-                // This avoids:
-                // - Allocating Vec<usize> for all matching indices
-                // - Sorting the indices (not needed without ORDER BY)
-                let rows: Vec<Row> = streaming_iter
-                    .filter_map(|idx| table.get_row(idx))
-                    .cloned()
-                    .collect();
+                // Collect all matching row indices first
+                let indices: Vec<usize> = streaming_iter.collect();
+
+                // Use batched row fetch for better cache locality (#3799)
+                // This sorts indices before fetching to improve sequential memory access
+                let row_refs = table.get_rows_batch(&indices);
+
+                // Clone only the fetched rows
+                let rows: Vec<Row> = row_refs.into_iter().cloned().collect();
 
                 // Build schema and return result
                 let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
@@ -422,9 +423,12 @@ pub(crate) fn execute_index_scan(
 
     // Zero-copy optimization: Work with row references until the final step
     // This avoids cloning rows that will be filtered out by the WHERE clause
-    // Issue #3790: Use get_row() which returns None for deleted rows
-    let row_refs: Vec<&Row> =
-        matching_row_indices.iter().filter_map(|idx| table.get_row(*idx)).collect();
+    //
+    // Performance optimization (#3799): Use batched row fetch for better cache locality
+    // The batch method sorts indices internally for sequential memory access,
+    // which significantly improves performance for range scans with scattered indices.
+    // Issue #3790: get_rows_batch() skips deleted rows (like get_row())
+    let row_refs: Vec<&Row> = table.get_rows_batch(&matching_row_indices);
 
     // Apply WHERE clause predicates if needed (zero-copy filtering)
     // Performance optimization: Skip WHERE clause evaluation if the index already

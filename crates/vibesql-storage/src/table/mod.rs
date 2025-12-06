@@ -544,6 +544,89 @@ impl Table {
         self.rows.get(idx)
     }
 
+    /// Batch fetch multiple rows by their indices.
+    ///
+    /// This method is optimized for fetching multiple rows at once, avoiding
+    /// repeated method call overhead. For large batches with scattered indices,
+    /// consider sorting the indices first for better cache locality.
+    ///
+    /// # Arguments
+    /// * `indices` - Slice of row indices to fetch
+    ///
+    /// # Returns
+    /// Vector of row references for non-deleted rows at the given indices.
+    /// Results are in the same order as the input indices (skipping deleted rows).
+    ///
+    /// # Performance
+    /// - O(k) where k = indices.len()
+    /// - Pre-allocates result vector to avoid reallocations
+    /// - Inlined bounds and deletion checks
+    #[inline]
+    pub fn get_rows_batch(&self, indices: &[usize]) -> Vec<&Row> {
+        if indices.is_empty() {
+            return Vec::new();
+        }
+
+        // Pre-allocate result vector
+        let mut result = Vec::with_capacity(indices.len());
+
+        // Batch fetch
+        let rows_len = self.rows.len();
+        let deleted_len = self.deleted.len();
+
+        for &idx in indices {
+            // Bounds check
+            if idx >= rows_len {
+                continue;
+            }
+            // Deleted check
+            if idx < deleted_len && self.deleted[idx] {
+                continue;
+            }
+            // SAFETY: We just checked bounds above
+            result.push(&self.rows[idx]);
+        }
+
+        result
+    }
+
+    /// Batch fetch rows for a contiguous range of indices.
+    ///
+    /// This is an optimized path for range scans on primary key indexes
+    /// where the index keys are sequential (e.g., auto-increment IDs).
+    /// In this case, index-key order equals row order, so no sorting needed.
+    ///
+    /// # Arguments
+    /// * `start_idx` - First row index (inclusive)
+    /// * `end_idx` - Last row index (exclusive)
+    ///
+    /// # Returns
+    /// Vector of row references for non-deleted rows in the range.
+    ///
+    /// # Performance
+    /// - O(k) where k = end_idx - start_idx
+    /// - Sequential memory access for optimal cache performance
+    /// - No allocation for index sorting
+    #[inline]
+    pub fn get_rows_range(&self, start_idx: usize, end_idx: usize) -> Vec<&Row> {
+        if start_idx >= end_idx {
+            return Vec::new();
+        }
+
+        let actual_end = end_idx.min(self.rows.len());
+        let mut result = Vec::with_capacity(actual_end.saturating_sub(start_idx));
+
+        for idx in start_idx..actual_end {
+            // Skip deleted rows
+            if idx < self.deleted.len() && self.deleted[idx] {
+                continue;
+            }
+            result.push(&self.rows[idx]);
+        }
+
+        result
+    }
+
     /// Scan table data in columnar format for SIMD-accelerated processing
     ///
     /// This method returns columnar data suitable for high-performance analytical queries.
