@@ -1020,6 +1020,7 @@ fn run_range_benchmark<E: SysbenchExecutor>(
     warmup: Duration,
 ) -> WorkloadResults {
     let mut data = SysbenchData::new(table_size);
+    let profile_breakdown = std::env::var("RANGE_QUERY_BREAKDOWN").is_ok();
 
     // Warmup
     let warmup_start = Instant::now();
@@ -1034,19 +1035,62 @@ fn run_range_benchmark<E: SysbenchExecutor>(
     // Benchmark
     let mut operations = 0u64;
     let mut total_time_us = 0u64;
+    let mut simple_time_us = 0u64;
+    let mut sum_time_us = 0u64;
+    let mut order_time_us = 0u64;
+    let mut distinct_time_us = 0u64;
     let bench_start = Instant::now();
 
     while bench_start.elapsed() < duration {
         let (start, end) = data.random_range(RANGE_SIZE);
 
         let op_start = Instant::now();
+
+        let t0 = Instant::now();
         let _ = executor.simple_range(start, end);
+        simple_time_us += t0.elapsed().as_micros() as u64;
+
+        let t1 = Instant::now();
         let _ = executor.sum_range(start, end);
+        sum_time_us += t1.elapsed().as_micros() as u64;
+
+        let t2 = Instant::now();
         let _ = executor.order_range(start, end);
+        order_time_us += t2.elapsed().as_micros() as u64;
+
+        let t3 = Instant::now();
         let _ = executor.distinct_range(start, end);
+        distinct_time_us += t3.elapsed().as_micros() as u64;
+
         total_time_us += op_start.elapsed().as_micros() as u64;
 
         operations += 4; // 4 range queries per iteration
+    }
+
+    // Print breakdown if requested
+    if profile_breakdown {
+        let query_count = operations / 4;
+        eprintln!(
+            "\n  {} Query Breakdown (avg per query, {} queries):",
+            executor.name(),
+            query_count
+        );
+        eprintln!(
+            "    simple_range:   {:.2} us",
+            simple_time_us as f64 / query_count as f64
+        );
+        eprintln!(
+            "    sum_range:      {:.2} us",
+            sum_time_us as f64 / query_count as f64
+        );
+        eprintln!(
+            "    order_range:    {:.2} us",
+            order_time_us as f64 / query_count as f64
+        );
+        eprintln!(
+            "    distinct_range: {:.2} us",
+            distinct_time_us as f64 / query_count as f64
+        );
     }
 
     let avg_latency_us =
