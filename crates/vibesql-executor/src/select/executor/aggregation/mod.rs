@@ -4,6 +4,7 @@
 mod detection;
 
 mod evaluation;
+mod window;
 
 use std::collections::HashMap;
 
@@ -319,6 +320,18 @@ impl SelectExecutor<'_> {
                 }
             }
         }
+
+        // Apply window functions that wrap aggregates (e.g., AVG(SUM(x)) OVER (...))
+        // This must happen after GROUP BY but before ORDER BY
+        let result_rows = if window::has_aggregate_window_functions(&expanded_select_list) {
+            window::apply_window_functions_to_aggregates(
+                result_rows,
+                &expanded_select_list,
+                self.database,
+            )?
+        } else {
+            result_rows
+        };
 
         // Apply ORDER BY if present
         let result_rows = if let Some(order_by) = &stmt.order_by {
